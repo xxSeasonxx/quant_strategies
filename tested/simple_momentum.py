@@ -8,8 +8,8 @@ Required observables:
 Symbol, timestamp, and close price for ordered bars.
 
 Signal rule:
-For each bar after the first, emit a long signal at the current bar timestamp
-when the current close is greater than the previous close.
+Emit the first long signal at the current bar timestamp when the current close
+is greater than the previous close.
 
 Falsifier:
 If the harness cannot evaluate this deterministic positive-momentum toy rule
@@ -39,5 +39,6 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
                     "hold_bars": hold_bars,
                 }
             )
+            break
 
     return signals
