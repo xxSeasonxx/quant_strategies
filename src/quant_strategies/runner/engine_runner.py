@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
-from quant_engine import (
+from quant_strategies.engine import (
     Bar,
     CostModel,
     EvaluationRequest,
@@ -31,7 +31,7 @@ class EngineRun:
     screen_summary: dict[str, Any] | None
     validate_summary: dict[str, Any] | None
     evidence_json: str
-    passed: bool
+    passed: bool | None
 
 
 def build_request(
@@ -67,7 +67,7 @@ def evaluate_request(request: EvaluationRequest, *, mode: EngineMode) -> EngineR
                 screen_summary=screen_result.model_dump(mode="json"),
                 validate_summary=None,
                 evidence_json=evidence_json(packet),
-                passed=True,
+                passed=None,
             )
 
         report = validate(request)
@@ -103,8 +103,15 @@ def _bar_from_row(row: dict[str, Any]) -> Bar:
             "low": row["low"],
             "close": row["close"],
         }
-        for field in ("bid", "ask", "mid"):
-            if row.get(field) is not None:
+        for field in (
+            "bid",
+            "ask",
+            "mid",
+            "funding_timestamp",
+            "funding_rate",
+            "has_funding_event",
+        ):
+            if field in row and row[field] is not None:
                 payload[field] = row[field]
         return Bar(**payload)
     except KeyError as exc:

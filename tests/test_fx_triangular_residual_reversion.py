@@ -5,6 +5,8 @@ import math
 
 import pytest
 
+from quant_strategies.runner.config import CostModelConfig, FillModelConfig
+from quant_strategies.runner.engine_runner import build_request, evaluate_request
 from untested.fx_triangular_residual_reversion import generate_signals
 
 
@@ -55,6 +57,24 @@ def params(**overrides: object) -> dict[str, object]:
     return values
 
 
+def engine_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for row in rows:
+        close = float(row["close"])
+        result.append(
+            {
+                **row,
+                "open": close,
+                "high": close,
+                "low": close,
+                "bid": close * 0.9999,
+                "ask": close * 1.0001,
+                "mid": close,
+            }
+        )
+    return result
+
+
 def test_generate_signals_returns_empty_for_empty_input():
     assert generate_signals([], {}) == []
 
@@ -73,7 +93,7 @@ def test_generate_signals_uses_prior_residuals_for_direct_cross_short():
     assert signals == [
         {
             "symbol": "EURJPY",
-            "decision_time": START + timedelta(minutes=3),
+            "decision_time": START + timedelta(minutes=2),
             "side": "short",
             "weight": 0.5,
             "hold_bars": 4,
@@ -87,12 +107,33 @@ def test_generate_signals_maps_synthetic_leg_reversion_side():
     assert signals == [
         {
             "symbol": "USDJPY",
-            "decision_time": START + timedelta(minutes=3),
+            "decision_time": START + timedelta(minutes=2),
             "side": "long",
             "weight": 0.5,
             "hold_bars": 4,
         }
     ]
+
+
+def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
+    rows = engine_rows(direct_residual_rows([0.0, 0.001, 0.002, 0.0, 0.0]))
+    signals = generate_signals(rows, params(hold_bars=1))
+
+    assert signals[0]["decision_time"] == START + timedelta(minutes=2)
+
+    request = build_request(
+        strategy_id="fx_timing",
+        rows=rows,
+        signals=signals,
+        fill_model=FillModelConfig(price="quote", entry_lag_bars=1, exit_lag_bars=0),
+        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
+    )
+    run = evaluate_request(request, mode="screen")
+    trade = run.screen_summary["trades"][0]
+
+    assert trade["decision_time"] == "2024-01-01T00:02:00Z"
+    assert trade["entry_time"] == "2024-01-01T00:03:00Z"
+    assert trade["exit_time"] == "2024-01-01T00:04:00Z"
 
 
 def test_generate_signals_suppresses_repeated_same_zone_entries():
@@ -106,7 +147,7 @@ def test_generate_signals_suppresses_repeated_same_zone_entries():
     assert signals == [
         {
             "symbol": "EURJPY",
-            "decision_time": START + timedelta(minutes=6),
+            "decision_time": START + timedelta(minutes=5),
             "side": "short",
             "weight": 0.5,
             "hold_bars": 4,

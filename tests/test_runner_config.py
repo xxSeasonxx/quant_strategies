@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.runner import config as config_module
 from quant_strategies.runner.config import load_config
 from quant_strategies.runner.errors import ConfigError
 
@@ -174,17 +173,12 @@ def test_future_bar_close_fill_remains_accepted(tmp_path: Path):
     assert config.fill_model.entry_lag_bars == 1
 
 
-def test_quote_fill_fails_when_quant_engine_lacks_quote_support(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_quote_fill_is_supported_by_internal_evaluator(tmp_path: Path):
     write_strategy(tmp_path)
 
-    class NoQuoteFill:
-        def __init__(self, **_: object) -> None:
-            raise ValueError("quote unsupported")
+    config = load_config(
+        write_config(tmp_path, data_kind="forex_with_quotes", dataset=None, fill_price="quote"),
+        repo_root=tmp_path,
+    )
 
-    monkeypatch.setattr(config_module, "EngineFillModel", NoQuoteFill)
-
-    with pytest.raises(ConfigError, match="does not support fill_model.price"):
-        load_config(
-            write_config(tmp_path, data_kind="forex_with_quotes", dataset=None, fill_price="quote"),
-            repo_root=tmp_path,
-        )
+    assert config.fill_model.price == "quote"

@@ -34,6 +34,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     try:
         loaded = data_loader.load_data(config)
         artifacts.write_strategy_input_rows(result_dir, loaded.rows)
+        artifacts.write_data_manifest(result_dir, config, loaded.rows)
     except RunnerError as exc:
         return _failure_result(config, result_dir, "data_load", str(exc))
 
@@ -53,30 +54,34 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         )
         artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
     except RunnerError as exc:
+        artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
         return _failure_result(config, result_dir, "request_build", str(exc))
 
     try:
         engine_run = engine_runner.evaluate_request(request, mode=config.output.mode)
     except RunnerError as exc:
+        artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
         return _failure_result(config, result_dir, "engine_evaluation", str(exc))
 
     if engine_run.evidence_json:
         artifacts.write_evidence(result_dir, engine_run.evidence_json)
-    notes = _success_notes(config.strategy_id, config.output.mode, engine_run.passed)
+    notes = _completion_notes(config, engine_run)
     artifacts.write_notes(result_dir, notes)
+    artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
+    success = _result_success(engine_run)
     artifacts.write_summary(
         result_dir,
         _summary_payload(
             config,
-            success=engine_run.passed,
-            status="passed" if engine_run.passed else "failed",
+            success=success,
+            status=_result_status(engine_run),
             stage="completed",
             message=notes.strip(),
             engine={"passed": engine_run.passed, "trade_count": _trade_count(engine_run)},
         ),
     )
     return RunResult(
-        success=engine_run.passed,
+        success=success,
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",
         message=notes.strip(),
@@ -137,15 +142,42 @@ def _failure_notes(stage: str, message: str) -> str:
     return f"# Run Failed\n\nstage: {stage}\nmessage: {message}\n"
 
 
-def _success_notes(strategy_id: str, mode: str, passed: bool) -> str:
-    status = "passed" if passed else "failed validation gates"
-    return (
-        "# Run Complete\n\n"
-        f"strategy_id: {strategy_id}\n"
-        f"mode: {mode}\n"
-        f"status: {status}\n"
-        "interpretation: runner smoke evidence only; not market robustness or promotion evidence.\n"
-    )
+def _result_success(engine_run: engine_runner.EngineRun) -> bool:
+    if engine_run.mode == "screen":
+        return True
+    return bool(engine_run.passed)
+
+
+def _result_status(engine_run: engine_runner.EngineRun) -> str:
+    if engine_run.mode == "screen":
+        return "screened"
+    return "passed" if engine_run.passed else "failed"
+
+
+def _completion_notes(config: config_module.RunConfig, engine_run: engine_runner.EngineRun) -> str:
+    lines = [
+        "# Run Complete",
+        "",
+        f"strategy_id: {config.strategy_id}",
+        f"mode: {engine_run.mode}",
+    ]
+    if engine_run.mode == "screen":
+        lines.append("status: screened")
+        interpretation = (
+            "runner screen evidence only; not validation pass, market robustness, "
+            "or promotion evidence."
+        )
+    else:
+        status = "passed" if engine_run.passed else "failed validation gates"
+        lines.append(f"status: {status}")
+        interpretation = "runner smoke evidence only; not market robustness or promotion evidence."
+    if config.data.kind == "crypto_perp_funding":
+        lines.append(
+            "return_scope: price-and-funding; supplied funding events are included "
+            "when they fall inside engine-held intervals."
+        )
+    lines.append(f"interpretation: {interpretation}")
+    return "\n".join(lines) + "\n"
 
 
 __all__ = ["RunResult", "run_config"]

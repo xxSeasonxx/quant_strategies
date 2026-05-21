@@ -92,7 +92,8 @@ evidence.json        when engine evidence is available
 `strategy_input_rows.csv` is the human-readable audit record for what the
 strategy saw. `strategy_input_rows.jsonl` is the type-faithful audit record for
 datetimes, booleans, nulls, funding fields, and quote fields.
-`engine_request.json` is the audit record for what `quant_engine` evaluated.
+`engine_request.json` is the audit record for what the internal evaluator
+evaluated.
 `summary.json` is the machine-readable result. `notes.md` is human-readable.
 
 Alternative considered: keep `bars.csv`, `screen_summary.json`, and
@@ -220,7 +221,7 @@ would be overbuilt for the current flat-file strategy library.
 - `artifacts.py` already owns result directories, snapshots, CSV writing, and
   notes. The change should extend this module with small helpers.
 - `engine_runner.py` already strips non-engine fields while building
-  `quant_engine` requests. The change should preserve that boundary and expose
+  internal evaluator requests. The change should preserve that boundary and expose
   it through `engine_request.json`.
 - Existing tests cover many validation and request-building paths. The change
   should add missing edge tests, not replace the test structure.

@@ -74,12 +74,13 @@ succeeds.
 
 ### Requirement: Engine Request Is Preserved Separately
 
-The strategy runner SHALL write the exact `quant_engine` evaluation request as
+The strategy runner SHALL write the exact internal evaluator request as
 `engine_request.json` after request construction succeeds.
 
 #### Scenario: Strategy input contains non-engine fields
 
-- **WHEN** strategy input rows contain fields not accepted by `quant_engine`
+- **WHEN** strategy input rows contain fields not accepted by the internal
+  evaluator
 - **THEN** those fields are omitted from `engine_request.json` but retained in
   `strategy_input_rows.csv` and `strategy_input_rows.jsonl`
 
@@ -209,9 +210,9 @@ headings `Source / provenance:`, `Market rationale:`,
 
 ### Requirement: Engine Validation Is Smoke Evidence
 
-The strategy runner SHALL document that `quant_engine` screen and validation
-outputs are runner smoke evidence and SHALL NOT present a single passing run as
-sufficient evidence for market robustness or promotion.
+The strategy runner SHALL document that internal evaluator screen and
+validation outputs are runner smoke evidence and SHALL NOT present a single
+passing run as sufficient evidence for market robustness or promotion.
 
 #### Scenario: Successful run notes are written
 

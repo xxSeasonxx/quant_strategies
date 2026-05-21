@@ -46,7 +46,7 @@
 - [x] 6.1 Add exact rationale headings to each committed strategy module docstring: `Source / provenance:`, `Market rationale:`, `Required observables:`, `Signal rule:`, `Assumptions:`, and `Falsifier:`.
 - [x] 6.2 Update `README.md` to describe setup assumptions, restored configs, and the simplified artifact contract.
 - [x] 6.3 Update `PRODUCT_REQUIREMENTS.md` to match the simplified artifact set and remove stale numbering or artifact references.
-- [x] 6.4 Keep `quant_engine` validation described as smoke evidence, not promotion evidence.
+- [x] 6.4 Keep internal evaluator validation described as smoke evidence, not promotion evidence.
 - [x] 6.5 Add a lightweight docstring test that checks exact headings only, without semantic parsing.
 
 ## 7. Verify

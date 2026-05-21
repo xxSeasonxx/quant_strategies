@@ -81,7 +81,6 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     hold_bars = int(params.get("hold_bars", params.get("hold_minutes", 30)))
 
     close_by_key, timestamps, symbols = _close_table(bars)
-    next_timestamp = {timestamp: timestamps[index + 1] for index, timestamp in enumerate(timestamps[:-1])}
 
     candidates: dict[tuple[str, object], list[tuple[int, float]]] = {}
     for triangle in _triangles_for(str(params.get("triangle_set", "outside_view_8"))):
@@ -91,7 +90,6 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
         _collect_candidates(
             triangle,
             points,
-            next_timestamp,
             close_by_key,
             zscore_window_bars,
             min_zscore_observations,
@@ -173,7 +171,6 @@ def _close_table(
 def _collect_candidates(
     triangle: _Triangle,
     points: list[dict[str, Any]],
-    next_timestamp: dict[object, object],
     close_by_key: dict[tuple[str, object], float],
     zscore_window_bars: int,
     min_zscore_observations: int,
@@ -208,8 +205,8 @@ def _collect_candidates(
             continue
 
         symbol, signal = selected
-        decision_time = next_timestamp.get(point["timestamp"])
-        if decision_time is None or (symbol, decision_time) not in close_by_key:
+        decision_time = point["timestamp"]
+        if (symbol, decision_time) not in close_by_key:
             prior_extreme_sign = extreme_sign
             continue
         if not (crossing_only and prior_extreme_sign == extreme_sign):

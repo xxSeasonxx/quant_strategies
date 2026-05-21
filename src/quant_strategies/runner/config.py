@@ -7,8 +7,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
 
-from quant_engine import FillModel as EngineFillModel
-
 from quant_strategies.runner.errors import ConfigError
 
 
@@ -85,14 +83,6 @@ class FillModelConfig(RunnerConfigModel):
                 'fill_model.price = "close" with entry_lag_bars = 0 requires '
                 "fill_model.allow_same_bar_close_fill = true"
             )
-        if self.price == "quote":
-            try:
-                EngineFillModel(price="quote")
-            except Exception as exc:
-                raise ValueError(
-                    'installed quant_engine does not support fill_model.price = "quote"; '
-                    "install the quote-fill engine change before running quote configs"
-                ) from exc
         return self
 
 

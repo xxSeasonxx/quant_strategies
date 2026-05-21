@@ -1,18 +1,20 @@
 # Quant Strategy Runner Design
 
+Historical note: this design predates the current runner artifact contract. Use
+`README.md`, `PRODUCT_REQUIREMENTS.md`, and active OpenSpec specs for current
+internal evaluator ownership and runner artifact semantics.
+
 ## Decision
 
 Add a package-style runner inside `quant_strategies`.
 
 `quant_strategies` will own strategy files, runnable strategy experiment
-configuration, artifact writing, and the public API consumed by
-`quant_autoresearch`. `quant_engine` remains a deterministic evaluator that
-accepts explicit bars, signals, fill assumptions, and cost assumptions.
+configuration, artifact writing, the internal deterministic evaluator, and the
+public API consumed by `quant_autoresearch`.
 
 ```text
 quant-data        market data access and readiness guards
-quant_engine      deterministic evaluation foundation
-quant_strategies  strategy files plus runnable experiment API
+quant_strategies  strategy files, internal evaluator, runnable experiment API
 quant_autoresearch consumer of quant_strategies, not a runner owner
 ```
 
@@ -27,7 +29,7 @@ quant_autoresearch consumer of quant_strategies, not a runner owner
 
 ## Non-Goals
 
-- Do not move runner behavior into `quant_engine`.
+- Keep runner orchestration separate from internal evaluator accounting.
 - Do not keep a separate runner in `quant_autoresearch`.
 - Do not create per-strategy folders.
 - Do not introduce a strategy registry or plugin framework.
@@ -128,7 +130,7 @@ run config
   -> load market data through quant_data
   -> convert data rows to strategy bar dictionaries
   -> call generate_signals(bars, params)
-  -> build quant_engine EvaluationRequest
+  -> build internal evaluator EvaluationRequest
   -> screen and optionally validate
   -> write artifacts
 ```
@@ -179,10 +181,10 @@ fallback from strict to non-strict data.
 
 `engine_runner.py`:
 
-- Build `quant_engine.EvaluationRequest`.
+- Build `quant_strategies.engine.EvaluationRequest`.
 - Reject missing or unfillable signals deterministically.
 - Run `screen` and `validate` through the Python API.
-- Build evidence JSON through `quant_engine`.
+- Build evidence JSON through `quant_strategies.engine`.
 
 `artifacts.py`:
 
@@ -263,7 +265,7 @@ Before considering implementation complete:
 
 - Run `conda run -n quant pytest` in `quant_strategies`.
 - Run a CLI smoke command against a synthetic or monkeypatched data adapter.
-- Run `conda run -n quant pytest` in `quant_engine` to confirm the engine
-  boundary remains intact.
+- Run migrated internal evaluator tests to confirm the evaluator boundary
+  remains intact.
 - Confirm `quant_autoresearch` no longer needs its own runner to consume the
   workflow.

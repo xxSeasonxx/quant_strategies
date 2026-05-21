@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.10",
     "quant-data",
-    "quant-engine",
 ]
 
 [project.scripts]

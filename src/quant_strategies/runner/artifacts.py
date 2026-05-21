@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import csv
+import hashlib
+import importlib.metadata
 import json
 import re
 import shutil
+import subprocess
+import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.runner.config import RunConfig
 
 
@@ -34,6 +39,7 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> N
     preferred_fields = [
         "symbol",
         "timestamp",
+        "available_at",
         "open",
         "high",
         "low",
@@ -43,6 +49,10 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> N
         "mid",
         "funding_timestamp",
         "funding_rate",
+        "bar_ingested_at",
+        "quote_ingested_at",
+        "funding_ingested_at",
+        "joined_refreshed_at",
         "has_funding_event",
     ]
     write_csv(result_dir / "strategy_input_rows.csv", rows, preferred_fields=preferred_fields)
@@ -59,6 +69,37 @@ def write_engine_request(result_dir: Path, request_json: str) -> None:
 
 def write_evidence(result_dir: Path, evidence_json: str) -> None:
     (result_dir / "evidence.json").write_text(evidence_json)
+
+
+def write_data_manifest(result_dir: Path, config: RunConfig, rows: list[dict[str, Any]]) -> None:
+    payload = {
+        "data": {
+            "kind": config.data.kind,
+            "dataset": config.data.dataset,
+            "symbols": list(config.data.symbols),
+            "start": config.data.start.isoformat(),
+            "end": config.data.end.isoformat(),
+            "strict": config.data.strict,
+        },
+        "rows": {
+            "total": len(rows),
+            "by_symbol": _row_ranges_by_symbol(rows),
+        },
+        "strategy_input_rows_jsonl_sha256": _file_sha256(result_dir / "strategy_input_rows.jsonl"),
+        "metadata_field_coverage": _metadata_field_coverage(rows),
+    }
+    _write_json(result_dir / "data_manifest.json", payload)
+
+
+def write_run_manifest(result_dir: Path, *, repo_root: Path) -> None:
+    payload = {
+        "repository": _git_identity(repo_root, result_dir),
+        "python": {"version": sys.version.split()[0]},
+        "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
+        "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
+        "artifacts": _artifact_hashes(result_dir),
+    }
+    _write_json(result_dir / "run_manifest.json", payload)
 
 
 def write_summary(result_dir: Path, summary: dict[str, Any]) -> None:
@@ -113,6 +154,120 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, list | tuple):
         return [_json_value(item) for item in value]
     return value
+
+
+def _row_ranges_by_symbol(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    by_symbol: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        symbol = str(row.get("symbol", ""))
+        timestamp = row.get("timestamp")
+        summary = by_symbol.setdefault(
+            symbol,
+            {"count": 0, "min_timestamp": None, "max_timestamp": None},
+        )
+        summary["count"] += 1
+        if timestamp is None:
+            continue
+        if summary["min_timestamp"] is None or timestamp < summary["min_timestamp"]:
+            summary["min_timestamp"] = timestamp
+        if summary["max_timestamp"] is None or timestamp > summary["max_timestamp"]:
+            summary["max_timestamp"] = timestamp
+
+    for summary in by_symbol.values():
+        summary["min_timestamp"] = _json_value(summary["min_timestamp"])
+        summary["max_timestamp"] = _json_value(summary["max_timestamp"])
+    return dict(sorted(by_symbol.items()))
+
+
+def _metadata_field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    fields = (
+        "available_at",
+        "bar_ingested_at",
+        "quote_ingested_at",
+        "funding_ingested_at",
+        "joined_refreshed_at",
+    )
+    coverage: dict[str, dict[str, int]] = {}
+    total = len(rows)
+    for field in fields:
+        if any(field in row for row in rows):
+            coverage[field] = {
+                "present": sum(1 for row in rows if row.get(field) is not None),
+                "total": total,
+            }
+    return coverage
+
+
+def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:
+    hashes: dict[str, dict[str, str]] = {}
+    for path in sorted(result_dir.iterdir()):
+        if not path.is_file() or path.name in {"run_manifest.json", "summary.json"}:
+            continue
+        hashes[path.name] = {"sha256": _file_sha256(path)}
+    return hashes
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _package_versions(package_names: list[str]) -> dict[str, str | None]:
+    versions: dict[str, str | None] = {}
+    for name in package_names:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = None
+    return versions
+
+
+def _git_identity(repo_root: Path, result_dir: Path) -> dict[str, Any]:
+    status = _git_output(
+        repo_root,
+        *_git_scoped_args(repo_root, result_dir, "status", "--porcelain", "--untracked-files=all"),
+    )
+    diff = _git_output(
+        repo_root,
+        *_git_scoped_args(repo_root, result_dir, "diff", "--binary", "HEAD"),
+    )
+    return {
+        "commit": _git_output(repo_root, "rev-parse", "HEAD"),
+        "short_commit": _git_output(repo_root, "rev-parse", "--short", "HEAD"),
+        "dirty": None if status is None else bool(status),
+        "status_porcelain_sha256": _text_sha256(status) if status else None,
+        "tracked_diff_sha256": _text_sha256(diff) if diff else None,
+    }
+
+
+def _git_scoped_args(repo_root: Path, result_dir: Path, *args: str) -> list[str]:
+    try:
+        relative_result_dir = result_dir.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        return list(args)
+    return [*args, "--", ".", f":(exclude){relative_result_dir.as_posix()}"]
+
+
+def _git_output(repo_root: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.rstrip("\n")
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _artifact_names(result_dir: Path, *, include_summary: bool) -> list[str]:

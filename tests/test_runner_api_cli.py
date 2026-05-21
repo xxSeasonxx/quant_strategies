@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,15 +15,17 @@ from quant_strategies.runner.errors import DataLoadError, EvaluationRunError
 
 
 SUMMARY_KEYS = {"strategy_id", "mode", "success", "status", "stage", "message", "artifacts", "engine"}
+LEGACY_DISTRIBUTION = "quant" + "-engine"
 
 
 def rows(*closes: float, quotes: bool = False, research_fields: bool = False) -> list[dict[str, object]]:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     result: list[dict[str, object]] = []
     for index, close in enumerate(closes):
+        timestamp = start + timedelta(days=index)
         row = {
             "symbol": "SPY" if not quotes else "EURUSD",
-            "timestamp": start + timedelta(days=index),
+            "timestamp": timestamp,
             "open": close,
             "high": close,
             "low": close,
@@ -32,8 +36,13 @@ def rows(*closes: float, quotes: bool = False, research_fields: bool = False) ->
         if research_fields:
             row.update(
                 {
+                    "available_at": timestamp + timedelta(minutes=1),
+                    "bar_ingested_at": timestamp + timedelta(minutes=2),
+                    "quote_ingested_at": timestamp + timedelta(minutes=3) if quotes else None,
+                    "joined_refreshed_at": timestamp + timedelta(minutes=4),
                     "funding_timestamp": row["timestamp"] if index == 0 else None,
                     "funding_rate": 0.0001 if index == 0 else None,
+                    "funding_ingested_at": timestamp + timedelta(minutes=5) if index == 0 else None,
                     "has_funding_event": index == 0,
                     "nullable": None,
                 }
@@ -69,6 +78,7 @@ def write_config(
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
+    mode: str = "validate",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
@@ -99,7 +109,7 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "validate"
+mode = "{mode}"
 '''.lstrip()
     )
     return config_path
@@ -128,6 +138,8 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "strategy_input_rows.jsonl",
         "signals.csv",
         "engine_request.json",
+        "data_manifest.json",
+        "run_manifest.json",
         "summary.json",
         "evidence.json",
         "notes.md",
@@ -136,8 +148,46 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "completed"
     assert summary["success"] is True
+    assert summary["status"] == "passed"
     assert summary["engine"] == {"passed": True, "trade_count": 1}
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
+
+
+def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, mode="screen")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["mode"] == "screen"
+    assert summary["stage"] == "completed"
+    assert summary["status"] == "screened"
+    assert summary["engine"] == {"passed": None, "trade_count": 1}
+    notes = (result.result_dir / "notes.md").read_text()
+    assert "status: screened" in notes
+    assert "status: passed" not in notes
+    assert "not validation pass" in notes
+
+
+def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, mode="validate")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["mode"] == "validate"
+    assert summary["stage"] == "completed"
+    assert summary["status"] == "failed"
+    assert summary["engine"] == {"passed": False, "trade_count": 1}
+    assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_writes_data_failure_summary(
@@ -194,7 +244,7 @@ def test_strategy_path_directory_failure_writes_summary(tmp_path: Path):
     assert read_summary(result.result_dir)["stage"] == "strategy_import"
 
 
-def test_raw_inputs_preserve_quote_and_funding_fields_while_engine_request_excludes_non_engine_fields(
+def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -226,6 +276,10 @@ def test_raw_inputs_preserve_quote_and_funding_fields_while_engine_request_exclu
     assert csv_rows[0]["ask"] == "1.11"
     assert csv_rows[0]["funding_rate"] == "0.0001"
     assert jsonl_rows[0]["timestamp"] == "2024-01-01T00:00:00+00:00"
+    assert jsonl_rows[0]["available_at"] == "2024-01-01T00:01:00+00:00"
+    assert jsonl_rows[0]["bar_ingested_at"] == "2024-01-01T00:02:00+00:00"
+    assert jsonl_rows[0]["quote_ingested_at"] == "2024-01-01T00:03:00+00:00"
+    assert jsonl_rows[0]["joined_refreshed_at"] == "2024-01-01T00:04:00+00:00"
     assert jsonl_rows[0]["bid"] == 1.09
     assert jsonl_rows[0]["ask"] == 1.11
     assert jsonl_rows[0]["funding_timestamp"] == "2024-01-01T00:00:00+00:00"
@@ -233,8 +287,113 @@ def test_raw_inputs_preserve_quote_and_funding_fields_while_engine_request_exclu
     assert jsonl_rows[1]["nullable"] is None
     assert request["bars"][0]["bid"] == 1.09
     assert request["bars"][0]["ask"] == 1.11
-    assert "funding_rate" not in request["bars"][0]
-    assert "has_funding_event" not in request["bars"][0]
+    assert request["bars"][0]["funding_timestamp"] == "2024-01-01T00:00:00Z"
+    assert request["bars"][0]["funding_rate"] == 0.0001
+    assert request["bars"][0]["has_funding_event"] is True
+    manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert manifest["metadata_field_coverage"]["available_at"] == {"present": 4, "total": 4}
+    assert manifest["metadata_field_coverage"]["quote_ingested_at"] == {"present": 4, "total": 4}
+
+
+def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=loaded_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert run_manifest["python"]["version"]
+    assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
+    assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
+    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v1"}
+    assert run_manifest["artifacts"]["config.toml"]["sha256"]
+    assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
+    assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
+    assert run_manifest["artifacts"]["signals.csv"]["sha256"]
+    assert run_manifest["artifacts"]["engine_request.json"]["sha256"]
+    assert data_manifest["data"] == {
+        "kind": "bars",
+        "dataset": "equity_1min",
+        "symbols": ["SPY"],
+        "start": "2024-01-01",
+        "end": "2024-01-05",
+        "strict": True,
+    }
+    assert data_manifest["rows"]["total"] == 4
+    assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
+    assert data_manifest["rows"]["by_symbol"]["SPY"]["min_timestamp"] == "2024-01-01T00:00:00+00:00"
+    assert data_manifest["rows"]["by_symbol"]["SPY"]["max_timestamp"] == "2024-01-04T00:00:00+00:00"
+    assert data_manifest["strategy_input_rows_jsonl_sha256"] == run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
+    summary = read_summary(result.result_dir)
+    assert "run_manifest.json" in summary["artifacts"]
+    assert "data_manifest.json" in summary["artifacts"]
+
+
+def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    (tmp_path / ".gitignore").write_text("results/\n")
+    (tmp_path / "README.md").write_text("clean\n")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("dirty\n")
+    (tmp_path / "scratch.txt").write_text("untracked\n")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    repository = run_manifest["repository"]
+    result_exclusion = f":(exclude){result.result_dir.relative_to(tmp_path).as_posix()}"
+    expected_status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", ".", result_exclusion],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.rstrip("\n")
+    expected_diff = subprocess.run(
+        ["git", "diff", "--binary", "HEAD", "--", ".", result_exclusion],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.rstrip("\n")
+    expected_status_hash = hashlib.sha256(expected_status.encode("utf-8")).hexdigest()
+    expected_diff_hash = hashlib.sha256(expected_diff.encode("utf-8")).hexdigest()
+    assert repository["commit"]
+    assert repository["dirty"] is True
+    assert repository["status_porcelain_sha256"] == expected_status_hash
+    assert repository["tracked_diff_sha256"] == expected_diff_hash
+
+
+def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, kind="crypto_perp_funding", symbol="BTC-PERP", dataset=None)
+    monkeypatch.setattr(
+        data_loader,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    notes = (result.result_dir / "notes.md").read_text()
+    assert "return_scope: price-and-funding" in notes
+    assert "supplied funding events are included" in notes
 
 
 def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

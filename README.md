@@ -6,8 +6,8 @@ runner for one config-driven experiment at a time.
 Strategy files stay pure: they expose `generate_signals(bars, params)` and do
 not call engines, load data, start loops, or write artifacts. Explicit
 experiments run through `quant_strategies.runner`, which loads data through
-public `quant_data.loader` APIs and evaluates through `quant_engine` Python
-APIs.
+public `quant_data.loader` APIs and evaluates through the internal
+`quant_strategies.engine` package.
 
 ## Layout
 
@@ -88,7 +88,8 @@ another current working directory.
 
 `runs/fx_triangular_residual_quote_smoke.toml` is the first real quote-fill
 smoke config. It uses `forex_with_quotes`, strict loading, and
-`fill_model.price = "quote"` so bid/ask execution is handled by `quant_engine`.
+`fill_model.price = "quote"` so bid/ask execution is handled by the internal
+evaluator.
 
 For close-derived signals, `fill_model.price = "close"` with
 `entry_lag_bars = 0` is rejected by default. Set
@@ -104,8 +105,10 @@ config.toml
 strategy_snapshot.py
 strategy_input_rows.csv
 strategy_input_rows.jsonl
+data_manifest.json
 signals.csv
 engine_request.json
+run_manifest.json
 summary.json
 notes.md
 evidence.json    when engine evidence is available
@@ -114,14 +117,26 @@ evidence.json    when engine evidence is available
 `strategy_input_rows.csv` is the human-readable record of what the strategy saw.
 `strategy_input_rows.jsonl` preserves datetimes, booleans, nulls, funding
 fields, and quote fields in JSON-compatible form. `engine_request.json` is the
-exact request passed to `quant_engine` and intentionally omits fields not used by
-the engine.
+exact request passed to `quant_strategies.engine` and intentionally omits fields
+not used by the evaluator. `data_manifest.json` records row counts, timestamp
+ranges, metadata field coverage, and the strategy-input JSONL hash.
+`run_manifest.json` records best-effort code/dependency identity, internal
+evidence schema identity, dirty worktree hashes when available, and hashes of
+generated run artifacts.
 
 `summary.json` has stable top-level keys: `strategy_id`, `mode`, `success`,
 `status`, `stage`, `message`, `artifacts`, and `engine`. `notes.md` is
-human-readable and treats `quant_engine` screen/validation output as runner
-smoke evidence, not promotion evidence or market robustness.
+human-readable and treats internal evaluator screen/validation output as runner
+smoke evidence, not promotion evidence or market robustness. In screen mode,
+`status = "screened"` means the evaluator completed a screen; it is not a
+validation pass. In validation mode, `status = "passed"` or `status = "failed"`
+reflects the validation gates returned by the evaluator.
 
-`fill_model.price = "quote"` depends on `quant_engine` quote-fill support. For
-FX quote runs, bid and ask fields are preserved in raw strategy input artifacts
-and the engine request; execution semantics remain owned by `quant_engine`.
+For FX quote runs, bid and ask fields are preserved in raw strategy input
+artifacts and the engine request; execution semantics remain owned by
+`quant_strategies.engine`.
+
+For `crypto_perp_funding` runs, funding fields may be used by the strategy and
+preserved in raw inputs. Internal evaluator requests include supplied funding
+events, and evaluator evidence reports funding cashflows separately as
+`funding_return` before including them in `net_return`.

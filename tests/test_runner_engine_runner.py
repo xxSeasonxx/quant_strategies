@@ -20,7 +20,6 @@ def bars(*closes: float, quotes: bool = False) -> list[dict[str, object]]:
             "high": close,
             "low": close,
             "close": close,
-            "funding_rate": 0.0,
         }
         if quotes:
             row.update({"bid": close - 0.01, "ask": close + 0.01, "mid": close})
@@ -58,8 +57,34 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_signals():
     assert request.spec.strategy_id == "demo"
     assert request.bars[0].symbol == "SPY"
     assert request.bars[0].close == 100.0
-    assert not hasattr(request.bars[0], "funding_rate")
+    assert request.bars[0].funding_rate is None
     assert request.spec.signals[0].decision_time == signal()["decision_time"]
+
+
+def test_build_request_preserves_funding_fields_for_engine_accounting():
+    rows = bars(100.0, 100.0, 100.0, 110.0)
+    rows[2].update(
+        {
+            "funding_timestamp": rows[2]["timestamp"],
+            "funding_rate": 0.001,
+            "has_funding_event": True,
+        }
+    )
+
+    request = build_request(
+        strategy_id="demo",
+        rows=rows,
+        signals=[signal(index=0, hold_bars=2)],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    assert request.bars[2].funding_timestamp == rows[2]["timestamp"]
+    assert request.bars[2].funding_rate == 0.001
+    assert request.bars[2].has_funding_event is True
+    run = evaluate_request(request, mode="screen")
+    assert run.screen_summary["trades"][0]["funding_return"] == pytest.approx(-0.001)
+    assert run.screen_summary["trades"][0]["net_return"] == pytest.approx(0.099)
 
 
 def test_build_request_rejects_zero_signals():
