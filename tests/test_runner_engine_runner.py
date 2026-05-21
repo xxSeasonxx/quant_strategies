@@ -86,6 +86,34 @@ def test_build_request_rejects_missing_decision_bar():
         )
 
 
+def test_build_request_translates_missing_required_bar_field():
+    bad_rows = bars(100.0, 101.0, 102.0, 104.0)
+    del bad_rows[0]["close"]
+
+    with pytest.raises(RequestBuildError, match="missing required bar field 'close'"):
+        build_request(
+            strategy_id="demo",
+            rows=bad_rows,
+            signals=[signal()],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
+
+
+def test_build_request_translates_missing_required_signal_field():
+    bad_signal = signal()
+    del bad_signal["side"]
+
+    with pytest.raises(RequestBuildError, match="missing required signal field 'side'"):
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 104.0),
+            signals=[bad_signal],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
+
+
 def test_build_request_rejects_insufficient_entry_or_exit_bars():
     with pytest.raises(RequestBuildError, match="exit fill is outside"):
         build_request(

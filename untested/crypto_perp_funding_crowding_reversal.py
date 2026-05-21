@@ -1,6 +1,14 @@
 """Strategy: crypto_perp_funding_crowding_reversal
 
-Thesis:
+Source / provenance:
+Internal crowding-reversal hypothesis derived from crypto perpetual futures
+funding-rate mechanism literature, especially Ackerer, Hugonnier, and Jermann
+(2024), "Perpetual Futures Pricing", NBER Working Paper 32936, DOI
+10.3386/w32936, and Zhang (2026), "Funding Rate Mechanism in Perpetual
+Futures", SSRN 6185958, DOI 10.2139/ssrn.6185958. This file is not a direct
+paper replication.
+
+Market rationale:
 Recent same-direction perpetual funding pressure and price extension can mark
 crowded positioning that mean-reverts over the next fixed holding window.
 
@@ -12,6 +20,10 @@ Signal rule:
 On a sparse decision cadence, use completed prior closes and funding events at
 or before the decision time. Short the strongest positive funding plus positive
 return tail, and long the strongest negative funding plus negative return tail.
+
+Assumptions:
+Funding timestamps are available no later than the decision time, and the
+completed prior close rather than the decision close drives return extension.
 
 Falsifier:
 If the broad fixed basket does not show positive gross reversal return before

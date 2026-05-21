@@ -1,8 +1,5 @@
-# strategy-runner Specification
+## ADDED Requirements
 
-## Purpose
-TBD - created by archiving change harden-runner-readiness. Update Purpose after archive.
-## Requirements
 ### Requirement: Stable Config Path Resolution
 
 The strategy runner SHALL resolve relative run-config paths against the

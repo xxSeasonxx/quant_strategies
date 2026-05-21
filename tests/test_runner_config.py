@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,9 @@ import pytest
 from quant_strategies.runner import config as config_module
 from quant_strategies.runner.config import load_config
 from quant_strategies.runner.errors import ConfigError
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def write_strategy(repo_root: Path) -> None:
@@ -24,8 +28,11 @@ def write_config(
     output_mode: str = "validate",
     results_dir: str = "results",
     fill_price: str = "close",
+    entry_lag_bars: int = 1,
+    allow_same_bar_close_fill: bool = False,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
+    allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
     config_path = repo_root / "run.toml"
     config_path.write_text(
         f'''
@@ -44,8 +51,9 @@ weight = 1.0
 
 [fill_model]
 price = "{fill_price}"
-entry_lag_bars = 1
+entry_lag_bars = {entry_lag_bars}
 exit_lag_bars = 0
+{allow_line}
 
 [cost_model]
 fee_bps_per_side = 0.0
@@ -68,6 +76,25 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
     assert config.params == {"weight": 1.0}
+
+
+def test_committed_run_configs_parse_without_live_data_access():
+    repo_root = REPO_ROOT
+    paths = sorted((repo_root / "runs").glob("*.toml"))
+    assert paths, "expected at least one committed run config"
+
+    for path in paths:
+        load_config(path, repo_root=repo_root)
+
+
+def test_readme_documented_run_configs_exist():
+    repo_root = REPO_ROOT
+    readme = (repo_root / "README.md").read_text()
+    referenced = sorted(set(re.findall(r"runs/[A-Za-z0-9_.-]+\.toml", readme)))
+    assert referenced, "README should document at least one run config"
+
+    missing = [path for path in referenced if not (repo_root / path).exists()]
+    assert missing == []
 
 
 @pytest.mark.parametrize(
@@ -111,6 +138,40 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
 
     with pytest.raises(ConfigError, match="output.results_dir must resolve inside repository"):
         load_config(write_config(tmp_path, results_dir="../results"), repo_root=tmp_path)
+
+
+def test_missing_relative_config_reports_resolved_path(tmp_path: Path):
+    missing = tmp_path / "runs" / "missing.toml"
+
+    with pytest.raises(ConfigError, match=re.escape(str(missing))):
+        load_config("runs/missing.toml", repo_root=tmp_path)
+
+
+def test_close_fill_zero_lag_is_rejected_by_default(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    with pytest.raises(ConfigError, match="allow_same_bar_close_fill"):
+        load_config(write_config(tmp_path, entry_lag_bars=0), repo_root=tmp_path)
+
+
+def test_close_fill_zero_lag_accepts_explicit_opt_in(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    config = load_config(
+        write_config(tmp_path, entry_lag_bars=0, allow_same_bar_close_fill=True),
+        repo_root=tmp_path,
+    )
+
+    assert config.fill_model.entry_lag_bars == 0
+    assert config.fill_model.allow_same_bar_close_fill is True
+
+
+def test_future_bar_close_fill_remains_accepted(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    config = load_config(write_config(tmp_path, entry_lag_bars=1), repo_root=tmp_path)
+
+    assert config.fill_model.entry_lag_bars == 1
 
 
 def test_quote_fill_fails_when_quant_engine_lacks_quote_support(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -39,6 +39,14 @@ def _resolve_inside_repo(value: Path, repo_root: Path, field_name: str) -> Path:
     return resolved
 
 
+def resolve_config_path(path: str | Path, *, repo_root: Path | None = None) -> Path:
+    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+    config_path = Path(path)
+    if config_path.is_absolute():
+        return config_path.resolve()
+    return (root / config_path).resolve()
+
+
 class DataConfig(RunnerConfigModel):
     kind: DataKind
     dataset: str | None = None
@@ -68,9 +76,15 @@ class FillModelConfig(RunnerConfigModel):
     price: Literal["open", "close", "quote"] = "close"
     entry_lag_bars: int = Field(default=1, ge=0)
     exit_lag_bars: int = Field(default=0, ge=0)
+    allow_same_bar_close_fill: bool = False
 
     @model_validator(mode="after")
-    def validate_engine_support(self) -> FillModelConfig:
+    def validate_fill_model(self) -> FillModelConfig:
+        if self.price == "close" and self.entry_lag_bars == 0 and not self.allow_same_bar_close_fill:
+            raise ValueError(
+                'fill_model.price = "close" with entry_lag_bars = 0 requires '
+                "fill_model.allow_same_bar_close_fill = true"
+            )
         if self.price == "quote":
             try:
                 EngineFillModel(price="quote")
@@ -121,8 +135,8 @@ class RunConfig(RunnerConfigModel):
 
 
 def load_config(path: str | Path, *, repo_root: Path | None = None) -> RunConfig:
-    config_path = Path(path)
     root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+    config_path = resolve_config_path(path, repo_root=root)
     try:
         payload = tomllib.loads(config_path.read_text())
     except OSError as exc:

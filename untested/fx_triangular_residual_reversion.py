@@ -1,6 +1,13 @@
 """Strategy: fx_triangular_residual_reversion
 
-Thesis:
+Source / provenance:
+Internal residual-reversion hypothesis derived from FX triangular
+arbitrage/law-of-one-price microstructure literature, especially Akram, Rime,
+and Sarno (2008), "Arbitrage in the Foreign Exchange Market: Turning on the
+Microscope", Journal of International Economics, DOI
+10.1016/j.jinteco.2008.07.004. This file is not a direct paper replication.
+
+Market rationale:
 Large one-minute deviations between an FX cross and its USD-leg synthetic value
 can mark short-lived pressure that mean-reverts.
 
@@ -12,6 +19,11 @@ Signal rule:
 Compute triangular log residuals from completed closes, score the current
 residual against prior residuals only, attribute the recent residual move to
 the largest aligned leg, and trade that leg toward residual mean reversion.
+
+Assumptions:
+Close prices and quote fields are sufficiently aligned across triangle legs;
+the next-bar quote fill is the earliest causal execution used by the runner
+config.
 
 Falsifier:
 If broad fixed-parameter residual signals do not produce positive gross return

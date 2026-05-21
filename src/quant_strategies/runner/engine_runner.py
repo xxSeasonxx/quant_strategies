@@ -50,7 +50,7 @@ def build_request(
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id=strategy_id, signals=engine_signals),
         bars=engine_bars,
-        fill_model=FillModel(**fill_model.model_dump()),
+        fill_model=FillModel(**fill_model.model_dump(exclude={"allow_same_bar_close_fill"})),
         cost_model=CostModel(**cost_model.model_dump()),
     )
     _assert_fillable(request)
@@ -93,42 +93,44 @@ def request_json(request: EvaluationRequest) -> str:
     return json.dumps(request.model_dump(mode="json", exclude_none=True), indent=2, sort_keys=True) + "\n"
 
 
-def bars_for_artifact(request: EvaluationRequest) -> list[dict[str, Any]]:
-    return [bar.model_dump(mode="json", exclude_none=True) for bar in request.bars]
-
-
-def signals_for_artifact(request: EvaluationRequest) -> list[dict[str, Any]]:
-    return [signal.model_dump(mode="json") for signal in request.spec.signals]
-
-
 def _bar_from_row(row: dict[str, Any]) -> Bar:
-    payload = {
-        "symbol": row["symbol"],
-        "timestamp": _as_datetime(row["timestamp"], "timestamp"),
-        "open": row["open"],
-        "high": row["high"],
-        "low": row["low"],
-        "close": row["close"],
-    }
-    for field in ("bid", "ask", "mid"):
-        if row.get(field) is not None:
-            payload[field] = row[field]
     try:
+        payload = {
+            "symbol": row["symbol"],
+            "timestamp": _as_datetime(row["timestamp"], "timestamp"),
+            "open": row["open"],
+            "high": row["high"],
+            "low": row["low"],
+            "close": row["close"],
+        }
+        for field in ("bid", "ask", "mid"):
+            if row.get(field) is not None:
+                payload[field] = row[field]
         return Bar(**payload)
+    except KeyError as exc:
+        field = str(exc.args[0])
+        raise RequestBuildError(f"missing required bar field '{field}' for {row.get('symbol', '<unknown>')}") from exc
+    except RequestBuildError:
+        raise
     except Exception as exc:
         raise RequestBuildError(f"invalid engine bar for {row.get('symbol')}: {exc}") from exc
 
 
 def _signal_from_row(row: dict[str, Any]) -> Signal:
-    payload = {
-        "symbol": row["symbol"],
-        "decision_time": _as_datetime(row["decision_time"], "decision_time"),
-        "side": row["side"],
-        "weight": row.get("weight", 1.0),
-        "hold_bars": row.get("hold_bars", 1),
-    }
     try:
+        payload = {
+            "symbol": row["symbol"],
+            "decision_time": _as_datetime(row["decision_time"], "decision_time"),
+            "side": row["side"],
+            "weight": row.get("weight", 1.0),
+            "hold_bars": row.get("hold_bars", 1),
+        }
         return Signal(**payload)
+    except KeyError as exc:
+        field = str(exc.args[0])
+        raise RequestBuildError(f"missing required signal field '{field}' for {row.get('symbol', '<unknown>')}") from exc
+    except RequestBuildError:
+        raise
     except Exception as exc:
         raise RequestBuildError(f"invalid signal for {row.get('symbol')}: {exc}") from exc
 
@@ -137,7 +139,10 @@ def _as_datetime(value: object, field_name: str) -> datetime:
     if isinstance(value, datetime):
         parsed = value
     elif isinstance(value, str):
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise RequestBuildError(f"{field_name} must be a valid ISO timestamp") from exc
     else:
         raise RequestBuildError(f"{field_name} must be a datetime or ISO timestamp")
     if parsed.tzinfo is None or parsed.utcoffset() is None:

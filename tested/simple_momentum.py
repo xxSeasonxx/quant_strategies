@@ -1,6 +1,10 @@
 """Strategy: simple_momentum
 
-Thesis:
+Source / provenance:
+Internal runner smoke strategy for this repository. It is a deterministic test
+fixture, not an external paper or production alpha source.
+
+Market rationale:
 A one-bar positive close-to-close move can be used as a minimal causal long
 signal for testing the research harness.
 
@@ -10,6 +14,10 @@ Symbol, timestamp, and close price for ordered bars.
 Signal rule:
 Emit the first long signal at the current bar timestamp when the current close
 is greater than the previous close.
+
+Assumptions:
+The configured fill model enters after the decision bar, so a close-derived
+signal is not filled on the same close unless explicitly opted in.
 
 Falsifier:
 If the harness cannot evaluate this deterministic positive-momentum toy rule
