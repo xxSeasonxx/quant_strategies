@@ -19,8 +19,16 @@ runner package for configured experiments.
 - `quant_autoresearch` should consume `quant_strategies.runner.run_config`
   instead of owning a separate runner harness.
 - Use public `quant_data` loader APIs only. Data materialization, refresh,
-  backfill, repair, and source joining belong upstream in `quant-data`.
+  backfill, repair, and source joining belong upstream in `quant-data`. Document and provide feedback to Season on any limitation of the `quant_data`
 - Write or update tests before moving a strategy from `untested/` to `tested/`.
+-  Every strategy needs a short
+  rationale docstring covering the actual strategy source/provenance, market
+  rationale, required data/observables, executable rule, key proxy/data
+  assumptions, and falsifier. Source/provenance must be specific enough to
+  audit: paper title/authors/year plus DOI/SSRN/URL when available, web page or
+  repository URL, or internal note path plus the upstream paper/web source it
+  cites. Vague labels such as "outside-view note" or "literature" are not
+  enough.
 - Use conda environment `quant` for all Python commands.
 - Use `conda run -n quant <command>` for Python commands.
 
@@ -35,14 +43,6 @@ runner package for configured experiments.
 - Always report changed-line counts before completion: files changed,
   insertions, deletions, and net change. Separate source, tests, docs, and
   generated/artifact movement when that distinction matters.
-- Every strategy needs a short
-  rationale docstring covering the actual strategy source/provenance, market
-  rationale, required data/observables, executable rule, key proxy/data
-  assumptions, and falsifier. Source/provenance must be specific enough to
-  audit: paper title/authors/year plus DOI/SSRN/URL when available, web page or
-  repository URL, or internal note path plus the upstream paper/web source it
-  cites. Vague labels such as "outside-view note" or "literature" are not
-  enough.
 - Prefer the simplest implementation and process that preserves correctness,
   auditability, and research discipline.
 - Stale docs are worse than no docs. Any implementation that changes behavior,
