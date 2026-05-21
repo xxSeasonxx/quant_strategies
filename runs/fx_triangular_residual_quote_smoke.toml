@@ -1,0 +1,48 @@
+strategy_path = "untested/fx_triangular_residual_reversion.py"
+strategy_id = "fx_triangular_residual_quote_smoke"
+
+[data]
+kind = "forex_with_quotes"
+symbols = [
+  "AUDJPY",
+  "AUDNZD",
+  "AUDUSD",
+  "CADJPY",
+  "EURAUD",
+  "EURGBP",
+  "EURJPY",
+  "EURUSD",
+  "GBPJPY",
+  "GBPUSD",
+  "NZDJPY",
+  "NZDUSD",
+  "USDCAD",
+  "USDJPY",
+]
+start = "2024-01-08"
+end = "2024-01-08"
+strict = true
+
+[params]
+triangle_set = "outside_view_8"
+zscore_window_bars = 120
+min_zscore_observations = 60
+entry_zscore = 3.0
+min_abs_residual_bps = 0.5
+attribution_bars = 5
+crossing_only = true
+weight = 0.25
+hold_bars = 10
+
+[fill_model]
+price = "quote"
+entry_lag_bars = 1
+exit_lag_bars = 0
+
+[cost_model]
+fee_bps_per_side = 0.0
+slippage_bps_per_side = 0.0
+
+[output]
+results_dir = "results"
+mode = "screen"

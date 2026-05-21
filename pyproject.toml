@@ -1,4 +1,25 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant-strategies"
+version = "0.1.0"
+description = "Flat strategy library and explicit quant strategy runner."
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.10",
+    "quant-data",
+    "quant-engine",
+]
+
+[project.scripts]
+quant-strategies = "quant_strategies.runner.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
 [tool.pytest.ini_options]
 addopts = "-ra"
-pythonpath = ["."]
+pythonpath = [".", "src"]
 testpaths = ["tests"]

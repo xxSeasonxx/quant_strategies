@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from quant_strategies.runner import data_loader
+from quant_strategies.runner.config import load_config
+from quant_strategies.runner.errors import DataLoadError
+
+
+def row(symbol: str, close: float = 100.0, **extra: object) -> dict[str, object]:
+    base = {
+        "symbol": symbol,
+        "timestamp": datetime(2024, 1, 1, tzinfo=timezone.utc),
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+    }
+    base.update(extra)
+    return base
+
+
+def make_config(
+    tmp_path: Path,
+    *,
+    kind: str = "bars",
+    symbols: list[str] | None = None,
+    dataset: str | None = "equity_1min",
+    fill_price: str = "close",
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("def generate_signals(bars, params): return []\n")
+    dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
+    symbols_text = ", ".join(f'"{symbol}"' for symbol in (symbols or ["SPY"]))
+    config_path = tmp_path / "run.toml"
+    config_path.write_text(
+        f'''
+strategy_path = "tested/demo.py"
+strategy_id = "demo"
+
+[data]
+kind = "{kind}"
+{dataset_line}symbols = [{symbols_text}]
+start = "2024-01-01"
+end = "2024-01-05"
+strict = true
+
+[fill_model]
+price = "{fill_price}"
+entry_lag_bars = 1
+
+[cost_model]
+fee_bps_per_side = 0.0
+slippage_bps_per_side = 0.0
+
+[output]
+results_dir = "results"
+mode = "screen"
+'''.lstrip()
+    )
+    return load_config(config_path, repo_root=tmp_path)
+
+
+def test_bars_adapter_loads_one_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path)
+    engine = object()
+    calls: list[tuple[object, str, str, bool]] = []
+
+    def fake_load_bars(engine_arg, symbol, dataset, start, end, *, research, strict):
+        calls.append((engine_arg, symbol, dataset, strict))
+        return [row(symbol)]
+
+    monkeypatch.setattr(data_loader.loader, "load_bars", fake_load_bars)
+
+    loaded = data_loader.load_data(config, engine=engine)
+
+    assert calls == [(engine, "SPY", "equity_1min", True)]
+    assert loaded.rows == [row("SPY")]
+
+
+def test_bars_adapter_loads_multiple_symbols(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path, symbols=["SPY", "QQQ"])
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_load_universe_bars(engine, symbols, dataset, start, end, *, research, strict):
+        calls.append((symbols, dataset))
+        return {"SPY": [row("SPY")], "QQQ": [row("QQQ")]}
+
+    monkeypatch.setattr(data_loader.loader, "load_universe_bars", fake_load_universe_bars)
+
+    loaded = data_loader.load_data(config, engine=object())
+
+    assert calls == [(["SPY", "QQQ"], "equity_1min")]
+    assert [item["symbol"] for item in loaded.rows] == ["QQQ", "SPY"]
+
+
+def test_crypto_perp_funding_adapter_loads_funding_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path, kind="crypto_perp_funding", symbols=["BTC-PERP"], dataset=None)
+    calls: list[str] = []
+
+    def fake_load_crypto(engine, symbol, start, end, *, research, strict):
+        calls.append(symbol)
+        return [row(symbol, funding_rate=0.0001, funding_timestamp=row(symbol)["timestamp"], has_funding_event=True)]
+
+    monkeypatch.setattr(data_loader.loader, "load_crypto_perp_bars_with_funding", fake_load_crypto)
+
+    loaded = data_loader.load_data(config, engine=object())
+
+    assert calls == ["BTC-PERP"]
+    assert loaded.rows[0]["funding_rate"] == 0.0001
+
+
+def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path, kind="forex_with_quotes", symbols=["EURUSD"], dataset=None, fill_price="quote")
+    calls: list[tuple[str, bool]] = []
+
+    def fake_load_fx(engine, symbol, start, end, *, research, strict, require_quotes):
+        calls.append((symbol, require_quotes))
+        return [row(symbol, bid=1.0999, ask=1.1001, mid=1.1)]
+
+    monkeypatch.setattr(data_loader.loader, "load_fx_bars_with_quotes", fake_load_fx)
+
+    loaded = data_loader.load_data(config, engine=object())
+
+    assert calls == [("EURUSD", True)]
+    assert loaded.rows[0]["bid"] == 1.0999
+    assert loaded.rows[0]["ask"] == 1.1001
+
+
+def test_empty_loaded_data_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path)
+    monkeypatch.setattr(data_loader.loader, "load_bars", lambda *args, **kwargs: [])
+
+    with pytest.raises(DataLoadError, match="no rows"):
+        data_loader.load_data(config, engine=object())
+
+
+def test_strict_loader_failure_is_translated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    config = make_config(tmp_path)
+
+    def fail_load(*args, **kwargs):
+        raise ValueError("strict window missing")
+
+    monkeypatch.setattr(data_loader.loader, "load_bars", fail_load)
+
+    with pytest.raises(DataLoadError, match="strict window missing"):
+        data_loader.load_data(config, engine=object())
+
+
+def test_default_engine_uses_quant_data_repo_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    quant_data_root = tmp_path / "quant-data"
+    package_dir = quant_data_root / "src" / "quant_data"
+    package_dir.mkdir(parents=True)
+    env_file = quant_data_root / ".env"
+    env_file.write_text("TIMESCALE_PASSWORD=secret\n")
+    captured: list[object] = []
+
+    class FakeDataConfig:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    def fake_get_engine(config=None):
+        captured.append(config)
+        return object()
+
+    monkeypatch.setattr(data_loader, "loader", SimpleNamespace(__file__=str(package_dir / "loader.py")))
+    monkeypatch.setattr(data_loader, "DataConfig", FakeDataConfig)
+    monkeypatch.setattr(data_loader, "get_engine", fake_get_engine)
+
+    data_loader._default_engine()
+
+    assert captured
+    assert captured[0].kwargs == {"_env_file": env_file}
