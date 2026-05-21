@@ -17,6 +17,10 @@ class DataLoadError(RunnerError):
     """Raised when configured data cannot be loaded."""
 
 
+class DataReadinessError(RunnerError):
+    """Raised when loaded rows are not ready by a signal decision time."""
+
+
 class RequestBuildError(RunnerError):
     """Raised when loaded rows and signals cannot form an engine request."""
 

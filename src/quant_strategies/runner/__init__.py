@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from quant_strategies.runner import artifacts, config as config_module, data_loader, engine_runner, strategy_loader
+from quant_strategies.runner import (
+    artifacts,
+    config as config_module,
+    data_loader,
+    data_readiness,
+    engine_runner,
+    strategy_loader,
+)
 from quant_strategies.runner.errors import RunnerError
 
 
@@ -13,6 +20,9 @@ class RunResult:
     result_dir: Path | None
     notes_path: Path | None
     message: str
+    run_completed: bool = False
+    assessment_status: str = "runner_failed"
+    promotion_eligible: bool = False
 
 
 def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> RunResult:
@@ -29,20 +39,31 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     try:
         generate_signals = strategy_loader.load_strategy(config.strategy_path, repo_root=effective_repo_root)
     except RunnerError as exc:
-        return _failure_result(config, result_dir, "strategy_import", str(exc))
+        return _failure_result(config, result_dir, "strategy_import", str(exc), repo_root=effective_repo_root)
 
     try:
         loaded = data_loader.load_data(config)
         artifacts.write_strategy_input_rows(result_dir, loaded.rows)
         artifacts.write_data_manifest(result_dir, config, loaded.rows)
     except RunnerError as exc:
-        return _failure_result(config, result_dir, "data_load", str(exc))
+        return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
 
     try:
         signals = generate_signals(loaded.rows, config.params)
         artifacts.write_signals(result_dir, signals)
     except Exception as exc:
-        return _failure_result(config, result_dir, "signal_generation", f"strategy execution failed: {exc}")
+        return _failure_result(
+            config,
+            result_dir,
+            "signal_generation",
+            f"strategy execution failed: {exc}",
+            repo_root=effective_repo_root,
+        )
+
+    try:
+        data_readiness.assert_decision_rows_ready(loaded.rows, signals)
+    except RunnerError as exc:
+        return _failure_result(config, result_dir, "data_readiness", str(exc), repo_root=effective_repo_root)
 
     try:
         request = engine_runner.build_request(
@@ -54,14 +75,12 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         )
         artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
     except RunnerError as exc:
-        artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
-        return _failure_result(config, result_dir, "request_build", str(exc))
+        return _failure_result(config, result_dir, "request_build", str(exc), repo_root=effective_repo_root)
 
     try:
         engine_run = engine_runner.evaluate_request(request, mode=config.output.mode)
     except RunnerError as exc:
-        artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
-        return _failure_result(config, result_dir, "engine_evaluation", str(exc))
+        return _failure_result(config, result_dir, "engine_evaluation", str(exc), repo_root=effective_repo_root)
 
     if engine_run.evidence_json:
         artifacts.write_evidence(result_dir, engine_run.evidence_json)
@@ -69,6 +88,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     artifacts.write_notes(result_dir, notes)
     artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
     success = _result_success(engine_run)
+    assessment_status = _assessment_status(engine_run)
     artifacts.write_summary(
         result_dir,
         _summary_payload(
@@ -78,6 +98,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             stage="completed",
             message=notes.strip(),
             engine={"passed": engine_run.passed, "trade_count": _trade_count(engine_run)},
+            assessment_status=assessment_status,
         ),
     )
     return RunResult(
@@ -85,12 +106,23 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",
         message=notes.strip(),
+        run_completed=True,
+        assessment_status=assessment_status,
+        promotion_eligible=False,
     )
 
 
-def _failure_result(config: config_module.RunConfig, result_dir: Path, stage: str, message: str) -> RunResult:
+def _failure_result(
+    config: config_module.RunConfig,
+    result_dir: Path,
+    stage: str,
+    message: str,
+    *,
+    repo_root: Path,
+) -> RunResult:
     notes = _failure_notes(stage, message)
     artifacts.write_notes(result_dir, notes)
+    artifacts.write_run_manifest(result_dir, repo_root=repo_root)
     artifacts.write_summary(
         result_dir,
         _summary_payload(
@@ -100,9 +132,18 @@ def _failure_result(config: config_module.RunConfig, result_dir: Path, stage: st
             stage=stage,
             message=message,
             engine={"passed": None, "trade_count": None},
+            assessment_status="runner_failed",
         ),
     )
-    return RunResult(success=False, result_dir=result_dir, notes_path=result_dir / "notes.md", message=notes.strip())
+    return RunResult(
+        success=False,
+        result_dir=result_dir,
+        notes_path=result_dir / "notes.md",
+        message=notes.strip(),
+        run_completed=True,
+        assessment_status="runner_failed",
+        promotion_eligible=False,
+    )
 
 
 def _summary_payload(
@@ -113,6 +154,7 @@ def _summary_payload(
     stage: str,
     message: str,
     engine: dict[str, object],
+    assessment_status: str,
 ) -> dict[str, object]:
     return {
         "strategy_id": config.strategy_id,
@@ -123,6 +165,9 @@ def _summary_payload(
         "message": message,
         "artifacts": [],
         "engine": engine,
+        "run_completed": True,
+        "assessment_status": assessment_status,
+        "promotion_eligible": False,
     }
 
 
@@ -152,6 +197,12 @@ def _result_status(engine_run: engine_runner.EngineRun) -> str:
     if engine_run.mode == "screen":
         return "screened"
     return "passed" if engine_run.passed else "failed"
+
+
+def _assessment_status(engine_run: engine_runner.EngineRun) -> str:
+    if engine_run.mode == "screen":
+        return "screened"
+    return "smoke_passed" if engine_run.passed else "smoke_failed"
 
 
 def _completion_notes(config: config_module.RunConfig, engine_run: engine_runner.EngineRun) -> str:
