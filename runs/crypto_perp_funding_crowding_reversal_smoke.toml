@@ -1,0 +1,43 @@
+strategy_path = "untested/crypto_perp_funding_crowding_reversal.py"
+strategy_id = "crypto_perp_funding_crowding_reversal_smoke"
+
+[data]
+kind = "crypto_perp_funding"
+symbols = [
+  "BTC-PERP",
+  "ETH-PERP",
+  "SOL-PERP",
+  "XRP-PERP",
+  "BNB-PERP",
+  "DOGE-PERP",
+  "ADA-PERP",
+  "AVAX-PERP",
+]
+start = "2024-01-01"
+end = "2024-01-07"
+strict = true
+
+[params]
+funding_lookback_events = 3
+return_lookback_minutes = 240
+decision_interval_minutes = 480
+decision_lag_minutes = 1
+top_n = 1
+min_cross_section = 4
+min_abs_funding_bps = 1.0
+min_abs_return_bps = 25.0
+weight = 0.25
+hold_bars = 480
+
+[fill_model]
+price = "close"
+entry_lag_bars = 1
+exit_lag_bars = 0
+
+[cost_model]
+fee_bps_per_side = 0.0
+slippage_bps_per_side = 0.0
+
+[output]
+results_dir = "results"
+mode = "screen"
