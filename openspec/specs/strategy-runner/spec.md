@@ -313,16 +313,19 @@ when availability or ingestion fields are present in loaded rows.
 
 ### Requirement: FX Strategy Timing Matches Configured Fill Lag
 
-The FX triangular residual strategy SHALL emit a `decision_time` that represents
-the completed residual decision timestamp, and the configured fill model SHALL
-be the only source of entry delay in the runner.
+The FX triangular residual strategy SHALL emit an `as_of_time` that represents
+the completed residual observation timestamp and a `decision_time` that is after
+the observation can be available. The configured fill model SHALL remain the
+only source of entry delay after the decision time in the runner.
 
 #### Scenario: FX residual quote config timing trace
 
 - **WHEN** the FX triangular residual strategy emits a signal from a completed
   residual observation
-- **THEN** the tested signal `decision_time` matches the intended decision
+- **THEN** the tested signal `as_of_time` matches the residual observation
   timestamp
+- **AND** the tested signal `decision_time` is no earlier than the observation
+  availability timestamp
 - **AND** the engine entry timestamp is determined only by the configured
   `fill_model.entry_lag_bars`
 

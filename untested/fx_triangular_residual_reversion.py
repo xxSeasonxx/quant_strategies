@@ -18,12 +18,14 @@ triangle leg.
 Signal rule:
 Compute triangular log residuals from completed closes, score the current
 residual against prior residuals only, attribute the recent residual move to
-the largest aligned leg, and trade that leg toward residual mean reversion.
+the largest aligned leg, and trade that leg toward residual mean reversion after
+the residual's as-of bar can be observed.
 
 Assumptions:
 Close prices and quote fields are sufficiently aligned across triangle legs;
-the next-bar quote fill is the earliest causal execution used by the runner
-config.
+market data availability is represented by the runner's `available_at` field
+when present, and the next-bar quote fill is the earliest causal execution used
+by the runner config.
 
 Falsifier:
 If broad fixed-parameter residual signals do not produce positive gross return
@@ -33,6 +35,7 @@ before spread and slippage, reject this one-minute residual proxy before tuning.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timedelta
 import math
 from statistics import fmean, pstdev
 from typing import Any
@@ -76,13 +79,14 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
         params.get("attribution_bars", params.get("attribution_minutes", 5)),
         "attribution_bars",
     )
+    decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
     crossing_only = bool(params.get("crossing_only", True))
     weight = float(params.get("weight", 1.0))
     hold_bars = int(params.get("hold_bars", params.get("hold_minutes", 30)))
 
     close_by_key, timestamps, symbols = _close_table(bars)
 
-    candidates: dict[tuple[str, object], list[tuple[int, float]]] = {}
+    candidates: dict[tuple[str, datetime], list[tuple[int, float]]] = {}
     for triangle in _triangles_for(str(params.get("triangle_set", "outside_view_8"))):
         if not set(_triangle_symbols(triangle)).issubset(symbols):
             continue
@@ -101,14 +105,16 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
         )
 
     signals: list[dict[str, object]] = []
-    for symbol, decision_time in sorted(candidates, key=lambda key: (key[1], key[0])):
-        score = sum(signal * strength for signal, strength in candidates[(symbol, decision_time)])
+    for symbol, as_of_time in sorted(candidates, key=lambda key: (key[1], key[0])):
+        score = sum(signal * strength for signal, strength in candidates[(symbol, as_of_time)])
         if abs(score) <= 1e-12:
             continue
+        decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
         signals.append(
             {
                 "symbol": symbol,
                 "decision_time": decision_time,
+                "as_of_time": as_of_time,
                 "side": "long" if score > 0.0 else "short",
                 "weight": weight,
                 "hold_bars": hold_bars,
@@ -131,6 +137,13 @@ def _positive_int(value: object, name: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: object, name: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
+
+
 def _positive_float(value: object, name: str) -> float:
     parsed = float(value)
     if not math.isfinite(parsed) or parsed <= 0.0:
@@ -147,14 +160,14 @@ def _non_negative_float(value: object, name: str) -> float:
 
 def _close_table(
     bars: Sequence[Mapping[str, object]],
-) -> tuple[dict[tuple[str, object], float], list[object], set[str]]:
-    close_by_key: dict[tuple[str, object], float] = {}
-    timestamps: set[object] = set()
+) -> tuple[dict[tuple[str, datetime], float], list[datetime], set[str]]:
+    close_by_key: dict[tuple[str, datetime], float] = {}
+    timestamps: set[datetime] = set()
     symbols: set[str] = set()
 
     for row in bars:
         symbol = str(row["symbol"])
-        timestamp = row["timestamp"]
+        timestamp = _as_datetime(row["timestamp"])
         close = _positive_finite_float(row["close"])
         if close is None:
             continue
@@ -171,14 +184,14 @@ def _close_table(
 def _collect_candidates(
     triangle: _Triangle,
     points: list[dict[str, Any]],
-    close_by_key: dict[tuple[str, object], float],
+    close_by_key: dict[tuple[str, datetime], float],
     zscore_window_bars: int,
     min_zscore_observations: int,
     entry_zscore: float,
     min_abs_residual_bps: float,
     attribution_bars: int,
     crossing_only: bool,
-    candidates: dict[tuple[str, object], list[tuple[int, float]]],
+    candidates: dict[tuple[str, datetime], list[tuple[int, float]]],
 ) -> None:
     prior_extreme_sign = 0
     residuals = [point["residual"] for point in points]
@@ -205,19 +218,19 @@ def _collect_candidates(
             continue
 
         symbol, signal = selected
-        decision_time = point["timestamp"]
-        if (symbol, decision_time) not in close_by_key:
+        as_of_time = point["timestamp"]
+        if (symbol, as_of_time) not in close_by_key:
             prior_extreme_sign = extreme_sign
             continue
         if not (crossing_only and prior_extreme_sign == extreme_sign):
-            candidates.setdefault((symbol, decision_time), []).append((signal, abs(float(residual_z))))
+            candidates.setdefault((symbol, as_of_time), []).append((signal, abs(float(residual_z))))
         prior_extreme_sign = extreme_sign
 
 
 def _residual_points(
     triangle: _Triangle,
-    timestamps: list[object],
-    close_by_key: dict[tuple[str, object], float],
+    timestamps: list[datetime],
+    close_by_key: dict[tuple[str, datetime], float],
 ) -> list[dict[str, Any]]:
     direct, leg_a, leg_a_sign, leg_b, leg_b_sign = triangle
     points: list[dict[str, Any]] = []
@@ -290,6 +303,12 @@ def _triangles_for(triangle_set: str) -> tuple[_Triangle, ...]:
 
 def _triangle_symbols(triangle: _Triangle) -> tuple[str, str, str]:
     return triangle[0], triangle[1], triangle[3]
+
+
+def _as_datetime(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError(f"expected datetime timestamp, got {type(value).__name__}")
+    return value
 
 
 def _positive_finite_float(value: object) -> float | None:
