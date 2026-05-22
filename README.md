@@ -158,13 +158,14 @@ preserved in raw inputs. Internal evaluator requests include supplied funding
 events, and evaluator evidence reports funding cashflows separately as
 `funding_return` before including them in `net_return`.
 
-When loaded rows include availability or ingestion metadata such as
-`available_at`, `bar_ingested_at`, `quote_ingested_at`, `funding_ingested_at`, or
-`joined_refreshed_at`, the runner checks the row that exactly matches each
-signal's symbol and `decision_time`. If that matching decision row says the data
-was available only after the decision time, the run fails at `data_readiness`
-before engine request construction. This is a direct decision-row causal guard,
-not a full historical lineage proof.
+When loaded rows include `available_at`, the runner checks the row used for each
+signal decision. By default that is the row matching the signal's symbol and
+`decision_time`; a strategy may emit `as_of_time` to state that it decided later
+using an earlier completed row. If the as-of row was available only after the
+decision time, the run fails at `data_readiness` before engine request
+construction. Ingestion and refresh timestamps remain audit metadata in
+artifacts and manifests; they are not treated as historical market availability.
+This is a direct as-of-row guard, not a full feature-lineage proof.
 
 ## Promotion Discipline
 

@@ -17,13 +17,16 @@ Symbol, timestamp, close, funding timestamp, funding rate, and funding-event
 flag for crypto perpetual bars.
 
 Signal rule:
-On a sparse decision cadence, use completed prior closes and funding events at
-or before the decision time. Short the strongest positive funding plus positive
-return tail, and long the strongest negative funding plus negative return tail.
+On a sparse as-of cadence, use completed prior closes and funding events at or
+before the as-of time. Emit decisions after the as-of bar can be observed. Short
+the strongest positive funding plus positive return tail, and long the
+strongest negative funding plus negative return tail.
 
 Assumptions:
-Funding timestamps are available no later than the decision time, and the
-completed prior close rather than the decision close drives return extension.
+Funding timestamps are known no later than the as-of time, market data
+availability is represented by the runner's `available_at` field when present,
+and the completed prior close rather than the as-of close drives return
+extension.
 
 Falsifier:
 If the broad fixed basket does not show positive gross reversal return before
@@ -51,6 +54,7 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     funding_lookback_events = _positive_int(params.get("funding_lookback_events", 3), "funding_lookback_events")
     return_lookback_minutes = _positive_int(params.get("return_lookback_minutes", 240), "return_lookback_minutes")
     decision_interval_minutes = _positive_int(params.get("decision_interval_minutes", 480), "decision_interval_minutes")
+    decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
     top_n = _positive_int(params.get("top_n", 1), "top_n")
     min_cross_section = _positive_int(params.get("min_cross_section", 4), "min_cross_section")
     min_abs_funding_bps = _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
@@ -59,7 +63,7 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     hold_bars = int(params.get("hold_bars", params.get("hold_minutes", 480)))
 
     rows_by_symbol = _rows_by_symbol(bars)
-    decision_times = sorted(
+    as_of_times = sorted(
         {
             row["timestamp"]
             for rows in rows_by_symbol.values()
@@ -69,15 +73,16 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     )
 
     signals: list[dict[str, object]] = []
-    for decision_time in decision_times:
+    for as_of_time in as_of_times:
         candidates = _decision_candidates(
             rows_by_symbol,
-            decision_time,
+            as_of_time,
             funding_lookback_events,
             return_lookback_minutes,
         )
         if len(candidates) < min_cross_section:
             continue
+        decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
 
         positive_tail = [
             candidate
@@ -96,12 +101,12 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
             positive_tail,
             key=lambda item: (-item["funding_pressure_bps"], -item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate["symbol"], decision_time, "short", weight, hold_bars))
+            signals.append(_signal(candidate["symbol"], decision_time, as_of_time, "short", weight, hold_bars))
         for candidate in sorted(
             negative_tail,
             key=lambda item: (item["funding_pressure_bps"], item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate["symbol"], decision_time, "long", weight, hold_bars))
+            signals.append(_signal(candidate["symbol"], decision_time, as_of_time, "long", weight, hold_bars))
 
     return signals
 
@@ -117,6 +122,13 @@ def _positive_int(value: object, name: str) -> int:
     parsed = int(value)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
+    return parsed
+
+
+def _non_negative_int(value: object, name: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError(f"{name} must be non-negative")
     return parsed
 
 
@@ -228,10 +240,18 @@ def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, param
     return minute_of_day % decision_interval_minutes == 0
 
 
-def _signal(symbol: str, decision_time: datetime, side: str, weight: float, hold_bars: int) -> dict[str, object]:
+def _signal(
+    symbol: str,
+    decision_time: datetime,
+    as_of_time: datetime,
+    side: str,
+    weight: float,
+    hold_bars: int,
+) -> dict[str, object]:
     return {
         "symbol": symbol,
         "decision_time": decision_time,
+        "as_of_time": as_of_time,
         "side": side,
         "weight": weight,
         "hold_bars": hold_bars,

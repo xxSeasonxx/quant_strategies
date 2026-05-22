@@ -440,28 +440,38 @@ committed strategy files.
 - **THEN** the strategy-boundary test fails unless the file is an allowed package
   marker
 
-### Requirement: Signal Decision Row Readiness
+### Requirement: Signal Data Availability Readiness
 
-The strategy runner SHALL reject emitted signals whose matching decision row was
-unavailable after the decision time when availability or ingestion metadata is
-present on a row matching the signal's symbol and decision timestamp.
+The strategy runner SHALL reject emitted signals whose declared as-of row was
+unavailable after the decision time when `available_at` metadata is present.
+When a signal includes `as_of_time`, that timestamp identifies the completed row
+used by the signal; otherwise the signal's `decision_time` is used as the as-of
+timestamp. Ingestion and refresh timestamps are audit metadata and SHALL NOT be
+treated as historical market availability.
 
-#### Scenario: Matching decision row is available
+#### Scenario: Matching as-of row is available
 
-- **WHEN** a signal decision row contains availability metadata at or before the
-  signal decision time
+- **WHEN** a signal as-of row contains `available_at` metadata at or before the
+  signal `decision_time`
 - **THEN** the runner may continue to engine request construction
 
-#### Scenario: Matching decision row is unavailable
+#### Scenario: Matching as-of row is unavailable
 
-- **WHEN** a signal decision row contains availability metadata after the signal
-  decision time
+- **WHEN** a signal as-of row contains `available_at` metadata after the signal
+  `decision_time`
 - **THEN** the run fails before engine request construction
 - **AND** the failure stage identifies data readiness
 
+#### Scenario: Signal declares completed as-of row
+
+- **WHEN** a signal includes `as_of_time` at or before `decision_time`
+- **THEN** the runner checks the row matching the signal symbol and `as_of_time`
+- **AND** it does not reject the signal because the later decision-time row has
+  not yet become available
+
 #### Scenario: No matching readiness metadata exists
 
-- **WHEN** no matching decision row contains availability or ingestion metadata
+- **WHEN** no matching as-of row contains `available_at` metadata
 - **THEN** the readiness check does not block the run
 
 ### Requirement: Promotion Discipline Remains Explicit

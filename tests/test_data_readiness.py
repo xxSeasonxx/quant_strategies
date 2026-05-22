@@ -37,13 +37,58 @@ def test_matching_decision_row_is_ready_at_or_before_decision_time(ready_at: dat
     )
 
 
-@pytest.mark.parametrize("field", data_readiness.READINESS_FIELDS)
-def test_late_matching_readiness_field_is_rejected(field: str):
-    with pytest.raises(DataReadinessError, match=field):
+def test_late_matching_available_at_is_rejected():
+    with pytest.raises(DataReadinessError, match="available_at"):
         data_readiness.assert_decision_rows_ready(
-            [row(**{field: DECISION_TIME + timedelta(minutes=1)})],
+            [row(available_at=DECISION_TIME + timedelta(minutes=1))],
             [signal()],
         )
+
+
+def test_signal_as_of_time_checks_completed_row_against_later_decision_time():
+    data_readiness.assert_decision_rows_ready(
+        [
+            row(timestamp=DECISION_TIME, available_at=DECISION_TIME + timedelta(minutes=1)),
+            row(timestamp=DECISION_TIME + timedelta(minutes=1), available_at=DECISION_TIME + timedelta(minutes=2)),
+        ],
+        [
+            signal(
+                decision_time=DECISION_TIME + timedelta(minutes=1),
+                as_of_time=DECISION_TIME,
+            )
+        ],
+    )
+
+
+def test_signal_as_of_time_cannot_be_after_decision_time():
+    with pytest.raises(DataReadinessError, match="as_of_time"):
+        data_readiness.assert_decision_rows_ready(
+            [row()],
+            [signal(as_of_time=DECISION_TIME + timedelta(minutes=1))],
+        )
+
+
+def test_signal_as_of_time_must_match_a_row_for_that_symbol():
+    with pytest.raises(DataReadinessError, match="does not match a row timestamp"):
+        data_readiness.assert_decision_rows_ready(
+            [row(symbol="QQQ")],
+            [signal(as_of_time=DECISION_TIME)],
+        )
+
+
+def test_audit_ingestion_timestamps_do_not_block_when_available_at_is_causal():
+    data_readiness.assert_decision_rows_ready(
+        [
+            row(
+                available_at=DECISION_TIME,
+                bar_ingested_at=DECISION_TIME + timedelta(days=365),
+                quote_ingested_at=DECISION_TIME + timedelta(days=365),
+                funding_ingested_at=DECISION_TIME + timedelta(days=365),
+                joined_refreshed_at=DECISION_TIME + timedelta(days=365),
+            )
+        ],
+        [signal()],
+    )
 
 
 def test_timezone_equivalent_iso_strings_match_and_allow_ready_row():
@@ -68,7 +113,7 @@ def test_no_matching_readiness_metadata_does_not_block():
 @pytest.mark.parametrize("missing", [float("nan")])
 def test_missing_like_optional_metadata_is_ignored(missing: object):
     data_readiness.assert_decision_rows_ready(
-        [row(**{field: missing for field in data_readiness.READINESS_FIELDS})],
+        [row(available_at=missing)],
         [signal()],
     )
 
@@ -78,7 +123,7 @@ def test_pandas_missing_like_optional_metadata_is_ignored():
 
     for missing in (pd.NaT, pd.NA):
         data_readiness.assert_decision_rows_ready(
-            [row(**{field: missing for field in data_readiness.READINESS_FIELDS})],
+            [row(available_at=missing)],
             [signal()],
         )
 

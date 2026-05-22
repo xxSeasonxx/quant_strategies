@@ -75,14 +75,16 @@ def test_generate_signals_fades_same_direction_funding_and_return_extremes():
     assert signals == [
         {
             "symbol": "BTC-PERP",
-            "decision_time": START + timedelta(minutes=10),
+            "decision_time": START + timedelta(minutes=11),
+            "as_of_time": START + timedelta(minutes=10),
             "side": "short",
             "weight": 0.25,
             "hold_bars": 3,
         },
         {
             "symbol": "ETH-PERP",
-            "decision_time": START + timedelta(minutes=10),
+            "decision_time": START + timedelta(minutes=11),
+            "as_of_time": START + timedelta(minutes=10),
             "side": "long",
             "weight": 0.25,
             "hold_bars": 3,
@@ -104,6 +106,15 @@ def test_generate_signals_uses_completed_prior_close_not_decision_close():
     bars = symbol_rows("BTC-PERP", 100.0, 100.0, 200.0, 0.0003)
 
     assert generate_signals(bars, params(min_cross_section=1)) == []
+
+
+def test_generate_signals_allows_explicit_zero_decision_lag():
+    bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
+
+    signals = generate_signals(bars, params(min_cross_section=1, decision_lag_minutes=0))
+
+    assert signals[0]["decision_time"] == START + timedelta(minutes=10)
+    assert signals[0]["as_of_time"] == START + timedelta(minutes=10)
 
 
 def test_generate_signals_excludes_future_funding_events():

@@ -7,13 +7,8 @@ from typing import Any
 from quant_strategies.runner.errors import DataReadinessError
 
 
-READINESS_FIELDS = (
-    "available_at",
-    "bar_ingested_at",
-    "quote_ingested_at",
-    "funding_ingested_at",
-    "joined_refreshed_at",
-)
+AVAILABILITY_FIELD = "available_at"
+SIGNAL_AS_OF_FIELD = "as_of_time"
 
 
 def assert_decision_rows_ready(
@@ -31,19 +26,43 @@ def assert_decision_rows_ready(
         decision_time = _matching_datetime(signal.get("decision_time"), "decision_time")
         if decision_time is None:
             continue
-        symbol = str(signal.get("symbol", ""))
-        for row in rows_by_key.get((symbol, decision_time), []):
-            _assert_row_ready(row, symbol=symbol, decision_time=decision_time)
-
-
-def _assert_row_ready(row: Mapping[str, Any], *, symbol: str, decision_time: datetime) -> None:
-    for field in READINESS_FIELDS:
-        ready_at = _optional_datetime(row.get(field), field)
-        if ready_at is not None and ready_at > decision_time:
+        as_of_time = _signal_as_of_time(signal, decision_time)
+        if as_of_time > decision_time:
             raise DataReadinessError(
-                f"{field} for {symbol} at {decision_time.isoformat()} "
-                f"is available after decision_time: {ready_at.isoformat()}"
+                f"{SIGNAL_AS_OF_FIELD} for {signal.get('symbol', '<unknown>')} "
+                f"must be at or before decision_time"
             )
+        symbol = str(signal.get("symbol", ""))
+        matching_rows = rows_by_key.get((symbol, as_of_time), [])
+        if SIGNAL_AS_OF_FIELD in signal and not matching_rows:
+            raise DataReadinessError(
+                f"{SIGNAL_AS_OF_FIELD} does not match a row timestamp for "
+                f"{symbol}: {as_of_time.isoformat()}"
+            )
+        for row in matching_rows:
+            _assert_row_ready(row, symbol=symbol, as_of_time=as_of_time, decision_time=decision_time)
+
+
+def _signal_as_of_time(signal: Mapping[str, Any], decision_time: datetime) -> datetime:
+    value = signal.get(SIGNAL_AS_OF_FIELD)
+    if _is_missing(value):
+        return decision_time
+    return _parse_datetime(value, SIGNAL_AS_OF_FIELD)
+
+
+def _assert_row_ready(
+    row: Mapping[str, Any],
+    *,
+    symbol: str,
+    as_of_time: datetime,
+    decision_time: datetime,
+) -> None:
+    ready_at = _optional_datetime(row.get(AVAILABILITY_FIELD), AVAILABILITY_FIELD)
+    if ready_at is not None and ready_at > decision_time:
+        raise DataReadinessError(
+            f"{AVAILABILITY_FIELD} for {symbol} as_of_time {as_of_time.isoformat()} "
+            f"is available after decision_time {decision_time.isoformat()}: {ready_at.isoformat()}"
+        )
 
 
 def _matching_datetime(value: object, field_name: str) -> datetime | None:

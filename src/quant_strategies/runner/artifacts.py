@@ -60,7 +60,11 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> N
 
 
 def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
-    write_csv(result_dir / "signals.csv", signals, preferred_fields=["symbol", "decision_time", "side", "weight", "hold_bars"])
+    write_csv(
+        result_dir / "signals.csv",
+        signals,
+        preferred_fields=["symbol", "decision_time", "as_of_time", "side", "weight", "hold_bars"],
+    )
 
 
 def write_engine_request(result_dir: Path, request_json: str) -> None:
