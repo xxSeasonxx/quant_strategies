@@ -18,8 +18,6 @@ runs/       curated TOML run configs
 src/        installable runner package
 tests/      tests for strategy timing, side, weight, and edge cases
 results/    generated run artifacts, ignored by git
-openspec/   active specs plus archived change history
-docs/       historical design notes
 ```
 
 Each strategy should be one Python file until it genuinely needs more structure.
@@ -29,10 +27,8 @@ Each strategy should be one Python file until it genuinely needs more structure.
 Run one explicit config:
 
 ```bash
-conda run -n quant quant-strategies run runs/simple_momentum_spy_daily.toml
-conda run -n quant quant-strategies run runs/fx_triangular_residual_quote_smoke.toml
-conda run -n quant quant-strategies run runs/crypto_perp_funding_crowding_reversal_smoke.toml
-conda run -n quant quant-strategies run --repo-root "$PWD" runs/simple_momentum_spy_daily.toml
+conda run -n quant quant-strategies run runs/<experiment>.toml
+conda run -n quant quant-strategies run --repo-root "$PWD" runs/<experiment>.toml
 ```
 
 The Python consumer API is:
@@ -40,7 +36,7 @@ The Python consumer API is:
 ```python
 from quant_strategies.runner import run_config
 
-result = run_config("runs/simple_momentum_spy_daily.toml")
+result = run_config("runs/<experiment>.toml")
 ```
 
 `quant_autoresearch` should consume this API instead of owning a separate
@@ -57,13 +53,13 @@ Run configs are TOML and validated with Pydantic before strategy import or data
 loading:
 
 ```toml
-strategy_path = "tested/simple_momentum.py"
-strategy_id = "simple_momentum_spy_daily"
+strategy_path = "tested/example_strategy.py"
+strategy_id = "example_strategy_daily"
 
 [data]
 kind = "bars"
-dataset = "equity_1min"
-symbols = ["SPY"]
+dataset = "example_dataset"
+symbols = ["EXAMPLE"]
 start = "2024-01-01"
 end = "2024-01-31"
 strict = true
@@ -92,20 +88,11 @@ Supported data kinds are `bars`, `crypto_perp_funding`, and
 `forex_with_quotes`. `strategy_path` and `output.results_dir` must resolve
 inside this repository. Relative config paths passed to `run_config(...,
 repo_root=...)` resolve against the effective repository root, so automation can
-call `run_config("runs/simple_momentum_spy_daily.toml", repo_root=repo)` from
+call `run_config("runs/<experiment>.toml", repo_root=repo)` from
 another current working directory.
 
-Committed smoke configs currently cover:
-
-- `runs/simple_momentum_spy_daily.toml`: SPY bar validation smoke; a failed
-  validation gate is still a completed runner artifact, not an infrastructure
-  failure.
-- `runs/fx_triangular_residual_quote_smoke.toml`: FX quote screen using
-  `forex_with_quotes` and `fill_model.price = "quote"` so bid/ask execution is
-  handled by the internal evaluator.
-- `runs/crypto_perp_funding_crowding_reversal_smoke.toml`: crypto perpetual
-  funding screen using `crypto_perp_funding` rows and funding-aware evaluator
-  accounting.
+Curated smoke configs live under `runs/`. They are examples of executable
+runner configurations and smoke evidence, not strategy-promotion evidence.
 
 For close-derived signals, `fill_model.price = "close"` with
 `entry_lag_bars = 0` is rejected by default. Set
@@ -183,10 +170,6 @@ caches after confirming you do not need the ignored files, use:
 ```bash
 git clean -fdX
 ```
-
-OpenSpec source of truth lives in `openspec/specs/`. Use `openspec list` to
-check whether any proposal is still active. `openspec/changes/archive/` is
-tracked audit history, not disposable run output.
 
 ## Promotion Discipline
 
