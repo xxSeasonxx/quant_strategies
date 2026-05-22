@@ -1,7 +1,13 @@
 # internal-evaluation-engine Specification
 
 ## Purpose
-TBD - created by archiving change internalize-quant-engine. Update Purpose after archive.
+
+Define the deterministic internal evaluator owned by `quant_strategies`:
+request/result models, fill and cost accounting, funding-aware trade returns,
+screen/validation behavior, evidence serialization, and the boundary that
+keeps strategy files and runner artifact orchestration separate from evaluator
+logic.
+
 ## Requirements
 ### Requirement: Internal Evaluator Package Boundary
 
@@ -77,4 +83,3 @@ The repository SHALL NOT provide `quant_engine` as a public import path or
 - **WHEN** first-party source, tests, and docs are searched
 - **THEN** active code does not import `quant_engine`
 - **AND** active workflows do not shell `quant-engine`
-

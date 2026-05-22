@@ -1,7 +1,13 @@
 # strategy-runner Specification
 
 ## Purpose
-TBD - created by archiving change harden-runner-readiness. Update Purpose after archive.
+
+Define the explicit `quant_strategies` runner contract for config-driven
+strategy experiments: config parsing, data loading through public `quant_data`
+APIs, pure strategy signal generation, internal evaluator requests, artifact
+writing, failure semantics, data availability readiness, and smoke-evidence
+interpretation.
+
 ## Requirements
 ### Requirement: Stable Config Path Resolution
 

@@ -16,13 +16,17 @@ runner package for configured experiments.
   artifact writing inside strategy files.
 - Run explicit experiments through `src/quant_strategies/runner/` using TOML
   configs under `runs/` and generated artifacts under ignored `results/`.
+- Treat `decision_time` as the actionable decision clock. If a strategy decides
+  after observing an earlier completed row, emit `as_of_time` for that row so
+  runner readiness can check `available_at <= decision_time`.
 - `quant_autoresearch` should consume `quant_strategies.runner.run_config`
   instead of owning a separate runner harness.
 - Use public `quant_data` loader APIs only. Data materialization, refresh,
-  backfill, repair, and source joining belong upstream in `quant-data`. Document and provide feedback to Season on any limitation of the `quant_data`
+  backfill, repair, and source joining belong upstream in `quant-data`.
+  Document and provide feedback to Season on any limitation of `quant_data`.
 - Write or update tests before moving a strategy from `untested/` to `tested/`.
--  Every strategy needs a short
-  rationale docstring covering the actual strategy source/provenance, market
+- Every strategy needs a short rationale docstring covering the actual strategy
+  source/provenance, market
   rationale, required data/observables, executable rule, key proxy/data
   assumptions, and falsifier. Source/provenance must be specific enough to
   audit: paper title/authors/year plus DOI/SSRN/URL when available, web page or

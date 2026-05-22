@@ -18,6 +18,8 @@ runs/       curated TOML run configs
 src/        installable runner package
 tests/      tests for strategy timing, side, weight, and edge cases
 results/    generated run artifacts, ignored by git
+openspec/   active specs plus archived change history
+docs/       historical design notes
 ```
 
 Each strategy should be one Python file until it genuinely needs more structure.
@@ -29,6 +31,7 @@ Run one explicit config:
 ```bash
 conda run -n quant quant-strategies run runs/simple_momentum_spy_daily.toml
 conda run -n quant quant-strategies run runs/fx_triangular_residual_quote_smoke.toml
+conda run -n quant quant-strategies run runs/crypto_perp_funding_crowding_reversal_smoke.toml
 conda run -n quant quant-strategies run --repo-root "$PWD" runs/simple_momentum_spy_daily.toml
 ```
 
@@ -92,10 +95,17 @@ repo_root=...)` resolve against the effective repository root, so automation can
 call `run_config("runs/simple_momentum_spy_daily.toml", repo_root=repo)` from
 another current working directory.
 
-`runs/fx_triangular_residual_quote_smoke.toml` is the first real quote-fill
-smoke config. It uses `forex_with_quotes`, strict loading, and
-`fill_model.price = "quote"` so bid/ask execution is handled by the internal
-evaluator.
+Committed smoke configs currently cover:
+
+- `runs/simple_momentum_spy_daily.toml`: SPY bar validation smoke; a failed
+  validation gate is still a completed runner artifact, not an infrastructure
+  failure.
+- `runs/fx_triangular_residual_quote_smoke.toml`: FX quote screen using
+  `forex_with_quotes` and `fill_model.price = "quote"` so bid/ask execution is
+  handled by the internal evaluator.
+- `runs/crypto_perp_funding_crowding_reversal_smoke.toml`: crypto perpetual
+  funding screen using `crypto_perp_funding` rows and funding-aware evaluator
+  accounting.
 
 For close-derived signals, `fill_model.price = "close"` with
 `entry_lag_bars = 0` is rejected by default. Set
@@ -166,6 +176,17 @@ decision time, the run fails at `data_readiness` before engine request
 construction. Ingestion and refresh timestamps remain audit metadata in
 artifacts and manifests; they are not treated as historical market availability.
 This is a direct as-of-row guard, not a full feature-lineage proof.
+
+`results/` is generated and ignored. To clear local run artifacts and Python
+caches after confirming you do not need the ignored files, use:
+
+```bash
+git clean -fdX
+```
+
+OpenSpec source of truth lives in `openspec/specs/`. Use `openspec list` to
+check whether any proposal is still active. `openspec/changes/archive/` is
+tracked audit history, not disposable run output.
 
 ## Promotion Discipline
 

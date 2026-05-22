@@ -1,8 +1,8 @@
 # Quant Strategy Runner Design
 
 Historical note: this design predates the current runner artifact contract. Use
-`README.md`, `PRODUCT_REQUIREMENTS.md`, and active OpenSpec specs for current
-internal evaluator ownership and runner artifact semantics.
+`README.md`, `AGENTS.md`, and active OpenSpec specs for current internal
+evaluator ownership, data-readiness semantics, and runner artifact behavior.
 
 ## Decision
 
@@ -47,6 +47,8 @@ quant_strategies/
 
   runs/
     simple_momentum_spy_daily.toml
+    fx_triangular_residual_quote_smoke.toml
+    crypto_perp_funding_crowding_reversal_smoke.toml
 
   results/
 
@@ -72,6 +74,8 @@ CLI:
 
 ```bash
 conda run -n quant quant-strategies run runs/simple_momentum_spy_daily.toml
+conda run -n quant quant-strategies run runs/fx_triangular_residual_quote_smoke.toml
+conda run -n quant quant-strategies run runs/crypto_perp_funding_crowding_reversal_smoke.toml
 ```
 
 Python API:
@@ -205,17 +209,24 @@ Each run writes one directory:
 results/2026-05-20T213000Z-simple_momentum_spy_daily/
   config.toml
   strategy_snapshot.py
-  bars.csv
+  strategy_input_rows.csv
+  strategy_input_rows.jsonl
+  data_manifest.json
   signals.csv
-  request.json
-  screen_summary.json
-  validate_summary.json
+  engine_request.json
+  run_manifest.json
+  summary.json
   evidence.json
   notes.md
 ```
 
 Failed runs should write as many useful artifacts as are safely available. A
 failed validation is still a valid run artifact, not a crash.
+
+Signals may include `as_of_time` when the actionable decision happens after an
+earlier completed observation row. Runner readiness checks the as-of row's
+`available_at` against `decision_time`; ingestion and refresh timestamps are
+preserved as audit metadata, not treated as historical market availability.
 
 ## Error Handling
 
