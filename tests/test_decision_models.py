@@ -150,3 +150,54 @@ def test_metadata_is_immutable_after_construction():
 
     with pytest.raises(TypeError):
         decision.metadata["x"] = 2
+
+
+def test_nested_metadata_is_immutable_after_construction():
+    decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+        metadata={"outer": {"items": [{"x": 1}]}},
+    )
+
+    with pytest.raises(TypeError):
+        decision.metadata["outer"]["items"][0] = {"x": 2}
+    with pytest.raises(TypeError):
+        decision.metadata["outer"]["items"][0]["x"] = 2
+
+
+def test_nested_metadata_is_isolated_from_caller_mutation():
+    metadata = {"outer": {"items": [{"x": 1}]}}
+    decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+        metadata=metadata,
+    )
+
+    metadata["outer"]["items"][0]["x"] = 2
+    metadata["outer"]["items"].append({"x": 3})
+    metadata["outer"]["new"] = "caller"
+
+    assert decision.metadata["outer"]["items"][0]["x"] == 1
+    assert len(decision.metadata["outer"]["items"]) == 1
+    assert "new" not in decision.metadata["outer"]
+
+
+def test_metadata_rejects_nested_non_string_mapping_keys():
+    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
+        StrategyDecision(
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=DECISION_TIME,
+            as_of_time=AS_OF_TIME,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=5),
+            metadata={"outer": [{1: "lossy"}]},
+        )

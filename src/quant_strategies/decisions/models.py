@@ -32,6 +32,27 @@ def _timezone_aware(value: datetime, field_name: str) -> datetime:
     return value
 
 
+def _freeze_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        frozen_items: dict[str, Any] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError("metadata mapping keys must be strings")
+            frozen_items[key] = _freeze_metadata_value(item)
+        return MappingProxyType(frozen_items)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_metadata_value(item) for item in value)
+    return value
+
+
+def _jsonable_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _jsonable_metadata_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_jsonable_metadata_value(item) for item in value]
+    return value
+
+
 class InstrumentRef(DecisionModel):
     kind: InstrumentKind
     symbol: str
@@ -96,12 +117,13 @@ class StrategyDecision(DecisionModel):
         if self.as_of_time > self.decision_time:
             raise ValueError("as_of_time must be on or before decision_time")
         try:
-            json.dumps(self.metadata, sort_keys=True, allow_nan=False)
+            frozen_metadata = _freeze_metadata_value(self.metadata)
+            json.dumps(_jsonable_metadata_value(frozen_metadata), sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("metadata must be JSON-compatible") from exc
-        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "metadata", frozen_metadata)
         return self
 
     @field_serializer("metadata")
     def serialize_metadata(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(value)
+        return _jsonable_metadata_value(value)
