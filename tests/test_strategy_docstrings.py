@@ -57,6 +57,14 @@ def strategy_files() -> list[Path]:
     )
 
 
+def researched_strategy_files() -> list[Path]:
+    return sorted(Path("researched").glob("*/families/*/variants/*/strategy.py"))
+
+
+def all_strategy_files_for_contract() -> list[Path]:
+    return strategy_files() + researched_strategy_files()
+
+
 def strategy_python_files() -> list[Path]:
     return sorted(
         path
@@ -67,7 +75,7 @@ def strategy_python_files() -> list[Path]:
 
 
 def test_strategy_docstrings_include_required_rationale_headings():
-    files = strategy_files()
+    files = all_strategy_files_for_contract()
     assert files, "expected committed strategy modules"
 
     for path in files:
@@ -88,7 +96,7 @@ def test_strategy_layout_is_flat():
 
 def test_strategy_modules_do_not_import_data_runner_or_engine_packages():
     offenders: list[str] = []
-    for path in strategy_files():
+    for path in all_strategy_files_for_contract():
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -105,7 +113,7 @@ def test_strategy_modules_do_not_import_data_runner_or_engine_packages():
 
 def test_strategy_modules_do_not_call_common_side_effect_primitives():
     offenders: list[str] = []
-    for path in strategy_files():
+    for path in all_strategy_files_for_contract():
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):

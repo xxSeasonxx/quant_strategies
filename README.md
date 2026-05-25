@@ -1,7 +1,7 @@
 # quant_strategies
 
-Flat strategy library for tested and untested strategy files, plus an explicit
-runner for one config-driven experiment at a time.
+Strategy library for untested, researched, and tested strategy files, plus an
+explicit runner for one config-driven experiment at a time.
 
 Strategy files stay pure: they expose `generate_signals(bars, params)` and do
 not call engines, load data, start loops, or write artifacts. Explicit
@@ -12,15 +12,22 @@ public `quant_data.loader` APIs and evaluates through the internal
 ## Layout
 
 ```text
-untested/   strategy files still under implementation
-tested/     strategy files with focused behavior tests
-runs/       curated TOML run configs
-src/        installable runner package
-tests/      tests for strategy timing, side, weight, and edge cases
-results/    generated run artifacts, ignored by git
+untested/    raw or actively forming strategy ideas
+researched/  bench-researched candidates frozen for separate validation
+tested/      strategies that passed the separate validation process
+runs/        curated TOML run configs
+src/         installable runner package
+tests/       tests for strategy timing, side, weight, and edge cases
+results/     generated run artifacts, ignored by git
 ```
 
 Each strategy should be one Python file until it genuinely needs more structure.
+
+`researched/` stores self-contained handoff packages from `quant_autoresearch`.
+Each package keeps frozen strategy code, runnable configs, deterministic
+selection output, and compact evidence. A researched strategy is ready for the
+separate validation process; it is not market validated and should not be moved
+to `tested/` until that validation process passes.
 
 ## Runner
 

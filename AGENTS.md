@@ -21,6 +21,10 @@ runner package for configured experiments.
   runner readiness can check `available_at <= decision_time`.
 - `quant_autoresearch` should consume `quant_strategies.runner.run_config`
   instead of owning a separate runner harness.
+- Keep `researched/` for frozen bench-promoted packages from
+  `quant_autoresearch`. Do not treat `researched/` as market validated.
+- Move from `researched/` to `tested/` only through the separate validation
+  process Season approves.
 - Use public `quant_data` loader APIs only. Data materialization, refresh,
   backfill, repair, and source joining belong upstream in `quant-data`.
   Document and provide feedback to Season on any limitation of `quant_data`.
