@@ -43,8 +43,9 @@ from datetime import datetime, timedelta
 import math
 from typing import Any
 
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 
-__all__ = ["generate_signals"]
+__all__ = ["generate_signals", "generate_decisions"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "close", "funding_timestamp", "funding_rate", "has_funding_event"}
 
@@ -280,6 +281,39 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
                     last_signal_time_by_symbol[candidate["symbol"]] = decision_time
 
     return signals
+
+
+def generate_decisions(bars: Sequence[Mapping[str, object]], params: Mapping[str, object]) -> list[StrategyDecision]:
+    decisions: list[StrategyDecision] = []
+    for signal in generate_signals(bars, params):
+        side = str(signal["side"])
+        if side not in {"long", "short"}:
+            raise ValueError(f"unsupported decision side: {side}")
+        decisions.append(
+            StrategyDecision(
+                strategy_id="crypto_perp_funding_crowding_reversal",
+                instrument=InstrumentRef(kind="crypto_perp", symbol=str(signal["symbol"])),
+                decision_time=_as_datetime(signal["decision_time"]),
+                as_of_time=_as_datetime(signal["as_of_time"]),
+                target=PositionTarget(
+                    direction=side,
+                    sizing_kind="target_weight",
+                    size=float(signal["weight"]),
+                ),
+                exit_policy=ExitPolicy(
+                    max_hold_bars=_positive_int(signal.get("max_hold_bars", signal["hold_bars"]), "max_hold_bars"),
+                    take_profit_bps=_optional_positive_float(signal.get("take_profit_bps"), "take_profit_bps"),
+                    stop_loss_bps=_optional_positive_float(signal.get("stop_loss_bps"), "stop_loss_bps"),
+                    trailing_stop_bps=_optional_positive_float(signal.get("trailing_stop_bps"), "trailing_stop_bps"),
+                ),
+                metadata={
+                    "funding_pressure_bps": signal.get("funding_pressure_bps"),
+                    "entry_return_extension_bps": signal.get("entry_return_extension_bps"),
+                    "signal_family": signal.get("signal_family"),
+                },
+            )
+        )
+    return decisions
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:
