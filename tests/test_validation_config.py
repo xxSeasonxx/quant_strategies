@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
 
+from quant_strategies.runner.config import RunConfig
 from quant_strategies.validation.config import load_validation_config, resolve_validation_config_path
 from quant_strategies.validation.errors import ValidationConfigError
 
@@ -69,6 +71,28 @@ def test_load_validation_config_resolves_paths_inside_repo(tmp_path: Path):
     assert config.strategy_path == tmp_path / "researched" / "demo" / "strategy.py"
     assert config.output.results_dir == tmp_path / "validation_results" / "demo"
     assert config.windows[0].id == "validation_2026_h1"
+
+
+def test_validation_config_converts_to_run_config_with_repo_root_override(tmp_path: Path):
+    write_strategy(tmp_path / "researched" / "demo" / "strategy.py")
+    config_path = tmp_path / "researched" / "demo" / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'strict = true\nstart = "2026-01-01"\nend = "2026-06-30"',
+            'strict = true\nstart = "2025-01-01"\nend = "2026-12-31"',
+        )
+    )
+    config = load_validation_config(tmp_path / "researched" / "demo", repo_root=tmp_path)
+    results_dir = tmp_path / "validation_results" / "demo" / "run"
+
+    run_config = config.to_run_config(config.windows[0], results_dir=results_dir)
+
+    assert isinstance(run_config, RunConfig)
+    assert run_config.output.mode == "validate"
+    assert run_config.output.results_dir == results_dir
+    assert run_config.data.start == date(2026, 1, 1)
+    assert run_config.data.end == date(2026, 6, 30)
 
 
 def test_load_validation_config_rejects_generate_strategy_outside_repo(tmp_path: Path):

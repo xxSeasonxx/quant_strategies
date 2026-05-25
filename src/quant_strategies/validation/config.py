@@ -5,7 +5,16 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from quant_strategies.runner.config import (
     CostModelConfig,
@@ -61,6 +70,8 @@ class ValidationOutputConfig(ValidationConfigModel):
 
 
 class ValidationConfig(ValidationConfigModel):
+    _repo_root_path: Path = PrivateAttr(default_factory=default_repo_root)
+
     strategy_path: Path
     strategy_id: str = Field(min_length=1)
     backend: BackendName = "vectorbtpro"
@@ -70,6 +81,11 @@ class ValidationConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     output: ValidationOutputConfig
+
+    def model_post_init(self, context: Any, /) -> None:
+        root = context.get("repo_root") if isinstance(context, dict) else None
+        repo_root = Path(root).resolve() if root is not None else default_repo_root()
+        object.__setattr__(self, "_repo_root_path", repo_root)
 
     @field_validator("strategy_path")
     @classmethod
@@ -85,14 +101,22 @@ class ValidationConfig(ValidationConfigModel):
         return strategy_id
 
     def to_run_config(self, window: ValidationWindow, *, results_dir: Path) -> RunConfig:
-        return RunConfig(
-            strategy_path=self.strategy_path,
-            strategy_id=self.strategy_id,
-            data=self.data.model_copy(update={"start": window.start, "end": window.end}),
-            params=self.params,
-            fill_model=self.fill_model,
-            cost_model=self.cost_model,
-            output=RunnerOutputConfig(results_dir=results_dir, mode="validate"),
+        context = {"repo_root": self._repo_root_path}
+        output = RunnerOutputConfig.model_validate(
+            {"results_dir": results_dir, "mode": "validate"},
+            context=context,
+        )
+        return RunConfig.model_validate(
+            {
+                "strategy_path": self.strategy_path,
+                "strategy_id": self.strategy_id,
+                "data": self.data.model_copy(update={"start": window.start, "end": window.end}),
+                "params": self.params,
+                "fill_model": self.fill_model,
+                "cost_model": self.cost_model,
+                "output": output,
+            },
+            context=context,
         )
 
 
