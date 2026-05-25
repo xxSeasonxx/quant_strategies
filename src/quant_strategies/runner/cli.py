@@ -5,6 +5,7 @@ from pathlib import Path
 
 from quant_strategies.runner import run_config
 from quant_strategies.validation import run_validation
+from quant_strategies.validation.errors import ValidationError
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -15,7 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--repo-root", type=Path, default=None, help="repository root for relative config paths")
     run_parser.add_argument("config", type=Path)
 
-    validate_parser = subparsers.add_parser("validate", help="validate one researched strategy package")
+    validate_parser = subparsers.add_parser("validate", help="validate one researched strategy package or config")
     validate_parser.add_argument("--repo-root", type=Path, default=None, help="repository root for relative paths")
     validate_parser.add_argument("package_or_config", type=Path)
 
@@ -33,7 +34,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if args.command == "validate":
-        result = run_validation(args.package_or_config, repo_root=args.repo_root)
+        try:
+            result = run_validation(args.package_or_config, repo_root=args.repo_root)
+        except ValidationError as exc:
+            print(f"validation failed: {exc}")
+            return 1
         print(f"{result.message}; artifacts: {result.result_dir}")
         if result.decision.decision == "clear_yes":
             return 0
