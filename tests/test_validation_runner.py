@@ -184,7 +184,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
     assert audit["windows"][0]["violations"] == ["invalid_decision_output"]
 
 
-def test_run_validation_default_vectorbtpro_backend_is_unavailable(tmp_path: Path, monkeypatch):
+def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path, backend=None)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
 
@@ -197,9 +197,9 @@ def test_run_validation_default_vectorbtpro_backend_is_unavailable(tmp_path: Pat
         "window_id": "validation_2026_h1",
         "result": {
             "backend": "vectorbtpro",
-            "status": "unavailable",
+            "status": "failed",
             "metrics": {},
-            "warnings": ["vectorbtpro backend is not implemented yet"],
+            "warnings": ["unfillable_exit:BTC-PERP:2026-01-01T00:01:00+00:00"],
             "unsupported_semantics": [],
         },
     }

@@ -47,6 +47,22 @@ def multi_symbol_rows():
     ]
 
 
+def sparse_symbol_rows():
+    return rows() + [
+        {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 200.0},
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "close": 201.0,
+        },
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "close": 202.0,
+        },
+    ]
+
+
 def decision(
     *,
     symbol: str = "BTC-PERP",
@@ -116,6 +132,20 @@ def test_vectorbtpro_backend_fails_on_missing_decision_bar():
         ],
         rows=rows(),
         config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("missing_decision_bar" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_requires_symbol_close_at_decision_bar():
+    pytest.importorskip("vectorbtpro")
+    config = SimpleNamespace(fill_model=SimpleNamespace(entry_lag_bars=1, exit_lag_bars=0))
+
+    result = VectorBTProBackend().run(
+        decisions=[decision(symbol="ETH-PERP")],
+        rows=sparse_symbol_rows(),
+        config=config,
     )
 
     assert result.status == "failed"

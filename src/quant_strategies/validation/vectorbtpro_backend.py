@@ -70,6 +70,9 @@ class VectorBTProBackend:
             decision_idx = _index_position(pd, close.index, item.decision_time)
             if decision_idx is None:
                 return _failed(self.name, f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
+            decision_time = close.index[decision_idx]
+            if pd.isna(close.loc[decision_time, symbol]):
+                return _failed(self.name, f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
 
             entry_idx = decision_idx + entry_lag
             if entry_idx >= len(close.index):
