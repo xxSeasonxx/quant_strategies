@@ -1,0 +1,1643 @@
+{
+  "baseline_params": {
+    "balance_sides": false,
+    "decision_interval_minutes": 240,
+    "decision_lag_minutes": 1,
+    "funding_lookback_events": 5,
+    "high_extension_short_hold_bars": 120,
+    "high_extension_short_return_bps": 120.0,
+    "hold_bars": 600,
+    "include_negative_funding_longs": true,
+    "include_positive_funding_shorts": true,
+    "long_hold_bars": 600,
+    "max_recent_same_direction_return_bps": 0.0,
+    "max_short_return_extension_bps": 250.0,
+    "min_abs_funding_bps": 1.0,
+    "min_abs_return_bps": 5.0,
+    "min_abs_return_z": 0.0,
+    "min_cross_section": 4,
+    "min_idiosyncratic_return_bps": 2.5,
+    "min_latest_abs_funding_bps": 0.0,
+    "min_long_idiosyncratic_return_bps": 0.0,
+    "min_same_sign_funding_events": 3,
+    "min_short_idiosyncratic_return_bps": 5.0,
+    "min_tail_count": 1,
+    "recent_return_lookback_minutes": 0,
+    "require_exit_horizon": true,
+    "return_lookback_minutes": 120,
+    "selection_score": "funding",
+    "session_end_hour": 20,
+    "session_start_hour": 4,
+    "short_hold_bars": 480,
+    "stop_loss_bps": 250.0,
+    "symbol_cooldown_minutes": 0,
+    "take_profit_bps": 300.0,
+    "top_n": 5,
+    "trailing_stop_bps": 200.0,
+    "volatility_lookback_minutes": 0,
+    "weight": 1.0
+  },
+  "campaign_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100",
+  "generated_at": "2026-05-25T15:11:44.573940+00:00",
+  "method_version": "research_handoff_rank_v1",
+  "selected_families": [
+    {
+      "best_variant_id": "6f7bbfcf2c49d0d24511bfc7bfaf1c15484f4403f83d02f318bb837b084505db",
+      "family": "selection_or_breadth",
+      "variant_count": 4
+    },
+    {
+      "best_variant_id": "401ea895e2bb60c5bd62a0b23ca8e61ea4638147dfbd279378a14995f34b4a2e",
+      "family": "entry_filter",
+      "variant_count": 5
+    },
+    {
+      "best_variant_id": "a9b0baa2907acb18cc68644938f630ee01979e552abaa1c147d0ea235b760f83",
+      "family": "time_only_exit",
+      "variant_count": 5
+    }
+  ],
+  "variants": [
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062325Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062445Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062607Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        56,
+        57,
+        58
+      ],
+      "base_score": 0.017532679483114093,
+      "blended_score": 0.015686540418224416,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "selection_or_breadth",
+      "min_trade_count": 733,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 4,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.003692278129779357,
+      "recent_window_scores": [
+        {
+          "attempt_id": 56,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062325Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022708647128421206,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 747,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 57,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062445Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014347706646725045,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 58,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062607Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015541684674196027,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2268,
+      "variant_id": "6f7bbfcf2c49d0d24511bfc7bfaf1c15484f4403f83d02f318bb837b084505db"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061928Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062046Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062205Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        53,
+        54,
+        55
+      ],
+      "base_score": 0.017287936814631436,
+      "blended_score": 0.015604569813288444,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "selection_or_breadth",
+      "min_trade_count": 728,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 3,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0033667340026859835,
+      "recent_window_scores": [
+        {
+          "attempt_id": 53,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061928Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022040520914715405,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 729,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 54,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062046Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014662536262155735,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 728,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 55,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062205Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.01516075326702317,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 784,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2241,
+      "variant_id": "1d2fd335b9eabd68ccc176a34e10c8561e301dba0f0e94c1aadc2233d7ba610c"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061528Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061648Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061807Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T074537Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        50,
+        51,
+        52,
+        100
+      ],
+      "base_score": 0.015707175388822794,
+      "blended_score": 0.013721988317843907,
+      "cost_stress_score": 0.022083517837701884,
+      "evidence_result_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T074537Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074655Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074812Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "family": "selection_or_breadth",
+      "min_trade_count": 733,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "return",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal",
+      "promotion_score": 0.015707175388822794,
+      "promotion_summary": {
+        "attempt": 100,
+        "commit": "9eb2245",
+        "cost_stress_id": "realistic_costs",
+        "cost_stress_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/cost_stress/realistic_costs/2026-05-25T074930Z-crypto_perp_funding_crowding_reversal",
+        "description": "promote broad no exits selection return",
+        "eligible_for_promotion": true,
+        "failed_reasons": [],
+        "promotion_score": 0.015707175388822794,
+        "recent_window_ids": [
+          "validation_2025_h1",
+          "validation_2025_h2",
+          "locked_recent_2026"
+        ],
+        "rotating_probe_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/rotating_probe/stress_2022_ftx/2026-05-25T075047Z-crypto_perp_funding_crowding_reversal",
+        "rotating_probe_window_id": "stress_2022_ftx",
+        "source_result_dirs": {
+          "locked_recent_2026": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T074537Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h1": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074655Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h2": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074812Z-crypto_perp_funding_crowding_reversal"
+        }
+      },
+      "recent_window_score_stdev": 0.003970374141957773,
+      "recent_window_scores": [
+        {
+          "attempt_id": 50,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061528Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 100,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T074537Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 100,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T074537Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 51,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061648Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014347706646725045,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 100,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074655Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014347706646725045,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 52,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061807Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015541684674196027,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        },
+        {
+          "attempt_id": 100,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0100_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074812Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015541684674196027,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 5289,
+      "variant_id": "05f96f34f899ec165aabb304d7527cfb407be8d0d85b46324c3c33d5639af662"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061128Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061248Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061407Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T073905Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        47,
+        48,
+        49,
+        99
+      ],
+      "base_score": 0.015707175388822794,
+      "blended_score": 0.013721988317843907,
+      "cost_stress_score": 0.022083517837701884,
+      "evidence_result_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T073905Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074022Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074140Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "family": "selection_or_breadth",
+      "min_trade_count": 733,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "product",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal",
+      "promotion_score": 0.015707175388822794,
+      "promotion_summary": {
+        "attempt": 99,
+        "commit": "9eb2245",
+        "cost_stress_id": "realistic_costs",
+        "cost_stress_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/cost_stress/realistic_costs/2026-05-25T074258Z-crypto_perp_funding_crowding_reversal",
+        "description": "promote broad no exits selection product",
+        "eligible_for_promotion": true,
+        "failed_reasons": [],
+        "promotion_score": 0.015707175388822794,
+        "recent_window_ids": [
+          "validation_2025_h1",
+          "validation_2025_h2",
+          "locked_recent_2026"
+        ],
+        "rotating_probe_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/rotating_probe/stress_2022_deleveraging/2026-05-25T074415Z-crypto_perp_funding_crowding_reversal",
+        "rotating_probe_window_id": "stress_2022_deleveraging",
+        "source_result_dirs": {
+          "locked_recent_2026": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T073905Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h1": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074022Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h2": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074140Z-crypto_perp_funding_crowding_reversal"
+        }
+      },
+      "recent_window_score_stdev": 0.003970374141957773,
+      "recent_window_scores": [
+        {
+          "attempt_id": 47,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061128Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 99,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T073905Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 99,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T073905Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022915740059924108,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 48,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061248Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014347706646725045,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 99,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T074022Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014347706646725045,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 49,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061407Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015541684674196027,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        },
+        {
+          "attempt_id": 99,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0099_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T074140Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015541684674196027,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 5289,
+      "variant_id": "e13492a831c1a5f4f59d2085802162d7cb5340d22c99d0d3f8c975f66ca03926"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064532Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064649Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064808Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        74,
+        75,
+        76
+      ],
+      "base_score": 0.017478772709101528,
+      "blended_score": 0.01526316044104101,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "entry_filter",
+      "min_trade_count": 690,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 10.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.004431224536121034,
+      "recent_window_scores": [
+        {
+          "attempt_id": 74,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064532Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.02333493355996386,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 695,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 75,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064649Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.01261868260437211,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 690,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 76,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064808Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.016482701962968607,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 747,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2132,
+      "variant_id": "401ea895e2bb60c5bd62a0b23ca8e61ea4638147dfbd279378a14995f34b4a2e"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064927Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065046Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065204Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        77,
+        78,
+        79
+      ],
+      "base_score": 0.01647797689506814,
+      "blended_score": 0.014755328865448239,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "entry_filter",
+      "min_trade_count": 698,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 5.0,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0034452960592397997,
+      "recent_window_scores": [
+        {
+          "attempt_id": 77,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064927Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.021349515494877673,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 710,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 78,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065046Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014120827927420854,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 698,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 79,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065204Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.013963587262905894,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 752,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2160,
+      "variant_id": "9095efe055479391aa2620212490f1453029beb1a394c7ed994b36ef741a940b"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062727Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062843Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062958Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        59,
+        60,
+        61
+      ],
+      "base_score": 0.015599628205739383,
+      "blended_score": 0.013615147338312428,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "entry_filter",
+      "min_trade_count": 471,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 2,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0039689617348539095,
+      "recent_window_scores": [
+        {
+          "attempt_id": 59,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062727Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.02078597391571294,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 524,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 60,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062843Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.011147598306334987,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 471,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 61,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T062958Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014865312395170222,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 603,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 1598,
+      "variant_id": "860f82ed027762e80da4b67cd89a20504e92788247732bff2fb8912584b612fc"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065727Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065841Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065956Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        83,
+        84,
+        85
+      ],
+      "base_score": 0.012277244502009373,
+      "blended_score": 0.01059949160932872,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "entry_filter",
+      "min_trade_count": 451,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.5,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0033555057853613046,
+      "recent_window_scores": [
+        {
+          "attempt_id": 83,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065727Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.016527547337992003,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 451,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 84,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065841Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.008324438038551794,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 487,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 85,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065956Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.011979748129484326,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 550,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 1488,
+      "variant_id": "8d62f210b7b2ce7bbd6bd29b21e2ce65cbd1e6d3d80befdad0baf49033b897ae"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064147Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064301Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064416Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        71,
+        72,
+        73
+      ],
+      "base_score": 0.010420249802969161,
+      "blended_score": 0.009124354047061547,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "entry_filter",
+      "min_trade_count": 482,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 2.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0025917915118152304,
+      "recent_window_scores": [
+        {
+          "attempt_id": 71,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064147Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.013385337425810575,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 482,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 72,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064301Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.0070716228201086855,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 510,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 73,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T064416Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.010803789162988221,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 604,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 1596,
+      "variant_id": "29f5ec0889f88b4742dc1bcdee96387c39dad3cded51a96e23e4a7fa808e6473"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065325Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065444Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065607Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        80,
+        81,
+        82
+      ],
+      "base_score": 0.01647797689506814,
+      "blended_score": 0.014755328865448239,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "time_only_exit",
+      "min_trade_count": 698,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_short_idiosyncratic_return_bps": 5.0,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0034452960592397997,
+      "recent_window_scores": [
+        {
+          "attempt_id": 80,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065325Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.021349515494877673,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 710,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 81,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065444Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014120827927420854,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 698,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 82,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T065607Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.013963587262905894,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 752,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2160,
+      "variant_id": "a9b0baa2907acb18cc68644938f630ee01979e552abaa1c147d0ea235b760f83"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060328Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060449Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060609Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        41,
+        42,
+        43
+      ],
+      "base_score": 0.016924318860646412,
+      "blended_score": 0.014380135842743199,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "time_only_exit",
+      "min_trade_count": 733,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 600,
+        "high_extension_short_return_bps": 0.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 600,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.0050883660358064286,
+      "recent_window_scores": [
+        {
+          "attempt_id": 41,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060328Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.023983017745006233,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 42,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060449Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014606695838280687,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 43,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060609Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.012183242998652314,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2270,
+      "variant_id": "d0e919829631f0a6c2b05de720b9e7474ae5e2a9494e10fb921d79f4c9fa1c76"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055516Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055638Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055758Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071242Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        35,
+        36,
+        37,
+        95
+      ],
+      "base_score": 0.016278311526520668,
+      "blended_score": 0.014299404822259127,
+      "cost_stress_score": 0.022666349924109017,
+      "evidence_result_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071242Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T071400Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T071517Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "family": "time_only_exit",
+      "min_trade_count": 730,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 960,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal",
+      "promotion_score": 0.016278311526520668,
+      "promotion_summary": {
+        "attempt": 95,
+        "commit": "9eb2245",
+        "cost_stress_id": "realistic_costs",
+        "cost_stress_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/cost_stress/realistic_costs/2026-05-25T071635Z-crypto_perp_funding_crowding_reversal",
+        "description": "promote broad no exits short 480 long 960",
+        "eligible_for_promotion": true,
+        "failed_reasons": [],
+        "promotion_score": 0.016278311526520668,
+        "recent_window_ids": [
+          "validation_2025_h1",
+          "validation_2025_h2",
+          "locked_recent_2026"
+        ],
+        "rotating_probe_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/rotating_probe/stress_2022_ftx/2026-05-25T071752Z-crypto_perp_funding_crowding_reversal",
+        "rotating_probe_window_id": "stress_2022_ftx",
+        "source_result_dirs": {
+          "locked_recent_2026": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071242Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h1": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T071400Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h2": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T071517Z-crypto_perp_funding_crowding_reversal"
+        }
+      },
+      "recent_window_score_stdev": 0.003957813408523082,
+      "recent_window_scores": [
+        {
+          "attempt_id": 35,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055516Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.023493016590775687,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 744,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 95,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071242Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.023493016590775687,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 744,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 95,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071242Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.023493016590775687,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 744,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 36,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055638Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015655035427168194,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 730,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 95,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T071400Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015655035427168194,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 730,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 37,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055758Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015342797778436631,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 784,
+          "window_id": "validation_2025_h2"
+        },
+        {
+          "attempt_id": 95,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0095_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T071517Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.015342797778436631,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 784,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 5260,
+      "variant_id": "d854f7e4876cdaf8c8d0ffd07ac2a9853978443974365574be09587d559a6731"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060728Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060847Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061008Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        44,
+        45,
+        46
+      ],
+      "base_score": 0.016387920241444042,
+      "blended_score": 0.014265779405753005,
+      "cost_stress_score": null,
+      "evidence_result_dirs": [],
+      "family": "time_only_exit",
+      "min_trade_count": 733,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 240,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 600,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": null,
+      "promotion_score": null,
+      "promotion_summary": null,
+      "recent_window_score_stdev": 0.004244281671382073,
+      "recent_window_scores": [
+        {
+          "attempt_id": 44,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060728Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.022337371872193087,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 749,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 45,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T060847Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.012724783699048321,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 733,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 46,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T061008Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.01410160515309072,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 788,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 2270,
+      "variant_id": "f95e767ed623a6559f43814252c2cd204273f07bc5825f4baa494760b9c21ef6"
+    },
+    {
+      "attempt_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055115Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055235Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055355Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071912Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "attempt_ids": [
+        32,
+        33,
+        34,
+        96
+      ],
+      "base_score": 0.01619863331799232,
+      "blended_score": 0.013976063684094476,
+      "cost_stress_score": 0.023448017355831536,
+      "evidence_result_dirs": [
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071912Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T072030Z-crypto_perp_funding_crowding_reversal",
+        "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T072147Z-crypto_perp_funding_crowding_reversal"
+      ],
+      "family": "time_only_exit",
+      "min_trade_count": 731,
+      "missing_recent_windows": [],
+      "params": {
+        "balance_sides": false,
+        "decision_interval_minutes": 240,
+        "funding_lookback_events": 5,
+        "high_extension_short_hold_bars": 120,
+        "high_extension_short_return_bps": 120.0,
+        "hold_bars": 600,
+        "include_negative_funding_longs": true,
+        "include_positive_funding_shorts": true,
+        "long_hold_bars": 720,
+        "max_recent_same_direction_return_bps": 0.0,
+        "max_short_return_extension_bps": 250.0,
+        "min_abs_funding_bps": 1.0,
+        "min_abs_return_bps": 5.0,
+        "min_abs_return_z": 0.0,
+        "min_idiosyncratic_return_bps": 2.5,
+        "min_latest_abs_funding_bps": 0.0,
+        "min_long_idiosyncratic_return_bps": 0.0,
+        "min_same_sign_funding_events": 3,
+        "min_tail_count": 1,
+        "recent_return_lookback_minutes": 0,
+        "require_exit_horizon": true,
+        "return_lookback_minutes": 120,
+        "selection_score": "funding",
+        "session_end_hour": 20,
+        "session_start_hour": 4,
+        "short_hold_bars": 480,
+        "symbol_cooldown_minutes": 0,
+        "top_n": 5,
+        "volatility_lookback_minutes": 0,
+        "weight": 1.0
+      },
+      "penalties": {
+        "cost_stress": 0.0,
+        "low_trades": 0.0,
+        "missing_recent_windows": 0.0,
+        "non_finite_scores": 0.0
+      },
+      "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal",
+      "promotion_score": 0.01619863331799232,
+      "promotion_summary": {
+        "attempt": 96,
+        "commit": "9eb2245",
+        "cost_stress_id": "realistic_costs",
+        "cost_stress_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/cost_stress/realistic_costs/2026-05-25T072306Z-crypto_perp_funding_crowding_reversal",
+        "description": "promote broad no exits short 480 long 720",
+        "eligible_for_promotion": true,
+        "failed_reasons": [],
+        "promotion_score": 0.01619863331799232,
+        "recent_window_ids": [
+          "validation_2025_h1",
+          "validation_2025_h2",
+          "locked_recent_2026"
+        ],
+        "rotating_probe_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/rotating_probe/recovery_2023_h1/2026-05-25T072424Z-crypto_perp_funding_crowding_reversal",
+        "rotating_probe_window_id": "recovery_2023_h1",
+        "source_result_dirs": {
+          "locked_recent_2026": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071912Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h1": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T072030Z-crypto_perp_funding_crowding_reversal",
+          "validation_2025_h2": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T072147Z-crypto_perp_funding_crowding_reversal"
+        }
+      },
+      "recent_window_score_stdev": 0.004445139267795688,
+      "recent_window_scores": [
+        {
+          "attempt_id": 32,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055115Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.024279128466942648,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 748,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 96,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071912Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.024279128466942648,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 748,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 96,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T071912Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.024279128466942648,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 748,
+          "window_id": "locked_recent_2026"
+        },
+        {
+          "attempt_id": 33,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055235Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014772933157788213,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 731,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 96,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h1/2026-05-25T072030Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.014772933157788213,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 731,
+          "window_id": "validation_2025_h1"
+        },
+        {
+          "attempt_id": 34,
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/2026-05-25T055355Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.01590374318649072,
+          "source": "attempt",
+          "status": "scored",
+          "trade_count": 786,
+          "window_id": "validation_2025_h2"
+        },
+        {
+          "attempt_id": 96,
+          "promotion_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal",
+          "result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100/promotion_0096_crypto_perp_funding_crowding_reversal/windows/validation_2025_h2/2026-05-25T072147Z-crypto_perp_funding_crowding_reversal",
+          "score": 0.01590374318649072,
+          "source": "promotion_source_result_dir",
+          "status": "scored",
+          "trade_count": 786,
+          "window_id": "validation_2025_h2"
+        }
+      ],
+      "required_min_trades": 200,
+      "strategy_source_sha": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "trade_count": 5278,
+      "variant_id": "326fddb01ac19b2fafcff14586dfccc4bc35e2733f9cd9992adc074ae576d36f"
+    }
+  ]
+}

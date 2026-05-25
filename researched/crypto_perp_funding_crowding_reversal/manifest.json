@@ -1,0 +1,253 @@
+{
+  "campaign_path": "/Users/Season_Yang/Personal/quant_autoresearch/results/broad_strategy_100",
+  "families": [
+    {
+      "directory": "families/family_01_primary_selection_or_breadth",
+      "family": "selection_or_breadth",
+      "role": "primary"
+    },
+    {
+      "directory": "families/family_02_secondary_entry_filter",
+      "family": "entry_filter",
+      "role": "secondary"
+    },
+    {
+      "directory": "families/family_03_exploratory_time_only_exit",
+      "family": "time_only_exit",
+      "role": "exploratory"
+    }
+  ],
+  "generated_at": "2026-05-25T15:15:10.744005+00:00",
+  "ranking_method_version": "research_handoff_rank_v1",
+  "selected_family_ids": [
+    "selection_or_breadth",
+    "entry_filter",
+    "time_only_exit"
+  ],
+  "source_repo_path": "/Users/Season_Yang/Personal/quant_autoresearch",
+  "target_repo_path": "/Users/Season_Yang/Personal/quant_strategies",
+  "variant_ids": [
+    "6f7bbfcf2c49d0d24511bfc7bfaf1c15484f4403f83d02f318bb837b084505db",
+    "1d2fd335b9eabd68ccc176a34e10c8561e301dba0f0e94c1aadc2233d7ba610c",
+    "05f96f34f899ec165aabb304d7527cfb407be8d0d85b46324c3c33d5639af662",
+    "e13492a831c1a5f4f59d2085802162d7cb5340d22c99d0d3f8c975f66ca03926",
+    "401ea895e2bb60c5bd62a0b23ca8e61ea4638147dfbd279378a14995f34b4a2e",
+    "9095efe055479391aa2620212490f1453029beb1a394c7ed994b36ef741a940b",
+    "860f82ed027762e80da4b67cd89a20504e92788247732bff2fb8912584b612fc",
+    "8d62f210b7b2ce7bbd6bd29b21e2ce65cbd1e6d3d80befdad0baf49033b897ae",
+    "29f5ec0889f88b4742dc1bcdee96387c39dad3cded51a96e23e4a7fa808e6473",
+    "a9b0baa2907acb18cc68644938f630ee01979e552abaa1c147d0ea235b760f83",
+    "d0e919829631f0a6c2b05de720b9e7474ae5e2a9494e10fb921d79f4c9fa1c76",
+    "d854f7e4876cdaf8c8d0ffd07ac2a9853978443974365574be09587d559a6731",
+    "f95e767ed623a6559f43814252c2cd204273f07bc5825f4baa494760b9c21ef6",
+    "326fddb01ac19b2fafcff14586dfccc4bc35e2733f9cd9992adc074ae576d36f"
+  ],
+  "variants": [
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "f2a0ab2c70022f8f45f7e01985d3a53bba6b6bf19038d7b779746f68af7486fc",
+      "directory": "families/family_01_primary_selection_or_breadth/variants/rank_01",
+      "evidence_files": [
+        "families/family_01_primary_selection_or_breadth/variants/rank_01/evidence/attempt_0056_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_01/evidence/attempt_0057_validation_2025_h1_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_01/evidence/attempt_0058_validation_2025_h2_score.json"
+      ],
+      "family": "selection_or_breadth",
+      "rank": 1,
+      "variant_id": "6f7bbfcf2c49d0d24511bfc7bfaf1c15484f4403f83d02f318bb837b084505db"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "99f2db6b142eb79dfa782a3e4dcb1ef4cb1e42d8968a7ade59fa0640bb466217",
+      "directory": "families/family_01_primary_selection_or_breadth/variants/rank_02",
+      "evidence_files": [
+        "families/family_01_primary_selection_or_breadth/variants/rank_02/evidence/attempt_0053_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_02/evidence/attempt_0054_validation_2025_h1_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_02/evidence/attempt_0055_validation_2025_h2_score.json"
+      ],
+      "family": "selection_or_breadth",
+      "rank": 2,
+      "variant_id": "1d2fd335b9eabd68ccc176a34e10c8561e301dba0f0e94c1aadc2233d7ba610c"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "eedfe0b6c0ba4552aa63fa647ea4680f151aedef75adec960aa5e8b0d41eacf2",
+      "directory": "families/family_01_primary_selection_or_breadth/variants/rank_03",
+      "evidence_files": [
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/attempt_0050_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/attempt_0051_validation_2025_h1_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/attempt_0052_validation_2025_h2_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/attempt_0100_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/promotion_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/promotion_source_01_broad_strategy_100_2026-05-25T074537Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/promotion_source_02_validation_2025_h1_2026-05-25T074655Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/promotion_source_03_validation_2025_h2_2026-05-25T074812Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_03/evidence/promotion_summary.json"
+      ],
+      "family": "selection_or_breadth",
+      "rank": 3,
+      "variant_id": "05f96f34f899ec165aabb304d7527cfb407be8d0d85b46324c3c33d5639af662"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "3314db2d3cea3e77ae8eb7e43ba2ac64b96a2a5abb032bc6c94c5102fbbe7767",
+      "directory": "families/family_01_primary_selection_or_breadth/variants/rank_04",
+      "evidence_files": [
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/attempt_0047_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/attempt_0048_validation_2025_h1_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/attempt_0049_validation_2025_h2_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/attempt_0099_locked_recent_2026_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/promotion_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/promotion_source_01_broad_strategy_100_2026-05-25T073905Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/promotion_source_02_validation_2025_h1_2026-05-25T074022Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/promotion_source_03_validation_2025_h2_2026-05-25T074140Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_01_primary_selection_or_breadth/variants/rank_04/evidence/promotion_summary.json"
+      ],
+      "family": "selection_or_breadth",
+      "rank": 4,
+      "variant_id": "e13492a831c1a5f4f59d2085802162d7cb5340d22c99d0d3f8c975f66ca03926"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "c7d907f8715b00a911c9615acbe1a6e591dd2d68089015326234ee5c1dfc5982",
+      "directory": "families/family_02_secondary_entry_filter/variants/rank_01",
+      "evidence_files": [
+        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/attempt_0074_locked_recent_2026_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/attempt_0075_validation_2025_h1_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/attempt_0076_validation_2025_h2_score.json"
+      ],
+      "family": "entry_filter",
+      "rank": 1,
+      "variant_id": "401ea895e2bb60c5bd62a0b23ca8e61ea4638147dfbd279378a14995f34b4a2e"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "b2b4adec58f65c8c7debbd2c473846b4a6908bc473412913110d9b4a10a0d6dd",
+      "directory": "families/family_02_secondary_entry_filter/variants/rank_02",
+      "evidence_files": [
+        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/attempt_0077_locked_recent_2026_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/attempt_0078_validation_2025_h1_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/attempt_0079_validation_2025_h2_score.json"
+      ],
+      "family": "entry_filter",
+      "rank": 2,
+      "variant_id": "9095efe055479391aa2620212490f1453029beb1a394c7ed994b36ef741a940b"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "e880084c662dc8df1b48389ef895881e1a4c05a1e56e259b846d82efe3c2905d",
+      "directory": "families/family_02_secondary_entry_filter/variants/rank_03",
+      "evidence_files": [
+        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/attempt_0059_locked_recent_2026_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/attempt_0060_validation_2025_h1_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/attempt_0061_validation_2025_h2_score.json"
+      ],
+      "family": "entry_filter",
+      "rank": 3,
+      "variant_id": "860f82ed027762e80da4b67cd89a20504e92788247732bff2fb8912584b612fc"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "212558b84882a02a8bb70d946d3e191320854fdfbdd067920d0333612ef7efeb",
+      "directory": "families/family_02_secondary_entry_filter/variants/rank_04",
+      "evidence_files": [
+        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/attempt_0083_locked_recent_2026_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/attempt_0084_validation_2025_h1_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/attempt_0085_validation_2025_h2_score.json"
+      ],
+      "family": "entry_filter",
+      "rank": 4,
+      "variant_id": "8d62f210b7b2ce7bbd6bd29b21e2ce65cbd1e6d3d80befdad0baf49033b897ae"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "538885efd603fb665cc91363596c71b73e4ff31fd38620c3658d6f11933bf690",
+      "directory": "families/family_02_secondary_entry_filter/variants/rank_05",
+      "evidence_files": [
+        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/attempt_0071_locked_recent_2026_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/attempt_0072_validation_2025_h1_score.json",
+        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/attempt_0073_validation_2025_h2_score.json"
+      ],
+      "family": "entry_filter",
+      "rank": 5,
+      "variant_id": "29f5ec0889f88b4742dc1bcdee96387c39dad3cded51a96e23e4a7fa808e6473"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "0790e23dbf1890815669e1772fba58d5053d54796e590268c9ba3811f5d99ea7",
+      "directory": "families/family_03_exploratory_time_only_exit/variants/rank_01",
+      "evidence_files": [
+        "families/family_03_exploratory_time_only_exit/variants/rank_01/evidence/attempt_0080_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_01/evidence/attempt_0081_validation_2025_h1_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_01/evidence/attempt_0082_validation_2025_h2_score.json"
+      ],
+      "family": "time_only_exit",
+      "rank": 1,
+      "variant_id": "a9b0baa2907acb18cc68644938f630ee01979e552abaa1c147d0ea235b760f83"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "78294bc50212847f09e2daebac4651c698235c357d6c3c14fff0093c741e7169",
+      "directory": "families/family_03_exploratory_time_only_exit/variants/rank_02",
+      "evidence_files": [
+        "families/family_03_exploratory_time_only_exit/variants/rank_02/evidence/attempt_0041_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_02/evidence/attempt_0042_validation_2025_h1_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_02/evidence/attempt_0043_validation_2025_h2_score.json"
+      ],
+      "family": "time_only_exit",
+      "rank": 2,
+      "variant_id": "d0e919829631f0a6c2b05de720b9e7474ae5e2a9494e10fb921d79f4c9fa1c76"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "a43dd11ac47c7c5dd157a7ea751c9b44f05b627e3bca9cfbec5275040426bf87",
+      "directory": "families/family_03_exploratory_time_only_exit/variants/rank_03",
+      "evidence_files": [
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/attempt_0035_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/attempt_0036_validation_2025_h1_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/attempt_0037_validation_2025_h2_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/attempt_0095_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/promotion_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/promotion_source_01_broad_strategy_100_2026-05-25T071242Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/promotion_source_02_validation_2025_h1_2026-05-25T071400Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/promotion_source_03_validation_2025_h2_2026-05-25T071517Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_03/evidence/promotion_summary.json"
+      ],
+      "family": "time_only_exit",
+      "rank": 3,
+      "variant_id": "d854f7e4876cdaf8c8d0ffd07ac2a9853978443974365574be09587d559a6731"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "974fde81fe58cbbf26e23a98553aed3f58bcd6dc50c1829e1d6e7ae9ab33a295",
+      "directory": "families/family_03_exploratory_time_only_exit/variants/rank_04",
+      "evidence_files": [
+        "families/family_03_exploratory_time_only_exit/variants/rank_04/evidence/attempt_0044_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_04/evidence/attempt_0045_validation_2025_h1_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_04/evidence/attempt_0046_validation_2025_h2_score.json"
+      ],
+      "family": "time_only_exit",
+      "rank": 4,
+      "variant_id": "f95e767ed623a6559f43814252c2cd204273f07bc5825f4baa494760b9c21ef6"
+    },
+    {
+      "code_sha256": "0bccdc9cbefca9a4257b5fc3a6ae76ded9ca3ec88fa2ee8f2d0bd6a566f1bb86",
+      "config_sha256": "f462b274b415e85e0e0994eaa951c095f6393c28c7185b60fae6c34e9fadc17e",
+      "directory": "families/family_03_exploratory_time_only_exit/variants/rank_05",
+      "evidence_files": [
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/attempt_0032_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/attempt_0033_validation_2025_h1_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/attempt_0034_validation_2025_h2_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/attempt_0096_locked_recent_2026_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/promotion_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/promotion_source_01_broad_strategy_100_2026-05-25T071912Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/promotion_source_02_validation_2025_h1_2026-05-25T072030Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/promotion_source_03_validation_2025_h2_2026-05-25T072147Z-crypto_perp_funding_crowding_reversal_score.json",
+        "families/family_03_exploratory_time_only_exit/variants/rank_05/evidence/promotion_summary.json"
+      ],
+      "family": "time_only_exit",
+      "rank": 5,
+      "variant_id": "326fddb01ac19b2fafcff14586dfccc4bc35e2733f9cd9992adc074ae576d36f"
+    }
+  ]
+}
