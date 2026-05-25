@@ -50,7 +50,7 @@ def test_write_json_artifact_is_stable(tmp_path: Path):
 
     assert path == tmp_path / "promotion_decision.json"
     assert json.loads(path.read_text()) == {"a": 1, "b": 2}
-    assert path.read_text().endswith("\n")
+    assert path.read_text() == '{\n  "a": 1,\n  "b": 2\n}\n'
 
 
 def test_write_json_artifact_serializes_structured_payloads(tmp_path: Path):
