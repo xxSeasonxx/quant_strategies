@@ -80,11 +80,21 @@ def test_load_validation_config_rejects_generate_strategy_outside_repo(tmp_path:
         load_validation_config(tmp_path / "researched" / "demo", repo_root=tmp_path)
 
 
-def test_load_validation_config_rejects_empty_windows(tmp_path: Path):
+def test_load_validation_config_rejects_missing_windows(tmp_path: Path):
     config_path = tmp_path / "researched" / "demo" / "validation.toml"
     write_config(config_path)
     config_text = config_path.read_text()
     config_path.write_text(config_text.replace("[[windows]]\nid = \"validation_2026_h1\"\nstart = \"2026-01-01\"\nend = \"2026-06-30\"\n\n", ""))
+
+    with pytest.raises(ValidationConfigError, match="windows"):
+        load_validation_config(tmp_path / "researched" / "demo", repo_root=tmp_path)
+
+
+def test_load_validation_config_rejects_empty_windows(tmp_path: Path):
+    config_path = tmp_path / "researched" / "demo" / "validation.toml"
+    write_config(config_path)
+    config_text = config_path.read_text()
+    config_path.write_text(config_text.replace("[[windows]]\nid = \"validation_2026_h1\"\nstart = \"2026-01-01\"\nend = \"2026-06-30\"\n\n", "windows = []\n\n"))
 
     with pytest.raises(ValidationConfigError, match="windows"):
         load_validation_config(tmp_path / "researched" / "demo", repo_root=tmp_path)
