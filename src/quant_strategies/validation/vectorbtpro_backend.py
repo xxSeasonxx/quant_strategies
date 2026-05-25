@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 import math
 import numbers
 from typing import Any
@@ -105,6 +106,8 @@ class VectorBTProBackend:
             return _failed(self.name, f"invalid_metrics:{exc}")
         except Exception as exc:
             return _failed(self.name, f"metric_extraction_failed:{exc}")
+        if metrics["trade_count"] != len(windows):
+            return _failed(self.name, f"unexpected_trade_count:{metrics['trade_count']}:{len(windows)}")
 
         return BackendRunResult(
             backend=self.name,
@@ -215,6 +218,8 @@ def _close_frame(pd: Any, rows: list[dict[str, Any]]) -> Any:
             raise ValueError(f"invalid_timestamp:{row.get('timestamp')}")
         if not math.isfinite(close):
             raise ValueError(f"nonfinite_close:{symbol}:{timestamp.isoformat()}")
+        if close <= 0.0:
+            raise ValueError(f"nonpositive_close:{symbol}:{timestamp.isoformat()}")
         records.append({"symbol": symbol, "timestamp": timestamp, "close": close})
 
     if not records:
@@ -249,9 +254,14 @@ def _exit_lag(config: Any) -> int:
 
 
 def _config_value(config: Any, section: str, field: str, *, default: Any) -> Any:
-    section_value = getattr(config, section, None)
+    if isinstance(config, Mapping):
+        section_value = config.get(section)
+    else:
+        section_value = getattr(config, section, None)
     if section_value is None:
         return default
+    if isinstance(section_value, Mapping):
+        return section_value.get(field, default)
     return getattr(section_value, field, default)
 
 
