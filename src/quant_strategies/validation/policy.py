@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from quant_strategies.validation.backends import BackendRunResult
+from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
 
 
 ValidationDecision = Literal["hard_no", "maybe", "clear_yes"]
@@ -45,8 +46,9 @@ def _validated_backend_metrics(
 def classify_validation(
     *,
     data_passed: bool,
-    backend_results: list[BackendRunResult],
+    backend_results: Sequence[BackendRunResult | ScenarioBackendRunResult],
     min_trades: int,
+    required_scenario_count: int | None = None,
 ) -> PromotionDecision:
     reasons: list[str] = []
     if not data_passed:
@@ -55,15 +57,23 @@ def classify_validation(
     if not backend_results:
         return PromotionDecision(decision="hard_no", reasons=("no_backend_results",))
 
+    scenario_results = tuple(_scenario_result(item) for item in backend_results)
+    required_results = [item for item in scenario_results if item.required]
+    if required_scenario_count is not None and len(required_results) < required_scenario_count:
+        return PromotionDecision(decision="hard_no", reasons=("missing_required_scenarios",))
+    if not required_results:
+        return PromotionDecision(decision="hard_no", reasons=("no_required_backend_results",))
+
     unsupported = [
-        result
-        for result in backend_results
-        if result.unsupported_semantics or result.status == "unsupported"
+        item.result
+        for item in required_results
+        if item.result.unsupported_semantics or item.result.status == "unsupported"
     ]
     if unsupported:
         return PromotionDecision(decision="maybe", reasons=("unsupported_semantics",))
 
-    for result in backend_results:
+    for item in required_results:
+        result = item.result
         if result.status != "completed":
             return PromotionDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
         metrics = _validated_backend_metrics(result.metrics)
@@ -79,3 +89,16 @@ def classify_validation(
     if reasons:
         return PromotionDecision(decision="hard_no", reasons=tuple(dict.fromkeys(reasons)))
     return PromotionDecision(decision="clear_yes")
+
+
+def _scenario_result(
+    item: BackendRunResult | ScenarioBackendRunResult,
+) -> ScenarioBackendRunResult:
+    if isinstance(item, ScenarioBackendRunResult):
+        return item
+    return ScenarioBackendRunResult(
+        window_id="",
+        scenario_id="",
+        required=True,
+        result=item,
+    )

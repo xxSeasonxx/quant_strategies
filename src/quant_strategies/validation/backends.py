@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -15,6 +16,14 @@ class BackendRunResult(BaseModel):
     metrics: dict[str, float | int | str | bool | None]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ScenarioBackendRunResult:
+    window_id: str
+    scenario_id: str
+    required: bool
+    result: BackendRunResult
 
 
 class ValidationBackend(Protocol):

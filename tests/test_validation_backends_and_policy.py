@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from quant_strategies.validation.backends import BackendRunResult, FakeBackend, get_backend
+from quant_strategies.validation.backends import (
+    BackendRunResult,
+    FakeBackend,
+    ScenarioBackendRunResult,
+    get_backend,
+)
 from quant_strategies.validation.policy import classify_validation
 
 
@@ -75,6 +80,68 @@ def test_policy_clear_yes_for_positive_sufficient_backend_result():
             )
         ],
         min_trades=10,
+    )
+
+    assert decision.decision == "clear_yes"
+    assert decision.reasons == ()
+
+
+def test_policy_requires_all_expected_required_scenarios():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/base",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="completed",
+                    metrics={"net_return": 0.03, "trade_count": 50},
+                    warnings=(),
+                    unsupported_semantics=(),
+                ),
+            )
+        ],
+        min_trades=10,
+        required_scenario_count=2,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "missing_required_scenarios" in decision.reasons
+
+
+def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/base",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="completed",
+                    metrics={"net_return": 0.03, "trade_count": 50},
+                    warnings=(),
+                    unsupported_semantics=(),
+                ),
+            ),
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/diagnostic",
+                required=False,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="unsupported",
+                    metrics={},
+                    warnings=(),
+                    unsupported_semantics=("threshold_exit_policy",),
+                ),
+            ),
+        ],
+        min_trades=10,
+        required_scenario_count=1,
     )
 
     assert decision.decision == "clear_yes"

@@ -18,7 +18,12 @@ AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 
 
-def write_package(tmp_path: Path, *, backend: str | None = "fake") -> Path:
+def write_package(
+    tmp_path: Path,
+    *,
+    backend: str | None = "fake",
+    window_ids: tuple[str, ...] = ("validation_2026_h1",),
+) -> Path:
     package = tmp_path / "researched" / "demo"
     package.mkdir(parents=True)
     (package / "strategy.py").write_text(
@@ -34,16 +39,22 @@ def write_package(tmp_path: Path, *, backend: str | None = "fake") -> Path:
         "    )]\n"
     )
     backend_line = f'backend = "{backend}"\n' if backend is not None else ""
+    window_blocks = "\n".join(
+        f"""
+[[windows]]
+id = "{window_id}"
+start = "2026-01-01"
+end = "2026-06-30"
+""".strip()
+        for window_id in window_ids
+    )
     (package / "validation.toml").write_text(
         f"""
 strategy_path = "researched/demo/strategy.py"
 strategy_id = "demo"
 {backend_line}
 
-[[windows]]
-id = "validation_2026_h1"
-start = "2026-01-01"
-end = "2026-06-30"
+{window_blocks}
 
 [data]
 kind = "crypto_perp_funding"
@@ -113,18 +124,19 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     promotion = json.loads((result.result_dir / "promotion_decision.json").read_text())
     assert promotion["decision"] == "clear_yes"
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert backend_summary["results"] == [
-        {
-            "window_id": "validation_2026_h1",
-            "result": {
-                "backend": "fake",
-                "status": "completed",
-                "metrics": {"net_return": 0.02, "trade_count": 20},
-                "warnings": [],
-                "unsupported_semantics": [],
-            },
-        }
-    ]
+    assert len(backend_summary["results"]) == 6
+    assert backend_summary["results"][0] == {
+        "window_id": "validation_2026_h1",
+        "scenario_id": "validation_2026_h1/base",
+        "required": True,
+        "result": {
+            "backend": "fake",
+            "status": "completed",
+            "metrics": {"net_return": 0.02, "trade_count": 20},
+            "warnings": [],
+            "unsupported_semantics": [],
+        },
+    }
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert (result.result_dir / "data_audit.json").exists()
 
@@ -198,6 +210,8 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert backend_summary["results"][0] == {
         "window_id": "validation_2026_h1",
+        "scenario_id": "validation_2026_h1/base",
+        "required": True,
         "result": {
             "backend": "vectorbtpro",
             "status": "failed",
@@ -208,11 +222,132 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
     }
 
 
+def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = ScenarioAwareBackend(
+        {
+            "validation_2026_h1/stressed_costs": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": 0.01, "trade_count": 5},
+                warnings=(),
+                unsupported_semantics=(),
+            )
+        }
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert "insufficient_trades" in result.decision.reasons
+    assert backend.calls == 6
+
+
+def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path, window_ids=("validation_2026_h1", "validation_2026_h2"))
+    loaded_row_ids = []
+
+    def load_data(config: Any) -> LoadedData:
+        loaded_rows = rows()
+        loaded_row_ids.append(id(loaded_rows))
+        return LoadedData(rows=loaded_rows)
+
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", load_data)
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "clear_yes"
+    assert len(loaded_row_ids) == 2
+    assert backend.calls == 12
+    h1_row_ids = {
+        row_id
+        for scenario_id, row_id in backend.row_ids_by_scenario
+        if scenario_id.startswith("validation_2026_h1/")
+    }
+    h2_row_ids = {
+        row_id
+        for scenario_id, row_id in backend.row_ids_by_scenario
+        if scenario_id.startswith("validation_2026_h2/")
+    }
+    assert h1_row_ids == {loaded_row_ids[0]}
+    assert h2_row_ids == {loaded_row_ids[1]}
+
+
+def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "clear_yes"
+    configs = {item.scenario_id: item for item in backend.configs}
+    assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
+    assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.5
+    assert configs["validation_2026_h1/base"].fill_model.entry_lag_bars == 1
+    assert configs["validation_2026_h1/stressed_costs"].cost_model.fee_bps_per_side == 1.0
+    assert configs["validation_2026_h1/stressed_costs"].cost_model.slippage_bps_per_side == 1.0
+    assert configs["validation_2026_h1/fill_lag_plus_1"].fill_model.entry_lag_bars == 2
+    assert configs["validation_2026_h1/param_weight_up_10pct"].params == {"weight": 1.1}
+
+
+def test_run_validation_writes_failure_artifacts_for_strategy_generation_exception(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+
+    def raise_generation_error(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
+        raise RuntimeError("signal code failed")
+
+    monkeypatch.setattr(
+        "quant_strategies.validation.load_decision_strategy",
+        lambda path, repo_root: raise_generation_error,
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_generation_failed",)
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_report.md").exists()
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert summary["results"] == []
+
+
+def test_run_validation_writes_failure_artifacts_for_backend_exception(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = ExplodingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("exploding_failed",)
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_report.md").exists()
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert len(summary["results"]) == 6
+    assert summary["results"][0]["scenario_id"] == "validation_2026_h1/base"
+    assert summary["results"][0]["result"]["status"] == "failed"
+    assert summary["results"][0]["result"]["warnings"] == ["backend_exception: backend crashed"]
+
+
 class RecordingBackend:
     name = "recording"
 
     def __init__(self) -> None:
         self.calls = 0
+        self.configs = []
+        self.row_ids_by_scenario = []
 
     def run(
         self,
@@ -222,6 +357,8 @@ class RecordingBackend:
         config: Any,
     ) -> BackendRunResult:
         self.calls += 1
+        self.configs.append(config)
+        self.row_ids_by_scenario.append((config.scenario_id, id(rows)))
         return BackendRunResult(
             backend=self.name,
             status="completed",
@@ -229,3 +366,43 @@ class RecordingBackend:
             warnings=(),
             unsupported_semantics=(),
         )
+
+
+class ScenarioAwareBackend(RecordingBackend):
+    name = "scenario_aware"
+
+    def __init__(self, overrides: dict[str, BackendRunResult]) -> None:
+        super().__init__()
+        self._overrides = overrides
+
+    def run(
+        self,
+        *,
+        decisions: list[StrategyDecision],
+        rows: list[dict[str, Any]],
+        config: Any,
+    ) -> BackendRunResult:
+        super().run(decisions=decisions, rows=rows, config=config)
+        return self._overrides.get(
+            config.scenario_id,
+            BackendRunResult(
+                backend=self.name,
+                status="completed",
+                metrics={"net_return": 0.01, "trade_count": 10},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+        )
+
+
+class ExplodingBackend:
+    name = "exploding"
+
+    def run(
+        self,
+        *,
+        decisions: list[StrategyDecision],
+        rows: list[dict[str, Any]],
+        config: Any,
+    ) -> BackendRunResult:
+        raise RuntimeError("backend crashed")
