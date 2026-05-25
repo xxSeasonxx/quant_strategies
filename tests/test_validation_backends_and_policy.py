@@ -111,6 +111,88 @@ def test_policy_requires_all_expected_required_scenarios():
     assert "missing_required_scenarios" in decision.reasons
 
 
+def test_policy_requires_expected_required_scenario_ids():
+    duplicate_base = [
+        ScenarioBackendRunResult(
+            window_id="validation_2026_h1",
+            scenario_id="validation_2026_h1/base",
+            required=True,
+            result=BackendRunResult(
+                backend="fake",
+                status="completed",
+                metrics={"net_return": 0.03, "trade_count": 50},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+        ),
+        ScenarioBackendRunResult(
+            window_id="validation_2026_h1",
+            scenario_id="validation_2026_h1/base",
+            required=True,
+            result=BackendRunResult(
+                backend="fake",
+                status="completed",
+                metrics={"net_return": 0.03, "trade_count": 50},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+        ),
+    ]
+
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=duplicate_base,
+        min_trades=10,
+        required_scenario_ids=(
+            "validation_2026_h1/base",
+            "validation_2026_h1/stressed_costs",
+        ),
+    )
+
+    assert decision.decision == "hard_no"
+    assert "duplicate_required_scenarios" in decision.reasons
+
+
+def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/base",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="completed",
+                    metrics={"net_return": 0.03, "trade_count": 50},
+                    warnings=(),
+                    unsupported_semantics=(),
+                ),
+            ),
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/other",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="completed",
+                    metrics={"net_return": 0.03, "trade_count": 50},
+                    warnings=(),
+                    unsupported_semantics=(),
+                ),
+            ),
+        ],
+        min_trades=10,
+        required_scenario_ids=(
+            "validation_2026_h1/base",
+            "validation_2026_h1/stressed_costs",
+        ),
+    )
+
+    assert decision.decision == "hard_no"
+    assert "missing_required_scenarios" in decision.reasons
+
+
 def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
     decision = classify_validation(
         data_passed=True,

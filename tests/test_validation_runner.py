@@ -341,6 +341,27 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
     assert summary["results"][0]["result"]["warnings"] == ["backend_exception: backend crashed"]
 
 
+def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = MalformedBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("malformed_failed",)
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_report.md").exists()
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert len(summary["results"]) == 6
+    assert summary["results"][0]["scenario_id"] == "validation_2026_h1/base"
+    assert summary["results"][0]["result"]["status"] == "failed"
+    assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]
+
+
 class RecordingBackend:
     name = "recording"
 
@@ -406,3 +427,16 @@ class ExplodingBackend:
         config: Any,
     ) -> BackendRunResult:
         raise RuntimeError("backend crashed")
+
+
+class MalformedBackend:
+    name = "malformed"
+
+    def run(
+        self,
+        *,
+        decisions: list[StrategyDecision],
+        rows: list[dict[str, Any]],
+        config: Any,
+    ) -> None:
+        return None

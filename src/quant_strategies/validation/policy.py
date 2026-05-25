@@ -49,6 +49,7 @@ def classify_validation(
     backend_results: Sequence[BackendRunResult | ScenarioBackendRunResult],
     min_trades: int,
     required_scenario_count: int | None = None,
+    required_scenario_ids: Sequence[str] | None = None,
 ) -> PromotionDecision:
     reasons: list[str] = []
     if not data_passed:
@@ -59,6 +60,13 @@ def classify_validation(
 
     scenario_results = tuple(_scenario_result(item) for item in backend_results)
     required_results = [item for item in scenario_results if item.required]
+    if required_scenario_ids is not None:
+        expected_ids = set(required_scenario_ids)
+        actual_ids = [item.scenario_id for item in required_results]
+        if len(actual_ids) != len(set(actual_ids)):
+            return PromotionDecision(decision="hard_no", reasons=("duplicate_required_scenarios",))
+        if set(actual_ids) != expected_ids:
+            return PromotionDecision(decision="hard_no", reasons=("missing_required_scenarios",))
     if required_scenario_count is not None and len(required_results) < required_scenario_count:
         return PromotionDecision(decision="hard_no", reasons=("missing_required_scenarios",))
     if not required_results:

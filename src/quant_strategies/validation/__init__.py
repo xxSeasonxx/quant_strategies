@@ -50,7 +50,7 @@ def run_validation(
     data_audits: list[dict[str, Any]] = []
     min_trades = 10
     failure_reasons: list[str] = []
-    required_scenario_count = 0
+    required_scenario_ids: list[str] = []
 
     try:
         selected_backend = backend or get_backend(config.backend)
@@ -142,11 +142,11 @@ def run_validation(
                 base_costs=_plain_mapping(config.cost_model),
                 base_fill=_plain_mapping(config.fill_model),
             )
-            required_scenario_count += sum(1 for scenario in scenarios if scenario.required)
+            required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
             for scenario in scenarios:
                 scenario_config = _scenario_config(config=config, scenario=scenario)
                 try:
-                    backend_result = selected_backend.run(
+                    raw_backend_result = selected_backend.run(
                         decisions=decisions,
                         rows=loaded.rows,
                         config=scenario_config,
@@ -156,6 +156,14 @@ def run_validation(
                         _backend_name(selected_backend, config.backend),
                         f"backend_exception: {exc}",
                     )
+                else:
+                    try:
+                        backend_result = BackendRunResult.model_validate(raw_backend_result)
+                    except Exception as exc:
+                        backend_result = _failed_backend_result(
+                            _backend_name(selected_backend, config.backend),
+                            f"invalid_backend_result: {exc}",
+                        )
                 backend_results.append(
                     ScenarioBackendRunResult(
                         window_id=window.id,
@@ -176,7 +184,7 @@ def run_validation(
             data_passed=data_passed,
             backend_results=backend_results,
             min_trades=min_trades,
-            required_scenario_count=required_scenario_count,
+            required_scenario_ids=tuple(required_scenario_ids),
         )
     _write_validation_artifacts(
         result_dir=result_dir,
