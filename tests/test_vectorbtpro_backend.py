@@ -63,6 +63,16 @@ def sparse_symbol_rows():
     ]
 
 
+def overlapping_window_rows():
+    return rows() + [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "close": 104.0,
+        },
+    ]
+
+
 def decision(
     *,
     symbol: str = "BTC-PERP",
@@ -237,6 +247,25 @@ def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
 
     assert result.status == "failed"
     assert any("duplicate_exit_signal" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
+    pytest.importorskip("vectorbtpro")
+
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(max_hold_bars=3),
+            decision(
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                max_hold_bars=1,
+            ),
+        ],
+        rows=overlapping_window_rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("overlapping_decision_window" in warning for warning in result.warnings)
 
 
 @pytest.mark.parametrize("close", [float("nan"), float("inf"), float("-inf")])

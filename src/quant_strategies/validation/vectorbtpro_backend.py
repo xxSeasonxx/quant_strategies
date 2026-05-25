@@ -61,6 +61,7 @@ class VectorBTProBackend:
         exit_lag = _exit_lag(config)
         entry_signals: set[tuple[str, Any]] = set()
         exit_signals: set[tuple[str, Any]] = set()
+        active_windows: dict[str, list[tuple[int, int]]] = {}
 
         for item in decisions:
             symbol = item.instrument.symbol
@@ -95,6 +96,12 @@ class VectorBTProBackend:
             exit_key = (symbol, exit_time)
             if exit_key in exit_signals:
                 return _failed(self.name, f"duplicate_exit_signal:{symbol}:{exit_time.isoformat()}")
+            for existing_entry_idx, existing_exit_idx in active_windows.get(symbol, []):
+                if entry_idx <= existing_exit_idx and exit_idx >= existing_entry_idx:
+                    return _failed(
+                        self.name,
+                        f"overlapping_decision_window:{symbol}:{entry_time.isoformat()}:{exit_time.isoformat()}",
+                    )
 
             if item.target.direction == "long":
                 long_entries.loc[entry_time, symbol] = True
@@ -105,6 +112,7 @@ class VectorBTProBackend:
 
             entry_signals.add(entry_key)
             exit_signals.add(exit_key)
+            active_windows.setdefault(symbol, []).append((entry_idx, exit_idx))
             size.loc[entry_time, symbol] = item.target.size
 
         fees = _bps_fraction(_config_value(config, "cost_model", "fee_bps_per_side", default=0.0))
