@@ -73,6 +73,16 @@ def overlapping_window_rows():
     ]
 
 
+def unrelated_symbol_timestamp_rows():
+    return rows() + [
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc),
+            "close": 200.0,
+        },
+    ]
+
+
 def decision(
     *,
     symbol: str = "BTC-PERP",
@@ -200,6 +210,31 @@ def test_vectorbtpro_backend_reports_unsupported_non_target_weight_sizing():
     assert "non_target_weight_sizing" in result.unsupported_semantics
 
 
+@pytest.mark.parametrize("fill_price", ["open", "quote"])
+def test_vectorbtpro_backend_reports_unsupported_non_close_fill_price(fill_price):
+    config = SimpleNamespace(fill_model=SimpleNamespace(price=fill_price))
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=config,
+    )
+
+    assert result.status == "unsupported"
+    assert "non_close_fill_price" in result.unsupported_semantics
+
+
+def test_vectorbtpro_backend_reports_unsupported_leveraged_target_weight():
+    result = VectorBTProBackend().run(
+        decisions=[decision(size=1.25)],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert "leveraged_target_weight" in result.unsupported_semantics
+
+
 def test_vectorbtpro_backend_reports_unsupported_multi_asset_target_weights():
     result = VectorBTProBackend().run(
         decisions=[
@@ -266,6 +301,41 @@ def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
 
     assert result.status == "failed"
     assert any("overlapping_decision_window" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_ignores_unrelated_symbol_timestamps_for_single_symbol_lags(monkeypatch):
+    vbt = pytest.importorskip("vectorbtpro")
+    captured = {}
+    config = SimpleNamespace(fill_model=SimpleNamespace(price="close", entry_lag_bars=1, exit_lag_bars=0))
+
+    class FakeTrades:
+        def count(self):
+            return 1
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return 0.05
+
+    def from_signals(close, **kwargs):
+        captured["close"] = close
+        captured.update(kwargs)
+        return FakePortfolio()
+
+    monkeypatch.setattr(vbt.Portfolio, "from_signals", from_signals)
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=unrelated_symbol_timestamp_rows(),
+        config=config,
+    )
+
+    assert result.status == "completed"
+    assert list(captured["close"].columns) == ["BTC-PERP"]
+    assert datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc) not in captured["close"].index
+    assert captured["long_entries"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "BTC-PERP"]
+    assert captured["long_exits"].loc[datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "BTC-PERP"]
 
 
 @pytest.mark.parametrize("close", [float("nan"), float("inf"), float("-inf")])

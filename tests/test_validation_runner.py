@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
@@ -187,6 +189,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
 def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path, backend=None)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setitem(sys.modules, "vectorbtpro", SimpleNamespace())
 
     result = run_validation(package, repo_root=tmp_path)
 

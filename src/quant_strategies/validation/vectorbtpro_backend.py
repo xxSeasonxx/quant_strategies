@@ -17,7 +17,7 @@ class VectorBTProBackend:
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
-        unsupported = _unsupported_semantics(decisions)
+        unsupported = _unsupported_semantics(decisions, config)
         if unsupported:
             return BackendRunResult(
                 backend=self.name,
@@ -50,6 +50,9 @@ class VectorBTProBackend:
             return _failed(self.name, f"missing_symbol:{missing_symbols[0]}")
         if decision_symbols:
             close = close.loc[:, list(decision_symbols)]
+        if len(decision_symbols) == 1:
+            symbol = decision_symbols[0]
+            close = close.loc[close[symbol].notna(), [symbol]]
 
         long_entries = pd.DataFrame(False, index=close.index, columns=close.columns)
         long_exits = pd.DataFrame(False, index=close.index, columns=close.columns)
@@ -144,8 +147,10 @@ class VectorBTProBackend:
         )
 
 
-def _unsupported_semantics(decisions: list[StrategyDecision]) -> tuple[str, ...]:
+def _unsupported_semantics(decisions: list[StrategyDecision], config: Any) -> tuple[str, ...]:
     unsupported: list[str] = []
+    if _config_value(config, "fill_model", "price", default="close") != "close":
+        unsupported.append("non_close_fill_price")
     for item in decisions:
         exit_policy = item.exit_policy
         if (
@@ -156,6 +161,8 @@ def _unsupported_semantics(decisions: list[StrategyDecision]) -> tuple[str, ...]
             unsupported.append("threshold_exit_policy")
         if item.target.sizing_kind != "target_weight":
             unsupported.append("non_target_weight_sizing")
+        elif item.target.size > 1.0:
+            unsupported.append("leveraged_target_weight")
         if item.target.direction == "flat":
             unsupported.append("flat_target")
     target_weight_symbols = {
