@@ -54,6 +54,29 @@ working directory, or from an installed package where the repository root is not
 implicit, pass `--repo-root <repo>` so relative config paths resolve against the
 intended checkout.
 
+## Validation
+
+The validation workflow is separate from runner smoke evidence.
+
+```bash
+conda run -n quant quant-strategies validate researched/<strategy_id-or-variant>
+```
+
+Validation candidates must expose:
+
+```python
+def generate_decisions(rows, params):
+    return []
+```
+
+`generate_signals` remains valid for fast research and smoke runs, but it is not
+enough to move a researched candidate toward `tested/`.
+
+Validation writes generated artifacts under ignored `validation_results/` and
+classifies each run as `hard_no`, `maybe`, or `clear_yes`. A `clear_yes`
+recommendation does not automatically move code into `tested/`; Season must
+approve that repository change.
+
 ## Config Shape
 
 Run configs are TOML and validated with Pydantic before strategy import or data
