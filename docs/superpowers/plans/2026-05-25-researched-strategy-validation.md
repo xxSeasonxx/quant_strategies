@@ -22,6 +22,7 @@ This plan implements the first end-to-end single-strategy validation slice. It d
 - Create `src/quant_strategies/validation/strategy_loader.py`: load `generate_decisions` from a strategy file.
 - Create `src/quant_strategies/validation/config.py`: validation TOML parsing, package resolution, and per-window run config materialization.
 - Create `src/quant_strategies/validation/data_audit.py`: decision/data causality and coverage checks.
+- Create `src/quant_strategies/validation/matrix.py`: validation scenario definitions and matrix expansion.
 - Create `src/quant_strategies/validation/backends.py`: backend protocol, result model, fake backend, backend selection.
 - Create `src/quant_strategies/validation/vectorbtpro_backend.py`: VectorBT PRO adapter for v1 supported max-hold directional target decisions.
 - Create `src/quant_strategies/validation/policy.py`: `hard_no` / `maybe` / `clear_yes` classification.
@@ -31,6 +32,46 @@ This plan implements the first end-to-end single-strategy validation slice. It d
 - Modify `.gitignore`: ignore `validation_results/`.
 - Modify `README.md`: document validation command, lifecycle meaning, and generated artifacts.
 - Modify one selected researched variant to expose `generate_decisions` after infrastructure exists.
+
+---
+
+## Eng Review Decisions
+
+These decisions supersede any older code snippets below that show a simpler
+one-backend-run-per-window validator:
+
+- Validation must expand a required matrix before any `clear_yes` result:
+  base windows, realistic costs, stressed costs, fill-lag sensitivity, and
+  parameter perturbations.
+- Validation must load rows once per window, then reuse those rows across all
+  matrix scenarios for that window.
+- When config loading succeeds, data load failures, strategy import failures,
+  `generate_decisions` failures, audit failures, backend failures, and
+  unsupported semantics must still write `promotion_decision.json` and
+  `validation_report.md`.
+- `PositionTarget.size` with `sizing_kind = "target_weight"` must affect the
+  VectorBT PRO backend run. Unsupported sizing must be rejected explicitly.
+- Missing symbols, missing decision bars, missing entry fills, and missing exit
+  fills must not be silently skipped. Classify them as `hard_no` unless the
+  artifact explicitly shows a fair-test data-coverage limitation, in which case
+  use `maybe`.
+- Tests must cover matrix expansion, failure artifacts, backend sizing, and
+  unfillable-decision rejection.
+
+Validation data flow:
+
+```text
+validation.toml
+  -> load rows once per window
+  -> generate_decisions(rows, params)
+  -> data audit
+  -> expand validation matrix
+       base / realistic costs / stressed costs / fill lag / params
+  -> backend adapter runs
+  -> aggregate matrix results
+  -> hard_no | maybe | clear_yes
+  -> artifacts + report
+```
 
 ---
 
@@ -737,6 +778,158 @@ Expected: all tests pass.
 ```bash
 git add src/quant_strategies/validation/config.py tests/test_validation_config.py
 git commit -m "feat: add validation config loading"
+```
+
+---
+
+### Task 3A: Validation Matrix Scenarios
+
+**Files:**
+- Create: `src/quant_strategies/validation/matrix.py`
+- Test: `tests/test_validation_matrix.py`
+
+- [ ] **Step 1: Write failing matrix tests**
+
+Create `tests/test_validation_matrix.py`:
+
+```python
+from __future__ import annotations
+
+from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
+
+
+def test_expand_validation_matrix_includes_required_v1_scenarios():
+    scenarios = expand_validation_matrix(
+        window_id="validation_2026_h1",
+        base_params={"threshold": 1.0},
+        base_costs={"fee_bps_per_side": 0.5, "slippage_bps_per_side": 0.5},
+        base_fill={"entry_lag_bars": 1, "exit_lag_bars": 0},
+    )
+
+    names = {scenario.id for scenario in scenarios}
+
+    assert "validation_2026_h1/base" in names
+    assert "validation_2026_h1/realistic_costs" in names
+    assert "validation_2026_h1/stressed_costs" in names
+    assert "validation_2026_h1/fill_lag_plus_1" in names
+    assert "validation_2026_h1/param_threshold_down_10pct" in names
+    assert "validation_2026_h1/param_threshold_up_10pct" in names
+    assert all(scenario.required for scenario in scenarios)
+
+
+def test_matrix_scenario_records_overrides_explicitly():
+    scenario = MatrixScenario(
+        id="validation_2026_h1/stressed_costs",
+        kind="cost_stress",
+        required=True,
+        params={},
+        cost_model={"fee_bps_per_side": 2.0, "slippage_bps_per_side": 2.0},
+        fill_model={},
+    )
+
+    assert scenario.kind == "cost_stress"
+    assert scenario.cost_model["fee_bps_per_side"] == 2.0
+```
+
+- [ ] **Step 2: Run matrix tests and verify failure**
+
+Run:
+
+```bash
+conda run -n quant pytest tests/test_validation_matrix.py -q
+```
+
+Expected: fail because `quant_strategies.validation.matrix` does not exist.
+
+- [ ] **Step 3: Add matrix scenario models and expansion**
+
+Create `src/quant_strategies/validation/matrix.py`:
+
+```python
+from __future__ import annotations
+
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+ScenarioKind = Literal["base", "cost", "cost_stress", "fill_lag", "parameter"]
+
+
+class MatrixScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1)
+    kind: ScenarioKind
+    required: bool = True
+    params: dict[str, Any] = Field(default_factory=dict)
+    cost_model: dict[str, Any] = Field(default_factory=dict)
+    fill_model: dict[str, Any] = Field(default_factory=dict)
+
+
+def expand_validation_matrix(
+    *,
+    window_id: str,
+    base_params: dict[str, Any],
+    base_costs: dict[str, Any],
+    base_fill: dict[str, Any],
+) -> tuple[MatrixScenario, ...]:
+    scenarios: list[MatrixScenario] = [
+        MatrixScenario(id=f"{window_id}/base", kind="base", params=base_params),
+        MatrixScenario(id=f"{window_id}/realistic_costs", kind="cost", cost_model=base_costs),
+        MatrixScenario(
+            id=f"{window_id}/stressed_costs",
+            kind="cost_stress",
+            cost_model={
+                "fee_bps_per_side": float(base_costs.get("fee_bps_per_side", 0.0)) * 2.0,
+                "slippage_bps_per_side": float(base_costs.get("slippage_bps_per_side", 0.0)) * 2.0,
+            },
+        ),
+        MatrixScenario(
+            id=f"{window_id}/fill_lag_plus_1",
+            kind="fill_lag",
+            fill_model={
+                **base_fill,
+                "entry_lag_bars": int(base_fill.get("entry_lag_bars", 1)) + 1,
+            },
+        ),
+    ]
+    for name, value in base_params.items():
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        scenarios.append(
+            MatrixScenario(
+                id=f"{window_id}/param_{name}_down_10pct",
+                kind="parameter",
+                params={**base_params, name: float(value) * 0.9},
+            )
+        )
+        scenarios.append(
+            MatrixScenario(
+                id=f"{window_id}/param_{name}_up_10pct",
+                kind="parameter",
+                params={**base_params, name: float(value) * 1.1},
+            )
+        )
+        break
+    return tuple(scenarios)
+```
+
+- [ ] **Step 4: Run matrix tests**
+
+Run:
+
+```bash
+conda run -n quant pytest tests/test_validation_matrix.py -q
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/quant_strategies/validation/matrix.py tests/test_validation_matrix.py
+git commit -m "feat: expand validation matrix scenarios"
 ```
 
 ---
@@ -2221,6 +2414,231 @@ git commit -m "docs: document researched validation workflow"
 
 ---
 
+### Task 11A: Eng Review Hardening
+
+**Files:**
+- Modify: `src/quant_strategies/validation/__init__.py`
+- Modify: `src/quant_strategies/validation/backends.py`
+- Modify: `src/quant_strategies/validation/vectorbtpro_backend.py`
+- Modify: `src/quant_strategies/validation/policy.py`
+- Test: `tests/test_validation_runner.py`
+- Test: `tests/test_validation_backends_and_policy.py`
+- Test: `tests/test_vectorbtpro_backend.py`
+
+- [ ] **Step 1: Add tests for required matrix gating**
+
+Extend `tests/test_validation_runner.py`:
+
+```python
+def test_run_validation_runs_each_matrix_scenario_once_per_loaded_window(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    load_calls = []
+    backend_calls = []
+
+    def fake_load(config):
+        load_calls.append(config.data.start)
+        return LoadedData(rows=rows())
+
+    class RecordingBackend:
+        name = "recording"
+
+        def run(self, *, decisions, rows, config):
+            backend_calls.append(config.scenario_id)
+            return BackendRunResult(
+                backend="recording",
+                status="completed",
+                metrics={"net_return": 0.02, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            )
+
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", fake_load)
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "clear_yes"
+    assert len(load_calls) == 1
+    assert {
+        "validation_2026_h1/base",
+        "validation_2026_h1/realistic_costs",
+        "validation_2026_h1/stressed_costs",
+        "validation_2026_h1/fill_lag_plus_1",
+    }.issubset(set(backend_calls))
+```
+
+- [ ] **Step 2: Add tests for failure-envelope artifacts**
+
+Extend `tests/test_validation_runner.py`:
+
+```python
+def test_run_validation_writes_artifacts_when_generate_decisions_fails(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text("def generate_decisions(rows, params):\n    raise RuntimeError('bad strategy')\n")
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+
+    result = run_validation(package, repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert "strategy_generation_failed" in result.decision.reasons
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_report.md").exists()
+
+
+def test_run_validation_writes_artifacts_when_backend_fails(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+
+    class FailingBackend:
+        name = "failing"
+
+        def run(self, *, decisions, rows, config):
+            raise RuntimeError("backend exploded")
+
+    result = run_validation(package, repo_root=tmp_path, backend=FailingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert "backend_failed" in result.decision.reasons
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+```
+
+- [ ] **Step 3: Add backend sizing and fillability tests**
+
+Extend `tests/test_vectorbtpro_backend.py`:
+
+```python
+def test_vectorbtpro_backend_rejects_unfillable_missing_symbol():
+    missing_symbol_decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="ETH-PERP"),
+        decision_time=DECISION,
+        as_of_time=AS_OF,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=1),
+    )
+
+    result = VectorBTProBackend().run(decisions=[missing_symbol_decision], rows=rows(), config=None)
+
+    assert result.status == "failed"
+    assert "missing_symbol" in result.warnings
+
+
+def test_vectorbtpro_backend_rejects_unfillable_exit_bar():
+    too_long = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION,
+        as_of_time=AS_OF,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=999),
+    )
+
+    result = VectorBTProBackend().run(decisions=[too_long], rows=rows(), config=None)
+
+    assert result.status == "failed"
+    assert "unfillable_exit" in result.warnings
+
+
+def test_vectorbtpro_backend_honors_target_weight_size(monkeypatch):
+    captured = {}
+
+    def fake_from_signals(close, **kwargs):
+        captured.update(kwargs)
+
+        class FakeTrades:
+            def count(self):
+                return 1
+
+        class FakePortfolio:
+            trades = FakeTrades()
+
+            def get_total_return(self):
+                return 0.01
+
+        return FakePortfolio()
+
+    import vectorbtpro as vbt
+
+    monkeypatch.setattr(vbt.Portfolio, "from_signals", fake_from_signals)
+
+    VectorBTProBackend().run(decisions=[decision()], rows=rows(), config=None)
+
+    assert "size" in captured
+    assert "size_type" in captured
+```
+
+- [ ] **Step 4: Update validation orchestration**
+
+Modify `run_validation(...)` so it:
+
+```text
+1. creates result_dir immediately after config load,
+2. loads rows once per validation window,
+3. generates decisions once per window,
+4. audits decisions once per window,
+5. expands matrix scenarios for that window,
+6. runs the backend once per required scenario using the already-loaded rows,
+7. catches data, strategy, audit, and backend failures into PromotionDecision,
+8. always writes promotion_decision.json and validation_report.md after result_dir exists.
+```
+
+The scenario config object passed to the backend must include `scenario_id`,
+scenario-specific `params`, `cost_model`, and `fill_model` so tests can verify
+which scenario ran.
+
+- [ ] **Step 5: Update policy aggregation**
+
+Modify `classify_validation(...)` so `clear_yes` requires:
+
+```text
+all required scenarios completed
+no required scenario has unsupported semantics
+each required scenario has trade_count >= min_trades
+each required scenario has net_return > 0
+```
+
+Diagnostic scenarios may be recorded in `robustness_matrix.json` without
+blocking `clear_yes`.
+
+- [ ] **Step 6: Update VectorBT PRO backend implementation**
+
+Modify `VectorBTProBackend.run(...)` so it:
+
+```text
+honors target_weight size through VectorBT size/size_type inputs
+returns status="failed" for missing symbols
+returns status="failed" for missing decision bars
+returns status="failed" for missing entry fills
+returns status="failed" for missing exit fills
+returns status="unsupported" for unsupported sizing or threshold exits
+never silently continues past an unfillable decision
+```
+
+- [ ] **Step 7: Run focused hardening tests**
+
+Run:
+
+```bash
+conda run -n quant pytest \
+  tests/test_validation_matrix.py \
+  tests/test_validation_runner.py \
+  tests/test_validation_backends_and_policy.py \
+  tests/test_vectorbtpro_backend.py \
+  -q
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/quant_strategies/validation tests/test_validation_matrix.py tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_vectorbtpro_backend.py
+git commit -m "feat: harden validation matrix and backend semantics"
+```
+
+---
+
 ### Task 12: Final Verification
 
 **Files:**
@@ -2235,6 +2653,7 @@ conda run -n quant pytest \
   tests/test_decision_models.py \
   tests/test_validation_strategy_loader.py \
   tests/test_validation_config.py \
+  tests/test_validation_matrix.py \
   tests/test_validation_data_audit.py \
   tests/test_validation_backends_and_policy.py \
   tests/test_validation_artifacts.py \
@@ -2308,6 +2727,19 @@ Expected: implementation commits are present. Existing unrelated worktree change
 
 ## Self-Review Notes
 
-- Spec coverage: the plan covers typed decisions, validation intake, data audit, backend boundary, fake backend tests, VectorBT PRO backend, artifacts, CLI command, first researched variant migration, docs, and verification.
+- Spec coverage: the plan covers typed decisions, validation intake, data audit, validation matrix expansion, backend boundary, failure-envelope artifacts, fake backend tests, VectorBT PRO backend, sizing and fillability semantics, CLI command, first researched variant migration, docs, and verification.
 - Scope control: portfolio validation, paper trading, live execution, options, margin, partial fills, and market impact remain outside this first implementation slice.
 - Type consistency: the canonical strategy function is `generate_decisions`; the typed output is `StrategyDecision`; the decision states are `hard_no`, `maybe`, and `clear_yes`.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | not run | Not requested for this backend validation plan. |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | not run | Not requested. |
+| Eng Review | `/plan-eng-review` | Architecture & tests | 1 | applied | 6 issues accepted: matrix gating, failure envelope, sizing fidelity, fail-closed fillability, expanded tests, per-window data reuse. |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | not applicable | Backend/docs-only plan. |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | not run | CLI/docs behavior covered by eng review. |
+
+- **UNRESOLVED:** 0.
+- **VERDICT:** ENG REVIEW APPLIED - ready to implement after current docs are committed.

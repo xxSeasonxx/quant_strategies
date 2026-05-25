@@ -32,6 +32,9 @@ VectorBT PRO, the current internal evaluator, or any future paper/live adapter.
 - Use VectorBT PRO as the first robust validation backend.
 - Keep VectorBT PRO behind an adapter; strategy files must not import or emit
   VectorBT-specific objects.
+- Run a required validation matrix before any `clear_yes` decision. The matrix
+  must include base windows, realistic costs, stressed costs, fill-lag
+  sensitivity, and parameter perturbations for v1.
 - Produce auditable validation artifacts and a three-state decision:
   `hard_no`, `maybe`, or `clear_yes`.
 - Keep portfolio construction, paper trading, and live execution out of v1.
@@ -69,6 +72,21 @@ a deterministic evaluator run.
 The validation workflow answers a stronger question: whether a frozen researched
 candidate survives conservative data, cost, fill, sample, and robustness checks
 with explicit semantics.
+
+The v1 data flow is:
+
+```text
+validation.toml
+  -> load rows once per validation window
+  -> generate_decisions(rows, params)
+  -> data audit
+  -> expand validation matrix
+       base / realistic costs / stressed costs / fill lag / params
+  -> backend adapter runs
+  -> aggregate matrix results
+  -> hard_no | maybe | clear_yes
+  -> artifacts + report
+```
 
 ## Strategy Decision Contract
 
@@ -126,6 +144,11 @@ decision_time before the as-of row was historically available
 unsupported instrument or exit semantics required by the candidate
 ```
 
+Backend adapters must either honor the typed decision semantics or reject them
+explicitly. In v1, `target_weight` sizing is supported and must affect the
+backend run. Any unsupported sizing kind must be reported as unsupported rather
+than silently simulated with a default.
+
 ## V1 Supported Semantics
 
 V1 supports only candidates whose economics can be represented by:
@@ -176,6 +199,12 @@ ValidationBackend
   run(decisions, rows, validation_config) -> BackendRunResult
 ```
 
+Backend adapters must fail closed on unfillable decisions. Missing symbols,
+missing decision bars, missing entry fills, and missing exit fills are validation
+failures, not skipped trades. The default classification is `hard_no`; use
+`maybe` only when the failure is clearly an upstream data-coverage limitation
+that prevents a fair test.
+
 The first real backend is:
 
 ```text
@@ -215,31 +244,39 @@ Pipeline:
 
 2. Data audit
    - load data through public quant_data APIs
+   - load each validation window once, then reuse those rows across all matrix
+     scenarios for that window
    - verify required observables
    - verify as_of_time / decision_time causality
    - verify strict validation windows do not silently shift or fill gaps
    - record quant_data limitations explicitly
 
-3. Backend simulation
-   - run decisions through VectorBTProBackend
+3. Matrix expansion
+   - produce one base scenario per window
+   - produce realistic-cost and stressed-cost scenarios
+   - produce fill-lag sensitivity scenarios
+   - produce parameter perturbation scenarios around selected values
+   - mark any scenario as required or diagnostic before execution
+
+4. Backend simulation
+   - run each required scenario through VectorBTProBackend
    - optionally run an internal-evaluator cross-check where semantics overlap
    - fail clearly when the requested backend is unavailable or unsupported
 
-4. Robustness matrix
-   - original researched windows
-   - out-of-sample windows not optimized by the research loop
-   - realistic costs
-   - stressed costs
-   - fill-lag sensitivity
-   - parameter perturbation around selected values
-   - symbol/time subsample stability
-   - negative controls where meaningful
-
 5. Decision
+   - aggregate scenario-level backend results into robustness_matrix.json
    - classify as hard_no, maybe, or clear_yes
    - write report and machine-readable decision artifact
    - require Season approval before any move into tested/
 ```
+
+When config loading succeeds, validation must write a decision artifact even on
+failure. Data loading failures, strategy import failures, `generate_decisions`
+exceptions, data audit failures, backend unavailability, unsupported semantics,
+and backend crashes should produce `promotion_decision.json` and
+`validation_report.md` with the failing stage and reason. Raw exceptions are
+acceptable only before a validation config has been loaded and a result
+directory can be created.
 
 ## Decision Policy
 
@@ -263,6 +300,7 @@ negative under realistic costs
 edge disappears under modest cost or fill stress
 extreme concentration in one symbol or tiny time slice
 cannot be reproduced from frozen artifacts
+unfillable decision under the configured validation data
 ```
 
 `maybe` means the strategy remains interesting but is not eligible for
@@ -276,6 +314,7 @@ quant_data coverage has material known gaps
 parameter perturbation is fragile
 backend cross-check disagreement is explainable but unresolved
 unsupported semantics are required for a fair test
+backend unavailable for an otherwise interpretable candidate
 ```
 
 `clear_yes` should be rare. Minimum meaning:
@@ -286,7 +325,7 @@ data is causal and reproducible
 realistic-cost performance is positive
 trade count is adequate for the horizon
 out-of-sample / walk-forward windows are stable enough
-stress tests degrade gracefully
+all required matrix scenarios pass and stress tests degrade gracefully
 assumptions and falsifiers are documented
 manual review approves movement to tested/
 ```
@@ -318,6 +357,9 @@ validation_results/<strategy_id>/<timestamp>/
 `promotion_decision.json` should be stable enough for automation. The markdown
 report should be concise enough for manual review and should explicitly list
 hard failures, assumptions, unsupported semantics, and remaining risks.
+`robustness_matrix.json` should list every scenario, whether it was required or
+diagnostic, the backend status, the key metrics, and the classification reason
+when a scenario blocks `clear_yes`.
 
 ## Promotion Mechanics
 
@@ -345,12 +387,14 @@ candidate:
 1. Add typed decision models.
 2. Convert one selected researched variant to generate_decisions.
 3. Add package-local or repo-local validation config.
-4. Add ValidationBackend and a fake backend for tests.
-5. Add VectorBTProBackend behind the adapter boundary.
-6. Add validation orchestration and artifacts.
-7. Add promotion decision classification.
-8. Add focused tests for models, intake, fake-backend orchestration,
-   unsupported semantics, and decision policy.
+4. Add validation matrix scenario models and expansion.
+5. Add ValidationBackend and a fake backend for tests.
+6. Add VectorBTProBackend behind the adapter boundary.
+7. Add validation orchestration, failure envelope, and artifacts.
+8. Add promotion decision classification across required matrix scenarios.
+9. Add focused tests for models, intake, fake-backend orchestration, matrix
+   expansion, failure artifacts, sizing, fillability, unsupported semantics, and
+   decision policy.
 ```
 
 Do not broaden to portfolio validation or unsupported instrument types until the
@@ -364,6 +408,9 @@ Before implementation is considered complete:
 - targeted tests for decision model validation
 - targeted tests for researched package intake
 - targeted tests for fake backend orchestration
+- targeted tests for validation matrix expansion and aggregation
+- targeted tests for failure-envelope artifact writing
+- targeted tests for backend sizing fidelity and unfillable-decision rejection
 - targeted tests for decision classification
 - optional local VectorBT PRO integration smoke if the backend is installed
 - one validation dry run against the selected researched crypto perp variant
