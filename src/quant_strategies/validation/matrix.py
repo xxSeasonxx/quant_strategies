@@ -1,14 +1,50 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ScenarioKind = Literal["base", "cost", "cost_stress", "fill_lag", "parameter"]
 
 
+class _FrozenDict(dict[str, Any]):
+    __slots__ = ()
+
+    def __init__(self, values: Mapping[str, Any]) -> None:
+        super().__init__(values)
+
+    def _immutable(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("frozen mapping cannot be mutated")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+
+def _freeze_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _FrozenDict({key: _freeze_value(nested) for key, nested in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_value(item) for item in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze_value(item) for item in value)
+    return value
+
+
 class MatrixScenario(BaseModel):
+    """Validation scenario with immutable section override maps.
+
+    Empty params, cost_model, or fill_model maps mean the scenario does not
+    override that section of the base validation config.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(min_length=1)
@@ -18,6 +54,13 @@ class MatrixScenario(BaseModel):
     cost_model: dict[str, Any] = Field(default_factory=dict)
     fill_model: dict[str, Any] = Field(default_factory=dict)
 
+    @model_validator(mode="after")
+    def freeze_override_maps(self) -> MatrixScenario:
+        object.__setattr__(self, "params", _freeze_value(self.params))
+        object.__setattr__(self, "cost_model", _freeze_value(self.cost_model))
+        object.__setattr__(self, "fill_model", _freeze_value(self.fill_model))
+        return self
+
 
 def expand_validation_matrix(
     *,
@@ -26,6 +69,8 @@ def expand_validation_matrix(
     base_costs: dict[str, Any],
     base_fill: dict[str, Any],
 ) -> tuple[MatrixScenario, ...]:
+    """Build v1 validation scenarios as override maps for one validation window."""
+
     scenarios: list[MatrixScenario] = [
         MatrixScenario(id=f"{window_id}/base", kind="base", params=base_params),
         MatrixScenario(id=f"{window_id}/realistic_costs", kind="cost", cost_model=base_costs),
