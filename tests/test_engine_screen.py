@@ -207,3 +207,296 @@ def test_screen_quote_fill_fails_closed_without_selected_quotes():
 
     with pytest.raises(EvaluationError, match="quote fill requires bid and ask"):
         screen(request)
+
+
+def test_screen_old_hold_bars_exits_with_max_hold_reason():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="old_hold",
+            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, hold_bars=2),),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 101.0, 103.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    result = screen(request)
+    trade = result.trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "max_hold"
+    assert trade.gross_return == pytest.approx(0.03)
+
+
+def test_screen_max_hold_bars_overrides_hold_bars():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="max_hold",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    hold_bars=5,
+                    max_hold_bars=1,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 102.0, 110.0, 120.0, 130.0, 140.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=32)
+    assert trade.exit_reason == "max_hold"
+    assert trade.gross_return == pytest.approx(0.02)
+
+
+def test_screen_exits_on_take_profit_before_max_hold():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="take_profit",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=3,
+                    take_profit_bps=150.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 102.0, 101.0, 104.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=32)
+    assert trade.exit_reason == "take_profit"
+    assert trade.gross_return == pytest.approx(0.02)
+
+
+def test_screen_exits_on_stop_loss_before_max_hold():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="stop_loss",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=3,
+                    stop_loss_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 98.0, 99.0, 104.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=32)
+    assert trade.exit_reason == "stop_loss"
+    assert trade.gross_return == pytest.approx(-0.02)
+
+
+def test_screen_exits_on_trailing_stop_after_favorable_move():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="trailing_stop",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=4,
+                    trailing_stop_bps=150.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 104.0, 102.0, 105.0, 106.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "trailing_stop"
+    assert trade.gross_return == pytest.approx(0.02)
+
+
+def test_screen_short_take_profit_uses_falling_price():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="short_take_profit",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.SHORT,
+                    max_hold_bars=3,
+                    take_profit_bps=150.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 98.0, 101.0, 104.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=32)
+    assert trade.exit_reason == "take_profit"
+    assert trade.gross_return == pytest.approx(0.02)
+
+
+def test_screen_short_take_profit_uses_simple_return_threshold():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="short_take_profit_threshold",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.SHORT,
+                    max_hold_bars=3,
+                    take_profit_bps=150.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 98.52, 98.5, 98.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "take_profit"
+    assert trade.gross_return == pytest.approx(0.015)
+
+
+def test_screen_short_stop_loss_uses_simple_return_threshold():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="short_stop_loss_threshold",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.SHORT,
+                    max_hold_bars=2,
+                    stop_loss_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 101.0, 100.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=32)
+    assert trade.exit_reason == "stop_loss"
+    assert trade.gross_return == pytest.approx(-0.01)
+
+
+def test_screen_prioritizes_stop_loss_over_trailing_stop_on_same_trigger_bar():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="priority_stop_loss",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=3,
+                    stop_loss_bps=50.0,
+                    trailing_stop_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 102.0, 99.0, 98.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "stop_loss"
+
+
+def test_screen_short_stop_loss_over_trailing_stop_on_same_trigger_bar():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="short_priority_stop_loss",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.SHORT,
+                    max_hold_bars=3,
+                    stop_loss_bps=50.0,
+                    trailing_stop_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 98.0, 101.0, 102.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "stop_loss"
+
+
+def test_screen_exit_lag_fills_after_trigger_bar():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="exit_lag",
+            signals=(
+                Signal(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=3,
+                    take_profit_bps=150.0,
+                ),
+            ),
+        ),
+        bars=bars_for("BTC", [100.0, 100.0, 102.0, 101.0, 99.0, 98.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1, exit_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "take_profit"
+    assert trade.exit_price == 101.0
+
+
+def test_screen_early_exit_shortens_funding_exposure():
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="funding_shortened",
+            signals=(
+                Signal(
+                    symbol="BTC-PERP",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=2,
+                    take_profit_bps=50.0,
+                ),
+            ),
+        ),
+        bars=funding_bars_for("BTC-PERP"),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "take_profit"
+    assert trade.funding_return == pytest.approx(-0.001)

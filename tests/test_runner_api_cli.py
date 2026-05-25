@@ -209,6 +209,44 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert "not validation pass" in notes
 
 
+def test_run_artifacts_preserve_exit_reason_and_signal_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def generate_signals(bars, params):\n"
+        "    return [{'symbol': bars[1]['symbol'], 'decision_time': bars[1]['timestamp'], "
+        "'side': 'long', 'weight': 1.0, 'hold_bars': 5, 'max_hold_bars': 2, "
+        "'take_profit_bps': 50.0, 'funding_pressure_bps': 3.25, "
+        "'entry_return_extension_bps': 42.0, 'signal_family': 'demo'}]\n"
+    )
+    config_path = write_config(tmp_path, mode="screen")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    with (result.result_dir / "signals.csv").open() as handle:
+        signal_rows = list(csv.DictReader(handle))
+    request = json.loads((result.result_dir / "engine_request.json").read_text())
+    evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    signal_payload = request["spec"]["signals"][0]
+    trade = evidence["screening_result"]["trades"][0]
+
+    assert signal_rows[0]["max_hold_bars"] == "2"
+    assert signal_rows[0]["take_profit_bps"] == "50.0"
+    assert signal_rows[0]["funding_pressure_bps"] == "3.25"
+    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v2"
+    assert signal_payload["metadata"]["funding_pressure_bps"] == 3.25
+    assert signal_payload["metadata"]["entry_return_extension_bps"] == 42.0
+    assert signal_payload["metadata"]["signal_family"] == "demo"
+    assert trade["exit_reason"] == "take_profit"
+    assert trade["signal_metadata"]["funding_pressure_bps"] == 3.25
+
+
 def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, mode="validate")
@@ -356,7 +394,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["python"]["version"]
     assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
     assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
-    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v1"}
+    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v2"}
     assert run_manifest["artifacts"]["config.toml"]["sha256"]
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]

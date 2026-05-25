@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.engine_runner import build_request, evaluate_request
+from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
 from quant_strategies.runner.errors import RequestBuildError
 
 
@@ -157,6 +157,66 @@ def test_build_request_rejects_quote_fill_without_bid_ask_fields():
             rows=bars(100.0, 101.0, 102.0, 104.0),
             signals=[signal()],
             fill_model=FillModelConfig(price="quote", entry_lag_bars=1),
+            cost_model=zero_cost(),
+        )
+
+
+def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
+    raw_signal = signal(index=0, hold_bars=5)
+    raw_signal.update(
+        {
+            "max_hold_bars": 2,
+            "take_profit_bps": 150.0,
+            "stop_loss_bps": 75.0,
+            "trailing_stop_bps": 50.0,
+            "metadata": {"source": "explicit"},
+            "funding_pressure_bps": 3.25,
+            "entry_return_extension_bps": 42.0,
+        }
+    )
+
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 100.0, 102.0, 101.0),
+        signals=[raw_signal],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    engine_signal = request.spec.signals[0]
+    assert engine_signal.max_hold_bars == 2
+    assert engine_signal.take_profit_bps == 150.0
+    assert engine_signal.stop_loss_bps == 75.0
+    assert engine_signal.trailing_stop_bps == 50.0
+    assert engine_signal.metadata == {
+        "entry_return_extension_bps": 42.0,
+        "funding_pressure_bps": 3.25,
+        "source": "explicit",
+    }
+    assert '"funding_pressure_bps": 3.25' in request_json(request)
+
+
+def test_build_request_rejects_duplicate_flat_and_nested_metadata_keys():
+    raw_signal = signal()
+    raw_signal.update({"metadata": {"funding_pressure_bps": 1.0}, "funding_pressure_bps": 2.0})
+
+    with pytest.raises(RequestBuildError, match="duplicate signal metadata key"):
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 103.0),
+            signals=[raw_signal],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
+
+
+def test_build_request_uses_max_hold_and_exit_lag_for_fillability():
+    with pytest.raises(RequestBuildError, match="exit fill is outside"):
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 100.0, 101.0),
+            signals=[{**signal(index=0, hold_bars=1), "max_hold_bars": 2}],
+            fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=1),
             cost_model=zero_cost(),
         )
 

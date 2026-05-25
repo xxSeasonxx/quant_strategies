@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 import math
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v1"
+EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v2"
 
 
 class EngineModel(BaseModel):
@@ -24,6 +25,9 @@ def _timezone_aware(value: datetime, field_name: str) -> datetime:
 class Side(str, Enum):
     LONG = "long"
     SHORT = "short"
+
+
+ExitReason = Literal["stop_loss", "take_profit", "trailing_stop", "max_hold"]
 
 
 class Bar(EngineModel):
@@ -80,6 +84,11 @@ class Signal(EngineModel):
     side: Side
     weight: float = Field(default=1.0, gt=0)
     hold_bars: int = Field(default=1, ge=1)
+    max_hold_bars: int | None = Field(default=None, ge=1)
+    take_profit_bps: float | None = None
+    stop_loss_bps: float | None = None
+    trailing_stop_bps: float | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("decision_time")
     @classmethod
@@ -87,9 +96,16 @@ class Signal(EngineModel):
         return _timezone_aware(value, "decision_time")
 
     @model_validator(mode="after")
-    def validate_weight(self) -> Signal:
+    def validate_signal(self) -> Signal:
         if not math.isfinite(self.weight):
             raise ValueError("weight must be finite")
+        exit_bps_values = (self.take_profit_bps, self.stop_loss_bps, self.trailing_stop_bps)
+        if any(value is not None and (not math.isfinite(value) or value <= 0.0) for value in exit_bps_values):
+            raise ValueError("exit bps values must be finite and positive")
+        try:
+            json.dumps(self.metadata, sort_keys=True, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("metadata must be JSON-compatible") from exc
         return self
 
 
@@ -134,11 +150,13 @@ class Trade(EngineModel):
     exit_time: datetime
     entry_price: float
     exit_price: float
+    exit_reason: ExitReason
     weight: float
     gross_return: float
     funding_return: float = 0.0
     cost_return: float
     net_return: float
+    signal_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScreeningResult(EngineModel):
@@ -173,7 +191,7 @@ class ValidationReport(EngineModel):
 
 
 class EvidencePacket(EngineModel):
-    schema_version: Literal["quant_strategies.engine.evidence/v1"] = "quant_strategies.engine.evidence/v1"
+    schema_version: Literal["quant_strategies.engine.evidence/v2"] = "quant_strategies.engine.evidence/v2"
     mode: Literal["screen", "validate"]
     strategy_id: str
     screening_result: ScreeningResult | None = None

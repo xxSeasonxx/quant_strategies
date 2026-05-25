@@ -25,6 +25,21 @@ from quant_strategies.runner.errors import EvaluationRunError, RequestBuildError
 EngineMode = Literal["screen", "validate"]
 
 
+_RESERVED_SIGNAL_FIELDS = {
+    "symbol",
+    "decision_time",
+    "as_of_time",
+    "side",
+    "weight",
+    "hold_bars",
+    "max_hold_bars",
+    "take_profit_bps",
+    "stop_loss_bps",
+    "trailing_stop_bps",
+    "metadata",
+}
+
+
 @dataclass(frozen=True)
 class EngineRun:
     mode: EngineMode
@@ -131,7 +146,11 @@ def _signal_from_row(row: dict[str, Any]) -> Signal:
             "side": row["side"],
             "weight": row.get("weight", 1.0),
             "hold_bars": row.get("hold_bars", 1),
+            "metadata": _signal_metadata(row),
         }
+        for field in ("max_hold_bars", "take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+            if field in row and row[field] is not None:
+                payload[field] = row[field]
         return Signal(**payload)
     except KeyError as exc:
         field = str(exc.args[0])
@@ -140,6 +159,22 @@ def _signal_from_row(row: dict[str, Any]) -> Signal:
         raise
     except Exception as exc:
         raise RequestBuildError(f"invalid signal for {row.get('symbol')}: {exc}") from exc
+
+
+def _signal_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    raw_metadata = row.get("metadata", {})
+    if raw_metadata is None:
+        metadata: dict[str, Any] = {}
+    elif isinstance(raw_metadata, dict):
+        metadata = dict(raw_metadata)
+    else:
+        raise RequestBuildError(f"signal metadata must be a mapping for {row.get('symbol', '<unknown>')}")
+
+    for key in sorted(set(row).difference(_RESERVED_SIGNAL_FIELDS)):
+        if key in metadata:
+            raise RequestBuildError(f"duplicate signal metadata key '{key}' for {row.get('symbol', '<unknown>')}")
+        metadata[key] = row[key]
+    return metadata
 
 
 def _as_datetime(value: object, field_name: str) -> datetime:
@@ -170,18 +205,19 @@ def _assert_fillable(request: EvaluationRequest) -> None:
             raise RequestBuildError(f"missing bars for signal symbol: {signal.symbol}")
         decision_index = _decision_index(symbol_bars, signal)
         entry_index = decision_index + request.fill_model.entry_lag_bars
-        exit_index = entry_index + signal.hold_bars + request.fill_model.exit_lag_bars
+        max_hold_bars = signal.max_hold_bars or signal.hold_bars
+        last_trigger_index = entry_index + max_hold_bars
+        last_exit_index = last_trigger_index + request.fill_model.exit_lag_bars
         if entry_index >= len(symbol_bars):
             raise RequestBuildError(f"entry fill is outside available bars: {signal.symbol}")
-        if exit_index >= len(symbol_bars):
+        if last_exit_index >= len(symbol_bars):
             raise RequestBuildError(f"exit fill is outside available bars: {signal.symbol}")
         if request.fill_model.price == "quote":
-            for fill_name, bar in (("entry", symbol_bars[entry_index]), ("exit", symbol_bars[exit_index])):
-                if bar.bid is None or bar.ask is None:
-                    raise RequestBuildError(
-                        f"quote fill requires bid and ask on {fill_name} bar: "
-                        f"{bar.symbol} at {bar.timestamp.isoformat()}"
-                    )
+            _assert_quote_fill_bar(symbol_bars[entry_index], "entry")
+            for trigger_index in range(entry_index + 1, last_trigger_index + 1):
+                _assert_quote_fill_bar(symbol_bars[trigger_index], "trigger")
+                exit_index = trigger_index + request.fill_model.exit_lag_bars
+                _assert_quote_fill_bar(symbol_bars[exit_index], "exit")
 
 
 def _decision_index(symbol_bars: list[Bar], signal: Signal) -> int:
@@ -189,3 +225,11 @@ def _decision_index(symbol_bars: list[Bar], signal: Signal) -> int:
         if bar.timestamp == signal.decision_time:
             return index
     raise RequestBuildError(f"decision_time does not match a bar timestamp: {signal.decision_time.isoformat()}")
+
+
+def _assert_quote_fill_bar(bar: Bar, fill_name: str) -> None:
+    if bar.bid is None or bar.ask is None:
+        raise RequestBuildError(
+            f"quote fill requires bid and ask on {fill_name} bar: "
+            f"{bar.symbol} at {bar.timestamp.isoformat()}"
+        )

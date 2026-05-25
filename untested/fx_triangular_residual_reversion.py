@@ -82,11 +82,15 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
     crossing_only = bool(params.get("crossing_only", True))
     weight = float(params.get("weight", 1.0))
-    hold_bars = int(params.get("hold_bars", params.get("hold_minutes", 30)))
+    max_hold_bars = _positive_int(
+        params.get("max_hold_bars", params.get("hold_bars", params.get("hold_minutes", 30))),
+        "max_hold_bars",
+    )
+    exit_controls = _exit_controls(params)
 
     close_by_key, timestamps, symbols = _close_table(bars)
 
-    candidates: dict[tuple[str, datetime], list[tuple[int, float]]] = {}
+    candidates: dict[tuple[str, datetime], list[dict[str, float | int]]] = {}
     for triangle in _triangles_for(str(params.get("triangle_set", "outside_view_8"))):
         if not set(_triangle_symbols(triangle)).issubset(symbols):
             continue
@@ -106,20 +110,27 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
 
     signals: list[dict[str, object]] = []
     for symbol, as_of_time in sorted(candidates, key=lambda key: (key[1], key[0])):
-        score = sum(signal * strength for signal, strength in candidates[(symbol, as_of_time)])
+        entries = candidates[(symbol, as_of_time)]
+        score = sum(float(entry["signal"]) * float(entry["strength"]) for entry in entries)
         if abs(score) <= 1e-12:
             continue
+        representative = max(entries, key=lambda entry: abs(float(entry["strength"])))
         decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
-        signals.append(
-            {
-                "symbol": symbol,
-                "decision_time": decision_time,
-                "as_of_time": as_of_time,
-                "side": "long" if score > 0.0 else "short",
-                "weight": weight,
-                "hold_bars": hold_bars,
-            }
-        )
+        payload: dict[str, object] = {
+            "symbol": symbol,
+            "decision_time": decision_time,
+            "as_of_time": as_of_time,
+            "side": "long" if score > 0.0 else "short",
+            "weight": weight,
+            "hold_bars": max_hold_bars,
+            "max_hold_bars": max_hold_bars,
+            "residual_zscore": representative["residual_zscore"],
+            "residual_bps": representative["residual_bps"],
+            "attribution_score": sum(float(entry["attribution_score"]) for entry in entries),
+            "signal_family": "fx_triangular_residual_reversion",
+        }
+        payload.update(exit_controls)
+        signals.append(payload)
     return signals
 
 
@@ -158,6 +169,24 @@ def _non_negative_float(value: object, name: str) -> float:
     return parsed
 
 
+def _optional_positive_float(value: object, name: str) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return parsed
+
+
+def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
+    controls: dict[str, object] = {}
+    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+        value = _optional_positive_float(params.get(name), name)
+        if value is not None:
+            controls[name] = value
+    return controls
+
+
 def _close_table(
     bars: Sequence[Mapping[str, object]],
 ) -> tuple[dict[tuple[str, datetime], float], list[datetime], set[str]]:
@@ -191,7 +220,7 @@ def _collect_candidates(
     min_abs_residual_bps: float,
     attribution_bars: int,
     crossing_only: bool,
-    candidates: dict[tuple[str, datetime], list[tuple[int, float]]],
+    candidates: dict[tuple[str, datetime], list[dict[str, float | int]]],
 ) -> None:
     prior_extreme_sign = 0
     residuals = [point["residual"] for point in points]
@@ -217,13 +246,21 @@ def _collect_candidates(
             prior_extreme_sign = extreme_sign
             continue
 
-        symbol, signal = selected
+        symbol, signal, attribution_score = selected
         as_of_time = point["timestamp"]
         if (symbol, as_of_time) not in close_by_key:
             prior_extreme_sign = extreme_sign
             continue
         if not (crossing_only and prior_extreme_sign == extreme_sign):
-            candidates.setdefault((symbol, as_of_time), []).append((signal, abs(float(residual_z))))
+            candidates.setdefault((symbol, as_of_time), []).append(
+                {
+                    "signal": signal,
+                    "strength": abs(float(residual_z)),
+                    "residual_zscore": float(residual_z),
+                    "residual_bps": float(residual_bps),
+                    "attribution_score": attribution_score,
+                }
+            )
         prior_extreme_sign = extreme_sign
 
 
@@ -261,7 +298,7 @@ def _select_reversion_leg(
     index: int,
     residual_sign: int,
     attribution_bars: int,
-) -> tuple[str, int] | None:
+) -> tuple[str, int, float] | None:
     direct, leg_a, leg_a_sign, leg_b, leg_b_sign = triangle
     current = points[index]
     prior = points[max(0, index - attribution_bars)]
@@ -276,10 +313,11 @@ def _select_reversion_leg(
     if not aligned:
         return None
 
-    leg_type, symbol, synthetic_sign, _ = max(aligned, key=lambda item: abs(item[3]))
+    leg_type, symbol, synthetic_sign, contribution = max(aligned, key=lambda item: abs(item[3]))
+    attribution_score = abs(float(contribution)) * 10_000.0
     if leg_type == "direct":
-        return symbol, -residual_sign
-    return symbol, residual_sign * synthetic_sign
+        return symbol, -residual_sign, attribution_score
+    return symbol, residual_sign * synthetic_sign, attribution_score
 
 
 def _extreme_sign(

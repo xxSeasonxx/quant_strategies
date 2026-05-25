@@ -63,7 +63,24 @@ def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
     write_csv(
         result_dir / "signals.csv",
         signals,
-        preferred_fields=["symbol", "decision_time", "as_of_time", "side", "weight", "hold_bars"],
+        preferred_fields=[
+            "symbol",
+            "decision_time",
+            "as_of_time",
+            "side",
+            "weight",
+            "hold_bars",
+            "max_hold_bars",
+            "take_profit_bps",
+            "stop_loss_bps",
+            "trailing_stop_bps",
+            "funding_pressure_bps",
+            "entry_return_extension_bps",
+            "residual_zscore",
+            "residual_bps",
+            "attribution_score",
+            "signal_family",
+        ],
     )
 
 

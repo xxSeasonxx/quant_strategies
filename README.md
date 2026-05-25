@@ -91,13 +91,23 @@ repo_root=...)` resolve against the effective repository root, so automation can
 call `run_config("runs/<experiment>.toml", repo_root=repo)` from
 another current working directory.
 
-Curated smoke configs live under `runs/`. They are examples of executable
+Curated smoke configs live under `runs/`. Examples include
+`runs/simple_momentum_spy_daily.toml`,
+`runs/crypto_perp_funding_crowding_reversal_smoke.toml`, and
+`runs/fx_triangular_residual_quote_smoke.toml`. They are examples of executable
 runner configurations and smoke evidence, not strategy-promotion evidence.
 
 For close-derived signals, `fill_model.price = "close"` with
 `entry_lag_bars = 0` is rejected by default. Set
 `allow_same_bar_close_fill = true` only when the config author has explicitly
 accepted same-bar close-fill causal responsibility.
+
+Signals may include optional exit controls: `max_hold_bars`,
+`take_profit_bps`, `stop_loss_bps`, and `trailing_stop_bps`. Exit triggers are
+confirmed from the configured fill price on completed bars; this runner does not
+simulate intrabar stop or target touches. `exit_lag_bars` controls whether the
+exit fills on the trigger bar or a later bar. Old `hold_bars`-only signals remain
+valid and are treated as max-hold exits.
 
 ## Artifacts
 
@@ -127,6 +137,13 @@ ranges, metadata field coverage, and the strategy-input JSONL hash.
 evidence schema identity, dirty worktree hashes when available, and hashes of
 generated run artifacts.
 
+Trade records in `evidence.json` include `exit_reason`, one of `max_hold`,
+`take_profit`, `stop_loss`, or `trailing_stop`. Strategy-emitted signal metadata
+is preserved as flat columns in `signals.csv`, normalized into signal `metadata`
+in `engine_request.json`, and copied into each trade as `signal_metadata`.
+Unknown top-level signal fields become metadata unless they are reserved signal
+contract fields.
+
 `summary.json` has stable top-level keys: `strategy_id`, `mode`, `success`,
 `status`, `stage`, `message`, `artifacts`, `engine`, `run_completed`,
 `assessment_status`, and `promotion_eligible`. `success` is the existing
@@ -153,7 +170,9 @@ artifacts and the engine request; execution semantics remain owned by
 For `crypto_perp_funding` runs, funding fields may be used by the strategy and
 preserved in raw inputs. Internal evaluator requests include supplied funding
 events, and evaluator evidence reports funding cashflows separately as
-`funding_return` before including them in `net_return`.
+`funding_return` before including them in `net_return`. When an exit trigger
+closes a trade before max hold, funding cashflows are computed only over the
+actual entry-to-exit interval.
 
 When loaded rows include `available_at`, the runner checks the row used for each
 signal decision. By default that is the row matching the signal's symbol and

@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 import math
 
 from quant_strategies.engine.models import (
     Bar,
     EvaluationRequest,
+    ExitReason,
+    FillModel,
     GateResult,
     ScreeningResult,
     Side,
+    Signal,
     Trade,
     ValidationConfig,
     ValidationReport,
@@ -18,6 +22,12 @@ from quant_strategies.engine.models import (
 
 class EvaluationError(ValueError):
     """Raised when an evaluation request cannot be screened causally."""
+
+
+@dataclass(frozen=True)
+class _ExitSelection:
+    exit_bar: Bar
+    reason: ExitReason
 
 
 def screen(request: EvaluationRequest) -> ScreeningResult:
@@ -32,15 +42,19 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
             raise EvaluationError(f"missing bars for signal symbol: {signal.symbol}")
         decision_index = _decision_index(symbol_bars, signal.decision_time)
         entry_index = decision_index + request.fill_model.entry_lag_bars
-        exit_index = entry_index + signal.hold_bars + request.fill_model.exit_lag_bars
         if entry_index >= len(symbol_bars):
             raise EvaluationError(f"entry fill is outside available bars: {signal.symbol}")
-        if exit_index >= len(symbol_bars):
-            raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")
 
         entry_bar = symbol_bars[entry_index]
-        exit_bar = symbol_bars[exit_index]
         entry_price = _fill_price(entry_bar, request.fill_model.price, signal.side, is_entry=True)
+        exit_selection = _select_exit(
+            symbol_bars,
+            signal,
+            entry_index,
+            entry_price,
+            request.fill_model,
+        )
+        exit_bar = exit_selection.exit_bar
         exit_price = _fill_price(exit_bar, request.fill_model.price, signal.side, is_entry=False)
         direction = 1.0 if signal.side is Side.LONG else -1.0
         gross_return = direction * ((exit_price - entry_price) / entry_price) * signal.weight
@@ -62,11 +76,13 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
                 exit_time=exit_bar.timestamp,
                 entry_price=entry_price,
                 exit_price=exit_price,
+                exit_reason=exit_selection.reason,
                 weight=signal.weight,
                 gross_return=gross_return,
                 funding_return=funding_return,
                 cost_return=cost_return,
                 net_return=net_return,
+                signal_metadata=signal.metadata,
             )
         )
 
@@ -156,6 +172,61 @@ def _decision_index(bars: tuple[Bar, ...], decision_time) -> int:
         if bar.timestamp == decision_time:
             return index
     raise EvaluationError(f"decision_time does not match a bar timestamp: {decision_time.isoformat()}")
+
+
+def _select_exit(
+    bars: tuple[Bar, ...],
+    signal: Signal,
+    entry_index: int,
+    entry_price: float,
+    fill_model: FillModel,
+) -> _ExitSelection:
+    max_hold_bars = signal.max_hold_bars or signal.hold_bars
+    last_trigger_index = entry_index + max_hold_bars
+    last_exit_index = last_trigger_index + fill_model.exit_lag_bars
+    if last_exit_index >= len(bars):
+        raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")
+
+    best_return_bps = 0.0
+    for trigger_index in range(entry_index + 1, last_trigger_index + 1):
+        trigger_bar = bars[trigger_index]
+        trigger_price = _fill_price(trigger_bar, fill_model.price, signal.side, is_entry=False)
+        side_return_bps = _side_return_bps(entry_price, trigger_price, signal.side)
+        if side_return_bps > best_return_bps:
+            best_return_bps = side_return_bps
+
+        reason = _exit_reason(signal, side_return_bps, best_return_bps)
+        if reason is None and trigger_index == last_trigger_index:
+            reason = "max_hold"
+        if reason is None:
+            continue
+
+        exit_index = trigger_index + fill_model.exit_lag_bars
+        return _ExitSelection(
+            exit_bar=bars[exit_index],
+            reason=reason,
+        )
+
+    raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")
+
+
+def _side_return_bps(entry_price: float, current_price: float, side: Side) -> float:
+    direction = 1.0 if side is Side.LONG else -1.0
+    return direction * ((current_price - entry_price) / entry_price) * 10_000.0
+
+
+def _exit_reason(signal: Signal, side_return_bps: float, best_return_bps: float) -> ExitReason | None:
+    if signal.stop_loss_bps is not None and side_return_bps <= -signal.stop_loss_bps:
+        return "stop_loss"
+    if signal.take_profit_bps is not None and side_return_bps >= signal.take_profit_bps:
+        return "take_profit"
+    if (
+        signal.trailing_stop_bps is not None
+        and best_return_bps > 0.0
+        and best_return_bps - side_return_bps >= signal.trailing_stop_bps
+    ):
+        return "trailing_stop"
+    return None
 
 
 def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:

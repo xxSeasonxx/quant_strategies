@@ -38,6 +38,48 @@ def test_signal_rejects_legacy_quantity_field():
         )
 
 
+def test_signal_accepts_exit_controls_and_metadata():
+    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    signal = Signal(
+        symbol="BTC",
+        decision_time=aware_time,
+        side=Side.LONG,
+        hold_bars=10,
+        max_hold_bars=3,
+        take_profit_bps=125.0,
+        stop_loss_bps=50.0,
+        trailing_stop_bps=25.0,
+        metadata={"funding_pressure_bps": 3.5, "signal_family": "demo"},
+    )
+
+    assert signal.max_hold_bars == 3
+    assert signal.take_profit_bps == 125.0
+    assert signal.stop_loss_bps == 50.0
+    assert signal.trailing_stop_bps == 25.0
+    assert signal.metadata == {"funding_pressure_bps": 3.5, "signal_family": "demo"}
+
+
+def test_signal_rejects_invalid_exit_controls_and_metadata():
+    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    base = {"symbol": "BTC", "decision_time": aware_time, "side": Side.LONG}
+
+    with pytest.raises(ValidationError, match="max_hold_bars"):
+        Signal(**base, max_hold_bars=0)
+
+    with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
+        Signal(**base, take_profit_bps=float("inf"))
+
+    with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
+        Signal(**base, stop_loss_bps=0.0)
+
+    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
+        Signal(**base, metadata={"timestamp": aware_time})
+
+    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
+        Signal(**base, metadata={"bad": float("nan")})
+
+
 def test_bar_accepts_valid_optional_quotes():
     aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 

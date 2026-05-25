@@ -98,6 +98,11 @@ def test_generate_signals_uses_prior_residuals_for_direct_cross_short():
             "side": "short",
             "weight": 0.5,
             "hold_bars": 4,
+            "max_hold_bars": 4,
+            "residual_zscore": pytest.approx(3.0),
+            "residual_bps": pytest.approx(20.0),
+            "attribution_score": pytest.approx(10.0),
+            "signal_family": "fx_triangular_residual_reversion",
         }
     ]
 
@@ -113,6 +118,11 @@ def test_generate_signals_maps_synthetic_leg_reversion_side():
             "side": "long",
             "weight": 0.5,
             "hold_bars": 4,
+            "max_hold_bars": 4,
+            "residual_zscore": pytest.approx(3.0),
+            "residual_bps": pytest.approx(20.0),
+            "attribution_score": pytest.approx(10.0),
+            "signal_family": "fx_triangular_residual_reversion",
         }
     ]
 
@@ -165,6 +175,11 @@ def test_generate_signals_suppresses_repeated_same_zone_entries():
             "side": "short",
             "weight": 0.5,
             "hold_bars": 4,
+            "max_hold_bars": 4,
+            "residual_zscore": pytest.approx(67.08257172001852),
+            "residual_bps": pytest.approx(50.0),
+            "attribution_score": pytest.approx(50.0),
+            "signal_family": "fx_triangular_residual_reversion",
         }
     ]
 
@@ -188,3 +203,20 @@ def test_generate_signals_returns_empty_for_zero_variance_history():
     signals = generate_signals(direct_residual_rows([0.0, 0.0, 0.005, 0.0]), params())
 
     assert signals == []
+
+
+def test_generate_signals_emits_optional_exit_controls():
+    signals = generate_signals(
+        direct_residual_rows([0.0, 0.001, 0.002, 0.0]),
+        params(
+            max_hold_bars=8,
+            take_profit_bps=120.0,
+            stop_loss_bps=70.0,
+            trailing_stop_bps=35.0,
+        ),
+    )
+
+    assert signals[0]["max_hold_bars"] == 8
+    assert signals[0]["take_profit_bps"] == 120.0
+    assert signals[0]["stop_loss_bps"] == 70.0
+    assert signals[0]["trailing_stop_bps"] == 35.0

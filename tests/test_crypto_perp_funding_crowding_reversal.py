@@ -80,6 +80,10 @@ def test_generate_signals_fades_same_direction_funding_and_return_extremes():
             "side": "short",
             "weight": 0.25,
             "hold_bars": 3,
+            "max_hold_bars": 3,
+            "funding_pressure_bps": pytest.approx(2.0),
+            "entry_return_extension_bps": pytest.approx(100.0),
+            "signal_family": "crypto_perp_funding_crowding_reversal",
         },
         {
             "symbol": "ETH-PERP",
@@ -88,6 +92,10 @@ def test_generate_signals_fades_same_direction_funding_and_return_extremes():
             "side": "long",
             "weight": 0.25,
             "hold_bars": 3,
+            "max_hold_bars": 3,
+            "funding_pressure_bps": pytest.approx(-2.0),
+            "entry_return_extension_bps": pytest.approx(-100.0),
+            "signal_family": "crypto_perp_funding_crowding_reversal",
         },
     ]
 
@@ -131,3 +139,23 @@ def test_generate_signals_requires_complete_funding_lookback():
     bars = symbol_rows("BTC-PERP", 100.0, 101.0, 101.0, 0.0003)
 
     assert generate_signals(bars, params(min_cross_section=1, funding_lookback_events=2)) == []
+
+
+def test_generate_signals_emits_optional_exit_controls():
+    bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
+
+    signals = generate_signals(
+        bars,
+        params(
+            min_cross_section=1,
+            max_hold_bars=7,
+            take_profit_bps=150.0,
+            stop_loss_bps=80.0,
+            trailing_stop_bps=40.0,
+        ),
+    )
+
+    assert signals[0]["max_hold_bars"] == 7
+    assert signals[0]["take_profit_bps"] == 150.0
+    assert signals[0]["stop_loss_bps"] == 80.0
+    assert signals[0]["trailing_stop_bps"] == 40.0

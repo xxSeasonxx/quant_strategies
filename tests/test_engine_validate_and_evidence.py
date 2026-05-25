@@ -39,7 +39,7 @@ def test_evidence_json_is_deterministic_for_screening_result():
     second = evidence_json(build_evidence_packet(request, screening_result=screen(request)))
 
     assert first == second
-    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v1"
+    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v2"
 
 
 def test_validate_passes_profitable_frozen_candidate():

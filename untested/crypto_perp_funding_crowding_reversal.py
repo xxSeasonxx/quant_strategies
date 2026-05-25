@@ -60,7 +60,11 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
     min_abs_funding_bps = _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
     min_abs_return_bps = _non_negative_float(params.get("min_abs_return_bps", 25.0), "min_abs_return_bps")
     weight = float(params.get("weight", 1.0))
-    hold_bars = int(params.get("hold_bars", params.get("hold_minutes", 480)))
+    max_hold_bars = _positive_int(
+        params.get("max_hold_bars", params.get("hold_bars", params.get("hold_minutes", 480))),
+        "max_hold_bars",
+    )
+    exit_controls = _exit_controls(params)
 
     rows_by_symbol = _rows_by_symbol(bars)
     as_of_times = sorted(
@@ -101,12 +105,12 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
             positive_tail,
             key=lambda item: (-item["funding_pressure_bps"], -item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate["symbol"], decision_time, as_of_time, "short", weight, hold_bars))
+            signals.append(_signal(candidate, decision_time, as_of_time, "short", weight, max_hold_bars, exit_controls))
         for candidate in sorted(
             negative_tail,
             key=lambda item: (item["funding_pressure_bps"], item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate["symbol"], decision_time, as_of_time, "long", weight, hold_bars))
+            signals.append(_signal(candidate, decision_time, as_of_time, "long", weight, max_hold_bars, exit_controls))
 
     return signals
 
@@ -137,6 +141,24 @@ def _non_negative_float(value: object, name: str) -> float:
     if not math.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
     return parsed
+
+
+def _optional_positive_float(value: object, name: str) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return parsed
+
+
+def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
+    controls: dict[str, object] = {}
+    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+        value = _optional_positive_float(params.get(name), name)
+        if value is not None:
+            controls[name] = value
+    return controls
 
 
 def _rows_by_symbol(bars: Sequence[Mapping[str, object]]) -> dict[str, list[dict[str, Any]]]:
@@ -241,21 +263,28 @@ def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, param
 
 
 def _signal(
-    symbol: str,
+    candidate: dict[str, Any],
     decision_time: datetime,
     as_of_time: datetime,
     side: str,
     weight: float,
-    hold_bars: int,
+    max_hold_bars: int,
+    exit_controls: Mapping[str, object],
 ) -> dict[str, object]:
-    return {
-        "symbol": symbol,
+    payload: dict[str, object] = {
+        "symbol": candidate["symbol"],
         "decision_time": decision_time,
         "as_of_time": as_of_time,
         "side": side,
         "weight": weight,
-        "hold_bars": hold_bars,
+        "hold_bars": max_hold_bars,
+        "max_hold_bars": max_hold_bars,
+        "funding_pressure_bps": candidate["funding_pressure_bps"],
+        "entry_return_extension_bps": candidate["return_extension_bps"],
+        "signal_family": "crypto_perp_funding_crowding_reversal",
     }
+    payload.update(exit_controls)
+    return payload
 
 
 def _as_datetime(value: object) -> datetime:
