@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import numbers
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
@@ -17,6 +18,23 @@ class VectorBTProBackend:
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
+        try:
+            import pandas as pd
+        except ImportError as exc:
+            return BackendRunResult(
+                backend=self.name,
+                status="unavailable",
+                metrics={},
+                warnings=(f"pandas import failed: {exc}",),
+                unsupported_semantics=(),
+            )
+
+        try:
+            close = _close_frame(pd, rows)
+            windows = _validate_decision_windows(pd, close, decisions, config)
+        except ValueError as exc:
+            return _failed(self.name, str(exc))
+
         unsupported = _unsupported_semantics(decisions, config)
         if unsupported:
             return BackendRunResult(
@@ -28,7 +46,6 @@ class VectorBTProBackend:
             )
 
         try:
-            import pandas as pd
             import vectorbtpro as vbt
         except ImportError as exc:
             return BackendRunResult(
@@ -39,20 +56,12 @@ class VectorBTProBackend:
                 unsupported_semantics=(),
             )
 
-        try:
-            close = _close_frame(pd, rows)
-        except ValueError as exc:
-            return _failed(self.name, f"invalid_rows:{exc}")
-
         decision_symbols = tuple(dict.fromkeys(item.instrument.symbol for item in decisions))
-        missing_symbols = [symbol for symbol in decision_symbols if symbol not in close.columns]
-        if missing_symbols:
-            return _failed(self.name, f"missing_symbol:{missing_symbols[0]}")
-        if decision_symbols:
-            close = close.loc[:, list(decision_symbols)]
         if len(decision_symbols) == 1:
             symbol = decision_symbols[0]
             close = close.loc[close[symbol].notna(), [symbol]]
+        elif decision_symbols:
+            close = close.loc[:, list(decision_symbols)]
 
         long_entries = pd.DataFrame(False, index=close.index, columns=close.columns)
         long_exits = pd.DataFrame(False, index=close.index, columns=close.columns)
@@ -60,62 +69,17 @@ class VectorBTProBackend:
         short_exits = pd.DataFrame(False, index=close.index, columns=close.columns)
         size = pd.DataFrame(0.0, index=close.index, columns=close.columns)
 
-        entry_lag = _entry_lag(config)
-        exit_lag = _exit_lag(config)
-        entry_signals: set[tuple[str, Any]] = set()
-        exit_signals: set[tuple[str, Any]] = set()
-        active_windows: dict[str, list[tuple[int, int]]] = {}
-
-        for item in decisions:
-            symbol = item.instrument.symbol
-            if symbol not in close.columns:
-                return _failed(self.name, f"missing_symbol:{symbol}")
-
-            decision_idx = _index_position(pd, close.index, item.decision_time)
-            if decision_idx is None:
-                return _failed(self.name, f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
-            decision_time = close.index[decision_idx]
-            if pd.isna(close.loc[decision_time, symbol]):
-                return _failed(self.name, f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
-
-            entry_idx = decision_idx + entry_lag
-            if entry_idx >= len(close.index):
-                return _failed(self.name, f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
-
-            entry_time = close.index[entry_idx]
-            if pd.isna(close.loc[entry_time, symbol]):
-                return _failed(self.name, f"unfillable_entry:{symbol}:{entry_time.isoformat()}")
-            entry_key = (symbol, entry_time)
-            if entry_key in entry_signals:
-                return _failed(self.name, f"duplicate_entry_signal:{symbol}:{entry_time.isoformat()}")
-
-            exit_idx = entry_idx + item.exit_policy.max_hold_bars + exit_lag
-            if exit_idx >= len(close.index):
-                return _failed(self.name, f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
-
-            exit_time = close.index[exit_idx]
-            if pd.isna(close.loc[exit_time, symbol]):
-                return _failed(self.name, f"unfillable_exit:{symbol}:{exit_time.isoformat()}")
-            exit_key = (symbol, exit_time)
-            if exit_key in exit_signals:
-                return _failed(self.name, f"duplicate_exit_signal:{symbol}:{exit_time.isoformat()}")
-            for existing_entry_idx, existing_exit_idx in active_windows.get(symbol, []):
-                if entry_idx <= existing_exit_idx and exit_idx >= existing_entry_idx:
-                    return _failed(
-                        self.name,
-                        f"overlapping_decision_window:{symbol}:{entry_time.isoformat()}:{exit_time.isoformat()}",
-                    )
-
+        for window in windows:
+            item = window["decision"]
+            symbol = window["symbol"]
+            entry_time = window["entry_time"]
+            exit_time = window["exit_time"]
             if item.target.direction == "long":
                 long_entries.loc[entry_time, symbol] = True
                 long_exits.loc[exit_time, symbol] = True
             elif item.target.direction == "short":
                 short_entries.loc[entry_time, symbol] = True
                 short_exits.loc[exit_time, symbol] = True
-
-            entry_signals.add(entry_key)
-            exit_signals.add(exit_key)
-            active_windows.setdefault(symbol, []).append((entry_idx, exit_idx))
             size.loc[entry_time, symbol] = item.target.size
 
         fees = _bps_fraction(_config_value(config, "cost_model", "fee_bps_per_side", default=0.0))
@@ -135,13 +99,17 @@ class VectorBTProBackend:
         except Exception as exc:
             return _failed(self.name, f"vectorbtpro_run_failed:{exc}")
 
+        try:
+            metrics = _portfolio_metrics(portfolio)
+        except ValueError as exc:
+            return _failed(self.name, f"invalid_metrics:{exc}")
+        except Exception as exc:
+            return _failed(self.name, f"metric_extraction_failed:{exc}")
+
         return BackendRunResult(
             backend=self.name,
             status="completed",
-            metrics={
-                "net_return": _float_metric(portfolio.get_total_return()),
-                "trade_count": _int_metric(portfolio.trades.count()),
-            },
+            metrics=metrics,
             warnings=(),
             unsupported_semantics=(),
         )
@@ -173,6 +141,63 @@ def _unsupported_semantics(decisions: list[StrategyDecision], config: Any) -> tu
     if len(target_weight_symbols) > 1:
         unsupported.append("multi_asset_target_weight")
     return tuple(dict.fromkeys(unsupported))
+
+
+def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDecision], config: Any) -> list[dict[str, Any]]:
+    entry_lag = _entry_lag(config)
+    exit_lag = _exit_lag(config)
+    entry_signals: set[tuple[str, Any]] = set()
+    exit_signals: set[tuple[str, Any]] = set()
+    active_windows: dict[str, list[tuple[int, int]]] = {}
+    windows: list[dict[str, Any]] = []
+
+    for item in decisions:
+        symbol = item.instrument.symbol
+        if symbol not in close.columns:
+            raise ValueError(f"missing_symbol:{symbol}")
+
+        symbol_close = close.loc[close[symbol].notna(), [symbol]]
+        decision_idx = _index_position(pd, symbol_close.index, item.decision_time)
+        if decision_idx is None:
+            raise ValueError(f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
+
+        entry_idx = decision_idx + entry_lag
+        if entry_idx >= len(symbol_close.index):
+            raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
+
+        entry_time = symbol_close.index[entry_idx]
+        entry_key = (symbol, entry_time)
+        if entry_key in entry_signals:
+            raise ValueError(f"duplicate_entry_signal:{symbol}:{entry_time.isoformat()}")
+
+        exit_idx = entry_idx + item.exit_policy.max_hold_bars + exit_lag
+        if exit_idx >= len(symbol_close.index):
+            raise ValueError(f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
+
+        exit_time = symbol_close.index[exit_idx]
+        exit_key = (symbol, exit_time)
+        if exit_key in exit_signals:
+            raise ValueError(f"duplicate_exit_signal:{symbol}:{exit_time.isoformat()}")
+
+        for existing_entry_idx, existing_exit_idx in active_windows.get(symbol, []):
+            if entry_idx <= existing_exit_idx and exit_idx >= existing_entry_idx:
+                raise ValueError(
+                    f"overlapping_decision_window:{symbol}:{entry_time.isoformat()}:{exit_time.isoformat()}"
+                )
+
+        entry_signals.add(entry_key)
+        exit_signals.add(exit_key)
+        active_windows.setdefault(symbol, []).append((entry_idx, exit_idx))
+        windows.append(
+            {
+                "decision": item,
+                "symbol": symbol,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+            }
+        )
+
+    return windows
 
 
 def _close_frame(pd: Any, rows: list[dict[str, Any]]) -> Any:
@@ -216,7 +241,7 @@ def _index_position(pd: Any, index: Any, value: Any) -> int | None:
 
 
 def _entry_lag(config: Any) -> int:
-    return int(_config_value(config, "fill_model", "entry_lag_bars", default=0))
+    return int(_config_value(config, "fill_model", "entry_lag_bars", default=1))
 
 
 def _exit_lag(config: Any) -> int:
@@ -234,6 +259,18 @@ def _bps_fraction(value: Any) -> float:
     return float(value) / 10_000.0
 
 
+def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
+    net_return = _float_metric(portfolio.get_total_return())
+    if not math.isfinite(net_return):
+        raise ValueError(f"nonfinite_net_return:{net_return}")
+
+    trade_count = _int_metric(portfolio.trades.count())
+    if trade_count < 0:
+        raise ValueError(f"invalid_trade_count:{trade_count}")
+
+    return {"net_return": net_return, "trade_count": trade_count}
+
+
 def _float_metric(value: Any) -> float:
     if hasattr(value, "mean"):
         return float(value.mean())
@@ -242,8 +279,17 @@ def _float_metric(value: Any) -> float:
 
 def _int_metric(value: Any) -> int:
     if hasattr(value, "sum"):
-        return int(value.sum())
-    return int(value)
+        value = value.sum()
+    if isinstance(value, bool):
+        raise ValueError("invalid_trade_count:bool")
+    if isinstance(value, numbers.Integral):
+        return int(value)
+    if isinstance(value, numbers.Real):
+        float_value = float(value)
+        if not math.isfinite(float_value) or not float_value.is_integer():
+            raise ValueError(f"invalid_trade_count:{value}")
+        return int(float_value)
+    raise ValueError(f"invalid_trade_count:{value}")
 
 
 def _failed(backend: str, warning: str) -> BackendRunResult:

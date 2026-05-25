@@ -116,16 +116,25 @@ def test_vectorbtpro_backend_reports_unsupported_threshold_exits():
 def test_vectorbtpro_backend_runs_max_hold_decisions():
     pytest.importorskip("vectorbtpro")
 
-    result = VectorBTProBackend().run(
+    full_result = VectorBTProBackend().run(
         decisions=[decision()],
         rows=rows(),
         config=None,
     )
+    quarter_result = VectorBTProBackend().run(
+        decisions=[decision(size=0.25)],
+        rows=rows(),
+        config=None,
+    )
 
-    assert result.status == "completed"
-    assert result.backend == "vectorbtpro"
-    assert result.metrics["trade_count"] >= 0
-    assert "net_return" in result.metrics
+    assert full_result.status == "completed"
+    assert full_result.backend == "vectorbtpro"
+    assert full_result.metrics["trade_count"] == 1
+    assert full_result.metrics["net_return"] == pytest.approx((103.0 / 102.0) - 1.0)
+    assert quarter_result.status == "completed"
+    assert quarter_result.metrics["trade_count"] == 1
+    assert 0.0 < quarter_result.metrics["net_return"] < full_result.metrics["net_return"]
+    assert quarter_result.metrics["net_return"] == pytest.approx(full_result.metrics["net_return"] * 0.25, rel=0.05)
 
 
 def test_vectorbtpro_backend_fails_on_missing_symbol():
@@ -138,6 +147,18 @@ def test_vectorbtpro_backend_fails_on_missing_symbol():
     )
 
     assert result.status == "failed"
+    assert any("missing_symbol" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_prioritizes_missing_symbol_before_unsupported_semantics():
+    result = VectorBTProBackend().run(
+        decisions=[decision(symbol="ETH-PERP", stop_loss_bps=100.0)],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert result.unsupported_semantics == ()
     assert any("missing_symbol" in warning for warning in result.warnings)
 
 
@@ -196,6 +217,20 @@ def test_vectorbtpro_backend_fails_on_unfillable_exit():
     )
 
     assert result.status == "failed"
+    assert any("unfillable_exit" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_prioritizes_unfillable_exit_before_unsupported_fill_price():
+    config = SimpleNamespace(fill_model=SimpleNamespace(price="open"))
+
+    result = VectorBTProBackend().run(
+        decisions=[decision(max_hold_bars=10)],
+        rows=rows(),
+        config=config,
+    )
+
+    assert result.status == "failed"
+    assert result.unsupported_semantics == ()
     assert any("unfillable_exit" in warning for warning in result.warnings)
 
 
@@ -267,6 +302,7 @@ def test_vectorbtpro_backend_fails_on_duplicate_entry_signal():
 
 def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
     pytest.importorskip("vectorbtpro")
+    config = SimpleNamespace(fill_model=SimpleNamespace(entry_lag_bars=0, exit_lag_bars=0))
 
     result = VectorBTProBackend().run(
         decisions=[
@@ -277,7 +313,7 @@ def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
             ),
         ],
         rows=rows(),
-        config=None,
+        config=config,
     )
 
     assert result.status == "failed"
@@ -286,6 +322,7 @@ def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
 
 def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
     pytest.importorskip("vectorbtpro")
+    config = SimpleNamespace(fill_model=SimpleNamespace(entry_lag_bars=0, exit_lag_bars=0))
 
     result = VectorBTProBackend().run(
         decisions=[
@@ -296,7 +333,7 @@ def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
             ),
         ],
         rows=overlapping_window_rows(),
-        config=None,
+        config=config,
     )
 
     assert result.status == "failed"
@@ -354,6 +391,19 @@ def test_vectorbtpro_backend_fails_on_nonfinite_close(close):
     assert any("nonfinite_close" in warning for warning in result.warnings)
 
 
+def test_vectorbtpro_backend_fails_on_duplicate_input_rows():
+    bad_rows = rows() + [{"symbol": "BTC-PERP", "timestamp": AS_OF, "close": 100.1}]
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=bad_rows,
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("duplicate_rows" in warning for warning in result.warnings)
+
+
 def test_vectorbtpro_backend_passes_target_weight_size_to_vectorbtpro(monkeypatch):
     vbt = pytest.importorskip("vectorbtpro")
     captured_kwargs = {}
@@ -383,4 +433,81 @@ def test_vectorbtpro_backend_passes_target_weight_size_to_vectorbtpro(monkeypatc
     assert result.status == "completed"
     assert "size" in captured_kwargs
     assert "size_type" in captured_kwargs
-    assert captured_kwargs["size"].loc[DECISION, "BTC-PERP"] == 0.25
+    assert captured_kwargs["size"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "BTC-PERP"] == 0.25
+
+
+@pytest.mark.parametrize("net_return", [float("nan"), float("inf")])
+def test_vectorbtpro_backend_fails_on_nonfinite_net_return(monkeypatch, net_return):
+    vbt = pytest.importorskip("vectorbtpro")
+
+    class FakeTrades:
+        def count(self):
+            return 1
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return net_return
+
+    monkeypatch.setattr(vbt.Portfolio, "from_signals", lambda *args, **kwargs: FakePortfolio())
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("invalid_metrics:nonfinite_net_return" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("trade_count", [-1, 1.5])
+def test_vectorbtpro_backend_fails_on_invalid_trade_count(monkeypatch, trade_count):
+    vbt = pytest.importorskip("vectorbtpro")
+
+    class FakeTrades:
+        def count(self):
+            return trade_count
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return 0.05
+
+    monkeypatch.setattr(vbt.Portfolio, "from_signals", lambda *args, **kwargs: FakePortfolio())
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("invalid_metrics:invalid_trade_count" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_fails_when_metric_extraction_raises(monkeypatch):
+    vbt = pytest.importorskip("vectorbtpro")
+
+    class FakeTrades:
+        def count(self):
+            return 1
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            raise RuntimeError("metrics unavailable")
+
+    monkeypatch.setattr(vbt.Portfolio, "from_signals", lambda *args, **kwargs: FakePortfolio())
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("metric_extraction_failed:metrics unavailable" in warning for warning in result.warnings)
