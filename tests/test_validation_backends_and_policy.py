@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from quant_strategies.validation.backends import BackendRunResult, FakeBackend, get_backend
 from quant_strategies.validation.policy import classify_validation
 
@@ -96,3 +98,86 @@ def test_policy_hard_no_for_negative_net_return():
 
     assert decision.decision == "hard_no"
     assert "negative_net_return" in decision.reasons
+
+
+def test_policy_hard_no_for_no_backend_results():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "no_backend_results" in decision.reasons
+
+
+def test_policy_hard_no_for_non_completed_backend_status():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            BackendRunResult(
+                backend="fake",
+                status="failed",
+                metrics={},
+                warnings=(),
+                unsupported_semantics=(),
+            )
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "fake_failed" in decision.reasons
+
+
+def test_policy_hard_no_for_insufficient_trades():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            BackendRunResult(
+                backend="fake",
+                status="completed",
+                metrics={"net_return": 0.03, "trade_count": 5},
+                warnings=(),
+                unsupported_semantics=(),
+            )
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "insufficient_trades" in decision.reasons
+
+
+@pytest.mark.parametrize(
+    "metrics",
+    [
+        {},
+        {"net_return": 0.03},
+        {"trade_count": 50},
+        {"net_return": "nan", "trade_count": 50},
+        {"net_return": float("nan"), "trade_count": 50},
+        {"net_return": True, "trade_count": 50},
+        {"net_return": "abc", "trade_count": 50},
+        {"net_return": 0.03, "trade_count": True},
+        {"net_return": 0.03, "trade_count": float("inf")},
+        {"net_return": 0.03, "trade_count": "abc"},
+    ],
+)
+def test_policy_hard_no_for_invalid_backend_metrics(metrics):
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            BackendRunResult(
+                backend="fake",
+                status="completed",
+                metrics=metrics,
+                warnings=(),
+                unsupported_semantics=(),
+            )
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "invalid_backend_metrics" in decision.reasons
