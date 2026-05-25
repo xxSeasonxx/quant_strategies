@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
@@ -43,6 +44,13 @@ class VectorBTProBackend:
         except ValueError as exc:
             return _failed(self.name, f"invalid_rows:{exc}")
 
+        decision_symbols = tuple(dict.fromkeys(item.instrument.symbol for item in decisions))
+        missing_symbols = [symbol for symbol in decision_symbols if symbol not in close.columns]
+        if missing_symbols:
+            return _failed(self.name, f"missing_symbol:{missing_symbols[0]}")
+        if decision_symbols:
+            close = close.loc[:, list(decision_symbols)]
+
         long_entries = pd.DataFrame(False, index=close.index, columns=close.columns)
         long_exits = pd.DataFrame(False, index=close.index, columns=close.columns)
         short_entries = pd.DataFrame(False, index=close.index, columns=close.columns)
@@ -51,6 +59,8 @@ class VectorBTProBackend:
 
         entry_lag = _entry_lag(config)
         exit_lag = _exit_lag(config)
+        entry_signals: set[tuple[str, Any]] = set()
+        exit_signals: set[tuple[str, Any]] = set()
 
         for item in decisions:
             symbol = item.instrument.symbol
@@ -68,6 +78,9 @@ class VectorBTProBackend:
             entry_time = close.index[entry_idx]
             if pd.isna(close.loc[entry_time, symbol]):
                 return _failed(self.name, f"unfillable_entry:{symbol}:{entry_time.isoformat()}")
+            entry_key = (symbol, entry_time)
+            if entry_key in entry_signals:
+                return _failed(self.name, f"duplicate_entry_signal:{symbol}:{entry_time.isoformat()}")
 
             exit_idx = entry_idx + item.exit_policy.max_hold_bars + exit_lag
             if exit_idx >= len(close.index):
@@ -76,6 +89,9 @@ class VectorBTProBackend:
             exit_time = close.index[exit_idx]
             if pd.isna(close.loc[exit_time, symbol]):
                 return _failed(self.name, f"unfillable_exit:{symbol}:{exit_time.isoformat()}")
+            exit_key = (symbol, exit_time)
+            if exit_key in exit_signals:
+                return _failed(self.name, f"duplicate_exit_signal:{symbol}:{exit_time.isoformat()}")
 
             if item.target.direction == "long":
                 long_entries.loc[entry_time, symbol] = True
@@ -84,6 +100,8 @@ class VectorBTProBackend:
                 short_entries.loc[entry_time, symbol] = True
                 short_exits.loc[exit_time, symbol] = True
 
+            entry_signals.add(entry_key)
+            exit_signals.add(exit_key)
             size.loc[entry_time, symbol] = item.target.size
 
         fees = _bps_fraction(_config_value(config, "cost_model", "fee_bps_per_side", default=0.0))
@@ -129,6 +147,13 @@ def _unsupported_semantics(decisions: list[StrategyDecision]) -> tuple[str, ...]
             unsupported.append("non_target_weight_sizing")
         if item.target.direction == "flat":
             unsupported.append("flat_target")
+    target_weight_symbols = {
+        item.instrument.symbol
+        for item in decisions
+        if item.target.sizing_kind == "target_weight" and item.target.direction != "flat"
+    }
+    if len(target_weight_symbols) > 1:
+        unsupported.append("multi_asset_target_weight")
     return tuple(dict.fromkeys(unsupported))
 
 
@@ -145,6 +170,8 @@ def _close_frame(pd: Any, rows: list[dict[str, Any]]) -> Any:
             raise ValueError("empty_symbol")
         if pd.isna(timestamp):
             raise ValueError(f"invalid_timestamp:{row.get('timestamp')}")
+        if not math.isfinite(close):
+            raise ValueError(f"nonfinite_close:{symbol}:{timestamp.isoformat()}")
         records.append({"symbol": symbol, "timestamp": timestamp, "close": close})
 
     if not records:

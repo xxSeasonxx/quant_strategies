@@ -30,6 +30,23 @@ def rows():
     ]
 
 
+def multi_symbol_rows():
+    return rows() + [
+        {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 200.0},
+        {"symbol": "ETH-PERP", "timestamp": DECISION, "close": 200.0},
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "close": 200.0,
+        },
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "close": 200.0,
+        },
+    ]
+
+
 def decision(
     *,
     symbol: str = "BTC-PERP",
@@ -141,6 +158,71 @@ def test_vectorbtpro_backend_reports_unsupported_non_target_weight_sizing():
 
     assert result.status == "unsupported"
     assert "non_target_weight_sizing" in result.unsupported_semantics
+
+
+def test_vectorbtpro_backend_reports_unsupported_multi_asset_target_weights():
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(symbol="BTC-PERP", size=0.9),
+            decision(symbol="ETH-PERP", size=0.1),
+        ],
+        rows=multi_symbol_rows(),
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert "multi_asset_target_weight" in result.unsupported_semantics
+
+
+def test_vectorbtpro_backend_fails_on_duplicate_entry_signal():
+    pytest.importorskip("vectorbtpro")
+
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(size=0.25),
+            decision(size=0.50),
+        ],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("duplicate_entry_signal" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
+    pytest.importorskip("vectorbtpro")
+
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(max_hold_bars=2),
+            decision(
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                max_hold_bars=1,
+            ),
+        ],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("duplicate_exit_signal" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize("close", [float("nan"), float("inf"), float("-inf")])
+def test_vectorbtpro_backend_fails_on_nonfinite_close(close):
+    pytest.importorskip("vectorbtpro")
+    bad_rows = rows()
+    bad_rows[0] = {"symbol": "BTC-PERP", "timestamp": AS_OF, "close": close}
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=bad_rows,
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("nonfinite_close" in warning for warning in result.warnings)
 
 
 def test_vectorbtpro_backend_passes_target_weight_size_to_vectorbtpro(monkeypatch):
