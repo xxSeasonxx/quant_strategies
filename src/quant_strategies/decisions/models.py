@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 InstrumentKind = Literal["equity_or_etf", "fx_pair", "crypto_perp"]
@@ -14,7 +16,7 @@ SizingKind = Literal["target_weight", "notional"]
 
 
 class DecisionModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
 
 def _stripped_non_empty(value: str, field_name: str) -> str:
@@ -77,7 +79,7 @@ class StrategyDecision(DecisionModel):
     as_of_time: datetime
     target: PositionTarget
     exit_policy: ExitPolicy
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("strategy_id")
     @classmethod
@@ -97,4 +99,9 @@ class StrategyDecision(DecisionModel):
             json.dumps(self.metadata, sort_keys=True, allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("metadata must be JSON-compatible") from exc
+        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         return self
+
+    @field_serializer("metadata")
+    def serialize_metadata(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return dict(value)

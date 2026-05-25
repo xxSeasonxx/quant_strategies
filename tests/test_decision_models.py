@@ -84,9 +84,19 @@ def test_non_flat_target_must_have_positive_size():
         PositionTarget(direction="short", sizing_kind="target_weight", size=0.0)
 
 
+def test_position_target_rejects_coerced_size():
+    with pytest.raises(ValidationError):
+        PositionTarget(direction="long", sizing_kind="target_weight", size="1.25")
+
+
 def test_exit_policy_rejects_non_positive_thresholds():
     with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
         ExitPolicy(max_hold_bars=5, stop_loss_bps=0.0)
+
+
+def test_exit_policy_rejects_coerced_max_hold_bars():
+    with pytest.raises(ValidationError):
+        ExitPolicy(max_hold_bars="5")
 
 
 @pytest.mark.parametrize(
@@ -125,3 +135,18 @@ def test_metadata_rejects_non_standard_json_nan():
             exit_policy=ExitPolicy(max_hold_bars=5),
             metadata={"bad": float("nan")},
         )
+
+
+def test_metadata_is_immutable_after_construction():
+    decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+        metadata={"x": 1},
+    )
+
+    with pytest.raises(TypeError):
+        decision.metadata["x"] = 2
