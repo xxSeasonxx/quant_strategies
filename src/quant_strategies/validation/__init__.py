@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -7,12 +8,13 @@ from typing import Any
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.runner import data_loader
 from quant_strategies.runner.config import default_repo_root
+from quant_strategies.runner.errors import RunnerError
 from quant_strategies.validation.artifacts import (
     create_validation_result_dir,
     write_json_artifact,
     write_text_artifact,
 )
-from quant_strategies.validation.backends import ValidationBackend, get_backend
+from quant_strategies.validation.backends import BackendRunResult, ValidationBackend, get_backend
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.data_audit import audit_decision_rows
 from quant_strategies.validation.policy import PromotionDecision, classify_validation
@@ -25,6 +27,12 @@ class ValidationRunResult:
     result_dir: Path | None
     decision: PromotionDecision
     message: str
+
+
+@dataclass(frozen=True)
+class WindowBackendRunResult:
+    window_id: str
+    result: BackendRunResult
 
 
 def run_validation(
@@ -46,31 +54,47 @@ def run_validation(
 
     for window in config.windows:
         run_config = config.to_run_config(window, results_dir=result_dir / "runner_smoke" / window.id)
-        loaded = data_loader.load_data(run_config)
-        if not loaded.rows:
+        try:
+            loaded = data_loader.load_data(run_config)
+        except RunnerError as exc:
             data_audits.append(
-                {
-                    "window_id": window.id,
-                    "row_count": 0,
-                    "decision_count": 0,
-                    "passed": False,
-                    "violations": ("no_rows_loaded",),
-                }
+                _failed_data_audit(
+                    window.id,
+                    row_count=0,
+                    decision_count=0,
+                    violations=(f"data_load_failed: {exc}",),
+                )
             )
             continue
-        decisions = generate_decisions(loaded.rows, config.params)
+
+        decision_output = generate_decisions(loaded.rows, config.params)
+        decisions, violations = _validate_decisions(decision_output, strategy_id=config.strategy_id)
+        if violations:
+            data_audits.append(
+                _failed_data_audit(
+                    window.id,
+                    row_count=len(loaded.rows),
+                    decision_count=len(decisions),
+                    violations=violations,
+                )
+            )
+            continue
+
         all_decisions.extend(decisions)
         audit = audit_decision_rows(loaded.rows, decisions)
         data_audits.append({"window_id": window.id, **audit.model_dump(mode="json")})
         if audit.passed:
             backend_results.append(
-                selected_backend.run(decisions=decisions, rows=loaded.rows, config=config)
+                WindowBackendRunResult(
+                    window_id=window.id,
+                    result=selected_backend.run(decisions=decisions, rows=loaded.rows, config=config),
+                )
             )
 
     data_passed = all(audit["passed"] for audit in data_audits)
     decision = classify_validation(
         data_passed=data_passed,
-        backend_results=backend_results,
+        backend_results=[item.result for item in backend_results],
         min_trades=min_trades,
     )
     _write_validation_artifacts(
@@ -88,12 +112,56 @@ def run_validation(
     )
 
 
+def _failed_data_audit(
+    window_id: str,
+    *,
+    row_count: int,
+    decision_count: int,
+    violations: tuple[str, ...],
+) -> dict[str, Any]:
+    return {
+        "window_id": window_id,
+        "row_count": row_count,
+        "decision_count": decision_count,
+        "passed": False,
+        "violations": violations,
+    }
+
+
+def _validate_decisions(
+    output: object,
+    *,
+    strategy_id: str,
+) -> tuple[list[StrategyDecision], tuple[str, ...]]:
+    if (
+        isinstance(output, str | bytes | bytearray)
+        or isinstance(output, Mapping)
+        or not isinstance(output, Sequence)
+    ):
+        return [], ("invalid_decision_output",)
+
+    decisions: list[StrategyDecision] = []
+    violations: list[str] = []
+    for index, item in enumerate(output):
+        if not isinstance(item, StrategyDecision):
+            violations.append(f"invalid_decision_output[{index}]")
+            continue
+        if item.strategy_id != strategy_id:
+            violations.append(
+                f"decision_strategy_id_mismatch[{index}]: expected {strategy_id}, got {item.strategy_id}"
+            )
+            continue
+        decisions.append(item)
+
+    return decisions, tuple(violations)
+
+
 def _write_validation_artifacts(
     *,
     result_dir: Path,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
-    backend_results: list[Any],
+    backend_results: list[WindowBackendRunResult],
     decision: PromotionDecision,
 ) -> None:
     decision_lines = [item.model_dump_json() for item in decisions]
@@ -102,7 +170,12 @@ def _write_validation_artifacts(
     write_json_artifact(
         result_dir,
         "backend_runs/summary.json",
-        {"results": [result.model_dump(mode="json") for result in backend_results]},
+        {
+            "results": [
+                {"window_id": item.window_id, "result": item.result.model_dump(mode="json")}
+                for item in backend_results
+            ]
+        },
     )
     write_json_artifact(
         result_dir,
