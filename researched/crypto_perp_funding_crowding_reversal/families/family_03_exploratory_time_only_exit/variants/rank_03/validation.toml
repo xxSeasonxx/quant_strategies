@@ -1,5 +1,7 @@
 strategy_path = "researched/crypto_perp_funding_crowding_reversal/families/family_03_exploratory_time_only_exit/variants/rank_03/strategy.py"
 strategy_id = "crypto_perp_funding_crowding_reversal"
+# VectorBT v1 may report multi_asset_target_weight for this full cross-sectional
+# package until portfolio-level target-weight validation is implemented.
 backend = "vectorbtpro"
 
 [[windows]]
