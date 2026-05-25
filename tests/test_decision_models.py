@@ -45,6 +45,18 @@ def test_strategy_decision_requires_timezone_aware_times():
         )
 
 
+def test_strategy_decision_requires_timezone_aware_as_of_time():
+    with pytest.raises(ValidationError, match="as_of_time must be timezone-aware"):
+        StrategyDecision(
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=DECISION_TIME,
+            as_of_time=datetime(2026, 1, 2, 12, 0),
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=5),
+        )
+
+
 def test_strategy_decision_rejects_lookahead_as_of_time():
     with pytest.raises(ValidationError, match="as_of_time must be on or before decision_time"):
         StrategyDecision(
@@ -77,6 +89,18 @@ def test_exit_policy_rejects_non_positive_thresholds():
         ExitPolicy(max_hold_bars=5, stop_loss_bps=0.0)
 
 
+@pytest.mark.parametrize(
+    "thresholds",
+    [
+        {"stop_loss_bps": float("inf")},
+        {"take_profit_bps": float("nan")},
+    ],
+)
+def test_exit_policy_rejects_non_finite_thresholds(thresholds):
+    with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
+        ExitPolicy(max_hold_bars=5, **thresholds)
+
+
 def test_metadata_must_be_json_compatible():
     with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
         StrategyDecision(
@@ -87,4 +111,17 @@ def test_metadata_must_be_json_compatible():
             target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
             exit_policy=ExitPolicy(max_hold_bars=5),
             metadata={"bad": {1, 2, 3}},
+        )
+
+
+def test_metadata_rejects_non_standard_json_nan():
+    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
+        StrategyDecision(
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=DECISION_TIME,
+            as_of_time=AS_OF_TIME,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=5),
+            metadata={"bad": float("nan")},
         )
