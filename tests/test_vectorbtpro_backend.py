@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -210,6 +211,60 @@ def test_vectorbtpro_backend_fails_on_unfillable_exit():
 
     assert result.status == "failed"
     assert any("unfillable_exit" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("entry_lag_bars", -1),
+        ("entry_lag_bars", 1.5),
+        ("entry_lag_bars", float("nan")),
+        ("entry_lag_bars", float("inf")),
+        ("entry_lag_bars", "1"),
+        ("entry_lag_bars", True),
+        ("exit_lag_bars", -1),
+        ("exit_lag_bars", 0.5),
+        ("exit_lag_bars", float("-inf")),
+        ("exit_lag_bars", False),
+    ],
+)
+def test_vectorbtpro_backend_fails_on_invalid_fill_lag(field, value):
+    config = {"fill_model": {"entry_lag_bars": 1, "exit_lag_bars": 0, field: value}}
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=config,
+    )
+
+    assert result.status == "failed"
+    assert any("invalid_fill_lag" in warning for warning in result.warnings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("fee_bps_per_side", -0.1),
+        ("fee_bps_per_side", float("nan")),
+        ("fee_bps_per_side", float("inf")),
+        ("fee_bps_per_side", True),
+        ("fee_bps_per_side", "1.0"),
+        ("slippage_bps_per_side", -0.1),
+        ("slippage_bps_per_side", float("-inf")),
+        ("slippage_bps_per_side", False),
+    ],
+)
+def test_vectorbtpro_backend_fails_on_invalid_cost_bps(field, value):
+    config = {"cost_model": {"fee_bps_per_side": 0.0, "slippage_bps_per_side": 0.0, field: value}}
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=config,
+    )
+
+    assert result.status == "failed"
+    assert any("invalid_cost_bps" in warning for warning in result.warnings)
 
 
 def test_vectorbtpro_backend_prioritizes_unfillable_exit_before_unsupported_fill_price():
@@ -489,6 +544,23 @@ def test_vectorbtpro_backend_passes_target_weight_size_to_vectorbtpro(monkeypatc
     assert "size" in captured_kwargs
     assert "size_type" in captured_kwargs
     assert captured_kwargs["size"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "BTC-PERP"] == 0.25
+
+
+def test_vectorbtpro_backend_reports_vectorbtpro_run_failure(monkeypatch):
+    def from_signals(*args, **kwargs):
+        raise RuntimeError("simulation failed")
+
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=from_signals))
+    monkeypatch.setitem(sys.modules, "vectorbtpro", fake_vbt)
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("vectorbtpro_run_failed:simulation failed" in warning for warning in result.warnings)
 
 
 @pytest.mark.parametrize("net_return", [float("nan"), float("inf")])

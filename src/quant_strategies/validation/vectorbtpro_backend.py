@@ -33,6 +33,8 @@ class VectorBTProBackend:
         try:
             close = _close_frame(pd, rows)
             windows = _validate_decision_windows(pd, close, decisions, config)
+            fees = _cost_bps_fraction(config, "fee_bps_per_side")
+            slippage = _cost_bps_fraction(config, "slippage_bps_per_side")
         except ValueError as exc:
             return _failed(self.name, str(exc))
 
@@ -83,8 +85,6 @@ class VectorBTProBackend:
                 short_exits.loc[exit_time, symbol] = True
             size.loc[entry_time, symbol] = item.target.size
 
-        fees = _bps_fraction(_config_value(config, "cost_model", "fee_bps_per_side", default=0.0))
-        slippage = _bps_fraction(_config_value(config, "cost_model", "slippage_bps_per_side", default=0.0))
         try:
             portfolio = vbt.Portfolio.from_signals(
                 close,
@@ -246,11 +246,11 @@ def _index_position(pd: Any, index: Any, value: Any) -> int | None:
 
 
 def _entry_lag(config: Any) -> int:
-    return int(_config_value(config, "fill_model", "entry_lag_bars", default=1))
+    return _fill_lag(config, "entry_lag_bars", default=1)
 
 
 def _exit_lag(config: Any) -> int:
-    return int(_config_value(config, "fill_model", "exit_lag_bars", default=0))
+    return _fill_lag(config, "exit_lag_bars", default=0)
 
 
 def _config_value(config: Any, section: str, field: str, *, default: Any) -> Any:
@@ -265,8 +265,24 @@ def _config_value(config: Any, section: str, field: str, *, default: Any) -> Any
     return getattr(section_value, field, default)
 
 
-def _bps_fraction(value: Any) -> float:
-    return float(value) / 10_000.0
+def _fill_lag(config: Any, field: str, *, default: int) -> int:
+    value = _config_value(config, "fill_model", field, default=default)
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"invalid_fill_lag:{field}:{value}")
+    float_value = float(value)
+    if not math.isfinite(float_value) or not float_value.is_integer() or float_value < 0.0:
+        raise ValueError(f"invalid_fill_lag:{field}:{value}")
+    return int(float_value)
+
+
+def _cost_bps_fraction(config: Any, field: str) -> float:
+    value = _config_value(config, "cost_model", field, default=0.0)
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"invalid_cost_bps:{field}:{value}")
+    float_value = float(value)
+    if not math.isfinite(float_value) or float_value < 0.0:
+        raise ValueError(f"invalid_cost_bps:{field}:{value}")
+    return float_value / 10_000.0
 
 
 def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
