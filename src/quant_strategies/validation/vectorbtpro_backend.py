@@ -182,7 +182,6 @@ def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDeci
             raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
 
         entry_time = symbol_close.index[entry_idx]
-        funding_entry_time = symbol_close.index[entry_idx - 1] if entry_idx > 0 else entry_time
         entry_key = (symbol, entry_time)
         if entry_key in entry_signals:
             raise ValueError(f"duplicate_entry_signal:{symbol}:{entry_time.isoformat()}")
@@ -210,7 +209,6 @@ def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDeci
                 "decision": item,
                 "symbol": symbol,
                 "entry_time": entry_time,
-                "funding_entry_time": funding_entry_time,
                 "exit_time": exit_time,
             }
         )
@@ -330,7 +328,7 @@ def _funding_adjusted_metrics(
         funding_return += funding_return_for_window(
             rows,
             symbol=window["symbol"],
-            entry_time=window["funding_entry_time"],
+            entry_time=window["entry_time"],
             exit_time=window["exit_time"],
             direction=decision.target.direction,
             weight=decision.target.size,

@@ -129,14 +129,14 @@ def funding_rows():
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
             "close": 102.0,
-            "funding_timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-            "funding_rate": 0.0003,
-            "has_funding_event": True,
         },
         {
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
             "close": 103.0,
+            "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "funding_rate": 0.0003,
+            "has_funding_event": True,
         },
     ]
 
@@ -172,7 +172,7 @@ def test_vectorbtpro_backend_adds_funding_return_for_crypto_perp_rows(monkeypatc
 def test_vectorbtpro_backend_fails_on_incomplete_funding_event(monkeypatch):
     install_fake_vectorbtpro(monkeypatch, total_return=0.01, trade_count=1)
     bad_rows = funding_rows()
-    bad_rows[2] = {**bad_rows[2], "funding_rate": None}
+    bad_rows[3] = {**bad_rows[3], "funding_rate": None}
 
     result = VectorBTProBackend().run(
         decisions=[decision()],
