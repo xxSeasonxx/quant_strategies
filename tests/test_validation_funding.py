@@ -85,6 +85,24 @@ def test_funding_window_is_entry_exclusive_and_exit_inclusive():
     assert result == pytest.approx(0.0030)
 
 
+def test_funding_observables_without_event_flag_do_not_create_cashflow():
+    rows = [
+        row(1, funding_rate=0.0020, funding_minute=1, has_funding_event=False),
+        row(2, funding_rate=0.0030, funding_minute=2, has_funding_event=True),
+    ]
+
+    result = funding_return_for_window(
+        rows,
+        symbol="BTC-PERP",
+        entry_time=START,
+        exit_time=START + timedelta(minutes=2),
+        direction="short",
+        weight=1.0,
+    )
+
+    assert result == pytest.approx(0.0030)
+
+
 def test_duplicate_matching_funding_events_are_counted_once():
     rows = [
         row(1, funding_rate=0.0002, funding_minute=1, has_funding_event=True),

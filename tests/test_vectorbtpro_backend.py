@@ -169,6 +169,26 @@ def test_vectorbtpro_backend_adds_funding_return_for_crypto_perp_rows(monkeypatc
     assert result.metrics["net_return"] == pytest.approx(0.0097)
 
 
+def test_vectorbtpro_backend_ignores_non_event_funding_observables(monkeypatch):
+    install_fake_vectorbtpro(monkeypatch, total_return=0.01, trade_count=1)
+    observable_rows = funding_rows()
+    observable_rows[3] = {
+        **observable_rows[3],
+        "has_funding_event": False,
+    }
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=observable_rows,
+        config=SimpleNamespace(data=SimpleNamespace(kind="crypto_perp_funding")),
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["price_cost_return"] == pytest.approx(0.01)
+    assert result.metrics["funding_return"] == pytest.approx(0.0)
+    assert result.metrics["net_return"] == pytest.approx(0.01)
+
+
 def test_vectorbtpro_backend_fails_on_incomplete_funding_event(monkeypatch):
     install_fake_vectorbtpro(monkeypatch, total_return=0.01, trade_count=1)
     bad_rows = funding_rows()

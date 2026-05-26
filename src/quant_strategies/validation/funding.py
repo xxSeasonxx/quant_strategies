@@ -37,7 +37,7 @@ def funding_return_for_window(
 
     funding_rates_by_time: dict[datetime, float] = {}
     for row in rows:
-        if row.get("symbol") != symbol or not _has_funding_event_fields(row):
+        if row.get("symbol") != symbol or row.get("has_funding_event") is not True:
             continue
 
         funding_timestamp = _funding_timestamp(row)
@@ -55,14 +55,6 @@ def funding_return_for_window(
 
     side_multiplier = 1 if direction == "long" else -1
     return sum(-side_multiplier * rate for rate in funding_rates_by_time.values()) * numeric_weight
-
-
-def _has_funding_event_fields(row: Mapping[str, object]) -> bool:
-    return (
-        row.get("has_funding_event") is True
-        or row.get("funding_rate") is not None
-        or row.get("funding_timestamp") is not None
-    )
 
 
 def _funding_timestamp(row: Mapping[str, object]) -> datetime:
