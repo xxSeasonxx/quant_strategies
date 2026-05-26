@@ -54,6 +54,11 @@ class VectorBTProBackend:
             )
 
         try:
+            max_gross_target_weight = _validate_portfolio_target_weights(windows)
+        except ValueError as exc:
+            return _failed(self.name, str(exc))
+
+        try:
             import vectorbtpro as vbt
         except ImportError as exc:
             return BackendRunResult(
@@ -101,6 +106,8 @@ class VectorBTProBackend:
                 slippage=slippage,
                 size=size,
                 size_type="valuepercent",
+                cash_sharing=True,
+                group_by=True,
             )
         except Exception as exc:
             return _failed(self.name, f"vectorbtpro_run_failed:{exc}")
@@ -117,6 +124,11 @@ class VectorBTProBackend:
             metrics = _funding_adjusted_metrics(metrics, rows, windows, config)
         except FundingEventError as exc:
             return _failed(self.name, f"invalid_funding_events:{exc}")
+        metrics = {
+            **metrics,
+            "portfolio_target_weight_model": "vectorbtpro_valuepercent_cash_sharing",
+            "max_gross_target_weight": max_gross_target_weight,
+        }
 
         return BackendRunResult(
             backend=self.name,
@@ -149,14 +161,21 @@ def _unsupported_semantics(
             unsupported.append("leveraged_target_weight")
         if item.target.direction == "flat":
             unsupported.append("flat_target")
-    target_weight_symbols = {
-        item.instrument.symbol
-        for item in decisions
-        if item.target.sizing_kind == "target_weight" and item.target.direction != "flat"
-    }
-    if len(target_weight_symbols) > 1:
-        unsupported.append("multi_asset_target_weight")
     return tuple(dict.fromkeys(unsupported))
+
+
+def _validate_portfolio_target_weights(windows: list[dict[str, Any]]) -> float:
+    max_gross = 0.0
+    for current in windows:
+        timestamp = current["entry_time"]
+        gross = 0.0
+        for window in windows:
+            if window["entry_time"] <= timestamp <= window["exit_time"]:
+                gross += abs(float(window["decision"].target.size))
+        max_gross = max(max_gross, gross)
+        if gross > 1.0 + 1e-12:
+            raise ValueError(f"portfolio_target_weight_exceeds_one:{timestamp.isoformat()}:{gross}")
+    return max_gross
 
 
 def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDecision], config: Any) -> list[dict[str, Any]]:

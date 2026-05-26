@@ -89,6 +89,7 @@ def decision(
     symbol: str = "BTC-PERP",
     decision_time: datetime = DECISION,
     max_hold_bars: int = 1,
+    direction: str = "long",
     sizing_kind: str = "target_weight",
     size: float = 1.0,
     **exit_kwargs,
@@ -98,7 +99,7 @@ def decision(
         instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
         decision_time=decision_time,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="long", sizing_kind=sizing_kind, size=size),
+        target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
         exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_kwargs),
     )
 
@@ -409,18 +410,93 @@ def test_vectorbtpro_backend_reports_unsupported_leveraged_target_weight():
     assert "leveraged_target_weight" in result.unsupported_semantics
 
 
-def test_vectorbtpro_backend_reports_unsupported_multi_asset_target_weights():
+def test_vectorbtpro_backend_reports_unsupported_flat_target():
+    result = VectorBTProBackend().run(
+        decisions=[decision(direction="flat", size=0.0)],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert "flat_target" in result.unsupported_semantics
+
+
+def test_vectorbtpro_backend_runs_conservative_multi_asset_target_weights(monkeypatch):
+    captured = {}
+
+    class FakeTrades:
+        def count(self):
+            return 2
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return 0.05
+
+    def from_signals(close, **kwargs):
+        captured["close"] = close
+        captured.update(kwargs)
+        return FakePortfolio()
+
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda *args, **kwargs: None))
+    monkeypatch.setitem(sys.modules, "vectorbtpro", fake_vbt)
+    monkeypatch.setattr(fake_vbt.Portfolio, "from_signals", from_signals)
+
     result = VectorBTProBackend().run(
         decisions=[
-            decision(symbol="BTC-PERP", size=0.9),
-            decision(symbol="ETH-PERP", size=0.1),
+            decision(symbol="BTC-PERP", size=0.6),
+            decision(symbol="ETH-PERP", size=0.4),
         ],
         rows=multi_symbol_rows(),
         config=None,
     )
 
-    assert result.status == "unsupported"
-    assert "multi_asset_target_weight" in result.unsupported_semantics
+    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    assert result.status == "completed"
+    assert result.unsupported_semantics == ()
+    assert captured["size_type"] == "valuepercent"
+    assert captured["cash_sharing"] is True
+    assert captured["group_by"] is True
+    assert captured["size"].loc[entry_time, "BTC-PERP"] == pytest.approx(0.6)
+    assert captured["size"].loc[entry_time, "ETH-PERP"] == pytest.approx(0.4)
+    assert result.metrics["portfolio_target_weight_model"] == "vectorbtpro_valuepercent_cash_sharing"
+    assert result.metrics["max_gross_target_weight"] == pytest.approx(1.0)
+
+
+def test_vectorbtpro_backend_fails_when_simultaneous_portfolio_target_weight_exceeds_one():
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(symbol="BTC-PERP", size=0.7),
+            decision(symbol="ETH-PERP", direction="short", size=0.4),
+        ],
+        rows=multi_symbol_rows(),
+        config=None,
+    )
+
+    assert result.status == "failed"
+    assert any("portfolio_target_weight_exceeds_one" in warning for warning in result.warnings)
+
+
+def test_vectorbtpro_backend_fails_when_staggered_active_portfolio_target_weight_exceeds_one():
+    config = SimpleNamespace(fill_model=SimpleNamespace(entry_lag_bars=0, exit_lag_bars=0))
+
+    result = VectorBTProBackend().run(
+        decisions=[
+            decision(symbol="BTC-PERP", decision_time=AS_OF, max_hold_bars=3, size=0.6),
+            decision(
+                symbol="ETH-PERP",
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                max_hold_bars=1,
+                size=0.5,
+            ),
+        ],
+        rows=multi_symbol_rows(),
+        config=config,
+    )
+
+    assert result.status == "failed"
+    assert any("portfolio_target_weight_exceeds_one" in warning for warning in result.warnings)
 
 
 def test_vectorbtpro_backend_fails_on_duplicate_entry_signal():
