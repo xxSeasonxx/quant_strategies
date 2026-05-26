@@ -146,9 +146,10 @@ unsupported instrument or exit semantics required by the candidate
 ```
 
 Backend adapters must either honor the typed decision semantics or reject them
-explicitly. In v1, `target_weight` sizing is supported and must affect the
-backend run. Any unsupported sizing kind must be reported as unsupported rather
-than silently simulated with a default.
+explicitly. In v1, `target_weight` sizing is supported only for single-symbol,
+non-overlapping long/short exposure windows and must affect the backend run.
+Any unsupported sizing kind must be reported as unsupported rather than silently
+simulated with a default.
 
 ## V1 Supported Semantics
 
@@ -161,13 +162,14 @@ instrument kinds:
   crypto_perp
 
 decision semantics:
-  target long / short / flat exposure
-  fixed target weight or fixed notional sizing
+  time-held long / short target_weight exposure windows
+  flat close state at the configured max-hold exit
   explicit decision_time and as_of_time
-  configured fill timing / lag
+  close fill timing / lag
   max hold exits
-  stop loss / take profit / trailing stop where modeled honestly
+  non-overlapping same-symbol windows
   realistic and stressed fee/slippage assumptions
+  crypto perpetual funding cashflows for supported windows
 ```
 
 Unsupported semantics are roadmap items, not hidden approximations:
@@ -175,6 +177,11 @@ Unsupported semantics are roadmap items, not hidden approximations:
 ```text
 options
 futures margin and liquidation
+notional sizing and other non-target-weight sizing
+stop loss / take profit / trailing stop threshold exits
+stateful rebalance logic
+multi-asset target-weight portfolio semantics
+overlapping same-symbol windows
 borrow constraints
 partial fills
 capacity and market impact
