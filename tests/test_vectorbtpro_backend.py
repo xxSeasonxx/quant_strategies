@@ -166,6 +166,7 @@ def test_vectorbtpro_backend_adds_funding_return_for_crypto_perp_rows(monkeypatc
     assert result.unsupported_semantics == ()
     assert result.metrics["price_cost_return"] == pytest.approx(0.01)
     assert result.metrics["funding_return"] == pytest.approx(-0.0003)
+    assert result.metrics["funding_model"] == "linear_additive_adjustment"
     assert result.metrics["net_return"] == pytest.approx(0.0097)
 
 
@@ -186,6 +187,7 @@ def test_vectorbtpro_backend_ignores_non_event_funding_observables(monkeypatch):
     assert result.status == "completed"
     assert result.metrics["price_cost_return"] == pytest.approx(0.01)
     assert result.metrics["funding_return"] == pytest.approx(0.0)
+    assert result.metrics["funding_model"] == "linear_additive_adjustment"
     assert result.metrics["net_return"] == pytest.approx(0.01)
 
 

@@ -25,7 +25,14 @@ SUMMARY_KEYS = {
     "engine",
     "run_completed",
     "assessment_status",
+    "evidence_class",
+    "strategy_contract",
+    "return_model",
+    "funding_model",
     "promotion_eligible",
+    "paper_trade_eligible",
+    "live_eligible",
+    "requires_manual_approval",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
 
@@ -167,7 +174,14 @@ def assert_assessment(
     assert result.promotion_eligible is promotion_eligible
     assert summary["run_completed"] is run_completed
     assert summary["assessment_status"] == assessment_status
+    assert summary["evidence_class"] == "runner_smoke"
+    assert summary["strategy_contract"] == "decision"
+    assert summary["return_model"] == "sum_weighted_trade_return"
+    assert summary["funding_model"] == "none"
     assert summary["promotion_eligible"] is promotion_eligible
+    assert summary["paper_trade_eligible"] is False
+    assert summary["live_eligible"] is False
+    assert summary["requires_manual_approval"] is True
 
 
 def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -423,6 +437,16 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
     assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
     assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v2"}
+    assert run_manifest["evidence"] == {
+        "evidence_class": "runner_smoke",
+        "strategy_contract": "decision",
+        "return_model": "sum_weighted_trade_return",
+        "funding_model": "none",
+        "promotion_eligible": False,
+        "paper_trade_eligible": False,
+        "live_eligible": False,
+        "requires_manual_approval": True,
+    }
     assert run_manifest["artifacts"]["config.toml"]["sha256"]
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
@@ -609,6 +633,10 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.result_dir is not None
+    summary = json.loads((result.result_dir / "summary.json").read_text())
+    assert summary["funding_model"] == "linear_additive_adjustment"
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    assert run_manifest["evidence"]["funding_model"] == "linear_additive_adjustment"
     notes = (result.result_dir / "notes.md").read_text()
     assert "return_scope: price-and-funding" in notes
     assert "supplied funding events are included" in notes

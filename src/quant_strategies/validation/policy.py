@@ -4,8 +4,9 @@ import math
 from collections.abc import Sequence
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
+from quant_strategies.evidence_semantics import validation_evidence_semantics
 from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
 
 
@@ -17,6 +18,26 @@ class PromotionDecision(BaseModel):
 
     decision: ValidationDecision
     reasons: tuple[str, ...] = ()
+    advisory_decision: ValidationDecision | None = None
+    evidence_class: str = "validation_advisory"
+    paper_trade_eligible: bool = False
+    live_eligible: bool = False
+    requires_manual_approval: bool = True
+
+    @model_validator(mode="after")
+    def default_advisory_fields(self) -> PromotionDecision:
+        if self.advisory_decision is None:
+            object.__setattr__(self, "advisory_decision", self.decision)
+        semantics = validation_evidence_semantics()
+        object.__setattr__(self, "evidence_class", str(semantics["evidence_class"]))
+        object.__setattr__(self, "paper_trade_eligible", bool(semantics["paper_trade_eligible"]))
+        object.__setattr__(self, "live_eligible", bool(semantics["live_eligible"]))
+        object.__setattr__(
+            self,
+            "requires_manual_approval",
+            bool(semantics["requires_manual_approval"]),
+        )
+        return self
 
 
 def _metric_number(metrics: dict[str, float | int | str | bool | None], name: str) -> float | None:

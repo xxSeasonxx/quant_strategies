@@ -123,12 +123,18 @@ def write_data_manifest(result_dir: Path, config: RunConfig, rows: list[dict[str
     _write_json(result_dir / "data_manifest.json", payload)
 
 
-def write_run_manifest(result_dir: Path, *, repo_root: Path) -> None:
+def write_run_manifest(
+    result_dir: Path,
+    *,
+    repo_root: Path,
+    evidence: dict[str, object],
+) -> None:
     payload = {
         "repository": _git_identity(repo_root, result_dir),
         "python": {"version": sys.version.split()[0]},
         "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
+        "evidence": evidence,
         "artifacts": _artifact_hashes(result_dir),
     }
     _write_json(result_dir / "run_manifest.json", payload)

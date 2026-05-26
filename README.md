@@ -14,6 +14,7 @@ APIs and evaluates through the internal `quant_strategies.engine` package.
 ```text
 untested/    raw or actively forming strategy ideas
 researched/  bench-researched candidates frozen for separate validation
+examples/    example or smoke strategies that are not lifecycle-promoted
 tested/      strategies that passed the separate validation process
 runs/        curated TOML run configs
 src/         installable runner package
@@ -75,8 +76,9 @@ strategy files do not emit engine-specific signals.
 
 Validation writes generated artifacts under ignored `validation_results/` and
 classifies each run as `hard_no`, `maybe`, or `clear_yes`. A `clear_yes`
-recommendation does not automatically move code into `tested/`; Season must
-approve that repository change.
+recommendation is advisory until Season approves a stronger promotion policy.
+`promotion_decision.json` includes `advisory_decision`,
+`paper_trade_eligible`, `live_eligible`, and `requires_manual_approval`.
 
 The v1 validation matrix treats `base` as a no-cost gross baseline,
 `realistic_costs` as the configured fee/slippage economics, and
@@ -190,6 +192,11 @@ ranges, metadata field coverage, and the strategy-input JSONL hash.
 evidence schema identity, dirty worktree hashes when available, and hashes of
 generated run artifacts.
 
+Runner artifacts are smoke evidence. They include `evidence_class`,
+`strategy_contract`, `return_model`, `funding_model`, `promotion_eligible`,
+`paper_trade_eligible`, `live_eligible`, and `requires_manual_approval` so
+automation and humans do not overread a quick run.
+
 Trade records in `evidence.json` include `exit_reason`, one of `max_hold`,
 `take_profit`, `stop_loss`, or `trailing_stop`. Strategy decision metadata is
 preserved in `decision_records.jsonl`, carried through internal signal
@@ -198,9 +205,11 @@ preserved in `decision_records.jsonl`, carried through internal signal
 
 `summary.json` has stable top-level keys: `strategy_id`, `mode`, `success`,
 `status`, `stage`, `message`, `artifacts`, `engine`, `run_completed`,
-`assessment_status`, and `promotion_eligible`. `success` is the existing
-runner/CLI outcome flag. New consumers should use `assessment_status` and
-`promotion_eligible` when interpreting research meaning:
+`assessment_status`, `evidence_class`, `strategy_contract`, `return_model`,
+`funding_model`, `promotion_eligible`, `paper_trade_eligible`,
+`live_eligible`, and `requires_manual_approval`. `success` is the existing
+runner/CLI outcome flag. New consumers should use `assessment_status` and the
+eligibility fields when interpreting research meaning:
 
 ```text
 screen       -> assessment_status = "screened", promotion_eligible = false

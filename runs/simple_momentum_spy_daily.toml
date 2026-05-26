@@ -1,4 +1,4 @@
-strategy_path = "tested/simple_momentum.py"
+strategy_path = "examples/strategies/simple_momentum.py"
 strategy_id = "simple_momentum_spy_daily"
 
 [data]

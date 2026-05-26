@@ -8,7 +8,15 @@ from quant_strategies.validation.backends import (
     ScenarioBackendRunResult,
     get_backend,
 )
-from quant_strategies.validation.policy import classify_validation
+from quant_strategies.validation.policy import PromotionDecision, classify_validation
+
+
+def assert_advisory_only(decision: PromotionDecision) -> None:
+    assert decision.evidence_class == "validation_advisory"
+    assert decision.advisory_decision == decision.decision
+    assert decision.paper_trade_eligible is False
+    assert decision.live_eligible is False
+    assert decision.requires_manual_approval is True
 
 
 def test_fake_backend_returns_configured_result():
@@ -46,6 +54,7 @@ def test_policy_hard_no_for_data_failure():
 
     assert decision.decision == "hard_no"
     assert "data_audit_failed" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_maybe_for_unsupported_semantics():
@@ -65,6 +74,7 @@ def test_policy_maybe_for_unsupported_semantics():
 
     assert decision.decision == "maybe"
     assert "unsupported_semantics" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_clear_yes_for_positive_sufficient_backend_result():
@@ -84,6 +94,7 @@ def test_policy_clear_yes_for_positive_sufficient_backend_result():
 
     assert decision.decision == "clear_yes"
     assert decision.reasons == ()
+    assert_advisory_only(decision)
 
 
 def test_policy_requires_all_expected_required_scenarios():
@@ -109,6 +120,7 @@ def test_policy_requires_all_expected_required_scenarios():
 
     assert decision.decision == "hard_no"
     assert "missing_required_scenarios" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_requires_expected_required_scenario_ids():
@@ -151,6 +163,7 @@ def test_policy_requires_expected_required_scenario_ids():
 
     assert decision.decision == "hard_no"
     assert "duplicate_required_scenarios" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
@@ -191,6 +204,7 @@ def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
 
     assert decision.decision == "hard_no"
     assert "missing_required_scenarios" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
@@ -228,6 +242,7 @@ def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
 
     assert decision.decision == "clear_yes"
     assert decision.reasons == ()
+    assert_advisory_only(decision)
 
 
 def test_policy_hard_no_for_nonpositive_net_return():
@@ -247,6 +262,7 @@ def test_policy_hard_no_for_nonpositive_net_return():
 
     assert decision.decision == "hard_no"
     assert "nonpositive_net_return" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_hard_no_for_zero_net_return():
@@ -266,6 +282,7 @@ def test_policy_hard_no_for_zero_net_return():
 
     assert decision.decision == "hard_no"
     assert "nonpositive_net_return" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_hard_no_for_no_backend_results():
@@ -277,6 +294,7 @@ def test_policy_hard_no_for_no_backend_results():
 
     assert decision.decision == "hard_no"
     assert "no_backend_results" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_hard_no_for_non_completed_backend_status():
@@ -296,6 +314,7 @@ def test_policy_hard_no_for_non_completed_backend_status():
 
     assert decision.decision == "hard_no"
     assert "fake_failed" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_maybe_for_required_backend_unavailable():
@@ -315,6 +334,7 @@ def test_policy_maybe_for_required_backend_unavailable():
 
     assert decision.decision == "maybe"
     assert "backend_unavailable" in decision.reasons
+    assert_advisory_only(decision)
 
 
 def test_policy_prioritizes_failed_required_result_over_unsupported_result():
@@ -351,6 +371,7 @@ def test_policy_prioritizes_failed_required_result_over_unsupported_result():
 
     assert decision.decision == "hard_no"
     assert decision.reasons == ("fake_failed",)
+    assert_advisory_only(decision)
 
 
 def test_policy_hard_no_for_insufficient_trades():
@@ -370,6 +391,7 @@ def test_policy_hard_no_for_insufficient_trades():
 
     assert decision.decision == "hard_no"
     assert "insufficient_trades" in decision.reasons
+    assert_advisory_only(decision)
 
 
 @pytest.mark.parametrize(
@@ -404,3 +426,4 @@ def test_policy_hard_no_for_invalid_backend_metrics(metrics):
 
     assert decision.decision == "hard_no"
     assert "invalid_backend_metrics" in decision.reasons
+    assert_advisory_only(decision)

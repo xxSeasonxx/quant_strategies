@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from quant_strategies.evidence_semantics import runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
     config as config_module,
@@ -89,7 +90,11 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         artifacts.write_evidence(result_dir, engine_run.evidence_json)
     notes = _completion_notes(config, engine_run)
     artifacts.write_notes(result_dir, notes)
-    artifacts.write_run_manifest(result_dir, repo_root=effective_repo_root)
+    artifacts.write_run_manifest(
+        result_dir,
+        repo_root=effective_repo_root,
+        evidence=runner_evidence_semantics(config.data.kind),
+    )
     success = _result_success(engine_run)
     assessment_status = _assessment_status(engine_run)
     artifacts.write_summary(
@@ -125,7 +130,11 @@ def _failure_result(
 ) -> RunResult:
     notes = _failure_notes(stage, message)
     artifacts.write_notes(result_dir, notes)
-    artifacts.write_run_manifest(result_dir, repo_root=repo_root)
+    artifacts.write_run_manifest(
+        result_dir,
+        repo_root=repo_root,
+        evidence=runner_evidence_semantics(config.data.kind),
+    )
     artifacts.write_summary(
         result_dir,
         _summary_payload(
@@ -159,6 +168,7 @@ def _summary_payload(
     engine: dict[str, object],
     assessment_status: str,
 ) -> dict[str, object]:
+    semantics = runner_evidence_semantics(config.data.kind)
     return {
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,
@@ -170,7 +180,7 @@ def _summary_payload(
         "engine": engine,
         "run_completed": True,
         "assessment_status": assessment_status,
-        "promotion_eligible": False,
+        **semantics,
     }
 
 

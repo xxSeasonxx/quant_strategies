@@ -315,7 +315,7 @@ def _funding_adjusted_metrics(
     rows: list[dict[str, Any]],
     windows: list[dict[str, Any]],
     config: Any,
-) -> dict[str, float | int]:
+) -> dict[str, float | int | str]:
     data_kind = _config_value(config, "data", "kind", default=None)
     if data_kind != "crypto_perp_funding" and not has_funding_cashflow_rows(rows):
         return metrics
@@ -339,6 +339,7 @@ def _funding_adjusted_metrics(
         **metrics,
         "price_cost_return": price_cost_return,
         "funding_return": funding_return,
+        "funding_model": "linear_additive_adjustment",
         "net_return": price_cost_return + funding_return,
     }
 

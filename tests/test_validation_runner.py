@@ -123,6 +123,11 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert result.result_dir is not None
     promotion = json.loads((result.result_dir / "promotion_decision.json").read_text())
     assert promotion["decision"] == "clear_yes"
+    assert promotion["evidence_class"] == "validation_advisory"
+    assert promotion["advisory_decision"] == "clear_yes"
+    assert promotion["paper_trade_eligible"] is False
+    assert promotion["live_eligible"] is False
+    assert promotion["requires_manual_approval"] is True
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
