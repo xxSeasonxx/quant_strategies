@@ -81,9 +81,12 @@ The v1 validation matrix treats `base` as a no-cost gross baseline,
 `realistic_costs` as the configured fee/slippage economics, and
 `stressed_costs` as doubled configured costs. Parameter perturbation scenarios
 are recorded as diagnostic evidence until validation regenerates decisions for
-each perturbed parameter set. The VectorBT PRO adapter currently rejects crypto
-perp funding cashflow rows as `unsupported_semantics` rather than simulating
-close-only returns that omit funding PnL.
+each perturbed parameter set. For crypto perpetual funding rows, the VectorBT PRO
+adapter reports funding-aware metrics for the current v1 supported shape:
+non-overlapping time-held target exposure windows. The validation metric is
+`price_cost_return + funding_return`. The adapter still rejects unsupported
+sizing, threshold exits, overlapping same-symbol windows, and multi-asset
+target-weight portfolio semantics rather than approximating them silently.
 
 Validation artifacts include the frozen `validation_config.toml`,
 `strategy_snapshot.py`, `decision_schema.json`, `decision_records.jsonl`,

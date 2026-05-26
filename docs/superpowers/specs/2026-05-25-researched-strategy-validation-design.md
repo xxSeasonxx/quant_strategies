@@ -373,8 +373,10 @@ when a scenario blocks `clear_yes`.
 
 `data_audit.json` records availability and decision-row checks. It should not be
 described as a complete proof that arbitrary strategy code is lookahead-free.
-The VectorBT PRO adapter must mark crypto perpetual funding cashflows as
-unsupported until funding PnL is modeled explicitly; close-only returns are not
+The VectorBT PRO adapter must include crypto perpetual funding cashflows for
+supported non-overlapping time-held windows. Funding-aware validation metrics
+must report `price_cost_return`, `funding_return`, and `net_return`, where
+`net_return = price_cost_return + funding_return`. Close-only returns are not
 valid funding strategy evidence.
 
 ## Promotion Mechanics
