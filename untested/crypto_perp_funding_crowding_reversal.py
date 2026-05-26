@@ -40,7 +40,13 @@ from datetime import datetime, timedelta
 import math
 from typing import Any
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    ExitPolicy,
+    InstrumentRef,
+    ObservationRef,
+    PositionTarget,
+    StrategyDecision,
+)
 
 
 __all__ = ["generate_decisions"]
@@ -65,10 +71,7 @@ def generate_decisions(
     min_abs_funding_bps = _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
     min_abs_return_bps = _non_negative_float(params.get("min_abs_return_bps", 25.0), "min_abs_return_bps")
     weight = float(params.get("weight", 1.0))
-    max_hold_bars = _positive_int(
-        params.get("max_hold_bars", params.get("hold_bars", params.get("hold_minutes", 480))),
-        "max_hold_bars",
-    )
+    max_hold_bars = _positive_int(params.get("max_hold_bars", 480), "max_hold_bars")
     exit_controls = _exit_controls(params)
 
     rows_by_symbol = _rows_by_symbol(bars)
@@ -198,20 +201,26 @@ def _decision_candidates(
     for symbol, rows in rows_by_symbol.items():
         observed_close = _exact_close_at(rows, observed_time)
         base_close = _exact_close_at(rows, base_time)
-        funding_pressure_bps = _funding_pressure_bps(rows, decision_time, funding_lookback_events)
+        funding = _funding_pressure(rows, decision_time, funding_lookback_events)
         if (
             observed_close is None
             or base_close is None
             or observed_close <= 0.0
             or base_close <= 0.0
-            or funding_pressure_bps is None
+            or funding is None
         ):
             continue
+        funding_pressure_bps, funding_observations = funding
         candidates.append(
             {
                 "symbol": symbol,
                 "funding_pressure_bps": funding_pressure_bps,
                 "return_extension_bps": (observed_close / base_close - 1.0) * 10_000.0,
+                "observations": (
+                    ObservationRef(symbol=symbol, timestamp=base_time, field="close", source="strategy_input"),
+                    ObservationRef(symbol=symbol, timestamp=observed_time, field="close", source="strategy_input"),
+                    *funding_observations,
+                ),
             }
         )
     return candidates
@@ -227,11 +236,11 @@ def _exact_close_at(rows: list[dict[str, Any]], timestamp: datetime) -> float | 
     return first
 
 
-def _funding_pressure_bps(
+def _funding_pressure(
     rows: list[dict[str, Any]],
     decision_time: datetime,
     funding_lookback_events: int,
-) -> float | None:
+) -> tuple[float, tuple[ObservationRef, ...]] | None:
     funding_events: dict[datetime, tuple[datetime, float]] = {}
     for row in rows:
         if row["timestamp"] > decision_time:
@@ -253,7 +262,31 @@ def _funding_pressure_bps(
     if len(funding_events) < funding_lookback_events:
         return None
     recent = sorted(funding_events.items(), key=lambda item: (item[0], item[1][0]))[-funding_lookback_events:]
-    return sum(rate for _, (_, rate) in recent) * 10_000.0
+    observations = tuple(
+        observation
+        for _, (row_timestamp, _) in recent
+        for observation in (
+            ObservationRef(
+                symbol=str(rows[0]["symbol"]),
+                timestamp=row_timestamp,
+                field="funding_timestamp",
+                source="strategy_input",
+            ),
+            ObservationRef(
+                symbol=str(rows[0]["symbol"]),
+                timestamp=row_timestamp,
+                field="funding_rate",
+                source="strategy_input",
+            ),
+            ObservationRef(
+                symbol=str(rows[0]["symbol"]),
+                timestamp=row_timestamp,
+                field="has_funding_event",
+                source="strategy_input",
+            ),
+        )
+    )
+    return sum(rate for _, (_, rate) in recent) * 10_000.0, observations
 
 
 def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, params: Mapping[str, object]) -> bool:
@@ -283,6 +316,7 @@ def _decision(
         as_of_time=as_of_time,
         target=PositionTarget(direction=side, sizing_kind="target_weight", size=weight),
         exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
+        observations=tuple(candidate["observations"]),
         metadata={
             "funding_pressure_bps": candidate["funding_pressure_bps"],
             "entry_return_extension_bps": candidate["return_extension_bps"],

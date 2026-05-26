@@ -76,9 +76,9 @@ def test_create_validation_result_dir_retries_atomic_collision(
 
 
 def test_write_json_artifact_is_stable(tmp_path: Path):
-    path = write_json_artifact(tmp_path, "promotion_decision.json", {"b": 2, "a": 1})
+    path = write_json_artifact(tmp_path, "validation_decision.json", {"b": 2, "a": 1})
 
-    assert path == tmp_path / "promotion_decision.json"
+    assert path == tmp_path / "validation_decision.json"
     assert json.loads(path.read_text()) == {"a": 1, "b": 2}
     assert path.read_text() == '{\n  "a": 1,\n  "b": 2\n}\n'
 

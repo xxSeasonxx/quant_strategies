@@ -40,7 +40,13 @@ import math
 from statistics import fmean, pstdev
 from typing import Any
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    ExitPolicy,
+    InstrumentRef,
+    ObservationRef,
+    PositionTarget,
+    StrategyDecision,
+)
 
 
 __all__ = ["generate_decisions"]
@@ -87,15 +93,12 @@ def generate_decisions(
     decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
     crossing_only = bool(params.get("crossing_only", True))
     weight = float(params.get("weight", 1.0))
-    max_hold_bars = _positive_int(
-        params.get("max_hold_bars", params.get("hold_bars", params.get("hold_minutes", 30))),
-        "max_hold_bars",
-    )
+    max_hold_bars = _positive_int(params.get("max_hold_bars", 30), "max_hold_bars")
     exit_controls = _exit_controls(params)
 
     close_by_key, timestamps, symbols = _close_table(bars)
 
-    candidates: dict[tuple[str, datetime], list[dict[str, float | int]]] = {}
+    candidates: dict[tuple[str, datetime], list[dict[str, Any]]] = {}
     for triangle in _triangles_for(str(params.get("triangle_set", "outside_view_8"))):
         if not set(_triangle_symbols(triangle)).issubset(symbols):
             continue
@@ -120,6 +123,11 @@ def generate_decisions(
         if abs(score) <= 1e-12:
             continue
         representative = max(entries, key=lambda entry: abs(float(entry["strength"])))
+        observations = _unique_observations(
+            observation
+            for entry in entries
+            for observation in entry["observations"]
+        )
         decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
         decisions.append(
             StrategyDecision(
@@ -133,6 +141,7 @@ def generate_decisions(
                     size=weight,
                 ),
                 exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
+                observations=observations,
                 metadata={
                     "residual_zscore": representative["residual_zscore"],
                     "residual_bps": representative["residual_bps"],
@@ -230,7 +239,7 @@ def _collect_candidates(
     min_abs_residual_bps: float,
     attribution_bars: int,
     crossing_only: bool,
-    candidates: dict[tuple[str, datetime], list[dict[str, float | int]]],
+    candidates: dict[tuple[str, datetime], list[dict[str, Any]]],
 ) -> None:
     prior_extreme_sign = 0
     residuals = [point["residual"] for point in points]
@@ -269,9 +278,44 @@ def _collect_candidates(
                     "residual_zscore": float(residual_z),
                     "residual_bps": float(residual_bps),
                     "attribution_score": attribution_score,
+                    "observations": _triangle_observations(
+                        triangle=triangle,
+                        points=points,
+                        current_index=index,
+                        zscore_window_bars=zscore_window_bars,
+                        attribution_bars=attribution_bars,
+                    ),
                 }
             )
         prior_extreme_sign = extreme_sign
+
+
+def _triangle_observations(
+    *,
+    triangle: _Triangle,
+    points: list[dict[str, Any]],
+    current_index: int,
+    zscore_window_bars: int,
+    attribution_bars: int,
+) -> tuple[ObservationRef, ...]:
+    symbols = _triangle_symbols(triangle)
+    history_start = max(0, current_index - zscore_window_bars)
+    attribution_index = max(0, current_index - attribution_bars)
+    point_indexes = set(range(history_start, current_index + 1))
+    point_indexes.add(attribution_index)
+    return tuple(
+        ObservationRef(symbol=symbol, timestamp=points[index]["timestamp"], field="close", source="strategy_input")
+        for index in sorted(point_indexes)
+        for symbol in symbols
+    )
+
+
+def _unique_observations(observations: Sequence[ObservationRef]) -> tuple[ObservationRef, ...]:
+    unique: dict[tuple[str, datetime, str | None, str | None], ObservationRef] = {}
+    for observation in observations:
+        key = (observation.symbol, observation.timestamp, observation.field, observation.source)
+        unique.setdefault(key, observation)
+    return tuple(unique[key] for key in sorted(unique))
 
 
 def _residual_points(

@@ -13,6 +13,7 @@ from quant_strategies.engine.models import (
     GateResult,
     ScreeningResult,
     Side,
+    SmokeScore,
     Signal,
     Trade,
     ValidationConfig,
@@ -102,10 +103,12 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
     return ScreeningResult(
         strategy_id=request.spec.strategy_id,
         trade_count=len(trades),
-        gross_return=gross_total,
-        funding_return=funding_total,
-        net_return=net_total,
-        cost_return=cost_total,
+        smoke_score=SmokeScore(
+            sum_weighted_trade_gross_return=gross_total,
+            sum_weighted_trade_funding_return=funding_total,
+            sum_weighted_trade_cost_return=cost_total,
+            sum_weighted_trade_net_return=net_total,
+        ),
         trades=tuple(trades),
     )
 
@@ -138,16 +141,22 @@ def validate(
         gates.append(
             GateResult(
                 name="positive_gross",
-                passed=screening_result.gross_return > 0,
-                detail=f"gross_return={screening_result.gross_return:.12g}",
+                passed=screening_result.smoke_score.sum_weighted_trade_gross_return > 0,
+                detail=(
+                    "sum_weighted_trade_gross_return="
+                    f"{screening_result.smoke_score.sum_weighted_trade_gross_return:.12g}"
+                ),
             )
         )
     if validation_config.require_positive_net:
         gates.append(
             GateResult(
                 name="positive_net",
-                passed=screening_result.net_return > 0,
-                detail=f"net_return={screening_result.net_return:.12g}",
+                passed=screening_result.smoke_score.sum_weighted_trade_net_return > 0,
+                detail=(
+                    "sum_weighted_trade_net_return="
+                    f"{screening_result.smoke_score.sum_weighted_trade_net_return:.12g}"
+                ),
             )
         )
 
@@ -204,8 +213,7 @@ def _select_exit(
     entry_price: float,
     fill_model: FillModel,
 ) -> _ExitSelection:
-    max_hold_bars = signal.max_hold_bars or signal.hold_bars
-    last_trigger_index = entry_index + max_hold_bars
+    last_trigger_index = entry_index + signal.max_hold_bars
     last_exit_index = last_trigger_index + fill_model.exit_lag_bars
     if last_exit_index >= len(bars):
         raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")

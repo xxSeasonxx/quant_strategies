@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.validation.data_audit import audit_decision_rows
 from untested.crypto_perp_funding_crowding_reversal import generate_decisions
 
 
@@ -48,7 +49,7 @@ def params(**overrides: object) -> dict[str, object]:
         "min_abs_funding_bps": 1.0,
         "min_abs_return_bps": 25.0,
         "weight": 0.25,
-        "hold_bars": 3,
+        "max_hold_bars": 3,
     }
     values.update(overrides)
     return values
@@ -61,7 +62,6 @@ def decision_payload(decision: StrategyDecision) -> dict[str, object]:
         "as_of_time": decision.as_of_time,
         "side": decision.target.direction,
         "weight": decision.target.size,
-        "hold_bars": decision.exit_policy.max_hold_bars,
         "max_hold_bars": decision.exit_policy.max_hold_bars,
         **dict(decision.metadata),
     }
@@ -74,6 +74,10 @@ def decision_payload(decision: StrategyDecision) -> dict[str, object]:
 
 def generate_payloads(bars: list[dict[str, object]], params: dict[str, object]) -> list[dict[str, object]]:
     return [decision_payload(decision) for decision in generate_decisions(bars, params)]
+
+
+def auditable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [{**row, "available_at": row["timestamp"]} for row in rows]
 
 
 def test_generate_decisions_returns_empty_for_empty_input():
@@ -102,7 +106,6 @@ def test_generate_decisions_fades_same_direction_funding_and_return_extremes():
             "as_of_time": START + timedelta(minutes=10),
             "side": "short",
             "weight": 0.25,
-            "hold_bars": 3,
             "max_hold_bars": 3,
             "funding_pressure_bps": pytest.approx(2.0),
             "entry_return_extension_bps": pytest.approx(100.0),
@@ -114,13 +117,52 @@ def test_generate_decisions_fades_same_direction_funding_and_return_extremes():
             "as_of_time": START + timedelta(minutes=10),
             "side": "long",
             "weight": 0.25,
-            "hold_bars": 3,
             "max_hold_bars": 3,
             "funding_pressure_bps": pytest.approx(-2.0),
             "entry_return_extension_bps": pytest.approx(-100.0),
             "signal_family": "crypto_perp_funding_crowding_reversal",
         },
     ]
+
+
+def test_generate_decisions_emits_close_and_funding_observation_lineage():
+    bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
+    decisions = generate_decisions(bars, params(min_cross_section=1))
+    observed = {
+        (item.symbol, item.timestamp, item.field, item.source)
+        for item in decisions[0].observations
+    }
+
+    assert observed == {
+        ("BTC-PERP", START, "close", "strategy_input"),
+        ("BTC-PERP", START + timedelta(minutes=9), "close", "strategy_input"),
+        ("BTC-PERP", START + timedelta(minutes=9), "funding_timestamp", "strategy_input"),
+        ("BTC-PERP", START + timedelta(minutes=9), "funding_rate", "strategy_input"),
+        ("BTC-PERP", START + timedelta(minutes=9), "has_funding_event", "strategy_input"),
+    }
+    assert audit_decision_rows(auditable_rows(bars), decisions).passed is True
+
+
+def test_crypto_lineage_audit_fails_for_missing_or_late_observed_rows():
+    bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
+    decisions = generate_decisions(bars, params(min_cross_section=1))
+    missing_rows = [
+        row
+        for row in auditable_rows(bars)
+        if row["timestamp"] != START + timedelta(minutes=9)
+    ]
+    late_rows = auditable_rows(bars)
+    for row in late_rows:
+        if row["timestamp"] == START + timedelta(minutes=9):
+            row["available_at"] = decisions[0].decision_time + timedelta(minutes=1)
+
+    missing_audit = audit_decision_rows(missing_rows, decisions)
+    late_audit = audit_decision_rows(late_rows, decisions)
+
+    assert missing_audit.passed is False
+    assert any("missing observation row" in violation for violation in missing_audit.violations)
+    assert late_audit.passed is False
+    assert any("was available after decision_time" in violation for violation in late_audit.violations)
 
 
 def test_generate_decisions_enforces_minimum_cross_section():

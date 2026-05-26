@@ -102,8 +102,8 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
         decision("QQQ", timestamp, "short"),
     ]
     signals = [
-        {"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "hold_bars": 2},
-        {"symbol": "QQQ", "decision_time": timestamp, "side": "short", "weight": 0.5, "hold_bars": 2},
+        {"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2},
+        {"symbol": "QQQ", "decision_time": timestamp, "side": "short", "weight": 0.5, "max_hold_bars": 2},
     ]
 
     payload = summary_profile_payload(
@@ -114,10 +114,12 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
         engine={
             "passed": True,
             "trade_count": 2,
-            "gross_return": 0.03,
-            "funding_return": 0.0,
-            "cost_return": 0.0,
-            "net_return": 0.03,
+            "smoke_score": {
+                "sum_weighted_trade_gross_return": 0.03,
+                "sum_weighted_trade_funding_return": 0.0,
+                "sum_weighted_trade_cost_return": 0.0,
+                "sum_weighted_trade_net_return": 0.03,
+            },
         },
     )
 
@@ -132,10 +134,12 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
     assert payload["engine"] == {
         "passed": True,
         "trade_count": 2,
-        "gross_return": 0.03,
-        "funding_return": 0.0,
-        "cost_return": 0.0,
-        "net_return": 0.03,
+        "smoke_score": {
+            "sum_weighted_trade_gross_return": 0.03,
+            "sum_weighted_trade_funding_return": 0.0,
+            "sum_weighted_trade_cost_return": 0.0,
+            "sum_weighted_trade_net_return": 0.03,
+        },
     }
 
 
@@ -145,7 +149,7 @@ def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
         config=config(tmp_path),
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "hold_bars": 2}],
+        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={"passed": True, "trade_count": 1},
         normalized_rows_hash="a" * 64,
     )
@@ -160,7 +164,7 @@ def test_summary_profile_payload_normalizes_common_non_json_row_values(tmp_path:
         config=config(tmp_path),
         rows=[{**row("SPY", timestamp, 100.0), "research_nan": float("nan"), "research_decimal": Decimal("1.25")}],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "hold_bars": 2}],
+        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={"passed": True, "trade_count": 1},
     )
 
@@ -181,14 +185,16 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
         config=run_config,
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "hold_bars": 2}],
+        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={
             "passed": True,
             "trade_count": 1,
-            "gross_return": 0.01,
-            "funding_return": 0.0,
-            "cost_return": 0.0,
-            "net_return": 0.01,
+            "smoke_score": {
+                "sum_weighted_trade_gross_return": 0.01,
+                "sum_weighted_trade_funding_return": 0.0,
+                "sum_weighted_trade_cost_return": 0.0,
+                "sum_weighted_trade_net_return": 0.01,
+            },
         },
     )
 

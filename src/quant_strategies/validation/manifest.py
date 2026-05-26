@@ -119,7 +119,7 @@ def _core_hashes(result_dir: Path) -> dict[str, str | None]:
         "backend_runs/summary.json",
         "backend_capability_matrix.json",
         "robustness_matrix.json",
-        "promotion_decision.json",
+        "validation_decision.json",
         "validation_report.md",
     )
     return {name: _optional_hash(result_dir / name) for name in names}

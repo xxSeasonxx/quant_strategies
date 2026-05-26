@@ -182,7 +182,7 @@ def assert_assessment(
     assert summary["artifact_profile"] == artifact_profile
     assert summary["evidence_class"] == "runner_smoke"
     assert summary["strategy_contract"] == "decision"
-    assert summary["return_model"] == "sum_weighted_trade_return"
+    assert summary["return_model"] == "smoke_score.sum_weighted_trade_net_return"
     assert summary["funding_model"] == "none"
     assert summary["promotion_eligible"] is promotion_eligible
     assert summary["paper_trade_eligible"] is False
@@ -223,10 +223,10 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert summary["status"] == "passed"
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["gross_return"] > 0
-    assert summary["engine"]["funding_return"] == 0.0
-    assert summary["engine"]["cost_return"] == 0.0
-    assert summary["engine"]["net_return"] > 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] > 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] > 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_passed")
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
@@ -266,10 +266,10 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert_assessment(result, summary, assessment_status="smoke_passed", artifact_profile="summary")
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["gross_return"] is not None
-    assert summary["engine"]["funding_return"] == 0.0
-    assert summary["engine"]["cost_return"] == 0.0
-    assert summary["engine"]["net_return"] is not None
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] is not None
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] is not None
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
@@ -280,9 +280,9 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert profile["signals"]["count"] == 1
     assert profile["engine"]["passed"] is True
     assert profile["engine"]["trade_count"] == 1
-    assert profile["engine"]["gross_return"] is not None
-    assert profile["engine"]["cost_return"] is not None
-    assert profile["engine"]["net_return"] is not None
+    assert profile["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] is not None
+    assert profile["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] is not None
+    assert profile["engine"]["smoke_score"]["sum_weighted_trade_net_return"] is not None
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
@@ -328,10 +328,10 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert summary["status"] == "screened"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["gross_return"] < 0
-    assert summary["engine"]["funding_return"] == 0.0
-    assert summary["engine"]["cost_return"] == 0.0
-    assert summary["engine"]["net_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] < 0
     assert_assessment(result, summary, assessment_status="screened")
     notes = (result.result_dir / "notes.md").read_text()
     assert "status: screened" in notes
@@ -402,8 +402,8 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["gross_return"] < 0
-    assert summary["engine"]["net_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] < 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_failed")
     assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
@@ -543,7 +543,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["evidence"] == {
         "evidence_class": "runner_smoke",
         "strategy_contract": "decision",
-        "return_model": "sum_weighted_trade_return",
+        "return_model": "smoke_score.sum_weighted_trade_net_return",
         "funding_model": "none",
         "promotion_eligible": False,
         "paper_trade_eligible": False,

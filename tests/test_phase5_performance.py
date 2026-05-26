@@ -44,7 +44,7 @@ def large_engine_request(
                     symbol=symbol,
                     decision_time=start + timedelta(minutes=decision_bar_index),
                     side=Side.LONG if signal_index % 2 == 0 else Side.SHORT,
-                    hold_bars=2,
+                    max_hold_bars=2,
                 )
             )
     return EvaluationRequest(

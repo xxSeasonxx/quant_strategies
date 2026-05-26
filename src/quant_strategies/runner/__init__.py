@@ -223,6 +223,16 @@ def _summary_payload(
     assessment_status: str,
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
+    engine_payload = dict(engine)
+    engine_payload.setdefault(
+        "smoke_score",
+        {
+            "sum_weighted_trade_gross_return": None,
+            "sum_weighted_trade_funding_return": None,
+            "sum_weighted_trade_cost_return": None,
+            "sum_weighted_trade_net_return": None,
+        },
+    )
     return {
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,
@@ -232,7 +242,7 @@ def _summary_payload(
         "stage": stage,
         "message": message,
         "artifacts": [],
-        "engine": engine,
+        "engine": engine_payload,
         "run_completed": True,
         "assessment_status": assessment_status,
         **semantics,
@@ -258,8 +268,21 @@ def _compact_engine_summary(engine_run: engine_runner.EngineRun) -> dict[str, ob
         source = screening_result if isinstance(screening_result, dict) else None
 
     summary: dict[str, object] = {"passed": engine_run.passed, "trade_count": _trade_count(engine_run)}
-    for key in ("gross_return", "funding_return", "cost_return", "net_return"):
-        summary[key] = source.get(key) if isinstance(source, dict) else None
+    smoke_score = source.get("smoke_score") if isinstance(source, dict) else None
+    if isinstance(smoke_score, dict):
+        summary["smoke_score"] = {
+            "sum_weighted_trade_gross_return": smoke_score.get("sum_weighted_trade_gross_return"),
+            "sum_weighted_trade_funding_return": smoke_score.get("sum_weighted_trade_funding_return"),
+            "sum_weighted_trade_cost_return": smoke_score.get("sum_weighted_trade_cost_return"),
+            "sum_weighted_trade_net_return": smoke_score.get("sum_weighted_trade_net_return"),
+        }
+    else:
+        summary["smoke_score"] = {
+            "sum_weighted_trade_gross_return": None,
+            "sum_weighted_trade_funding_return": None,
+            "sum_weighted_trade_cost_return": None,
+            "sum_weighted_trade_net_return": None,
+        }
     if engine_run.validate_summary is not None:
         gates = engine_run.validate_summary.get("gates")
         if isinstance(gates, list):

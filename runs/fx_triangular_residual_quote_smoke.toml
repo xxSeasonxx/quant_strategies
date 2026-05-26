@@ -32,7 +32,7 @@ min_abs_residual_bps = 0.5
 attribution_bars = 5
 crossing_only = true
 weight = 0.25
-hold_bars = 10
+max_hold_bars = 10
 
 [fill_model]
 price = "quote"

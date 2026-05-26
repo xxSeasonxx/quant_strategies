@@ -16,14 +16,47 @@ def check_research_manifest(
     strategy_path: Path,
     repo_root: Path,
 ) -> dict[str, Any]:
-    manifest_path = _find_parent_manifest(config_path=config_path, repo_root=repo_root)
-    if manifest_path is None:
-        return {"found": False, "passed": True, "violations": []}
+    researched_package = _researched_package_dir(
+        config_path=config_path,
+        strategy_path=strategy_path,
+        repo_root=repo_root,
+    )
+    is_researched_package = researched_package is not None
+    if not is_researched_package:
+        return {
+            "is_researched_package": False,
+            "found": False,
+            "passed": True,
+            "violations": [],
+        }
+
+    layout_violations = _canonical_layout_violations(
+        config_path=config_path,
+        strategy_path=strategy_path,
+        package_dir=researched_package,
+    )
+    if layout_violations:
+        return {
+            "is_researched_package": True,
+            "found": False,
+            "passed": False,
+            "violations": layout_violations,
+        }
+
+    manifest_path = researched_package / "manifest.json"
+    if not manifest_path.exists():
+        return {
+            "is_researched_package": True,
+            "found": False,
+            "passed": False,
+            "violations": ["research_manifest_missing"],
+        }
 
     try:
         payload = json.loads(manifest_path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
         return {
+            "is_researched_package": True,
             "found": True,
             "manifest_path": _relative_path(manifest_path, repo_root),
             "passed": False,
@@ -33,6 +66,7 @@ def check_research_manifest(
     variants = payload.get("variants")
     if not isinstance(variants, list):
         return {
+            "is_researched_package": True,
             "found": True,
             "manifest_path": _relative_path(manifest_path, repo_root),
             "passed": False,
@@ -42,11 +76,11 @@ def check_research_manifest(
     variant = _matching_variant(variants, manifest_path=manifest_path, config_path=config_path)
     if variant is None:
         return {
+            "is_researched_package": True,
             "found": True,
             "manifest_path": _relative_path(manifest_path, repo_root),
-            "passed": True,
-            "warnings": ["research_manifest_variant_missing"],
-            "violations": [],
+            "passed": False,
+            "violations": ["research_manifest_variant_missing"],
         }
 
     status = _variant_status(variant)
@@ -55,21 +89,21 @@ def check_research_manifest(
         "strategy_sha256": _safe_file_sha256(strategy_path),
         "validation_config_sha256": _safe_file_sha256(config_path),
     }
-    if status in _VALIDATION_READY_STATUSES:
-        expected_strategy_hash = variant.get("strategy_sha256") or variant.get("code_sha256")
-        expected_config_hash = variant.get("validation_config_sha256") or variant.get(
-            "config_sha256"
-        )
-        if expected_strategy_hash is None:
-            violations.append("research_manifest_missing_strategy_hash")
-        elif expected_strategy_hash != hashes["strategy_sha256"]:
-            violations.append("research_manifest_strategy_hash_mismatch")
-        if expected_config_hash is None:
-            violations.append("research_manifest_missing_validation_config_hash")
-        elif expected_config_hash != hashes["validation_config_sha256"]:
-            violations.append("research_manifest_validation_config_hash_mismatch")
+    if status not in _VALIDATION_READY_STATUSES:
+        violations.append("research_manifest_status_not_validation_ready")
+    expected_strategy_hash = variant.get("strategy_sha256")
+    expected_config_hash = variant.get("validation_config_sha256")
+    if expected_strategy_hash is None:
+        violations.append("research_manifest_missing_strategy_hash")
+    elif expected_strategy_hash != hashes["strategy_sha256"]:
+        violations.append("research_manifest_strategy_hash_mismatch")
+    if expected_config_hash is None:
+        violations.append("research_manifest_missing_validation_config_hash")
+    elif expected_config_hash != hashes["validation_config_sha256"]:
+        violations.append("research_manifest_validation_config_hash_mismatch")
 
     return {
+        "is_researched_package": True,
         "found": True,
         "manifest_path": _relative_path(manifest_path, repo_root),
         "variant_directory": str(variant.get("directory", "")),
@@ -80,16 +114,49 @@ def check_research_manifest(
     }
 
 
-def _find_parent_manifest(*, config_path: Path, repo_root: Path) -> Path | None:
-    current = config_path.resolve().parent
-    root = repo_root.resolve()
-    while True:
-        candidate = current / "manifest.json"
-        if candidate.exists():
-            return candidate
-        if current == root or current.parent == current:
-            return None
-        current = current.parent
+def _researched_package_dir(
+    *,
+    config_path: Path,
+    strategy_path: Path,
+    repo_root: Path,
+) -> Path | None:
+    packages = {
+        package
+        for package in (
+            _researched_package_dir_for_path(config_path, repo_root=repo_root),
+            _researched_package_dir_for_path(strategy_path, repo_root=repo_root),
+        )
+        if package is not None
+    }
+    if not packages:
+        return None
+    if len(packages) == 1:
+        return next(iter(packages))
+    return repo_root.resolve() / "researched"
+
+
+def _researched_package_dir_for_path(path: Path, *, repo_root: Path) -> Path | None:
+    researched_root = (repo_root.resolve() / "researched").resolve()
+    try:
+        relative = path.resolve().relative_to(researched_root)
+    except ValueError:
+        return None
+    if not relative.parts:
+        return researched_root
+    return researched_root / relative.parts[0]
+
+
+def _canonical_layout_violations(
+    *,
+    config_path: Path,
+    strategy_path: Path,
+    package_dir: Path,
+) -> list[str]:
+    expected_config = package_dir / "validation.toml"
+    expected_strategy = package_dir / "strategy.py"
+    if config_path.resolve() == expected_config.resolve() and strategy_path.resolve() == expected_strategy.resolve():
+        return []
+    return ["research_manifest_invalid_layout"]
 
 
 def _matching_variant(

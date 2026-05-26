@@ -31,6 +31,11 @@ def audit_observation_dependencies(
                 continue
 
             for row in matching_rows:
+                if observation.field is not None and row.get(observation.field) is None:
+                    violations.append(
+                        f"missing observation field {observation.field} for {label} "
+                        f"used by {decision.instrument.symbol}"
+                    )
                 if "available_at" not in row or row.get("available_at") is None:
                     violations.append(
                         f"missing available_at for observation {label} used by {decision.instrument.symbol}"

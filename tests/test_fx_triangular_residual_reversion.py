@@ -7,7 +7,8 @@ import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.engine_runner import build_request, evaluate_request
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import ObservationRef, StrategyDecision
+from quant_strategies.validation.data_audit import audit_decision_rows
 from untested.fx_triangular_residual_reversion import generate_decisions
 
 
@@ -52,7 +53,7 @@ def params(**overrides: object) -> dict[str, object]:
         "attribution_bars": 1,
         "crossing_only": True,
         "weight": 0.5,
-        "hold_bars": 4,
+        "max_hold_bars": 4,
     }
     values.update(overrides)
     return values
@@ -83,7 +84,6 @@ def decision_payload(decision: StrategyDecision) -> dict[str, object]:
         "as_of_time": decision.as_of_time,
         "side": decision.target.direction,
         "weight": decision.target.size,
-        "hold_bars": decision.exit_policy.max_hold_bars,
         "max_hold_bars": decision.exit_policy.max_hold_bars,
         **dict(decision.metadata),
     }
@@ -96,6 +96,10 @@ def decision_payload(decision: StrategyDecision) -> dict[str, object]:
 
 def generate_payloads(bars: list[dict[str, object]], params: dict[str, object]) -> list[dict[str, object]]:
     return [decision_payload(decision) for decision in generate_decisions(bars, params)]
+
+
+def auditable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [{**row, "available_at": row["timestamp"]} for row in rows]
 
 
 def test_generate_decisions_returns_empty_for_empty_input():
@@ -120,7 +124,6 @@ def test_generate_decisions_uses_prior_residuals_for_direct_cross_short():
             "as_of_time": START + timedelta(minutes=2),
             "side": "short",
             "weight": 0.5,
-            "hold_bars": 4,
             "max_hold_bars": 4,
             "residual_zscore": pytest.approx(3.0),
             "residual_bps": pytest.approx(20.0),
@@ -128,6 +131,46 @@ def test_generate_decisions_uses_prior_residuals_for_direct_cross_short():
             "signal_family": "fx_triangular_residual_reversion",
         }
     ]
+
+
+def test_generate_decisions_emits_complete_close_observation_lineage():
+    rows = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
+    decisions = generate_decisions(rows, params())
+    observed = {
+        (item.symbol, item.timestamp, item.field, item.source)
+        for item in decisions[0].observations
+    }
+    expected_times = [START + timedelta(minutes=index) for index in range(3)]
+    expected = {
+        (symbol, timestamp, "close", "strategy_input")
+        for symbol in ("EURJPY", "EURUSD", "USDJPY")
+        for timestamp in expected_times
+    }
+
+    assert observed == expected
+    assert audit_decision_rows(auditable_rows(rows), decisions).passed is True
+
+
+def test_fx_lineage_audit_fails_for_missing_or_late_observed_rows():
+    rows = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
+    decisions = generate_decisions(rows, params())
+    missing_rows = [
+        row
+        for row in auditable_rows(rows)
+        if not (row["symbol"] == "EURUSD" and row["timestamp"] == START + timedelta(minutes=1))
+    ]
+    late_rows = auditable_rows(rows)
+    for row in late_rows:
+        if row["symbol"] == "EURUSD" and row["timestamp"] == START + timedelta(minutes=1):
+            row["available_at"] = decisions[0].decision_time + timedelta(minutes=1)
+
+    missing_audit = audit_decision_rows(missing_rows, decisions)
+    late_audit = audit_decision_rows(late_rows, decisions)
+
+    assert missing_audit.passed is False
+    assert any("missing observation row" in violation for violation in missing_audit.violations)
+    assert late_audit.passed is False
+    assert any("was available after decision_time" in violation for violation in late_audit.violations)
 
 
 def test_generate_decisions_maps_synthetic_leg_reversion_side():
@@ -140,7 +183,6 @@ def test_generate_decisions_maps_synthetic_leg_reversion_side():
             "as_of_time": START + timedelta(minutes=2),
             "side": "long",
             "weight": 0.5,
-            "hold_bars": 4,
             "max_hold_bars": 4,
             "residual_zscore": pytest.approx(3.0),
             "residual_bps": pytest.approx(20.0),
@@ -152,7 +194,7 @@ def test_generate_decisions_maps_synthetic_leg_reversion_side():
 
 def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
     rows = engine_rows(direct_residual_rows([0.0, 0.001, 0.002, 0.0, 0.0, 0.0]))
-    signals = generate_payloads(rows, params(hold_bars=1))
+    signals = generate_payloads(rows, params(max_hold_bars=1))
 
     assert signals[0]["as_of_time"] == START + timedelta(minutes=2)
     assert signals[0]["decision_time"] == START + timedelta(minutes=3)
@@ -197,7 +239,6 @@ def test_generate_decisions_suppresses_repeated_same_zone_entries():
             "as_of_time": START + timedelta(minutes=5),
             "side": "short",
             "weight": 0.5,
-            "hold_bars": 4,
             "max_hold_bars": 4,
             "residual_zscore": pytest.approx(67.08257172001852),
             "residual_bps": pytest.approx(50.0),

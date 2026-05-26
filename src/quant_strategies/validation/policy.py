@@ -10,26 +10,28 @@ from quant_strategies.evidence_semantics import validation_evidence_semantics
 from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
 
 
-ValidationDecision = Literal["hard_no", "maybe", "clear_yes"]
+ValidationDecision = Literal["hard_no", "maybe", "mechanical_pass"]
 
 
-class PromotionDecision(BaseModel):
+class ValidationPolicyDecision(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     decision: ValidationDecision
     reasons: tuple[str, ...] = ()
     advisory_decision: ValidationDecision | None = None
     evidence_class: str = "validation_advisory"
+    promotion_eligible: bool = False
     paper_trade_eligible: bool = False
     live_eligible: bool = False
     requires_manual_approval: bool = True
 
     @model_validator(mode="after")
-    def default_advisory_fields(self) -> PromotionDecision:
+    def default_advisory_fields(self) -> ValidationPolicyDecision:
         if self.advisory_decision is None:
             object.__setattr__(self, "advisory_decision", self.decision)
         semantics = validation_evidence_semantics()
         object.__setattr__(self, "evidence_class", str(semantics["evidence_class"]))
+        object.__setattr__(self, "promotion_eligible", bool(semantics["promotion_eligible"]))
         object.__setattr__(self, "paper_trade_eligible", bool(semantics["paper_trade_eligible"]))
         object.__setattr__(self, "live_eligible", bool(semantics["live_eligible"]))
         object.__setattr__(
@@ -71,13 +73,13 @@ def classify_validation(
     min_trades: int,
     required_scenario_count: int | None = None,
     required_scenario_ids: Sequence[str] | None = None,
-) -> PromotionDecision:
+) -> ValidationPolicyDecision:
     reasons: list[str] = []
     if not data_passed:
         reasons.append("data_audit_failed")
-        return PromotionDecision(decision="hard_no", reasons=tuple(reasons))
+        return ValidationPolicyDecision(decision="hard_no", reasons=tuple(reasons))
     if not backend_results:
-        return PromotionDecision(decision="hard_no", reasons=("no_backend_results",))
+        return ValidationPolicyDecision(decision="hard_no", reasons=("no_backend_results",))
 
     scenario_results = tuple(_scenario_result(item) for item in backend_results)
     required_results = [item for item in scenario_results if item.required]
@@ -85,22 +87,22 @@ def classify_validation(
         expected_ids = set(required_scenario_ids)
         actual_ids = [item.scenario_id for item in required_results]
         if len(actual_ids) != len(set(actual_ids)):
-            return PromotionDecision(decision="hard_no", reasons=("duplicate_required_scenarios",))
+            return ValidationPolicyDecision(decision="hard_no", reasons=("duplicate_required_scenarios",))
         if set(actual_ids) != expected_ids:
-            return PromotionDecision(decision="hard_no", reasons=("missing_required_scenarios",))
+            return ValidationPolicyDecision(decision="hard_no", reasons=("missing_required_scenarios",))
     if required_scenario_count is not None and len(required_results) < required_scenario_count:
-        return PromotionDecision(decision="hard_no", reasons=("missing_required_scenarios",))
+        return ValidationPolicyDecision(decision="hard_no", reasons=("missing_required_scenarios",))
     if not required_results:
-        return PromotionDecision(decision="hard_no", reasons=("no_required_backend_results",))
+        return ValidationPolicyDecision(decision="hard_no", reasons=("no_required_backend_results",))
 
     for item in required_results:
         result = item.result
         if result.status == "failed":
-            return PromotionDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
+            return ValidationPolicyDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
 
     unavailable = [item.result for item in required_results if item.result.status == "unavailable"]
     if unavailable:
-        return PromotionDecision(decision="maybe", reasons=("backend_unavailable",))
+        return ValidationPolicyDecision(decision="maybe", reasons=("backend_unavailable",))
 
     unsupported = [
         item.result
@@ -108,12 +110,12 @@ def classify_validation(
         if item.result.unsupported_semantics or item.result.status == "unsupported"
     ]
     if unsupported:
-        return PromotionDecision(decision="maybe", reasons=("unsupported_semantics",))
+        return ValidationPolicyDecision(decision="maybe", reasons=("unsupported_semantics",))
 
     for item in required_results:
         result = item.result
         if result.status != "completed":
-            return PromotionDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
+            return ValidationPolicyDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
         metrics = _validated_backend_metrics(result.metrics)
         if metrics is None:
             reasons.append("invalid_backend_metrics")
@@ -125,8 +127,8 @@ def classify_validation(
             reasons.append("nonpositive_net_return")
 
     if reasons:
-        return PromotionDecision(decision="hard_no", reasons=tuple(dict.fromkeys(reasons)))
-    return PromotionDecision(decision="clear_yes")
+        return ValidationPolicyDecision(decision="hard_no", reasons=tuple(dict.fromkeys(reasons)))
+    return ValidationPolicyDecision(decision="mechanical_pass")
 
 
 def _scenario_result(

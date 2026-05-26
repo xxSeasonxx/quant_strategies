@@ -98,14 +98,11 @@ def test_committed_run_configs_use_decision_strategy_contract():
         assert callable(load_strategy(config.strategy_path, repo_root=repo_root))
 
 
-def test_readme_documented_run_configs_exist():
+def test_readme_does_not_document_named_run_configs():
     repo_root = REPO_ROOT
     readme = (repo_root / "README.md").read_text()
-    referenced = sorted(set(re.findall(r"runs/[A-Za-z0-9_.-]+\.toml", readme)))
-    assert referenced, "README should document at least one run config"
-
-    missing = [path for path in referenced if not (repo_root / path).exists()]
-    assert missing == []
+    assert re.search(r"\bruns/[A-Za-z0-9_.-]+\.toml\b", readme) is None
+    assert "_smoke.toml" not in readme
 
 
 @pytest.mark.parametrize(

@@ -27,7 +27,7 @@ min_cross_section = 4
 min_abs_funding_bps = 1.0
 min_abs_return_bps = 25.0
 weight = 0.25
-hold_bars = 480
+max_hold_bars = 480
 
 [fill_model]
 price = "close"

@@ -32,7 +32,7 @@ def bars_for(closes: list[float]) -> list[dict[str, object]]:
 
 def test_generate_decisions_emits_long_after_positive_close_change():
     bars = bars_for([100.0, 101.0, 100.0])
-    decisions = load_example_strategy().generate_decisions(bars, {"weight": 1.0, "hold_bars": 1})
+    decisions = load_example_strategy().generate_decisions(bars, {"weight": 1.0, "max_hold_bars": 1})
 
     assert len(decisions) == 1
     decision = decisions[0]
@@ -47,7 +47,7 @@ def test_generate_decisions_emits_long_after_positive_close_change():
 def test_generate_decisions_uses_current_bar_as_decision_time_without_lookahead():
     decisions = load_example_strategy().generate_decisions(
         bars_for([100.0, 99.0, 101.0, 100.0]),
-        {"weight": 0.5, "hold_bars": 2},
+        {"weight": 0.5, "max_hold_bars": 2},
     )
 
     assert len(decisions) == 1
@@ -62,7 +62,7 @@ def test_generate_decisions_uses_current_bar_as_decision_time_without_lookahead(
 def test_generate_decisions_stops_after_first_positive_close_change():
     decisions = load_example_strategy().generate_decisions(
         bars_for([100.0, 101.0, 102.0, 103.0]),
-        {"weight": 1.0, "hold_bars": 1},
+        {"weight": 1.0, "max_hold_bars": 1},
     )
 
     assert len(decisions) == 1

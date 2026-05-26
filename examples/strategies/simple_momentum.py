@@ -36,7 +36,7 @@ def generate_decisions(
     params: Mapping[str, object],
 ) -> list[StrategyDecision]:
     weight = float(params.get("weight", 1.0))
-    hold_bars = int(params.get("hold_bars", 1))
+    max_hold_bars = int(params.get("max_hold_bars", 1))
     decisions: list[StrategyDecision] = []
 
     for index in range(1, len(bars)):
@@ -58,7 +58,7 @@ def generate_decisions(
                         sizing_kind="target_weight",
                         size=weight,
                     ),
-                    exit_policy=ExitPolicy(max_hold_bars=hold_bars),
+                    exit_policy=ExitPolicy(max_hold_bars=max_hold_bars),
                 )
             )
             break

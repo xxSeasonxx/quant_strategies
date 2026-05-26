@@ -83,8 +83,7 @@ class Signal(EngineModel):
     decision_time: datetime
     side: Side
     weight: float = Field(default=1.0, gt=0)
-    hold_bars: int = Field(default=1, ge=1)
-    max_hold_bars: int | None = Field(default=None, ge=1)
+    max_hold_bars: int = Field(ge=1)
     take_profit_bps: float | None = None
     stop_loss_bps: float | None = None
     trailing_stop_bps: float | None = None
@@ -159,14 +158,18 @@ class Trade(EngineModel):
     signal_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SmokeScore(EngineModel):
+    sum_weighted_trade_gross_return: float
+    sum_weighted_trade_funding_return: float = 0.0
+    sum_weighted_trade_cost_return: float
+    sum_weighted_trade_net_return: float
+
+
 class ScreeningResult(EngineModel):
     mode: Literal["screen"] = "screen"
     strategy_id: str
     trade_count: int
-    gross_return: float
-    funding_return: float = 0.0
-    net_return: float
-    cost_return: float
+    smoke_score: SmokeScore
     trades: tuple[Trade, ...]
 
 

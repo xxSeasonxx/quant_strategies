@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"validation failed: {exc}")
             return 1
         print(f"{result.message}; artifacts: {result.result_dir}")
-        if result.decision.decision == "clear_yes":
+        if result.decision.decision == "mechanical_pass":
             return 0
         if result.decision.decision == "hard_no":
             return 1

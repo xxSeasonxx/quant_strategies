@@ -31,7 +31,6 @@ _RESERVED_SIGNAL_FIELDS = {
     "as_of_time",
     "side",
     "weight",
-    "hold_bars",
     "max_hold_bars",
     "take_profit_bps",
     "stop_loss_bps",
@@ -172,10 +171,10 @@ def _signal_from_row(row: dict[str, Any]) -> Signal:
             "decision_time": _as_datetime(row["decision_time"], "decision_time"),
             "side": row["side"],
             "weight": row.get("weight", 1.0),
-            "hold_bars": row.get("hold_bars", 1),
+            "max_hold_bars": row["max_hold_bars"],
             "metadata": _signal_metadata(row),
         }
-        for field in ("max_hold_bars", "take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+        for field in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
             if field in row and row[field] is not None:
                 payload[field] = row[field]
         return Signal(**payload)
@@ -228,8 +227,7 @@ def _assert_fillable(request: EvaluationRequest) -> None:
             raise RequestBuildError(f"missing bars for signal symbol: {signal.symbol}")
         decision_index = _decision_index(indexed, signal)
         entry_index = decision_index + request.fill_model.entry_lag_bars
-        max_hold_bars = signal.max_hold_bars or signal.hold_bars
-        last_trigger_index = entry_index + max_hold_bars
+        last_trigger_index = entry_index + signal.max_hold_bars
         last_exit_index = last_trigger_index + request.fill_model.exit_lag_bars
         if entry_index >= len(symbol_bars):
             raise RequestBuildError(f"entry fill is outside available bars: {signal.symbol}")

@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError
 from quant_strategies.validation import run_validation
@@ -30,7 +30,7 @@ def write_package(
     package = tmp_path / "researched" / "demo"
     package.mkdir(parents=True)
     strategy_text = (
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -39,6 +39,7 @@ def write_package(
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     ).replace("size=1.0", "size=float(params.get('weight', 1.0))")
     (package / "strategy.py").write_text(strategy_text)
@@ -79,10 +80,15 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+[readiness]
+min_observations_per_decision = 1
+required_observation_fields = ["close"]
+
 [output]
 results_dir = "validation_results/demo"
 """.lstrip()
     )
+    write_manifest(package)
     return package
 
 
@@ -94,6 +100,7 @@ def decision(strategy_id: str = "demo") -> StrategyDecision:
         as_of_time=AS_OF,
         target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
         exit_policy=ExitPolicy(max_hold_bars=1),
+        observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close", source="strategy_input"),),
     )
 
 
@@ -109,11 +116,29 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_manifest(package: Path, *, lifecycle_status: str = "validation_ready") -> None:
+    (package / "manifest.json").write_text(
+        json.dumps(
+            {
+                "variants": [
+                    {
+                        "directory": ".",
+                        "lifecycle_status": lifecycle_status,
+                        "strategy_sha256": file_sha256(package / "strategy.py"),
+                        "validation_config_sha256": file_sha256(package / "validation.toml"),
+                    }
+                ]
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
+def test_run_validation_writes_mechanical_pass_artifacts(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path)
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
@@ -131,12 +156,13 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "clear_yes"
+    assert result.decision.decision == "mechanical_pass"
     assert result.result_dir is not None
-    promotion = json.loads((result.result_dir / "promotion_decision.json").read_text())
-    assert promotion["decision"] == "clear_yes"
+    promotion = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert promotion["decision"] == "mechanical_pass"
     assert promotion["evidence_class"] == "validation_advisory"
-    assert promotion["advisory_decision"] == "clear_yes"
+    assert promotion["advisory_decision"] == "mechanical_pass"
+    assert promotion["promotion_eligible"] is False
     assert promotion["paper_trade_eligible"] is False
     assert promotion["live_eligible"] is False
     assert promotion["requires_manual_approval"] is True
@@ -172,13 +198,16 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert (result.result_dir / "strategy_snapshot.py").exists()
     assert (result.result_dir / "decision_schema.json").exists()
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "clear_yes"
+    assert robustness_matrix["decision"]["decision"] == "mechanical_pass"
     assert len(robustness_matrix["scenarios"]) == 6
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["validation"]["strategy_id"] == "demo"
     assert manifest["validation"]["backend"] == "fake"
     assert manifest["strategy"]["path"] == "researched/demo/strategy.py"
-    assert manifest["research_manifest"] == {"found": False, "passed": True, "violations": []}
+    assert manifest["research_manifest"]["found"] is True
+    assert manifest["research_manifest"]["passed"] is True
+    assert manifest["research_manifest"]["lifecycle_status"] == "validation_ready"
+    assert manifest["research_manifest"]["violations"] == []
     assert manifest["data"]["windows"][0]["status"] == "loaded"
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
     assert manifest["data"]["windows"][0]["rows_sha256"]
@@ -207,6 +236,9 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
         result.result_dir / "backend_capability_matrix.json"
     )
+    assert manifest["core_hashes"]["validation_decision.json"] == file_sha256(
+        result.result_dir / "validation_decision.json"
+    )
     assert manifest["artifacts"]["backend_runs/summary.json"]["sha256"] == file_sha256(
         result.result_dir / "backend_runs" / "summary.json"
     )
@@ -231,7 +263,7 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert audit["windows"][0]["passed"] is False
     assert audit["windows"][0]["violations"] == ["data_load_failed: data load returned no rows"]
-    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_decision.json").exists()
     capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["data"]["windows"][0]["status"] == "failed"
@@ -296,9 +328,28 @@ def test_run_validation_blocks_malformed_research_manifest_variants(tmp_path: Pa
     ]
 
 
-def test_run_validation_records_missing_research_manifest_variant_without_blocking(
+def test_run_validation_blocks_missing_research_manifest(tmp_path: Path):
+    package = write_package(tmp_path)
+    (package / "manifest.json").unlink()
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"] == {
+        "is_researched_package": True,
+        "found": False,
+        "passed": False,
+        "violations": ["research_manifest_missing"],
+    }
+
+
+def test_run_validation_blocks_missing_research_manifest_variant(
     tmp_path: Path,
-    monkeypatch,
 ):
     package = write_package(tmp_path)
     (package / "manifest.json").write_text(
@@ -313,18 +364,160 @@ def test_run_validation_records_missing_research_manifest_variant_without_blocki
             }
         )
     )
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["passed"] is False
+    assert manifest["research_manifest"]["violations"] == ["research_manifest_variant_missing"]
+
+
+def test_run_validation_blocks_invalid_researched_layout(tmp_path: Path):
+    package = write_package(tmp_path)
+    nested = package / "variant"
+    nested.mkdir()
+    (nested / "validation.toml").write_text((package / "validation.toml").read_text())
+    backend = RecordingBackend()
+
+    result = run_validation(nested / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["violations"] == ["research_manifest_invalid_layout"]
+
+
+def test_run_validation_blocks_external_config_pointing_at_researched_strategy(tmp_path: Path):
+    package = write_package(tmp_path)
+    external_config = tmp_path / "external" / "validation.toml"
+    external_config.parent.mkdir()
+    external_config.write_text(
+        (package / "validation.toml")
+        .read_text()
+        .replace('results_dir = "validation_results/demo"', 'results_dir = "validation_results/external"')
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(external_config, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["is_researched_package"] is True
+    assert manifest["research_manifest"]["found"] is False
+    assert manifest["research_manifest"]["passed"] is False
+    assert manifest["research_manifest"]["violations"] == ["research_manifest_invalid_layout"]
+
+
+def test_run_validation_ignores_parent_manifest_for_non_researched_config(
+    tmp_path: Path,
+    monkeypatch,
+):
+    source_package = write_package(tmp_path)
+    scratch_root = tmp_path / "scratch"
+    package = scratch_root / "demo"
+    package.mkdir(parents=True)
+    (package / "strategy.py").write_text((source_package / "strategy.py").read_text())
+    validation_text = (source_package / "validation.toml").read_text()
+    validation_text = validation_text.replace(
+        'strategy_path = "researched/demo/strategy.py"',
+        'strategy_path = "scratch/demo/strategy.py"',
+    )
+    validation_text = validation_text.replace(
+        '\n[readiness]\nmin_observations_per_decision = 1\nrequired_observation_fields = ["close"]\n',
+        "\n",
+    )
+    (package / "validation.toml").write_text(validation_text)
+    (scratch_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "variants": [
+                    {
+                        "directory": "demo",
+                        "lifecycle_status": "validation_ready",
+                        "strategy_sha256": file_sha256(package / "strategy.py"),
+                        "validation_config_sha256": file_sha256(package / "validation.toml"),
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(package / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "mechanical_pass"
+    assert backend.calls == 6
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"] == {
+        "is_researched_package": False,
+        "found": False,
+        "passed": True,
+        "violations": [],
+    }
+
+
+def test_run_validation_blocks_missing_readiness_metadata(tmp_path: Path):
+    package = write_package(tmp_path)
+    validation_text = (package / "validation.toml").read_text()
+    validation_text = validation_text.replace(
+        '\n[readiness]\nmin_observations_per_decision = 1\nrequired_observation_fields = ["close"]\n',
+        "\n",
+    )
+    (package / "validation.toml").write_text(validation_text)
+    write_manifest(package)
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("validation_readiness_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["violations"] == ["validation_readiness_metadata_missing"]
+
+
+def test_run_validation_blocks_missing_required_observations(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "clear_yes"
-    assert backend.calls == 6
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("validation_readiness_failed",)
+    assert backend.calls == 0
     assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["passed"] is True
-    assert manifest["research_manifest"]["warnings"] == ["research_manifest_variant_missing"]
-    assert manifest["research_manifest"]["violations"] == []
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["violations"] == [
+        "decision[0] has 0 observations; requires at least 1",
+        "decision[0] missing required observation fields: ['close']",
+    ]
 
 
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
@@ -436,7 +629,7 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "clear_yes"
+    assert result.decision.decision == "mechanical_pass"
     assert len(loaded_row_ids) == 2
     assert backend.calls == 12
     h1_row_ids = {
@@ -465,7 +658,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "clear_yes"
+    assert result.decision.decision == "mechanical_pass"
     configs = {item.scenario_id: item for item in backend.configs}
     decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
     assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
@@ -509,7 +702,7 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
 ):
     package = write_package(tmp_path)
     (package / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def validate_params(params):\n"
         "    if float(params['weight']) > 1.0:\n"
         "        raise ValueError('weight too high')\n"
@@ -522,14 +715,16 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
+    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "clear_yes"
+    assert result.decision.decision == "mechanical_pass"
     assert backend.calls == 5
     assert result.result_dir is not None
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
@@ -555,7 +750,7 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
 ):
     package = write_package(tmp_path)
     (package / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def validate_params(params):\n"
         "    extra = set(params).difference({'weight'})\n"
         "    if extra:\n"
@@ -569,12 +764,14 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
     validation_config = (package / "validation.toml").read_text()
     (package / "validation.toml").write_text(
         validation_config.replace("weight = 1.0", "weight = 1.0\ntypo = 2.0")
     )
+    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
@@ -595,6 +792,7 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
         "    rows[0]['close'] = 999.0\n"
         "    return []\n"
     )
+    write_manifest(package)
     loaded_rows = rows()
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
@@ -618,6 +816,7 @@ def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypat
         "    params['weight'] = 2.0\n"
         "    return []\n"
     )
+    write_manifest(package)
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
         lambda config: LoadedData(rows=rows()),
@@ -651,7 +850,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("strategy_generation_failed",)
     assert result.result_dir is not None
-    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_decision.json").exists()
     assert (result.result_dir / "validation_report.md").exists()
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert summary["results"] == []
@@ -669,7 +868,7 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("exploding_failed",)
     assert result.result_dir is not None
-    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_decision.json").exists()
     assert (result.result_dir / "validation_report.md").exists()
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(summary["results"]) == 6
@@ -690,7 +889,7 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("malformed_failed",)
     assert result.result_dir is not None
-    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_decision.json").exists()
     assert (result.result_dir / "validation_report.md").exists()
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(summary["results"]) == 6
@@ -746,6 +945,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit
 ):
     package = write_package(tmp_path)
     (package / "strategy.py").write_text("raise SystemExit('import exited')\n")
+    write_manifest(package)
 
     with pytest.raises(SystemExit, match="import exited"):
         run_validation(package, repo_root=tmp_path, backend=RecordingBackend())

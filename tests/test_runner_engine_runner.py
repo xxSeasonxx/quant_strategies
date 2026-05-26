@@ -29,13 +29,13 @@ def bars(*closes: float, quotes: bool = False) -> list[dict[str, object]]:
     return rows
 
 
-def signal(index: int = 1, *, hold_bars: int = 1) -> dict[str, object]:
+def signal(index: int = 1, *, max_hold_bars: int = 1) -> dict[str, object]:
     return {
         "symbol": "SPY",
         "decision_time": datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=index),
         "side": "long",
         "weight": 1.0,
-        "hold_bars": hold_bars,
+        "max_hold_bars": max_hold_bars,
     }
 
 
@@ -95,7 +95,6 @@ def test_decisions_to_signal_rows_preserves_engine_fields():
             "as_of_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
             "side": "long",
             "weight": 0.5,
-            "hold_bars": 3,
             "max_hold_bars": 3,
             "stop_loss_bps": 100.0,
             "take_profit_bps": 200.0,
@@ -127,7 +126,7 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     request = build_request(
         strategy_id="demo",
         rows=rows,
-        signals=[signal(index=0, hold_bars=2)],
+        signals=[signal(index=0, max_hold_bars=2)],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -248,7 +247,7 @@ def test_build_request_rejects_quote_fill_without_bid_ask_fields():
 
 
 def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
-    raw_signal = signal(index=0, hold_bars=5)
+    raw_signal = signal(index=0, max_hold_bars=5)
     raw_signal.update(
         {
             "max_hold_bars": 2,
@@ -301,7 +300,7 @@ def test_build_request_uses_max_hold_and_exit_lag_for_fillability():
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 100.0, 101.0),
-            signals=[{**signal(index=0, hold_bars=1), "max_hold_bars": 2}],
+            signals=[{**signal(index=0, max_hold_bars=1), "max_hold_bars": 2}],
             fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=1),
             cost_model=zero_cost(),
         )

@@ -69,6 +69,21 @@ class ValidationOutputConfig(ValidationConfigModel):
         return _resolve_inside_repo(value, _repo_root(info), "output.results_dir")
 
 
+class ValidationReadinessConfig(ValidationConfigModel):
+    min_observations_per_decision: int = Field(ge=1)
+    required_observation_fields: tuple[str, ...] = Field(min_length=1)
+
+    @field_validator("required_observation_fields")
+    @classmethod
+    def normalize_required_fields(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        fields = tuple(field.strip() for field in value)
+        if any(not field for field in fields):
+            raise ValueError("readiness.required_observation_fields cannot contain empty fields")
+        if len(fields) != len(set(fields)):
+            raise ValueError("readiness.required_observation_fields cannot contain duplicates")
+        return fields
+
+
 class ValidationConfig(ValidationConfigModel):
     _repo_root_path: Path = PrivateAttr(default_factory=default_repo_root)
 
@@ -81,6 +96,7 @@ class ValidationConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     output: ValidationOutputConfig
+    readiness: ValidationReadinessConfig | None = None
 
     def model_post_init(self, context: Any, /) -> None:
         root = context.get("repo_root") if isinstance(context, dict) else None

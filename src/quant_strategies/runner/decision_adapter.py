@@ -25,7 +25,6 @@ def decisions_to_signal_rows(decisions: list[StrategyDecision]) -> list[dict[str
             "as_of_time": decision.as_of_time,
             "side": decision.target.direction,
             "weight": decision.target.size,
-            "hold_bars": decision.exit_policy.max_hold_bars,
             "max_hold_bars": decision.exit_policy.max_hold_bars,
             "metadata": dict(decision.metadata),
         }

@@ -122,3 +122,61 @@ def test_load_validation_config_rejects_empty_windows(tmp_path: Path):
 
     with pytest.raises(ValidationConfigError, match="windows"):
         load_validation_config(tmp_path / "researched" / "demo", repo_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("readiness_text", "message"),
+    [
+        (
+            """
+[readiness]
+min_observations_per_decision = 0
+required_observation_fields = ["close"]
+""",
+            "greater than or equal to 1",
+        ),
+        (
+            """
+[readiness]
+min_observations_per_decision = 1
+""",
+            "required_observation_fields",
+        ),
+        (
+            """
+[readiness]
+min_observations_per_decision = 1
+required_observation_fields = []
+""",
+            "required_observation_fields",
+        ),
+        (
+            """
+[readiness]
+min_observations_per_decision = 1
+required_observation_fields = [""]
+""",
+            "cannot contain empty fields",
+        ),
+        (
+            """
+[readiness]
+min_observations_per_decision = 1
+required_observation_fields = ["close", "close"]
+""",
+            "cannot contain duplicates",
+        ),
+    ],
+)
+def test_load_validation_config_rejects_vacuous_readiness_metadata(
+    tmp_path: Path,
+    readiness_text: str,
+    message: str,
+):
+    write_strategy(tmp_path / "researched" / "demo" / "strategy.py")
+    config_path = tmp_path / "researched" / "demo" / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(config_path.read_text() + readiness_text)
+
+    with pytest.raises(ValidationConfigError, match=message):
+        load_validation_config(config_path, repo_root=tmp_path)

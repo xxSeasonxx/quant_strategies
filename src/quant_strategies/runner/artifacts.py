@@ -79,7 +79,6 @@ def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
             "as_of_time",
             "side",
             "weight",
-            "hold_bars",
             "max_hold_bars",
             "take_profit_bps",
             "stop_loss_bps",

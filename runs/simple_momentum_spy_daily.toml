@@ -11,7 +11,7 @@ strict = true
 
 [params]
 weight = 1.0
-hold_bars = 1
+max_hold_bars = 1
 
 [fill_model]
 price = "close"

@@ -33,7 +33,8 @@ from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
 from quant_strategies.validation.manifest import rows_sha256, write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
-from quant_strategies.validation.policy import PromotionDecision, classify_validation
+from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
+from quant_strategies.validation.readiness import check_validation_readiness
 from quant_strategies.validation.research_manifest import check_research_manifest
 from quant_strategies.validation.strategy_loader import load_decision_strategy
 
@@ -42,7 +43,7 @@ from quant_strategies.validation.strategy_loader import load_decision_strategy
 class ValidationRunResult:
     success: bool
     result_dir: Path | None
-    decision: PromotionDecision
+    decision: ValidationPolicyDecision
     message: str
 
 
@@ -80,11 +81,7 @@ def run_validation(
         repo_root=root,
     )
     if not research_manifest["passed"]:
-        decision = PromotionDecision(
-            decision="hard_no",
-            reasons=("research_manifest_integrity_failed",),
-        )
-        _write_validation_artifacts(
+        return _failure_result(
             result_dir=result_dir,
             repo_root=root,
             config=config,
@@ -94,20 +91,38 @@ def run_validation(
             data_audits=data_audits,
             data_provenance=data_provenance,
             backend_results=backend_results,
-            decision=decision,
             research_manifest=research_manifest,
+            reason="research_manifest_integrity_failed",
         )
-        return _validation_result(result_dir, decision)
+
+    if research_manifest.get("is_researched_package") and config.readiness is None:
+        data_audits.append(
+            _failed_data_audit(
+                "config",
+                row_count=0,
+                decision_count=0,
+                violations=("validation_readiness_metadata_missing",),
+            )
+        )
+        return _failure_result(
+            result_dir=result_dir,
+            repo_root=root,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
+            decisions=all_decisions,
+            data_audits=data_audits,
+            data_provenance=data_provenance,
+            backend_results=backend_results,
+            research_manifest=research_manifest,
+            reason="validation_readiness_failed",
+        )
 
     try:
         selected_backend = backend or get_backend(config.backend)
         backend_name = _backend_name(selected_backend, config.backend)
     except Exception as exc:
-        decision = PromotionDecision(
-            decision="hard_no",
-            reasons=("backend_selection_failed",),
-        )
-        _write_validation_artifacts(
+        return _failure_result(
             result_dir=result_dir,
             repo_root=root,
             config=config,
@@ -117,16 +132,14 @@ def run_validation(
             data_audits=data_audits,
             data_provenance=data_provenance,
             backend_results=backend_results,
-            decision=decision,
             research_manifest=research_manifest,
+            reason="backend_selection_failed",
         )
-        return _validation_result(result_dir, decision)
 
     try:
         generate_decisions = load_decision_strategy(config.strategy_path, repo_root=root)
     except Exception as exc:
-        decision = PromotionDecision(decision="hard_no", reasons=("strategy_import_failed",))
-        _write_validation_artifacts(
+        return _failure_result(
             result_dir=result_dir,
             repo_root=root,
             config=config,
@@ -136,18 +149,13 @@ def run_validation(
             data_audits=data_audits,
             data_provenance=data_provenance,
             backend_results=backend_results,
-            decision=decision,
             research_manifest=research_manifest,
+            reason="strategy_import_failed",
         )
-        return _validation_result(result_dir, decision)
 
     try:
         base_params = validate_strategy_params(generate_decisions, config.params)
     except Exception as exc:
-        decision = PromotionDecision(
-            decision="hard_no",
-            reasons=("param_validation_failed",),
-        )
         data_audits.append(
             _failed_data_audit(
                 "config",
@@ -156,7 +164,7 @@ def run_validation(
                 violations=(f"param_validation_failed: {exc}",),
             )
         )
-        _write_validation_artifacts(
+        return _failure_result(
             result_dir=result_dir,
             repo_root=root,
             config=config,
@@ -166,10 +174,9 @@ def run_validation(
             data_audits=data_audits,
             data_provenance=data_provenance,
             backend_results=backend_results,
-            decision=decision,
             research_manifest=research_manifest,
+            reason="param_validation_failed",
         )
-        return _validation_result(result_dir, decision)
 
     for window in config.windows:
         run_config = config.to_run_config(window, results_dir=result_dir / "runner_smoke" / window.id)
@@ -240,8 +247,16 @@ def run_validation(
             )
             continue
 
-        data_audits.append({"window_id": window.id, **audit.model_dump(mode="json")})
-        if audit.passed:
+        audit_payload = {"window_id": window.id, **audit.model_dump(mode="json")}
+        if audit.passed and config.readiness is not None:
+            readiness_violations = check_validation_readiness(decisions, config.readiness)
+            if readiness_violations:
+                failure_reasons.append("validation_readiness_failed")
+                audit_payload["passed"] = False
+                audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
+
+        data_audits.append(audit_payload)
+        if audit_payload["passed"]:
             scenarios = expand_validation_matrix(
                 window_id=window.id,
                 base_params=_plain_mapping(base_params),
@@ -262,6 +277,7 @@ def run_validation(
                     rows=loaded.rows,
                     strategy_id=config.strategy_id,
                     scenario_config=scenario_config,
+                    readiness=config.readiness,
                     backend_name=backend_name,
                 )
                 backend_result = decision_outcome.failure
@@ -310,7 +326,7 @@ def run_validation(
 
     data_passed = all(audit["passed"] for audit in data_audits)
     if failure_reasons:
-        decision = PromotionDecision(
+        decision = ValidationPolicyDecision(
             decision="hard_no",
             reasons=tuple(dict.fromkeys(failure_reasons)),
         )
@@ -337,13 +353,44 @@ def run_validation(
     return _validation_result(result_dir, decision)
 
 
-def _validation_result(result_dir: Path, decision: PromotionDecision) -> ValidationRunResult:
+def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> ValidationRunResult:
     return ValidationRunResult(
-        success=decision.decision == "clear_yes",
+        success=decision.decision == "mechanical_pass",
         result_dir=result_dir,
         decision=decision,
         message=f"validation decision: {decision.decision}",
     )
+
+
+def _failure_result(
+    *,
+    result_dir: Path,
+    repo_root: Path,
+    config: Any,
+    config_path: Path,
+    backend_name: str,
+    decisions: list[StrategyDecision],
+    data_audits: list[dict[str, Any]],
+    data_provenance: list[dict[str, Any]],
+    backend_results: list[ScenarioBackendRunResult],
+    research_manifest: dict[str, Any],
+    reason: str,
+) -> ValidationRunResult:
+    decision = ValidationPolicyDecision(decision="hard_no", reasons=(reason,))
+    _write_validation_artifacts(
+        result_dir=result_dir,
+        repo_root=repo_root,
+        config=config,
+        config_path=config_path,
+        backend_name=backend_name,
+        decisions=decisions,
+        data_audits=data_audits,
+        data_provenance=data_provenance,
+        backend_results=backend_results,
+        decision=decision,
+        research_manifest=research_manifest,
+    )
+    return _validation_result(result_dir, decision)
 
 
 def _failed_data_audit(
@@ -424,6 +471,7 @@ def _scenario_decision_outcome(
     rows: Sequence[Mapping[str, Any]],
     strategy_id: str,
     scenario_config: Any,
+    readiness: Any,
     backend_name: str,
 ) -> _ScenarioDecisionOutcome:
     if scenario.kind != "parameter":
@@ -471,6 +519,18 @@ def _scenario_decision_outcome(
                 f"parameter_decision_audit_failed: {'; '.join(audit.violations)}",
             ),
         )
+    if readiness is not None:
+        readiness_violations = check_validation_readiness(scenario_decisions, readiness)
+        if readiness_violations:
+            return _ScenarioDecisionOutcome(
+                decisions=[],
+                decision_generation_status="failed",
+                decisions_regenerated=False,
+                failure=_failed_backend_result(
+                    backend_name,
+                    f"parameter_decision_readiness_failed: {'; '.join(readiness_violations)}",
+                ),
+            )
     return _ScenarioDecisionOutcome(
         decisions=scenario_decisions,
         decision_generation_status="regenerated",
@@ -540,7 +600,7 @@ def _write_validation_artifacts(
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
-    decision: PromotionDecision,
+    decision: ValidationPolicyDecision,
     research_manifest: dict[str, Any],
 ) -> None:
     capability_matrix = backend_capability_matrix(backend_name, backend_results)
@@ -600,7 +660,7 @@ def _write_validation_artifacts(
     write_json_artifact(result_dir, "backend_capability_matrix.json", capability_matrix)
     write_json_artifact(
         result_dir,
-        "promotion_decision.json",
+        "validation_decision.json",
         decision.model_dump(mode="json"),
     )
     write_text_artifact(

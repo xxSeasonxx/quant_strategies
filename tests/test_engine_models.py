@@ -13,14 +13,14 @@ def test_bars_and_signals_require_timezone_aware_timestamps():
         Bar(symbol="BTC", timestamp=datetime(2024, 1, 1), open=1.0, high=1.0, low=1.0, close=1.0)
 
     with pytest.raises(ValidationError, match="decision_time must be timezone-aware"):
-        Signal(symbol="BTC", decision_time=datetime(2024, 1, 1), side=Side.LONG)
+        Signal(symbol="BTC", decision_time=datetime(2024, 1, 1), side=Side.LONG, max_hold_bars=1)
 
 
 def test_signal_weight_and_costs_must_be_finite():
     aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
     with pytest.raises(ValidationError, match="weight must be finite"):
-        Signal(symbol="BTC", decision_time=aware_time, side=Side.LONG, weight=float("inf"))
+        Signal(symbol="BTC", decision_time=aware_time, side=Side.LONG, weight=float("inf"), max_hold_bars=1)
 
     with pytest.raises(ValidationError, match="cost values must be finite"):
         CostModel(fee_bps_per_side=float("inf"))
@@ -45,7 +45,6 @@ def test_signal_accepts_exit_controls_and_metadata():
         symbol="BTC",
         decision_time=aware_time,
         side=Side.LONG,
-        hold_bars=10,
         max_hold_bars=3,
         take_profit_bps=125.0,
         stop_loss_bps=50.0,
@@ -63,21 +62,22 @@ def test_signal_accepts_exit_controls_and_metadata():
 def test_signal_rejects_invalid_exit_controls_and_metadata():
     aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
     base = {"symbol": "BTC", "decision_time": aware_time, "side": Side.LONG}
+    valid_base = {**base, "max_hold_bars": 1}
 
     with pytest.raises(ValidationError, match="max_hold_bars"):
-        Signal(**base, max_hold_bars=0)
+        Signal(**{**base, "max_hold_bars": 0})
 
     with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
-        Signal(**base, take_profit_bps=float("inf"))
+        Signal(**valid_base, take_profit_bps=float("inf"))
 
     with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
-        Signal(**base, stop_loss_bps=0.0)
+        Signal(**valid_base, stop_loss_bps=0.0)
 
     with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
-        Signal(**base, metadata={"timestamp": aware_time})
+        Signal(**valid_base, metadata={"timestamp": aware_time})
 
     with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
-        Signal(**base, metadata={"bad": float("nan")})
+        Signal(**valid_base, metadata={"bad": float("nan")})
 
 
 def test_bar_accepts_valid_optional_quotes():

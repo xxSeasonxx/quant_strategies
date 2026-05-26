@@ -55,7 +55,7 @@ def test_declared_cross_section_observations_pass():
     )
 
     audit = audit_decision_rows(
-        [row("BTC-PERP"), row("ETH-PERP")],
+        [row("BTC-PERP"), {**row("ETH-PERP"), "return_21d": 0.1}],
         [decision(observations=observations)],
     )
 
@@ -85,6 +85,20 @@ def test_missing_observation_row_fails():
     assert audit.passed is False
     assert audit.violations == (
         "missing observation row for BTC-PERP: ETH-PERP at 2026-01-01T00:00:00+00:00",
+    )
+
+
+def test_missing_observation_field_fails():
+    observations = (ObservationRef(symbol="ETH-PERP", timestamp=AS_OF, field="return_21d"),)
+
+    audit = audit_decision_rows(
+        [row("BTC-PERP"), row("ETH-PERP")],
+        [decision(observations=observations)],
+    )
+
+    assert audit.passed is False
+    assert audit.violations == (
+        "missing observation field return_21d for ETH-PERP at 2026-01-01T00:00:00+00:00 used by BTC-PERP",
     )
 
 

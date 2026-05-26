@@ -8,12 +8,13 @@ from quant_strategies.validation.backends import (
     ScenarioBackendRunResult,
     get_backend,
 )
-from quant_strategies.validation.policy import PromotionDecision, classify_validation
+from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
 
 
-def assert_advisory_only(decision: PromotionDecision) -> None:
+def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
     assert decision.evidence_class == "validation_advisory"
     assert decision.advisory_decision == decision.decision
+    assert decision.promotion_eligible is False
     assert decision.paper_trade_eligible is False
     assert decision.live_eligible is False
     assert decision.requires_manual_approval is True
@@ -77,7 +78,7 @@ def test_policy_maybe_for_unsupported_semantics():
     assert_advisory_only(decision)
 
 
-def test_policy_clear_yes_for_positive_sufficient_backend_result():
+def test_policy_mechanical_pass_for_positive_sufficient_backend_result():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -92,7 +93,7 @@ def test_policy_clear_yes_for_positive_sufficient_backend_result():
         min_trades=10,
     )
 
-    assert decision.decision == "clear_yes"
+    assert decision.decision == "mechanical_pass"
     assert decision.reasons == ()
     assert_advisory_only(decision)
 
@@ -207,7 +208,7 @@ def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
     assert_advisory_only(decision)
 
 
-def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
+def test_policy_ignores_diagnostic_scenarios_for_mechanical_pass():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -240,7 +241,7 @@ def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
         required_scenario_count=1,
     )
 
-    assert decision.decision == "clear_yes"
+    assert decision.decision == "mechanical_pass"
     assert decision.reasons == ()
     assert_advisory_only(decision)
 
