@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision, validate_decision_output
+from quant_strategies.provenance import file_sha256
 from quant_strategies.runner import data_loader
 from quant_strategies.runner.config import default_repo_root
 from quant_strategies.validation.artifacts import (
@@ -16,6 +17,7 @@ from quant_strategies.validation.artifacts import (
 )
 from quant_strategies.validation.backends import (
     BackendRunResult,
+    DecisionGenerationStatus,
     ScenarioBackendRunResult,
     ValidationBackend,
     get_backend,
@@ -37,6 +39,14 @@ class ValidationRunResult:
     result_dir: Path | None
     decision: PromotionDecision
     message: str
+
+
+@dataclass(frozen=True)
+class _ScenarioDecisionOutcome:
+    decisions: list[StrategyDecision]
+    decision_generation_status: DecisionGenerationStatus
+    decisions_regenerated: bool
+    failure: BackendRunResult | None = None
 
 
 def run_validation(
@@ -240,26 +250,27 @@ def run_validation(
                     scenario=scenario,
                     base_params=base_params,
                 )
-                scenario_decisions = decisions
-                decisions_regenerated = False
-                scenario_decision_result = _scenario_decision_result(
+                decision_outcome = _scenario_decision_outcome(
                     scenario=scenario,
                     generate_decisions=generate_decisions,
+                    base_decisions=decisions,
                     rows=loaded.rows,
                     strategy_id=config.strategy_id,
                     scenario_config=scenario_config,
                     backend_name=backend_name,
                 )
-                backend_result = None
-                if isinstance(scenario_decision_result, tuple):
-                    scenario_decisions, decisions_regenerated = scenario_decision_result
-                elif scenario_decision_result is not None:
-                    backend_result = scenario_decision_result
-                    decisions_regenerated = scenario.kind == "parameter"
+                backend_result = decision_outcome.failure
+                decision_records_path = None
+                decision_records_sha256 = None
                 if backend_result is None:
+                    decision_records_path, decision_records_sha256 = _write_scenario_decision_records(
+                        result_dir=result_dir,
+                        scenario_id=scenario.id,
+                        decisions=decision_outcome.decisions,
+                    )
                     try:
                         raw_backend_result = selected_backend.run(
-                            decisions=list(scenario_decisions),
+                            decisions=list(decision_outcome.decisions),
                             rows=frozen_rows(loaded.rows),
                             config=scenario_config,
                         )
@@ -283,8 +294,12 @@ def run_validation(
                         required=scenario.required,
                         result=backend_result,
                         scenario_kind=scenario.kind,
-                        decisions_regenerated=decisions_regenerated,
+                        decisions_regenerated=decision_outcome.decisions_regenerated,
                         diagnostic_only=not scenario.required,
+                        decision_generation_status=decision_outcome.decision_generation_status,
+                        decision_count=len(decision_outcome.decisions),
+                        decision_records_path=decision_records_path,
+                        decision_records_sha256=decision_records_sha256,
                     )
                 )
 
@@ -406,24 +421,34 @@ def _scenario_config(
     )
 
 
-def _scenario_decision_result(
+def _scenario_decision_outcome(
     *,
     scenario: MatrixScenario,
     generate_decisions: Any,
+    base_decisions: list[StrategyDecision],
     rows: Sequence[Mapping[str, Any]],
     strategy_id: str,
     scenario_config: Any,
     backend_name: str,
-) -> tuple[list[StrategyDecision], bool] | BackendRunResult | None:
+) -> _ScenarioDecisionOutcome:
     if scenario.kind != "parameter":
-        return None
+        return _ScenarioDecisionOutcome(
+            decisions=list(base_decisions),
+            decision_generation_status="base_reused",
+            decisions_regenerated=False,
+        )
     try:
         scenario_params = _validated_params(generate_decisions, scenario_config.params)
         decision_output = generate_decisions(frozen_rows(rows), frozen_params(scenario_params))
     except Exception as exc:
-        return _failed_backend_result(
-            backend_name,
-            f"parameter_decision_generation_failed: {exc}",
+        return _ScenarioDecisionOutcome(
+            decisions=[],
+            decision_generation_status="failed",
+            decisions_regenerated=False,
+            failure=_failed_backend_result(
+                backend_name,
+                f"parameter_decision_generation_failed: {exc}",
+            ),
         )
 
     scenario_decisions, violations = validate_decision_output(
@@ -431,17 +456,52 @@ def _scenario_decision_result(
         strategy_id=strategy_id,
     )
     if violations:
-        return _failed_backend_result(
-            backend_name,
-            f"parameter_decision_generation_failed: {'; '.join(violations)}",
+        return _ScenarioDecisionOutcome(
+            decisions=[],
+            decision_generation_status="failed",
+            decisions_regenerated=False,
+            failure=_failed_backend_result(
+                backend_name,
+                f"parameter_decision_generation_failed: {'; '.join(violations)}",
+            ),
         )
     audit = audit_decision_rows(frozen_rows(rows), scenario_decisions)
     if not audit.passed:
-        return _failed_backend_result(
-            backend_name,
-            f"parameter_decision_audit_failed: {'; '.join(audit.violations)}",
+        return _ScenarioDecisionOutcome(
+            decisions=[],
+            decision_generation_status="failed",
+            decisions_regenerated=False,
+            failure=_failed_backend_result(
+                backend_name,
+                f"parameter_decision_audit_failed: {'; '.join(audit.violations)}",
+            ),
         )
-    return scenario_decisions, True
+    return _ScenarioDecisionOutcome(
+        decisions=scenario_decisions,
+        decision_generation_status="regenerated",
+        decisions_regenerated=True,
+    )
+
+
+def _write_scenario_decision_records(
+    *,
+    result_dir: Path,
+    scenario_id: str,
+    decisions: list[StrategyDecision],
+) -> tuple[str, str]:
+    artifact_name = f"backend_runs/decision_records/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
+    lines = [item.model_dump_json() for item in decisions]
+    path = write_text_artifact(result_dir, artifact_name, "\n".join(lines))
+    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+
+
+def _safe_scenario_artifact_path(scenario_id: str) -> str:
+    safe_parts = [
+        "".join(char if char.isalnum() or char in "_.-" else "-" for char in part).strip(".")
+        for part in scenario_id.split("/")
+    ]
+    safe_parts = [part or "scenario" for part in safe_parts]
+    return "/".join(safe_parts)
 
 
 def _backend_name(backend: ValidationBackend, fallback: str) -> str:
@@ -503,6 +563,10 @@ def _write_validation_artifacts(
                     "required": item.required,
                     "diagnostic_only": item.diagnostic_only,
                     "decisions_regenerated": item.decisions_regenerated,
+                    "decision_generation_status": item.decision_generation_status,
+                    "decision_count": item.decision_count,
+                    "decision_records_path": item.decision_records_path,
+                    "decision_records_sha256": item.decision_records_sha256,
                     "result": item.result.model_dump(mode="json"),
                 }
                 for item in backend_results
@@ -522,6 +586,10 @@ def _write_validation_artifacts(
                     "required": item.required,
                     "diagnostic_only": item.diagnostic_only,
                     "decisions_regenerated": item.decisions_regenerated,
+                    "decision_generation_status": item.decision_generation_status,
+                    "decision_count": item.decision_count,
+                    "decision_records_path": item.decision_records_path,
+                    "decision_records_sha256": item.decision_records_sha256,
                     "backend": item.result.backend,
                     "status": item.result.status,
                     "metrics": item.result.metrics,

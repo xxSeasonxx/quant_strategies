@@ -10,6 +10,7 @@ from quant_strategies.decisions import StrategyDecision
 
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
+DecisionGenerationStatus = Literal["base_reused", "regenerated", "failed"]
 
 
 class BackendRunResult(BaseModel):
@@ -31,6 +32,10 @@ class ScenarioBackendRunResult:
     scenario_kind: str = "unknown"
     decisions_regenerated: bool = False
     diagnostic_only: bool = False
+    decision_generation_status: DecisionGenerationStatus = "base_reused"
+    decision_count: int = 0
+    decision_records_path: str | None = None
+    decision_records_sha256: str | None = None
 
 
 class ValidationBackend(Protocol):

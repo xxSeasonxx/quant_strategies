@@ -97,11 +97,14 @@ semantics rather than approximating them silently.
 
 Validation artifacts include the frozen `validation_config.toml`,
 `strategy_snapshot.py`, `decision_schema.json`, `decision_records.jsonl`,
-`data_audit.json`, `backend_runs/summary.json`, `robustness_matrix.json`,
-`promotion_decision.json`, `validation_report.md`, and
+`data_audit.json`, `backend_runs/summary.json`,
+`backend_runs/decision_records/<window>/<scenario>.jsonl`,
+`robustness_matrix.json`, `promotion_decision.json`, `validation_report.md`, and
 `validation_manifest.json`. `validation_manifest.json` records repository,
 package, config, strategy, row-provenance, backend, researched-manifest, and
-artifact hash identity. `data_audit.json`
+artifact hash identity. Per-scenario backend summaries record the decision
+generation status, decision count, decision-record path, and decision-record
+hash used for that exact backend run. `data_audit.json`
 records decision/data availability checks; it is not a proof of complete
 lookahead freedom inside strategy code.
 

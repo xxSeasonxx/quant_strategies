@@ -109,6 +109,10 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
 def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path)
     monkeypatch.setattr(
@@ -139,6 +143,8 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
+    base_decision_path = "backend_runs/decision_records/validation_2026_h1/base.jsonl"
+    base_decision_file = result.result_dir / base_decision_path
     assert backend_summary["results"][0] == {
         "window_id": "validation_2026_h1",
         "scenario_id": "validation_2026_h1/base",
@@ -146,6 +152,10 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
         "required": True,
         "diagnostic_only": False,
         "decisions_regenerated": False,
+        "decision_generation_status": "base_reused",
+        "decision_count": 1,
+        "decision_records_path": base_decision_path,
+        "decision_records_sha256": file_sha256(base_decision_file),
         "result": {
             "backend": "fake",
             "status": "completed",
@@ -154,6 +164,7 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
             "unsupported_semantics": [],
         },
     }
+    assert read_jsonl(base_decision_file)[0]["target"]["size"] == 1.0
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert (result.result_dir / "data_audit.json").exists()
     assert (result.result_dir / "validation_config.toml").exists()
@@ -171,11 +182,18 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
     assert manifest["data"]["windows"][0]["rows_sha256"]
     assert manifest["backend"]["status_counts"] == {"completed": 6}
+    assert manifest["backend"]["scenarios"][0]["decision_records_path"] == base_decision_path
+    assert manifest["backend"]["scenarios"][0]["decision_records_sha256"] == file_sha256(
+        base_decision_file
+    )
     assert manifest["core_hashes"]["decision_records.jsonl"] == file_sha256(
         result.result_dir / "decision_records.jsonl"
     )
     assert manifest["artifacts"]["backend_runs/summary.json"]["sha256"] == file_sha256(
         result.result_dir / "backend_runs" / "summary.json"
+    )
+    assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
+        base_decision_file
     )
 
 
@@ -236,6 +254,56 @@ def test_run_validation_blocks_stale_validation_ready_research_manifest(tmp_path
     ]
 
 
+def test_run_validation_blocks_malformed_research_manifest_variants(tmp_path: Path):
+    package = write_package(tmp_path)
+    (package / "manifest.json").write_text(json.dumps({"variants": {"directory": "."}}))
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["found"] is True
+    assert manifest["research_manifest"]["passed"] is False
+    assert manifest["research_manifest"]["violations"] == [
+        "research_manifest_variants_invalid"
+    ]
+
+
+def test_run_validation_records_missing_research_manifest_variant_without_blocking(
+    tmp_path: Path,
+    monkeypatch,
+):
+    package = write_package(tmp_path)
+    (package / "manifest.json").write_text(
+        json.dumps(
+            {
+                "variants": [
+                    {
+                        "directory": "other_variant",
+                        "lifecycle_status": "validation_ready",
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "clear_yes"
+    assert backend.calls == 6
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["passed"] is True
+    assert manifest["research_manifest"]["warnings"] == ["research_manifest_variant_missing"]
+    assert manifest["research_manifest"]["violations"] == []
+
+
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path)
     backend = RecordingBackend()
@@ -291,6 +359,12 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
         "required": True,
         "diagnostic_only": False,
         "decisions_regenerated": False,
+        "decision_generation_status": "base_reused",
+        "decision_count": 1,
+        "decision_records_path": "backend_runs/decision_records/validation_2026_h1/base.jsonl",
+        "decision_records_sha256": file_sha256(
+            result.result_dir / "backend_runs/decision_records/validation_2026_h1/base.jsonl"
+        ),
         "result": {
             "backend": "vectorbtpro",
             "status": "failed",
@@ -391,6 +465,66 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     }
     assert param_summary["validation_2026_h1/param_weight_up_10pct"]["diagnostic_only"] is True
     assert param_summary["validation_2026_h1/param_weight_up_10pct"]["decisions_regenerated"] is True
+    assert (
+        param_summary["validation_2026_h1/param_weight_up_10pct"]["decision_generation_status"]
+        == "regenerated"
+    )
+    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["decision_count"] == 1
+    param_decision_path = param_summary["validation_2026_h1/param_weight_up_10pct"][
+        "decision_records_path"
+    ]
+    param_decision_file = result.result_dir / param_decision_path
+    assert file_sha256(param_decision_file) == param_summary[
+        "validation_2026_h1/param_weight_up_10pct"
+    ]["decision_records_sha256"]
+    assert read_jsonl(param_decision_file)[0]["target"]["size"] == 1.1
+
+
+def test_run_validation_records_failed_parameter_generation_without_backend_call(
+    tmp_path: Path,
+    monkeypatch,
+):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    if float(params['weight']) > 1.0:\n"
+        "        raise ValueError('weight too high')\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "clear_yes"
+    assert backend.calls == 5
+    assert result.result_dir is not None
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    by_scenario = {item["scenario_id"]: item for item in summary["results"]}
+    failed = by_scenario["validation_2026_h1/param_weight_up_10pct"]
+    assert failed["diagnostic_only"] is True
+    assert failed["decisions_regenerated"] is False
+    assert failed["decision_generation_status"] == "failed"
+    assert failed["decision_count"] == 0
+    assert failed["decision_records_path"] is None
+    assert failed["decision_records_sha256"] is None
+    assert failed["result"]["status"] == "failed"
+    assert failed["result"]["warnings"] == [
+        "parameter_decision_generation_failed: weight too high"
+    ]
+    assert "validation_2026_h1/param_weight_up_10pct" not in {
+        scenario_id for scenario_id, _ in backend.decision_sizes_by_scenario
+    }
 
 
 def test_run_validation_rejects_unknown_params_with_strategy_validator(

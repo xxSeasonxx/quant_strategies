@@ -30,13 +30,23 @@ def check_research_manifest(
             "violations": [f"research_manifest_unreadable: {exc}"],
         }
 
-    variant = _matching_variant(payload, manifest_path=manifest_path, config_path=config_path)
-    if variant is None:
+    variants = payload.get("variants")
+    if not isinstance(variants, list):
         return {
             "found": True,
             "manifest_path": _relative_path(manifest_path, repo_root),
             "passed": False,
-            "violations": ["research_manifest_variant_missing"],
+            "violations": ["research_manifest_variants_invalid"],
+        }
+
+    variant = _matching_variant(variants, manifest_path=manifest_path, config_path=config_path)
+    if variant is None:
+        return {
+            "found": True,
+            "manifest_path": _relative_path(manifest_path, repo_root),
+            "passed": True,
+            "warnings": ["research_manifest_variant_missing"],
+            "violations": [],
         }
 
     status = _variant_status(variant)
@@ -83,14 +93,11 @@ def _find_parent_manifest(*, config_path: Path, repo_root: Path) -> Path | None:
 
 
 def _matching_variant(
-    payload: dict[str, Any],
+    variants: list[Any],
     *,
     manifest_path: Path,
     config_path: Path,
 ) -> dict[str, Any] | None:
-    variants = payload.get("variants")
-    if not isinstance(variants, list):
-        return None
     config_dir = config_path.resolve().parent
     manifest_dir = manifest_path.resolve().parent
     for item in variants:
