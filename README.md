@@ -87,26 +87,32 @@ The v1 validation matrix treats `base` as a no-cost gross baseline,
 `stressed_costs` as doubled configured costs. Parameter perturbation scenarios
 regenerate decisions with perturbed params and remain diagnostic unless a later
 promotion policy makes them required. For crypto perpetual funding rows, the
-VectorBT PRO adapter reports funding-aware metrics for the current v1 supported
-shape:
-non-overlapping time-held target exposure windows. The reported funding-aware
-`net_return` is `price_cost_return + funding_return`; both components are
-reported separately. The adapter still rejects unsupported sizing, threshold
-exits, overlapping same-symbol windows, and multi-asset target-weight portfolio
-semantics rather than approximating them silently.
+VectorBT PRO adapter reports funding-aware metrics for non-overlapping
+time-held target exposure windows. The reported funding-aware `net_return` is
+`price_cost_return + funding_return`; both components are reported separately.
+The adapter supports portfolio target-weight decisions only under explicit v1
+constraints: close-price fills, canonical `target_weight` sizing, no threshold
+exits, no overlapping same-symbol windows, per-decision weight no greater than
+`1.0`, and gross active portfolio target weight no greater than `1.0`. It still
+rejects unsupported sizing, threshold exits, leveraged weights, and ambiguous
+overlapping windows rather than approximating them silently.
 
 Validation artifacts include the frozen `validation_config.toml`,
 `strategy_snapshot.py`, `decision_schema.json`, `decision_records.jsonl`,
 `data_audit.json`, `backend_runs/summary.json`,
 `backend_runs/decision_records/<window>/<scenario>.jsonl`,
-`robustness_matrix.json`, `promotion_decision.json`, `validation_report.md`, and
-`validation_manifest.json`. `validation_manifest.json` records repository,
+`backend_capability_matrix.json`, `robustness_matrix.json`,
+`promotion_decision.json`, `validation_report.md`, and
+`validation_manifest.json`. `backend_capability_matrix.json` records the
+selected backend's supported, conditional, unsupported, and unknown semantics;
+`validation_manifest.json` embeds the same matrix and records repository,
 package, config, strategy, row-provenance, backend, researched-manifest, and
-artifact hash identity. Per-scenario backend summaries record the decision
+artifact hash identity. Capability support is not market validation or
+paper/live eligibility. Per-scenario backend summaries record the decision
 generation status, decision count, decision-record path, and decision-record
-hash used for that exact backend run. `data_audit.json`
-records decision/data availability checks; it is not a proof of complete
-lookahead freedom inside strategy code.
+hash used for that exact backend run. `data_audit.json` records decision/data
+availability checks, including typed `StrategyDecision.observations` dependency
+checks against `as_of_time`, `decision_time`, and row `available_at`.
 
 Runner and validation pass immutable row and param views into strategies, and
 validation gives each backend scenario a fresh immutable row view. Strategies

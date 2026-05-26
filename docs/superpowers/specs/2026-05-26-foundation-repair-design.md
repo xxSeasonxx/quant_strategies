@@ -211,13 +211,18 @@ Only after the foundation is clean, add deeper validation capability.
 
 ### Design
 
-- Add observation/dependency metadata to `StrategyDecision.metadata` first.
-Introduce a typed dependency field only after at least two strategy families
-need the same schema.
+- Add typed observation/dependency references to `StrategyDecision`.
+Season chose the typed field now so the unified decision contract carries
+causality dependencies explicitly instead of hiding them in metadata.
 - Add future-poison tests for cross-sectional and FX triangle strategies.
 - Add a backend capability matrix and include it in validation artifacts.
 - Add portfolio-level target-weight support only if the candidate being
 validated requires it.
+
+Implementation plan:
+`docs/superpowers/plans/2026-05-26-validation-depth-phase-6.md`.
+Tests and backend semantics must remain synthetic/canonical rather than derived
+from legacy researched packages.
 
 ### Root Cause Addressed
 
