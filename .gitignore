@@ -5,4 +5,5 @@ __pycache__/
 .DS_Store
 results/
 validation_results/
+.worktrees/
 *.egg-info/
