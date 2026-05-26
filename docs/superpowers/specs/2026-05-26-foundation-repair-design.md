@@ -24,12 +24,12 @@ not constrain the target design.
 ## Goals
 
 - Remove semantic drift between quick research, validation, and future
-  paper/live follow-up.
+paper/live follow-up.
 - Keep the repo a modular monolith with focused packages.
 - Make artifacts unable to overclaim their evidential strength.
 - Make validation evidence reproducible from code/config/data/backend identity.
 - Keep `quant_autoresearch` on the shared runner by improving the runner after
-  semantics are honest.
+semantics are honest.
 - Fix root contracts before adding portfolio or statistical sophistication.
 
 ## Non-Goals
@@ -38,9 +38,9 @@ not constrain the target design.
 - Do not split the repo into services.
 - Do not preserve signal-only strategy contracts as a foundation constraint.
 - Do not add advanced statistical validation before contract, semantics,
-  provenance, and mutability risks are fixed.
+provenance, and mutability risks are fixed.
 - Do not build portfolio target-weight support before backend capabilities and
-  evidence semantics are explicit.
+evidence semantics are explicit.
 
 ## Rollout Order
 
@@ -62,16 +62,16 @@ Public strategy code should emit `StrategyDecision`.
 - `decisions/` remains the canonical strategy intent model.
 - Runner strategy loading should require `generate_decisions`.
 - Validation strategy loading should use the same loader or a thin wrapper over
-  the same contract.
+the same contract.
 - The smoke engine may keep its existing `Signal` model internally, but the
-  conversion should be owned by infrastructure:
+conversion should be owned by infrastructure:
 
 ```text
 StrategyDecision -> engine Signal -> engine.screen / engine.validate
 ```
 
 - `generate_signals` should not be a public foundation contract. Signal-only
-  strategies can be migrated, treated as test fixtures, or retired.
+strategies can be migrated, treated as test fixtures, or retired.
 - Runner artifacts should record `strategy_contract = "decision"`.
 
 ### Root Cause Addressed
@@ -96,7 +96,7 @@ Runner summaries and manifests should include:
 - `strategy_contract = "decision"`
 - `return_model = "sum_weighted_trade_return"`
 - funding metrics should state whether they are full cashflow accounting or a
-  v1 linear additive adjustment
+v1 linear additive adjustment
 - `promotion_eligible = false`
 - `paper_trade_eligible = false`
 - `live_eligible = false`
@@ -144,7 +144,7 @@ Add researched manifest integrity checks:
 - hash listed strategy/config files
 - fail validation on stale hashes for validation-ready variants
 - record whether a variant is `runner_only`, `validation_ready`, or
-  `validated_for_testing`
+`validated_for_testing`
 
 ### Root Cause Addressed
 
@@ -163,7 +163,7 @@ Make invalid or misleading runs hard to produce.
 - Catch expected `Exception` subclasses, not `BaseException`.
 - Let `SystemExit`, `KeyboardInterrupt`, and `GeneratorExit` propagate.
 - Make runner and validation result-directory allocation atomic by retrying on
-  `FileExistsError` instead of relying on check-then-create.
+`FileExistsError` instead of relying on check-then-create.
 - Add per-strategy parameter validation through a simple convention:
 
 ```python
@@ -172,7 +172,7 @@ def validate_params(params: Mapping[str, object]) -> Mapping[str, object]:
 ```
 
 - Parameter perturbation scenarios should regenerate decisions. If not, mark
-  them `decisions_regenerated = false` and exclude them from promotion language.
+them `decisions_regenerated = false` and exclude them from promotion language.
 
 ### Root Cause Addressed
 
@@ -189,7 +189,7 @@ Improve `quant_autoresearch` throughput only after artifacts cannot overclaim.
 - Reuse the index for fillability and evaluation.
 - Skip or pre-index funding scans for non-funding data.
 - Add `artifact_profile = "summary"` for quick research:
-  - row counts
+  - row countsre
   - normalized row hash
   - sampled rows
   - signal/decision summary
@@ -209,12 +209,12 @@ Only after the foundation is clean, add deeper validation capability.
 ### Design
 
 - Add observation/dependency metadata to `StrategyDecision.metadata` first.
-  Introduce a typed dependency field only after at least two strategy families
-  need the same schema.
+Introduce a typed dependency field only after at least two strategy families
+need the same schema.
 - Add future-poison tests for cross-sectional and FX triangle strategies.
 - Add a backend capability matrix and include it in validation artifacts.
 - Add portfolio-level target-weight support only if the candidate being
-  validated requires it.
+validated requires it.
 
 ### Root Cause Addressed
 
@@ -223,64 +223,61 @@ evidence layers are stable.
 
 ## Component Impacts
 
-| Component | Change |
-|---|---|
-| `decisions/` | Remains canonical; owns decision-to-signal helpers if shared outside one runner module |
-| `runner/strategy_loader.py` | Loads `generate_decisions` as the public strategy entrypoint |
-| `runner/engine_runner.py` | Converts decisions to internal engine signals and owns timestamp indexing |
-| `runner/artifacts.py` | Writes contract, return-model, eligibility, and artifact-profile metadata |
-| `validation/strategy_loader.py` | Shares the canonical decision loader |
-| `validation/policy.py` | Makes advisory/deployability semantics explicit |
-| `validation/artifacts.py` | Writes validation manifest and eligibility fields |
-| `validation/backends.py` | Narrows backend status type and capability reporting |
-| `validation/__init__.py` | Uses immutable inputs and clearer exception boundaries |
-| `researched/` | Gains manifest integrity/status checks; stale packages stop being trusted; imported loop feedback is labeled non-validation evidence |
-| `tested/` | Contains only validation-passed strategies; smoke fixtures move elsewhere or are explicitly marked during transition |
-| `tests/` | Adds contract, artifact semantics, manifest, mutation, benchmark, and causality tests |
+
+| Component                       | Change                                                                                                                               |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `decisions/`                    | Remains canonical; owns decision-to-signal helpers if shared outside one runner module                                               |
+| `runner/strategy_loader.py`     | Loads `generate_decisions` as the public strategy entrypoint                                                                         |
+| `runner/engine_runner.py`       | Converts decisions to internal engine signals and owns timestamp indexing                                                            |
+| `runner/artifacts.py`           | Writes contract, return-model, eligibility, and artifact-profile metadata                                                            |
+| `validation/strategy_loader.py` | Shares the canonical decision loader                                                                                                 |
+| `validation/policy.py`          | Makes advisory/deployability semantics explicit                                                                                      |
+| `validation/artifacts.py`       | Writes validation manifest and eligibility fields                                                                                    |
+| `validation/backends.py`        | Narrows backend status type and capability reporting                                                                                 |
+| `validation/__init__.py`        | Uses immutable inputs and clearer exception boundaries                                                                               |
+| `researched/`                   | Gains manifest integrity/status checks; stale packages stop being trusted; imported loop feedback is labeled non-validation evidence |
+| `tested/`                       | Contains only validation-passed strategies; smoke fixtures move elsewhere or are explicitly marked during transition                 |
+| `tests/`                        | Adds contract, artifact semantics, manifest, mutation, benchmark, and causality tests                                                |
+
 
 ## Testing Strategy
 
 Each phase should land with focused tests:
 
 1. Contract reset:
-   - runner accepts `generate_decisions`
-   - runner rejects missing decision contract
-   - decision-to-signal conversion preserves symbol, timing, direction, weight,
-     hold, and metadata needed by the smoke engine
-
+  - runner accepts `generate_decisions`
+  - runner rejects missing decision contract
+  - decision-to-signal conversion preserves symbol, timing, direction, weight,
+  hold, and metadata needed by the smoke engine
 2. Evidence semantics:
-   - summaries/manifests include contract and eligibility fields
-   - runner return model is explicit
-   - validation output cannot imply paper/live approval
-
+  - summaries/manifests include contract and eligibility fields
+  - runner return model is explicit
+  - validation output cannot imply paper/live approval
 3. Provenance:
-   - validation manifest hashes required artifacts
-   - stale researched manifest hashes block validation
-
+  - validation manifest hashes required artifacts
+  - stale researched manifest hashes block validation
 4. Boundary hardening:
-   - strategy/backend mutation cannot alter stored evidence
-   - `SystemExit` propagates
-   - invalid backend status fails model validation
-   - unknown params fail for validation-ready strategies
-   - parallel result-directory allocation is safe
-
+  - strategy/backend mutation cannot alter stored evidence
+  - `SystemExit` propagates
+  - invalid backend status fails model validation
+  - unknown params fail for validation-ready strategies
+  - parallel result-directory allocation is safe
 5. Performance:
-   - large synthetic signal set avoids linear decision-time scans
-   - summary artifact profile stays under byte limits
-
+  - large synthetic signal set avoids linear decision-time scans
+  - summary artifact profile stays under byte limits
 6. Validation depth:
-   - future-poison tests catch hidden dependency lookahead
-   - unsupported backend capabilities remain fail-closed
+  - future-poison tests catch hidden dependency lookahead
+  - unsupported backend capabilities remain fail-closed
 
 ## Sequencing Notes
 
 - Phase 1 and Phase 2 should be implemented first, before any deeper validation
-  work.
+work.
 - Phase 3 should land before trusting new validation results.
 - Phase 5 can be split if `quant_autoresearch` is blocked, but it should not
-  weaken artifact semantics.
+weaken artifact semantics.
 - Phase 6 should not start with portfolio target weights unless an end-to-end
-  validation run proves that is the current blocking semantic.
+validation run proves that is the current blocking semantic.
 
 ## Success Criteria
 
@@ -290,5 +287,5 @@ Each phase should land with focused tests:
 - Validation evidence is reproducible from manifest hashes.
 - Strategy/backend execution cannot mutate evidence inputs.
 - Broad quick research can use the shared runner without multi-GB default
-  artifacts.
+artifacts.
 - Unsupported backend semantics remain explicit and fail-closed.

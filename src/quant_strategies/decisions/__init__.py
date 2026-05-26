@@ -11,6 +11,7 @@ from quant_strategies.decisions.models import (
     StrategyDecision,
 )
 from quant_strategies.decisions.output_validation import validate_decision_output
+from quant_strategies.decisions.params import validate_strategy_params
 from quant_strategies.decisions.strategy_loader import (
     DecisionStrategyCallable,
     DecisionStrategyLoadError,
@@ -29,5 +30,6 @@ __all__ = [
     "SizingKind",
     "StrategyDecision",
     "load_decision_strategy",
+    "validate_strategy_params",
     "validate_decision_output",
 ]

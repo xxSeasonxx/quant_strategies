@@ -6,7 +6,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from quant_strategies.decisions import StrategyDecision, validate_decision_output
+from quant_strategies.boundary import frozen_params, frozen_rows
+from quant_strategies.decisions import (
+    StrategyDecision,
+    validate_decision_output,
+    validate_strategy_params,
+)
 from quant_strategies.provenance import file_sha256
 from quant_strategies.runner import data_loader
 from quant_strategies.runner.config import default_repo_root
@@ -22,7 +27,6 @@ from quant_strategies.validation.backends import (
     ValidationBackend,
     get_backend,
 )
-from quant_strategies.validation.boundary import frozen_params, frozen_rows
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
@@ -137,7 +141,7 @@ def run_validation(
         return _validation_result(result_dir, decision)
 
     try:
-        base_params = _validated_params(generate_decisions, config.params)
+        base_params = validate_strategy_params(generate_decisions, config.params)
     except Exception as exc:
         decision = PromotionDecision(
             decision="hard_no",
@@ -392,16 +396,6 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
     return dict(vars(value))
 
 
-def _validated_params(generate_decisions: Any, params: Mapping[str, Any]) -> dict[str, Any]:
-    validator = getattr(generate_decisions, "validate_params", None)
-    if validator is None:
-        return dict(params)
-    validated = validator(frozen_params(params))
-    if not isinstance(validated, Mapping):
-        raise ValueError("validate_params must return a mapping")
-    return dict(validated)
-
-
 def _scenario_config(
     *,
     config: Any,
@@ -438,7 +432,7 @@ def _scenario_decision_outcome(
             decisions_regenerated=False,
         )
     try:
-        scenario_params = _validated_params(generate_decisions, scenario_config.params)
+        scenario_params = validate_strategy_params(generate_decisions, scenario_config.params)
         decision_output = generate_decisions(frozen_rows(rows), frozen_params(scenario_params))
     except Exception as exc:
         return _ScenarioDecisionOutcome(

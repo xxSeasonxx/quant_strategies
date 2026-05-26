@@ -488,6 +488,134 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
+def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def generate_decisions(rows, params):\n"
+        "    rows[0]['close'] = 999.0\n"
+        "    return []\n"
+    )
+    config_path = write_config(tmp_path)
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=loaded_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert loaded_rows[0]["close"] == 100.0
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "decision_generation"
+    assert "strategy execution failed" in summary["message"]
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
+def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def generate_decisions(rows, params):\n"
+        "    params['weight'] = 2.0\n"
+        "    return []\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "decision_generation"
+    assert "strategy execution failed" in summary["message"]
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
+def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def validate_params(params):\n"
+        "    raise ValueError('unknown params')\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+    config_path = write_config(tmp_path)
+    load_calls = 0
+
+    def load_data(config):
+        nonlocal load_calls
+        load_calls += 1
+        return LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0))
+
+    monkeypatch.setattr(data_loader, "load_data", load_data)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert load_calls == 0
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "param_validation"
+    assert summary["message"] == "param validation failed: unknown params"
+    assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
+def test_runner_rejects_non_mapping_validate_params_return(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def validate_params(params):\n"
+        "    return None\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "param_validation"
+    assert summary["message"] == "param validation failed: validate_params must return a mapping"
+    assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
+def test_runner_propagates_strategy_execution_system_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def generate_decisions(rows, params):\n"
+        "    raise SystemExit('strategy exited')\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    with pytest.raises(SystemExit, match="strategy exited"):
+        run_config(config_path, repo_root=tmp_path)
+
+
+def test_runner_propagates_strategy_import_system_exit(tmp_path: Path):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("raise SystemExit('import exited')\n")
+    config_path = write_config(tmp_path)
+
+    with pytest.raises(SystemExit, match="import exited"):
+        run_config(config_path, repo_root=tmp_path)
+
+
 @pytest.mark.parametrize("readiness_lag", [-timedelta(minutes=1), timedelta(0)])
 def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
     tmp_path: Path,

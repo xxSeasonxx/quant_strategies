@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from quant_strategies.decisions import StrategyDecision, validate_decision_output
+from quant_strategies.boundary import frozen_params, frozen_rows
+from quant_strategies.decisions import (
+    StrategyDecision,
+    validate_decision_output,
+    validate_strategy_params,
+)
 from quant_strategies.evidence_semantics import runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
@@ -45,6 +50,17 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         return _failure_result(config, result_dir, "strategy_import", str(exc), repo_root=effective_repo_root)
 
     try:
+        validated_params = validate_strategy_params(generate_decisions, config.params)
+    except Exception as exc:
+        return _failure_result(
+            config,
+            result_dir,
+            "param_validation",
+            f"param validation failed: {exc}",
+            repo_root=effective_repo_root,
+        )
+
+    try:
         loaded = data_loader.load_data(config)
         artifacts.write_strategy_input_rows(result_dir, loaded.rows)
         artifacts.write_data_manifest(result_dir, config, loaded.rows)
@@ -52,7 +68,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
 
     try:
-        decision_output = generate_decisions(loaded.rows, config.params)
+        decision_output = generate_decisions(frozen_rows(loaded.rows), frozen_params(validated_params))
         decisions = _validated_decisions(decision_output, strategy_id=config.strategy_id)
         artifacts.write_decision_records(result_dir, decisions)
         signals = decisions_to_signal_rows(decisions)

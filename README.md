@@ -108,10 +108,10 @@ hash used for that exact backend run. `data_audit.json`
 records decision/data availability checks; it is not a proof of complete
 lookahead freedom inside strategy code.
 
-Validation passes immutable row and param views into strategies and fresh
-immutable row views into each backend scenario. Strategies may define
-`validate_params(params)` to reject unknown or invalid TOML params before data
-loading and backend execution.
+Runner and validation pass immutable row and param views into strategies, and
+validation gives each backend scenario a fresh immutable row view. Strategies
+may define `validate_params(params)` to reject unknown or invalid TOML params
+before data loading and backend execution.
 
 ## Config Shape
 
