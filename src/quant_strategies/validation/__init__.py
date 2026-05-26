@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +20,7 @@ from quant_strategies.validation.backends import (
     ValidationBackend,
     get_backend,
 )
+from quant_strategies.validation.boundary import frozen_params, frozen_rows
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
@@ -86,9 +87,11 @@ def run_validation(
     try:
         selected_backend = backend or get_backend(config.backend)
         backend_name = _backend_name(selected_backend, config.backend)
-    except BaseException as exc:
-        _raise_interrupt(exc)
-        decision = PromotionDecision(decision="hard_no", reasons=("backend_selection_failed",))
+    except Exception as exc:
+        decision = PromotionDecision(
+            decision="hard_no",
+            reasons=("backend_selection_failed",),
+        )
         _write_validation_artifacts(
             result_dir=result_dir,
             repo_root=root,
@@ -106,9 +109,38 @@ def run_validation(
 
     try:
         generate_decisions = load_decision_strategy(config.strategy_path, repo_root=root)
-    except BaseException as exc:
-        _raise_interrupt(exc)
+    except Exception as exc:
         decision = PromotionDecision(decision="hard_no", reasons=("strategy_import_failed",))
+        _write_validation_artifacts(
+            result_dir=result_dir,
+            repo_root=root,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
+            decisions=all_decisions,
+            data_audits=data_audits,
+            data_provenance=data_provenance,
+            backend_results=backend_results,
+            decision=decision,
+            research_manifest=research_manifest,
+        )
+        return _validation_result(result_dir, decision)
+
+    try:
+        base_params = _validated_params(generate_decisions, config.params)
+    except Exception as exc:
+        decision = PromotionDecision(
+            decision="hard_no",
+            reasons=("param_validation_failed",),
+        )
+        data_audits.append(
+            _failed_data_audit(
+                "config",
+                row_count=0,
+                decision_count=0,
+                violations=(f"param_validation_failed: {exc}",),
+            )
+        )
         _write_validation_artifacts(
             result_dir=result_dir,
             repo_root=root,
@@ -128,8 +160,7 @@ def run_validation(
         run_config = config.to_run_config(window, results_dir=result_dir / "runner_smoke" / window.id)
         try:
             loaded = data_loader.load_data(run_config)
-        except BaseException as exc:
-            _raise_interrupt(exc)
+        except Exception as exc:
             data_provenance.append(
                 _data_provenance(
                     window.id,
@@ -151,11 +182,11 @@ def run_validation(
         data_provenance.append(
             _data_provenance(window.id, run_config, status="loaded", rows=loaded.rows)
         )
+        strategy_rows = frozen_rows(loaded.rows)
 
         try:
-            decision_output = generate_decisions(loaded.rows, config.params)
-        except BaseException as exc:
-            _raise_interrupt(exc)
+            decision_output = generate_decisions(strategy_rows, frozen_params(base_params))
+        except Exception as exc:
             failure_reasons.append("strategy_generation_failed")
             data_audits.append(
                 _failed_data_audit(
@@ -181,9 +212,8 @@ def run_validation(
 
         all_decisions.extend(decisions)
         try:
-            audit = audit_decision_rows(loaded.rows, decisions)
-        except BaseException as exc:
-            _raise_interrupt(exc)
+            audit = audit_decision_rows(strategy_rows, decisions)
+        except Exception as exc:
             failure_reasons.append("data_audit_failed")
             data_audits.append(
                 _failed_data_audit(
@@ -199,40 +229,62 @@ def run_validation(
         if audit.passed:
             scenarios = expand_validation_matrix(
                 window_id=window.id,
-                base_params=_plain_mapping(config.params),
+                base_params=_plain_mapping(base_params),
                 base_costs=_plain_mapping(config.cost_model),
                 base_fill=_plain_mapping(config.fill_model),
             )
             required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
             for scenario in scenarios:
-                scenario_config = _scenario_config(config=config, scenario=scenario)
-                try:
-                    raw_backend_result = selected_backend.run(
-                        decisions=decisions,
-                        rows=loaded.rows,
-                        config=scenario_config,
-                    )
-                except BaseException as exc:
-                    _raise_interrupt(exc)
-                    backend_result = _failed_backend_result(
-                        backend_name,
-                        f"backend_exception: {exc}",
-                    )
-                else:
+                scenario_config = _scenario_config(
+                    config=config,
+                    scenario=scenario,
+                    base_params=base_params,
+                )
+                scenario_decisions = decisions
+                decisions_regenerated = False
+                scenario_decision_result = _scenario_decision_result(
+                    scenario=scenario,
+                    generate_decisions=generate_decisions,
+                    rows=loaded.rows,
+                    strategy_id=config.strategy_id,
+                    scenario_config=scenario_config,
+                    backend_name=backend_name,
+                )
+                backend_result = None
+                if isinstance(scenario_decision_result, tuple):
+                    scenario_decisions, decisions_regenerated = scenario_decision_result
+                elif scenario_decision_result is not None:
+                    backend_result = scenario_decision_result
+                    decisions_regenerated = scenario.kind == "parameter"
+                if backend_result is None:
                     try:
-                        backend_result = BackendRunResult.model_validate(raw_backend_result)
-                    except BaseException as exc:
-                        _raise_interrupt(exc)
+                        raw_backend_result = selected_backend.run(
+                            decisions=list(scenario_decisions),
+                            rows=frozen_rows(loaded.rows),
+                            config=scenario_config,
+                        )
+                    except Exception as exc:
                         backend_result = _failed_backend_result(
                             backend_name,
-                            f"invalid_backend_result: {exc}",
+                            f"backend_exception: {exc}",
                         )
+                    else:
+                        try:
+                            backend_result = BackendRunResult.model_validate(raw_backend_result)
+                        except Exception as exc:
+                            backend_result = _failed_backend_result(
+                                backend_name,
+                                f"invalid_backend_result: {exc}",
+                            )
                 backend_results.append(
                     ScenarioBackendRunResult(
                         window_id=window.id,
                         scenario_id=scenario.id,
                         required=scenario.required,
                         result=backend_result,
+                        scenario_kind=scenario.kind,
+                        decisions_regenerated=decisions_regenerated,
+                        diagnostic_only=not scenario.required,
                     )
                 )
 
@@ -295,7 +347,7 @@ def _data_provenance(
     run_config: Any,
     *,
     status: str,
-    rows: list[dict[str, Any]] | None,
+    rows: Sequence[Mapping[str, Any]] | None,
     message: str | None = None,
 ) -> dict[str, Any]:
     payload = {
@@ -325,10 +377,25 @@ def _plain_mapping(value: Any) -> dict[str, Any]:
     return dict(vars(value))
 
 
-def _scenario_config(*, config: Any, scenario: MatrixScenario) -> SimpleNamespace:
+def _validated_params(generate_decisions: Any, params: Mapping[str, Any]) -> dict[str, Any]:
+    validator = getattr(generate_decisions, "validate_params", None)
+    if validator is None:
+        return dict(params)
+    validated = validator(frozen_params(params))
+    if not isinstance(validated, Mapping):
+        raise ValueError("validate_params must return a mapping")
+    return dict(validated)
+
+
+def _scenario_config(
+    *,
+    config: Any,
+    scenario: MatrixScenario,
+    base_params: Mapping[str, Any],
+) -> SimpleNamespace:
     return SimpleNamespace(
         scenario_id=scenario.id,
-        params={**_plain_mapping(config.params), **scenario.params},
+        params={**_plain_mapping(base_params), **scenario.params},
         cost_model=SimpleNamespace(
             **{**_plain_mapping(config.cost_model), **scenario.cost_model}
         ),
@@ -337,6 +404,44 @@ def _scenario_config(*, config: Any, scenario: MatrixScenario) -> SimpleNamespac
         ),
         data=SimpleNamespace(**_plain_mapping(config.data)),
     )
+
+
+def _scenario_decision_result(
+    *,
+    scenario: MatrixScenario,
+    generate_decisions: Any,
+    rows: Sequence[Mapping[str, Any]],
+    strategy_id: str,
+    scenario_config: Any,
+    backend_name: str,
+) -> tuple[list[StrategyDecision], bool] | BackendRunResult | None:
+    if scenario.kind != "parameter":
+        return None
+    try:
+        scenario_params = _validated_params(generate_decisions, scenario_config.params)
+        decision_output = generate_decisions(frozen_rows(rows), frozen_params(scenario_params))
+    except Exception as exc:
+        return _failed_backend_result(
+            backend_name,
+            f"parameter_decision_generation_failed: {exc}",
+        )
+
+    scenario_decisions, violations = validate_decision_output(
+        decision_output,
+        strategy_id=strategy_id,
+    )
+    if violations:
+        return _failed_backend_result(
+            backend_name,
+            f"parameter_decision_generation_failed: {'; '.join(violations)}",
+        )
+    audit = audit_decision_rows(frozen_rows(rows), scenario_decisions)
+    if not audit.passed:
+        return _failed_backend_result(
+            backend_name,
+            f"parameter_decision_audit_failed: {'; '.join(audit.violations)}",
+        )
+    return scenario_decisions, True
 
 
 def _backend_name(backend: ValidationBackend, fallback: str) -> str:
@@ -394,7 +499,10 @@ def _write_validation_artifacts(
                 {
                     "window_id": item.window_id,
                     "scenario_id": item.scenario_id,
+                    "scenario_kind": item.scenario_kind,
                     "required": item.required,
+                    "diagnostic_only": item.diagnostic_only,
+                    "decisions_regenerated": item.decisions_regenerated,
                     "result": item.result.model_dump(mode="json"),
                 }
                 for item in backend_results
@@ -410,7 +518,10 @@ def _write_validation_artifacts(
                 {
                     "window_id": item.window_id,
                     "scenario_id": item.scenario_id,
+                    "scenario_kind": item.scenario_kind,
                     "required": item.required,
+                    "diagnostic_only": item.diagnostic_only,
+                    "decisions_regenerated": item.decisions_regenerated,
                     "backend": item.result.backend,
                     "status": item.result.status,
                     "metrics": item.result.metrics,
@@ -454,8 +565,3 @@ def _scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[st
     if result.status == "unsupported" or result.unsupported_semantics:
         return ("unsupported_semantics",)
     return ()
-
-
-def _raise_interrupt(exc: BaseException) -> None:
-    if isinstance(exc, KeyboardInterrupt):
-        raise exc

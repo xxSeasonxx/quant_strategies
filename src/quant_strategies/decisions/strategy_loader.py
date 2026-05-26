@@ -56,4 +56,11 @@ def load_decision_strategy(
         raise DecisionStrategyLoadError(
             "strategy file must define callable generate_decisions(rows, params)"
         )
+    validate_params = getattr(module, "validate_params", None)
+    if validate_params is not None:
+        if not callable(validate_params):
+            raise DecisionStrategyLoadError(
+                "strategy validate_params must be callable when defined"
+            )
+        setattr(generate_decisions, "validate_params", validate_params)
     return generate_decisions

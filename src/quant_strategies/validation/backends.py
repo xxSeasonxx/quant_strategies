@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.decisions import StrategyDecision
 
 
+BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
+
+
 class BackendRunResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     backend: str
-    status: str
+    status: BackendStatus
     metrics: dict[str, float | int | str | bool | None]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
@@ -24,6 +28,9 @@ class ScenarioBackendRunResult:
     scenario_id: str
     required: bool
     result: BackendRunResult
+    scenario_kind: str = "unknown"
+    decisions_regenerated: bool = False
+    diagnostic_only: bool = False
 
 
 class ValidationBackend(Protocol):
@@ -33,7 +40,7 @@ class ValidationBackend(Protocol):
         self,
         *,
         decisions: list[StrategyDecision],
-        rows: list[dict[str, Any]],
+        rows: Sequence[Mapping[str, Any]],
         config: Any,
     ) -> BackendRunResult:
         raise NotImplementedError
@@ -55,7 +62,7 @@ class FakeBackend:
         self,
         *,
         decisions: list[StrategyDecision],
-        rows: list[dict[str, Any]],
+        rows: Sequence[Mapping[str, Any]],
         config: Any,
     ) -> BackendRunResult:
         return self._result

@@ -15,11 +15,15 @@ def create_validation_result_dir(results_root: Path, strategy_id: str) -> Path:
     base_name = f"{timestamp}-{safe_strategy_id}"
     result_dir = results_root / base_name
     suffix = 2
-    while result_dir.exists():
-        result_dir = results_root / f"{base_name}-{suffix}"
-        suffix += 1
-    result_dir.mkdir(parents=True)
-    return result_dir
+    results_root.mkdir(parents=True, exist_ok=True)
+    while True:
+        try:
+            result_dir.mkdir()
+        except FileExistsError:
+            result_dir = results_root / f"{base_name}-{suffix}"
+            suffix += 1
+            continue
+        return result_dir
 
 
 def write_json_artifact(result_dir: Path, name: str, payload: Any) -> Path:

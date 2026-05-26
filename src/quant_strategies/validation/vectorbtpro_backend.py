@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import math
 import numbers
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
@@ -21,7 +21,7 @@ class VectorBTProBackend:
         self,
         *,
         decisions: list[StrategyDecision],
-        rows: list[dict[str, Any]],
+        rows: Sequence[Mapping[str, Any]],
         config: Any,
     ) -> BackendRunResult:
         try:
@@ -129,7 +129,7 @@ class VectorBTProBackend:
 
 def _unsupported_semantics(
     decisions: list[StrategyDecision],
-    rows: list[dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
     config: Any,
 ) -> tuple[str, ...]:
     unsupported: list[str] = []
@@ -216,7 +216,7 @@ def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDeci
     return windows
 
 
-def _close_frame(pd: Any, rows: list[dict[str, Any]]) -> Any:
+def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]]) -> Any:
     records: list[dict[str, Any]] = []
     for row in rows:
         try:
@@ -312,7 +312,7 @@ def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
 
 def _funding_adjusted_metrics(
     metrics: dict[str, float | int],
-    rows: list[dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
     windows: list[dict[str, Any]],
     config: Any,
 ) -> dict[str, float | int | str]:

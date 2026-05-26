@@ -26,11 +26,14 @@ def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path
     config.output.results_dir.mkdir(parents=True, exist_ok=True)
     result_dir = config.output.results_dir / base_name
     suffix = 2
-    while result_dir.exists():
-        result_dir = config.output.results_dir / f"{base_name}-{suffix}"
-        suffix += 1
-    result_dir.mkdir(parents=True)
-    return result_dir
+    while True:
+        try:
+            result_dir.mkdir()
+        except FileExistsError:
+            result_dir = config.output.results_dir / f"{base_name}-{suffix}"
+            suffix += 1
+            continue
+        return result_dir
 
 
 def initialize_run_artifacts(config_path: Path, config: RunConfig, result_dir: Path) -> None:

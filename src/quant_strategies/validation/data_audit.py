@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -36,9 +37,12 @@ def _parse_aware_datetime(value: Any) -> tuple[datetime | None, str | None]:
     return parsed, None
 
 
-def audit_decision_rows(rows: list[dict[str, Any]], decisions: list[StrategyDecision]) -> DataAudit:
+def audit_decision_rows(
+    rows: Sequence[Mapping[str, Any]],
+    decisions: list[StrategyDecision],
+) -> DataAudit:
     violations: list[str] = []
-    row_index: dict[tuple[str, datetime], list[dict[str, Any]]] = {}
+    row_index: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
     for row in rows:
         symbol = str(row.get("symbol"))
         timestamp, reason = _parse_aware_datetime(row.get("timestamp"))

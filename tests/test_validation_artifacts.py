@@ -45,6 +45,36 @@ def test_create_validation_result_dir_adds_suffix_on_collision(tmp_path: Path, m
     assert third.name == "2026-05-25T123045Z-demo_strategy-3"
 
 
+def test_create_validation_result_dir_retries_atomic_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=UTC):  # type: ignore[override]
+            return cls(2026, 5, 25, 12, 30, 45, tzinfo=tz)
+
+    base_name = "2026-05-25T123045Z-demo_strategy"
+    original_mkdir = Path.mkdir
+    collided = False
+
+    def mkdir_with_collision(path: Path, *args, **kwargs):
+        nonlocal collided
+        if path.name == base_name and not collided:
+            collided = True
+            original_mkdir(path, *args, **kwargs)
+            raise FileExistsError(str(path))
+        return original_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(artifacts, "datetime", FixedDatetime)
+    monkeypatch.setattr(Path, "mkdir", mkdir_with_collision)
+
+    result_dir = create_validation_result_dir(tmp_path, "demo_strategy")
+
+    assert result_dir.name == "2026-05-25T123045Z-demo_strategy-2"
+    assert (tmp_path / base_name).exists()
+
+
 def test_write_json_artifact_is_stable(tmp_path: Path):
     path = write_json_artifact(tmp_path, "promotion_decision.json", {"b": 2, "a": 1})
 

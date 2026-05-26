@@ -53,3 +53,29 @@ def test_load_decision_strategy_returns_callable(tmp_path: Path):
     decisions = generate_decisions(rows, {})
 
     assert decisions[0].strategy_id == "demo"
+
+
+def test_load_decision_strategy_attaches_validate_params(tmp_path: Path):
+    strategy = write_strategy(
+        tmp_path / "researched" / "demo" / "strategy.py",
+        "def validate_params(params):\n"
+        "    return {'weight': float(params['weight'])}\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n",
+    )
+
+    generate_decisions = load_decision_strategy(strategy, repo_root=tmp_path)
+
+    assert generate_decisions.validate_params({"weight": 1}) == {"weight": 1.0}
+
+
+def test_load_decision_strategy_rejects_noncallable_validate_params(tmp_path: Path):
+    strategy = write_strategy(
+        tmp_path / "researched" / "demo" / "strategy.py",
+        "validate_params = {}\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n",
+    )
+
+    with pytest.raises(ValidationStrategyLoadError, match="validate_params"):
+        load_decision_strategy(strategy, repo_root=tmp_path)

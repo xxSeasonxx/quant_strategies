@@ -85,9 +85,10 @@ recommendation is advisory until Season approves a stronger promotion policy.
 The v1 validation matrix treats `base` as a no-cost gross baseline,
 `realistic_costs` as the configured fee/slippage economics, and
 `stressed_costs` as doubled configured costs. Parameter perturbation scenarios
-are recorded as diagnostic evidence until validation regenerates decisions for
-each perturbed parameter set. For crypto perpetual funding rows, the VectorBT PRO
-adapter reports funding-aware metrics for the current v1 supported shape:
+regenerate decisions with perturbed params and remain diagnostic unless a later
+promotion policy makes them required. For crypto perpetual funding rows, the
+VectorBT PRO adapter reports funding-aware metrics for the current v1 supported
+shape:
 non-overlapping time-held target exposure windows. The reported funding-aware
 `net_return` is `price_cost_return + funding_return`; both components are
 reported separately. The adapter still rejects unsupported sizing, threshold
@@ -97,9 +98,17 @@ semantics rather than approximating them silently.
 Validation artifacts include the frozen `validation_config.toml`,
 `strategy_snapshot.py`, `decision_schema.json`, `decision_records.jsonl`,
 `data_audit.json`, `backend_runs/summary.json`, `robustness_matrix.json`,
-`promotion_decision.json`, and `validation_report.md`. `data_audit.json`
+`promotion_decision.json`, `validation_report.md`, and
+`validation_manifest.json`. `validation_manifest.json` records repository,
+package, config, strategy, row-provenance, backend, researched-manifest, and
+artifact hash identity. `data_audit.json`
 records decision/data availability checks; it is not a proof of complete
 lookahead freedom inside strategy code.
+
+Validation passes immutable row and param views into strategies and fresh
+immutable row views into each backend scenario. Strategies may define
+`validate_params(params)` to reject unknown or invalid TOML params before data
+loading and backend execution.
 
 ## Config Shape
 

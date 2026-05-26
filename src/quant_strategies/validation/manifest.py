@@ -85,7 +85,10 @@ def _backend_summary(
             {
                 "window_id": item.window_id,
                 "scenario_id": item.scenario_id,
+                "scenario_kind": item.scenario_kind,
                 "required": item.required,
+                "diagnostic_only": item.diagnostic_only,
+                "decisions_regenerated": item.decisions_regenerated,
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),

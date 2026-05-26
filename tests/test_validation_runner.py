@@ -8,6 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError
@@ -27,7 +29,7 @@ def write_package(
 ) -> Path:
     package = tmp_path / "researched" / "demo"
     package.mkdir(parents=True)
-    (package / "strategy.py").write_text(
+    strategy_text = (
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
@@ -38,7 +40,8 @@ def write_package(
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
-    )
+    ).replace("size=1.0", "size=float(params.get('weight', 1.0))")
+    (package / "strategy.py").write_text(strategy_text)
     backend_line = f'backend = "{backend}"\n' if backend is not None else ""
     window_blocks = "\n".join(
         f"""
@@ -139,7 +142,10 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert backend_summary["results"][0] == {
         "window_id": "validation_2026_h1",
         "scenario_id": "validation_2026_h1/base",
+        "scenario_kind": "base",
         "required": True,
+        "diagnostic_only": False,
+        "decisions_regenerated": False,
         "result": {
             "backend": "fake",
             "status": "completed",
@@ -281,7 +287,10 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
     assert backend_summary["results"][0] == {
         "window_id": "validation_2026_h1",
         "scenario_id": "validation_2026_h1/base",
+        "scenario_kind": "base",
         "required": True,
+        "diagnostic_only": False,
+        "decisions_regenerated": False,
         "result": {
             "backend": "vectorbtpro",
             "status": "failed",
@@ -343,8 +352,13 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
         for scenario_id, row_id in backend.row_ids_by_scenario
         if scenario_id.startswith("validation_2026_h2/")
     }
-    assert h1_row_ids == {loaded_row_ids[0]}
-    assert h2_row_ids == {loaded_row_ids[1]}
+    assert loaded_row_ids[0] not in h1_row_ids
+    assert loaded_row_ids[1] not in h2_row_ids
+    assert len(h1_row_ids) == 6
+    assert len(h2_row_ids) == 6
+    first_rows = backend.rows_by_scenario[0][1]
+    with pytest.raises(TypeError):
+        first_rows[0]["close"] = 999.0
 
 
 def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
@@ -356,6 +370,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
 
     assert result.decision.decision == "clear_yes"
     configs = {item.scenario_id: item for item in backend.configs}
+    decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
     assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
     assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].cost_model.slippage_bps_per_side == 0.0
@@ -366,6 +381,98 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert configs["validation_2026_h1/stressed_costs"].cost_model.slippage_bps_per_side == 1.0
     assert configs["validation_2026_h1/fill_lag_plus_1"].fill_model.entry_lag_bars == 2
     assert configs["validation_2026_h1/param_weight_up_10pct"].params == {"weight": 1.1}
+    assert decision_sizes["validation_2026_h1/base"] == [1.0]
+    assert decision_sizes["validation_2026_h1/param_weight_up_10pct"] == [1.1]
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    param_summary = {
+        item["scenario_id"]: item
+        for item in summary["results"]
+        if item["scenario_kind"] == "parameter"
+    }
+    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["diagnostic_only"] is True
+    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["decisions_regenerated"] is True
+
+
+def test_run_validation_rejects_unknown_params_with_strategy_validator(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    extra = set(params).difference({'weight'})\n"
+        "    if extra:\n"
+        "        raise ValueError(f'unknown params: {sorted(extra)}')\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    validation_config = (package / "validation.toml").read_text()
+    (package / "validation.toml").write_text(
+        validation_config.replace("weight = 1.0", "weight = 1.0\ntypo = 2.0")
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("param_validation_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert "param_validation_failed: unknown params" in audit["windows"][0]["violations"][0]
+
+
+def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text(
+        "def generate_decisions(rows, params):\n"
+        "    rows[0]['close'] = 999.0\n"
+        "    return []\n"
+    )
+    loaded_rows = rows()
+    monkeypatch.setattr(
+        "quant_strategies.runner.data_loader.load_data",
+        lambda config: LoadedData(rows=loaded_rows),
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_generation_failed",)
+    assert loaded_rows[0]["close"] == 100.0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert "strategy_generation_failed" in audit["windows"][0]["violations"][0]
+
+
+def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text(
+        "def generate_decisions(rows, params):\n"
+        "    params['weight'] = 2.0\n"
+        "    return []\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.data_loader.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_generation_failed",)
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert "strategy_generation_failed" in audit["windows"][0]["violations"][0]
 
 
 def test_run_validation_writes_failure_artifacts_for_strategy_generation_exception(
@@ -435,6 +542,30 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]
 
 
+def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = InvalidStatusBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("invalid_status_failed",)
+    assert result.result_dir is not None
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert summary["results"][0]["result"]["status"] == "failed"
+    assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]
+    assert "status" in summary["results"][0]["result"]["warnings"][0]
+
+
+def test_run_validation_propagates_backend_system_exit(tmp_path: Path, monkeypatch):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+
+    with pytest.raises(SystemExit, match="backend exited"):
+        run_validation(package, repo_root=tmp_path, backend=ExitingBackend())
+
+
 def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_exit(
     tmp_path: Path, monkeypatch
 ):
@@ -449,16 +580,8 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
         lambda path, repo_root: exit_generation,
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("strategy_generation_failed",)
-    assert result.result_dir is not None
-    audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert audit["windows"][0]["violations"] == [
-        "strategy_generation_failed: signal code exited"
-    ]
-    assert (result.result_dir / "promotion_decision.json").exists()
+    with pytest.raises(SystemExit, match="signal code exited"):
+        run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
 
 
 def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit(
@@ -467,15 +590,8 @@ def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit
     package = write_package(tmp_path)
     (package / "strategy.py").write_text("raise SystemExit('import exited')\n")
 
-    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("strategy_import_failed",)
-    assert result.result_dir is not None
-    assert (result.result_dir / "promotion_decision.json").exists()
-    assert (result.result_dir / "validation_report.md").exists()
-    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert summary["results"] == []
+    with pytest.raises(SystemExit, match="import exited"):
+        run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
 
 
 class RecordingBackend:
@@ -485,6 +601,8 @@ class RecordingBackend:
         self.calls = 0
         self.configs = []
         self.row_ids_by_scenario = []
+        self.rows_by_scenario = []
+        self.decision_sizes_by_scenario = []
 
     def run(
         self,
@@ -496,6 +614,10 @@ class RecordingBackend:
         self.calls += 1
         self.configs.append(config)
         self.row_ids_by_scenario.append((config.scenario_id, id(rows)))
+        self.rows_by_scenario.append((config.scenario_id, rows))
+        self.decision_sizes_by_scenario.append(
+            (config.scenario_id, [decision.target.size for decision in decisions])
+        )
         return BackendRunResult(
             backend=self.name,
             status="completed",
@@ -556,3 +678,35 @@ class MalformedBackend:
         config: Any,
     ) -> None:
         return None
+
+
+class ExitingBackend:
+    name = "exiting"
+
+    def run(
+        self,
+        *,
+        decisions: list[StrategyDecision],
+        rows: list[dict[str, Any]],
+        config: Any,
+    ) -> BackendRunResult:
+        raise SystemExit("backend exited")
+
+
+class InvalidStatusBackend:
+    name = "invalid_status"
+
+    def run(
+        self,
+        *,
+        decisions: list[StrategyDecision],
+        rows: list[dict[str, Any]],
+        config: Any,
+    ) -> dict[str, object]:
+        return {
+            "backend": self.name,
+            "status": "finished",
+            "metrics": {"net_return": 0.01, "trade_count": 10},
+            "warnings": (),
+            "unsupported_semantics": (),
+        }
