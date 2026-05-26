@@ -34,7 +34,7 @@ def make_config(
 ):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
-    strategy.write_text("def generate_signals(bars, params): return []\n")
+    strategy.write_text("def generate_decisions(rows, params): return []\n")
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     symbols_text = ", ".join(f'"{symbol}"' for symbol in (symbols or ["SPY"]))
     config_path = tmp_path / "run.toml"

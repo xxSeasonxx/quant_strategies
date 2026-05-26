@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -82,6 +83,16 @@ def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
             "signal_family",
         ],
     )
+
+
+def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
+    lines = [
+        decision.model_dump_json()
+        if hasattr(decision, "model_dump_json")
+        else json.dumps(_json_value(decision), sort_keys=True)
+        for decision in decisions
+    ]
+    (result_dir / "decision_records.jsonl").write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
 def write_engine_request(result_dir: Path, request_json: str) -> None:
@@ -160,6 +171,8 @@ def _ordered_fields(rows: list[dict[str, Any]], preferred: list[str]) -> list[st
 def _csv_value(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, Mapping | list | tuple):
+        return json.dumps(_json_value(value), sort_keys=True)
     return value
 
 
@@ -170,7 +183,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
 def _json_value(value: Any) -> Any:
     if isinstance(value, datetime | date):
         return value.isoformat()
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_json_value(item) for item in value]

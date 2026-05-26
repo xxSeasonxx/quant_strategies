@@ -8,10 +8,10 @@ REQUIRED_HEADINGS = (
     "Source / provenance:",
     "Market rationale:",
     "Required observables:",
-    "Signal rule:",
     "Assumptions:",
     "Falsifier:",
 )
+RULE_HEADINGS = ("Decision rule:", "Signal rule:")
 BANNED_IMPORT_ROOTS = {
     "quant_data",
     "quant_strategies.engine",
@@ -81,6 +81,8 @@ def test_strategy_docstrings_include_required_rationale_headings():
     for path in files:
         docstring = ast.get_docstring(ast.parse(path.read_text())) or ""
         missing = [heading for heading in REQUIRED_HEADINGS if heading not in docstring]
+        if not any(heading in docstring for heading in RULE_HEADINGS):
+            missing.append("Decision rule: or Signal rule:")
         assert missing == [], f"{path} missing headings: {missing}"
 
 

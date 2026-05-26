@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def write_strategy(repo_root: Path) -> None:
     strategy = repo_root / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
-    strategy.write_text("def generate_signals(bars, params):\n    return []\n")
+    strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
 
 
 def write_config(

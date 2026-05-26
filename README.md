@@ -3,11 +3,11 @@
 Strategy library for untested, researched, and tested strategy files, plus an
 explicit runner for one config-driven experiment at a time.
 
-Strategy files stay pure: they expose `generate_signals(bars, params)` and do
-not call engines, load data, start loops, or write artifacts. Explicit
-experiments run through `quant_strategies.runner`, which loads data through
-public `quant_data.loader` APIs and evaluates through the internal
-`quant_strategies.engine` package.
+Strategy files stay pure: foundation strategies expose
+`generate_decisions(rows, params)` and do not call engines, load data, start
+loops, or write artifacts. Explicit experiments run through
+`quant_strategies.runner`, which loads data through public `quant_data.loader`
+APIs and evaluates through the internal `quant_strategies.engine` package.
 
 ## Layout
 
@@ -69,8 +69,9 @@ def generate_decisions(rows, params):
     return []
 ```
 
-`generate_signals` remains valid for fast research and smoke runs, but it is not
-enough to move a researched candidate toward `tested/`.
+The runner and validation workflows share the same decision contract. The
+runner adapts `StrategyDecision` objects to its internal smoke engine request;
+strategy files do not emit engine-specific signals.
 
 Validation writes generated artifacts under ignored `validation_results/` and
 classifies each run as `hard_no`, `maybe`, or `clear_yes`. A `clear_yes`
@@ -151,12 +152,12 @@ For close-derived signals, `fill_model.price = "close"` with
 `allow_same_bar_close_fill = true` only when the config author has explicitly
 accepted same-bar close-fill causal responsibility.
 
-Signals may include optional exit controls: `max_hold_bars`,
-`take_profit_bps`, `stop_loss_bps`, and `trailing_stop_bps`. Exit triggers are
-confirmed from the configured fill price on completed bars; this runner does not
-simulate intrabar stop or target touches. `exit_lag_bars` controls whether the
-exit fills on the trigger bar or a later bar. Old `hold_bars`-only signals remain
-valid and are treated as max-hold exits.
+Decisions may include optional exit controls: `take_profit_bps`,
+`stop_loss_bps`, and `trailing_stop_bps`. Exit triggers are confirmed from the
+configured fill price on completed bars; this runner does not simulate intrabar
+stop or target touches. `exit_lag_bars` controls whether the exit fills on the
+trigger bar or a later bar. The decision `exit_policy.max_hold_bars` controls
+the max-hold exit.
 
 ## Artifacts
 
@@ -167,6 +168,7 @@ config.toml
 strategy_snapshot.py
 strategy_input_rows.csv
 strategy_input_rows.jsonl
+decision_records.jsonl
 data_manifest.json
 signals.csv
 engine_request.json
@@ -178,20 +180,21 @@ evidence.json    when engine evidence is available
 
 `strategy_input_rows.csv` is the human-readable record of what the strategy saw.
 `strategy_input_rows.jsonl` preserves datetimes, booleans, nulls, funding
-fields, and quote fields in JSON-compatible form. `engine_request.json` is the
-exact request passed to `quant_strategies.engine` and intentionally omits fields
-not used by the evaluator. `data_manifest.json` records row counts, timestamp
+fields, and quote fields in JSON-compatible form. `decision_records.jsonl` is
+the canonical strategy output record. `signals.csv` is an internal smoke-engine
+adapter artifact generated from decisions. `engine_request.json` is the exact
+request passed to `quant_strategies.engine` and intentionally omits fields not
+used by the evaluator. `data_manifest.json` records row counts, timestamp
 ranges, metadata field coverage, and the strategy-input JSONL hash.
 `run_manifest.json` records best-effort code/dependency identity, internal
 evidence schema identity, dirty worktree hashes when available, and hashes of
 generated run artifacts.
 
 Trade records in `evidence.json` include `exit_reason`, one of `max_hold`,
-`take_profit`, `stop_loss`, or `trailing_stop`. Strategy-emitted signal metadata
-is preserved as flat columns in `signals.csv`, normalized into signal `metadata`
-in `engine_request.json`, and copied into each trade as `signal_metadata`.
-Unknown top-level signal fields become metadata unless they are reserved signal
-contract fields.
+`take_profit`, `stop_loss`, or `trailing_stop`. Strategy decision metadata is
+preserved in `decision_records.jsonl`, carried through internal signal
+`metadata` in `engine_request.json`, and copied into each trade as
+`signal_metadata`.
 
 `summary.json` has stable top-level keys: `strategy_id`, `mode`, `success`,
 `status`, `stage`, `message`, `artifacts`, `engine`, `run_completed`,
@@ -224,10 +227,9 @@ closes a trade before max hold, funding cashflows are computed only over the
 actual entry-to-exit interval.
 
 When loaded rows include `available_at`, the runner checks the row used for each
-signal decision. By default that is the row matching the signal's symbol and
-`decision_time`; a strategy may emit `as_of_time` to state that it decided later
-using an earlier completed row. If the as-of row was available only after the
-decision time, the run fails at `data_readiness` before engine request
+strategy decision. `StrategyDecision.as_of_time` names the row timestamp used for
+the decision. If the as-of row was available only after the decision time, the
+run fails at `data_readiness` before engine request
 construction. Ingestion and refresh timestamps remain audit metadata in
 artifacts and manifests; they are not treated as historical market availability.
 This is a direct as-of-row guard, not a full feature-lineage proof.

@@ -74,15 +74,29 @@ def write_strategy(repo_root: Path, *, fixed_quote_signal: bool = False) -> None
     strategy.parent.mkdir(parents=True, exist_ok=True)
     if fixed_quote_signal:
         strategy.write_text(
-            "def generate_signals(bars, params):\n"
-            "    return [{'symbol': 'EURUSD', 'decision_time': bars[1]['timestamp'], "
-            "'side': 'long', 'weight': 1.0, 'hold_bars': 1}]\n"
+            "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+            "def generate_decisions(rows, params):\n"
+            "    return [StrategyDecision(\n"
+            "        strategy_id='demo',\n"
+            "        instrument=InstrumentRef(kind='fx_pair', symbol='EURUSD'),\n"
+            "        decision_time=rows[1]['timestamp'],\n"
+            "        as_of_time=rows[1]['timestamp'],\n"
+            "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+            "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+            "    )]\n"
         )
         return
     strategy.write_text(
-        "def generate_signals(bars, params):\n"
-        "    return [{'symbol': bars[1]['symbol'], 'decision_time': bars[1]['timestamp'], "
-        "'side': 'long', 'weight': 1.0, 'hold_bars': 1}]\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
     )
 
 
@@ -170,6 +184,7 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "strategy_snapshot.py",
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
+        "decision_records.jsonl",
         "signals.csv",
         "engine_request.json",
         "data_manifest.json",
@@ -179,6 +194,9 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "notes.md",
     }
     assert {path.name for path in result.result_dir.iterdir() if path.is_file()} == expected
+    decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
+    assert len(decision_records) == 1
+    assert json.loads(decision_records[0])["strategy_id"] == "demo"
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "completed"
     assert summary["success"] is True
@@ -216,11 +234,21 @@ def test_run_artifacts_preserve_exit_reason_and_signal_metadata(
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "def generate_signals(bars, params):\n"
-        "    return [{'symbol': bars[1]['symbol'], 'decision_time': bars[1]['timestamp'], "
-        "'side': 'long', 'weight': 1.0, 'hold_bars': 5, 'max_hold_bars': 2, "
-        "'take_profit_bps': 50.0, 'funding_pressure_bps': 3.25, "
-        "'entry_return_extension_bps': 42.0, 'signal_family': 'demo'}]\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=2, take_profit_bps=50.0),\n"
+        "        metadata={\n"
+        "            'funding_pressure_bps': 3.25,\n"
+        "            'entry_return_extension_bps': 42.0,\n"
+        "            'signal_family': 'demo',\n"
+        "        },\n"
+        "    )]\n"
     )
     config_path = write_config(tmp_path, mode="screen")
     monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
@@ -238,7 +266,7 @@ def test_run_artifacts_preserve_exit_reason_and_signal_metadata(
 
     assert signal_rows[0]["max_hold_bars"] == "2"
     assert signal_rows[0]["take_profit_bps"] == "50.0"
-    assert signal_rows[0]["funding_pressure_bps"] == "3.25"
+    assert json.loads(signal_rows[0]["metadata"])["funding_pressure_bps"] == 3.25
     assert evidence["schema_version"] == "quant_strategies.engine.evidence/v2"
     assert signal_payload["metadata"]["funding_pressure_bps"] == 3.25
     assert signal_payload["metadata"]["entry_return_extension_bps"] == 42.0
@@ -398,6 +426,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["artifacts"]["config.toml"]["sha256"]
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
+    assert run_manifest["artifacts"]["decision_records.jsonl"]["sha256"]
     assert run_manifest["artifacts"]["signals.csv"]["sha256"]
     assert run_manifest["artifacts"]["engine_request.json"]["sha256"]
     assert data_manifest["data"] == {
@@ -418,10 +447,10 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert "data_manifest.json" in summary["artifacts"]
 
 
-def test_signal_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
-    strategy.write_text("def generate_signals(bars, params):\n    raise RuntimeError('boom')\n")
+    strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('boom')\n")
     config_path = write_config(tmp_path)
     monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
@@ -431,7 +460,7 @@ def test_signal_generation_failure_writes_run_manifest(tmp_path: Path, monkeypat
     assert result.result_dir is not None
     assert (result.result_dir / "run_manifest.json").exists()
     summary = read_summary(result.result_dir)
-    assert summary["stage"] == "signal_generation"
+    assert summary["stage"] == "decision_generation"
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
@@ -474,6 +503,7 @@ def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_reque
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "data_manifest.json",
+        "decision_records.jsonl",
         "signals.csv",
         "run_manifest.json",
         "summary.json",
@@ -487,16 +517,23 @@ def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_reque
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
-def test_malformed_signal_decision_time_remains_request_build_failure(
+def test_malformed_decision_time_remains_decision_generation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "def generate_signals(bars, params):\n"
-        "    return [{'symbol': bars[1]['symbol'], 'decision_time': 'not-a-timestamp', "
-        "'side': 'long', 'weight': 1.0, 'hold_bars': 1}]\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
+        "        decision_time='not-a-timestamp',\n"
+        "        as_of_time=rows[1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
     )
     config_path = write_config(tmp_path)
     monkeypatch.setattr(
@@ -510,8 +547,8 @@ def test_malformed_signal_decision_time_remains_request_build_failure(
     assert result.success is False
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["stage"] == "request_build"
-    assert "decision_time must be a valid ISO timestamp" in summary["message"]
+    assert summary["stage"] == "decision_generation"
+    assert "decision_time" in summary["message"]
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
@@ -586,7 +623,14 @@ def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, m
 
     assert result.success is False
     assert result.result_dir is not None
-    for name in ("strategy_input_rows.csv", "strategy_input_rows.jsonl", "signals.csv", "summary.json", "notes.md"):
+    for name in (
+        "strategy_input_rows.csv",
+        "strategy_input_rows.jsonl",
+        "decision_records.jsonl",
+        "signals.csv",
+        "summary.json",
+        "notes.md",
+    ):
         assert (result.result_dir / name).exists()
     assert not (result.result_dir / "engine_request.json").exists()
     assert read_summary(result.result_dir)["stage"] == "request_build"

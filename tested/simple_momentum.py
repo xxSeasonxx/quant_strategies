@@ -11,9 +11,9 @@ signal for testing the research harness.
 Required observables:
 Symbol, timestamp, and close price for ordered bars.
 
-Signal rule:
-Emit the first long signal at the current bar timestamp when the current close
-is greater than the previous close.
+Decision rule:
+Emit the first long target decision at the current bar timestamp when the
+current close is greater than the previous close.
 
 Assumptions:
 The configured fill model enters after the decision bar, so a close-derived
@@ -28,25 +28,39 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 
-def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, object]) -> list[dict[str, object]]:
+
+def generate_decisions(
+    bars: Sequence[Mapping[str, object]],
+    params: Mapping[str, object],
+) -> list[StrategyDecision]:
     weight = float(params.get("weight", 1.0))
     hold_bars = int(params.get("hold_bars", 1))
-    signals: list[dict[str, object]] = []
+    decisions: list[StrategyDecision] = []
 
     for index in range(1, len(bars)):
         previous_close = float(bars[index - 1]["close"])
         current_close = float(bars[index]["close"])
         if current_close > previous_close:
-            signals.append(
-                {
-                    "symbol": str(bars[index]["symbol"]),
-                    "decision_time": bars[index]["timestamp"],
-                    "side": "long",
-                    "weight": weight,
-                    "hold_bars": hold_bars,
-                }
+            timestamp = bars[index]["timestamp"]
+            decisions.append(
+                StrategyDecision(
+                    strategy_id="simple_momentum",
+                    instrument=InstrumentRef(
+                        kind="equity_or_etf",
+                        symbol=str(bars[index]["symbol"]),
+                    ),
+                    decision_time=timestamp,
+                    as_of_time=timestamp,
+                    target=PositionTarget(
+                        direction="long",
+                        sizing_kind="target_weight",
+                        size=weight,
+                    ),
+                    exit_policy=ExitPolicy(max_hold_bars=hold_bars),
+                )
             )
             break
 
-    return signals
+    return decisions

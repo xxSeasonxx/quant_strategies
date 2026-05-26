@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
+from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
 from quant_strategies.runner.errors import RequestBuildError
 
@@ -37,6 +39,28 @@ def signal(index: int = 1, *, hold_bars: int = 1) -> dict[str, object]:
     }
 
 
+def decision(
+    *,
+    direction: str = "long",
+    sizing_kind: str = "target_weight",
+    size: float = 0.5,
+) -> StrategyDecision:
+    timestamp = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    return StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=timestamp,
+        as_of_time=timestamp,
+        target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
+        exit_policy=ExitPolicy(
+            max_hold_bars=3,
+            stop_loss_bps=100.0,
+            take_profit_bps=200.0,
+        ),
+        metadata={"source": "test"},
+    )
+
+
 def close_fill() -> FillModelConfig:
     return FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0)
 
@@ -59,6 +83,35 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_signals():
     assert request.bars[0].close == 100.0
     assert request.bars[0].funding_rate is None
     assert request.spec.signals[0].decision_time == signal()["decision_time"]
+
+
+def test_decisions_to_signal_rows_preserves_engine_fields():
+    rows = decisions_to_signal_rows([decision()])
+
+    assert rows == [
+        {
+            "symbol": "SPY",
+            "decision_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            "as_of_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
+            "side": "long",
+            "weight": 0.5,
+            "hold_bars": 3,
+            "max_hold_bars": 3,
+            "stop_loss_bps": 100.0,
+            "take_profit_bps": 200.0,
+            "metadata": {"source": "test"},
+        }
+    ]
+
+
+def test_decisions_to_signal_rows_rejects_flat_targets():
+    with pytest.raises(RequestBuildError, match="flat target"):
+        decisions_to_signal_rows([decision(direction="flat", size=0.0)])
+
+
+def test_decisions_to_signal_rows_rejects_non_target_weight():
+    with pytest.raises(RequestBuildError, match="target_weight"):
+        decisions_to_signal_rows([decision(sizing_kind="notional")])
 
 
 def test_build_request_preserves_funding_fields_for_engine_accounting():

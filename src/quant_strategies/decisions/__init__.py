@@ -10,9 +10,16 @@ from quant_strategies.decisions.models import (
     SizingKind,
     StrategyDecision,
 )
+from quant_strategies.decisions.strategy_loader import (
+    DecisionStrategyCallable,
+    DecisionStrategyLoadError,
+    load_decision_strategy,
+)
 
 __all__ = [
     "DecisionModel",
+    "DecisionStrategyCallable",
+    "DecisionStrategyLoadError",
     "Direction",
     "ExitPolicy",
     "InstrumentKind",
@@ -20,4 +27,5 @@ __all__ = [
     "PositionTarget",
     "SizingKind",
     "StrategyDecision",
+    "load_decision_strategy",
 ]

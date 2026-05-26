@@ -11,6 +11,7 @@ from quant_strategies.runner import (
     engine_runner,
     strategy_loader,
 )
+from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
 
 
@@ -37,7 +38,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     artifacts.initialize_run_artifacts(config_file, config, result_dir)
 
     try:
-        generate_signals = strategy_loader.load_strategy(config.strategy_path, repo_root=effective_repo_root)
+        generate_decisions = strategy_loader.load_strategy(config.strategy_path, repo_root=effective_repo_root)
     except RunnerError as exc:
         return _failure_result(config, result_dir, "strategy_import", str(exc), repo_root=effective_repo_root)
 
@@ -49,13 +50,15 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
 
     try:
-        signals = generate_signals(loaded.rows, config.params)
+        decisions = generate_decisions(loaded.rows, config.params)
+        artifacts.write_decision_records(result_dir, decisions)
+        signals = decisions_to_signal_rows(decisions)
         artifacts.write_signals(result_dir, signals)
     except Exception as exc:
         return _failure_result(
             config,
             result_dir,
-            "signal_generation",
+            "decision_generation",
             f"strategy execution failed: {exc}",
             repo_root=effective_repo_root,
         )
