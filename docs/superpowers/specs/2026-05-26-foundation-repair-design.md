@@ -95,6 +95,8 @@ Runner summaries and manifests should include:
 
 - `strategy_contract = "decision"`
 - `return_model = "sum_weighted_trade_return"`
+- funding metrics should state whether they are full cashflow accounting or a
+  v1 linear additive adjustment
 - `promotion_eligible = false`
 - `paper_trade_eligible = false`
 - `live_eligible = false`
@@ -110,6 +112,10 @@ Validation artifacts should include explicit eligibility fields:
 The current `clear_yes` label should either be renamed to an advisory label or
 kept only with explicit non-deployability fields. Imported autoresearch loop
 feedback should be wrapped or labeled as non-validation evidence.
+
+Smoke fixtures and examples should not live in lifecycle folders whose names
+imply validated strategy status. If a fixture remains in such a folder during
+transition, artifacts and docs must mark it as a fixture exception.
 
 ### Root Cause Addressed
 
@@ -156,6 +162,8 @@ Make invalid or misleading runs hard to produce.
 - Change backend status from plain `str` to a finite `Literal` or enum.
 - Catch expected `Exception` subclasses, not `BaseException`.
 - Let `SystemExit`, `KeyboardInterrupt`, and `GeneratorExit` propagate.
+- Make runner and validation result-directory allocation atomic by retrying on
+  `FileExistsError` instead of relying on check-then-create.
 - Add per-strategy parameter validation through a simple convention:
 
 ```python
@@ -226,7 +234,8 @@ evidence layers are stable.
 | `validation/artifacts.py` | Writes validation manifest and eligibility fields |
 | `validation/backends.py` | Narrows backend status type and capability reporting |
 | `validation/__init__.py` | Uses immutable inputs and clearer exception boundaries |
-| `researched/` | Gains manifest integrity/status checks; stale packages stop being trusted |
+| `researched/` | Gains manifest integrity/status checks; stale packages stop being trusted; imported loop feedback is labeled non-validation evidence |
+| `tested/` | Contains only validation-passed strategies; smoke fixtures move elsewhere or are explicitly marked during transition |
 | `tests/` | Adds contract, artifact semantics, manifest, mutation, benchmark, and causality tests |
 
 ## Testing Strategy
@@ -253,6 +262,7 @@ Each phase should land with focused tests:
    - `SystemExit` propagates
    - invalid backend status fails model validation
    - unknown params fail for validation-ready strategies
+   - parallel result-directory allocation is safe
 
 5. Performance:
    - large synthetic signal set avoids linear decision-time scans
