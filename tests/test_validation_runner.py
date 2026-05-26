@@ -167,6 +167,7 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert read_jsonl(base_decision_file)[0]["target"]["size"] == 1.0
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert (result.result_dir / "data_audit.json").exists()
+    assert (result.result_dir / "backend_capability_matrix.json").exists()
     assert (result.result_dir / "validation_config.toml").exists()
     assert (result.result_dir / "strategy_snapshot.py").exists()
     assert (result.result_dir / "decision_schema.json").exists()
@@ -182,12 +183,29 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
     assert manifest["data"]["windows"][0]["rows_sha256"]
     assert manifest["backend"]["status_counts"] == {"completed": 6}
+    capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
+    assert capability_matrix == {
+        "backend": "fake",
+        "observed_unsupported_semantics": [],
+        "semantics": [
+            {
+                "semantic": "test_double",
+                "status": "supported",
+                "details": "Deterministic validation test double.",
+                "observed_unsupported": False,
+            }
+        ],
+    }
+    assert manifest["backend"]["capability_matrix"] == capability_matrix
     assert manifest["backend"]["scenarios"][0]["decision_records_path"] == base_decision_path
     assert manifest["backend"]["scenarios"][0]["decision_records_sha256"] == file_sha256(
         base_decision_file
     )
     assert manifest["core_hashes"]["decision_records.jsonl"] == file_sha256(
         result.result_dir / "decision_records.jsonl"
+    )
+    assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
+        result.result_dir / "backend_capability_matrix.json"
     )
     assert manifest["artifacts"]["backend_runs/summary.json"]["sha256"] == file_sha256(
         result.result_dir / "backend_runs" / "summary.json"
@@ -214,10 +232,15 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     assert audit["windows"][0]["passed"] is False
     assert audit["windows"][0]["violations"] == ["data_load_failed: data load returned no rows"]
     assert (result.result_dir / "promotion_decision.json").exists()
+    capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["data"]["windows"][0]["status"] == "failed"
     assert manifest["data"]["windows"][0]["row_count"] == 0
     assert manifest["data"]["windows"][0]["rows_sha256"] is None
+    assert manifest["backend"]["capability_matrix"] == capability_matrix
+    assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
+        result.result_dir / "backend_capability_matrix.json"
+    )
 
 
 def test_run_validation_blocks_stale_validation_ready_research_manifest(tmp_path: Path):

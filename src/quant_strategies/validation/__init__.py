@@ -27,6 +27,7 @@ from quant_strategies.validation.backends import (
     ValidationBackend,
     get_backend,
 )
+from quant_strategies.validation.capabilities import backend_capability_matrix
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
@@ -542,6 +543,7 @@ def _write_validation_artifacts(
     decision: PromotionDecision,
     research_manifest: dict[str, Any],
 ) -> None:
+    capability_matrix = backend_capability_matrix(backend_name, backend_results)
     decision_lines = [item.model_dump_json() for item in decisions]
     write_text_artifact(result_dir, "decision_records.jsonl", "\n".join(decision_lines))
     write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
@@ -595,6 +597,7 @@ def _write_validation_artifacts(
             ],
         },
     )
+    write_json_artifact(result_dir, "backend_capability_matrix.json", capability_matrix)
     write_json_artifact(
         result_dir,
         "promotion_decision.json",
@@ -614,6 +617,7 @@ def _write_validation_artifacts(
         backend_name=backend_name,
         data_provenance=data_provenance,
         backend_results=backend_results,
+        capability_matrix=capability_matrix,
         research_manifest=research_manifest,
     )
 

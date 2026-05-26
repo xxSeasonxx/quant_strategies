@@ -35,6 +35,7 @@ def write_validation_manifest(
     backend_name: str,
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
+    capability_matrix: dict[str, Any],
     research_manifest: dict[str, Any],
 ) -> Path:
     payload = {
@@ -57,6 +58,7 @@ def write_validation_manifest(
         "backend": _backend_summary(
             backend_name=backend_name,
             backend_results=backend_results,
+            capability_matrix=capability_matrix,
         ),
         "research_manifest": research_manifest,
         "core_hashes": _core_hashes(result_dir),
@@ -73,6 +75,7 @@ def _backend_summary(
     *,
     backend_name: str,
     backend_results: list[ScenarioBackendRunResult],
+    capability_matrix: dict[str, Any],
 ) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     unsupported: set[str] = set()
@@ -102,6 +105,7 @@ def _backend_summary(
         "selected": backend_name,
         "status_counts": dict(sorted(status_counts.items())),
         "unsupported_semantics": sorted(unsupported),
+        "capability_matrix": capability_matrix,
         "scenarios": scenarios,
     }
 
@@ -113,6 +117,7 @@ def _core_hashes(result_dir: Path) -> dict[str, str | None]:
         "decision_records.jsonl",
         "data_audit.json",
         "backend_runs/summary.json",
+        "backend_capability_matrix.json",
         "robustness_matrix.json",
         "promotion_decision.json",
         "validation_report.md",
