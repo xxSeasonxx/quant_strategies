@@ -104,7 +104,7 @@ Validation artifacts include the frozen `validation_config.toml`,
 `backend_capability_matrix.json`, `robustness_matrix.json`,
 `promotion_decision.json`, `validation_report.md`, and
 `validation_manifest.json`. `backend_capability_matrix.json` records the
-selected backend's supported, conditional, unsupported, and unknown semantics;
+selected backend's supported, conditional, and unsupported semantics;
 `validation_manifest.json` embeds the same matrix and records repository,
 package, config, strategy, row-provenance, backend, researched-manifest, and
 artifact hash identity. Capability support is not market validation or

@@ -98,6 +98,14 @@ def test_strategy_decision_serializes_observations_to_json():
     ]
 
 
+def test_strategy_decision_schema_includes_observations():
+    schema = StrategyDecision.model_json_schema()
+
+    assert "observations" in schema["properties"]
+    observation_schema = schema["$defs"]["ObservationRef"]
+    assert set(observation_schema["properties"]) == {"symbol", "timestamp", "field", "source"}
+
+
 def test_strategy_decision_requires_timezone_aware_times():
     with pytest.raises(ValidationError, match="decision_time must be timezone-aware"):
         StrategyDecision(

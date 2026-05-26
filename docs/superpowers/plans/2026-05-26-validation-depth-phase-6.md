@@ -1,6 +1,6 @@
 # Validation Depth Phase 6 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add Phase 6 validation depth with typed `StrategyDecision` observation dependencies, synthetic future-poison causality tests, conservative VectorBT PRO portfolio target-weight support, and backend capability artifacts.
 
@@ -59,7 +59,7 @@ strategy.generate_decisions(rows, params)
 - Modify: `src/quant_strategies/decisions/__init__.py`
 - Modify: `tests/test_decision_models.py`
 
-- [ ] Add `ObservationRef(DecisionModel)` with fields:
+- [x] Add `ObservationRef(DecisionModel)` with fields:
 
 ```python
 class ObservationRef(DecisionModel):
@@ -86,21 +86,21 @@ class ObservationRef(DecisionModel):
         return _stripped_non_empty(value, info.field_name)
 ```
 
-- [ ] Add `observations: tuple[ObservationRef, ...] = ()` to `StrategyDecision`.
-- [ ] Export `ObservationRef` from `src/quant_strategies/decisions/__init__.py`.
-- [ ] Add model tests:
+- [x] Add `observations: tuple[ObservationRef, ...] = ()` to `StrategyDecision`.
+- [x] Export `ObservationRef` from `src/quant_strategies/decisions/__init__.py`.
+- [x] Add model tests:
   - accepts multiple typed observations for cross-sectional decisions;
   - defaults `observations` to `()`;
   - rejects naive observation timestamps;
   - rejects empty observation symbols;
   - serializes observations into `model_dump(mode="json")`.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 conda run -n quant pytest tests/test_decision_models.py -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add src/quant_strategies/decisions/models.py src/quant_strategies/decisions/__init__.py tests/test_decision_models.py
@@ -116,7 +116,7 @@ git commit -m "feat: add typed decision observations"
 - Create: `tests/test_validation_dependencies.py`
 - Create: `tests/test_validation_future_poison.py`
 
-- [ ] Move aware datetime parsing into `validation/datetime_utils.py`:
+- [x] Move aware datetime parsing into `validation/datetime_utils.py`:
 
 ```python
 def parse_aware_datetime(value: Any) -> tuple[datetime | None, str | None]:
@@ -125,32 +125,32 @@ def parse_aware_datetime(value: Any) -> tuple[datetime | None, str | None]:
 
 Use the existing behavior from `data_audit.py`: accept aware `datetime`, accept ISO strings including `Z`, reject naive/invalid/non-datetime values with the same reason strings.
 
-- [ ] Add `audit_observation_dependencies(row_index, decisions)` in `validation/dependencies.py`.
+- [x] Add `audit_observation_dependencies(row_index, decisions)` in `validation/dependencies.py`.
   - Input `row_index` is the existing `dict[tuple[str, datetime], list[Mapping[str, Any]]]` built by `audit_decision_rows`.
   - For each `decision.observations`, fail if observation timestamp is after `decision.as_of_time`.
   - Fail if the observation row is missing.
   - Fail if the observation row has missing/invalid `available_at`.
   - Fail if `available_at > decision.decision_time`.
   - Do not rebuild the full row index inside this helper.
-- [ ] Update `audit_decision_rows(...)` to call `audit_observation_dependencies(row_index, decisions)` before returning.
-- [ ] Add dependency tests:
+- [x] Update `audit_decision_rows(...)` to call `audit_observation_dependencies(row_index, decisions)` before returning.
+- [x] Add dependency tests:
   - no observations remains valid;
   - declared cross-section observations pass;
   - future observation timestamp fails;
   - missing observation row fails;
   - missing/invalid/late `available_at` fails.
-- [ ] Add synthetic future-poison tests:
+- [x] Add synthetic future-poison tests:
   - cross-sectional synthetic generator uses only `AS_OF` rows and typed observations;
   - FX triangle synthetic generator uses only `AS_OF` rows and typed observations;
   - poisoning future rows does not change generated decision fingerprints;
   - a declared future FX observation is caught by the audit.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 conda run -n quant pytest tests/test_validation_dependencies.py tests/test_validation_future_poison.py -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add src/quant_strategies/validation/datetime_utils.py src/quant_strategies/validation/dependencies.py src/quant_strategies/validation/data_audit.py tests/test_validation_dependencies.py tests/test_validation_future_poison.py
@@ -163,8 +163,8 @@ git commit -m "feat: audit decision observation dependencies"
 - Modify: `src/quant_strategies/validation/vectorbtpro_backend.py`
 - Modify: `tests/test_vectorbtpro_backend.py`
 
-- [ ] Replace the old `multi_asset_target_weight` unsupported test with a passing test for two symbols sized `0.6` and `0.4`.
-- [ ] In that test, monkeypatch `vectorbtpro.Portfolio.from_signals` and assert:
+- [x] Replace the old `multi_asset_target_weight` unsupported test with a passing test for two symbols sized `0.6` and `0.4`.
+- [x] In that test, monkeypatch `vectorbtpro.Portfolio.from_signals` and assert:
   - `status == "completed"`;
   - `unsupported_semantics == ()`;
   - `size_type == "valuepercent"`;
@@ -172,19 +172,19 @@ git commit -m "feat: audit decision observation dependencies"
   - `group_by is True`;
   - both symbol sizes are passed at the expected entry timestamp;
   - metrics include `portfolio_target_weight_model == "vectorbtpro_valuepercent_cash_sharing"` and `max_gross_target_weight == 1.0`.
-- [ ] Add fail-closed tests:
+- [x] Add fail-closed tests:
   - simultaneous `0.7 + 0.4` target weights fail with `portfolio_target_weight_exceeds_one`;
   - staggered cross-symbol windows fail when active gross weight exceeds `1.0`;
   - per-decision weight above `1.0` still reports `leveraged_target_weight`;
   - threshold exits, non-close fills, non-target-weight sizing, flat targets, and same-symbol overlapping windows still fail closed.
-- [ ] Implement `_validate_portfolio_target_weights(windows)`:
+- [x] Implement `_validate_portfolio_target_weights(windows)`:
   - compute gross active target weight at each entry timestamp;
   - use positive size as absolute exposure for long and short;
   - raise `ValueError("portfolio_target_weight_exceeds_one:<timestamp>:<gross>")` above `1.0 + 1e-12`;
   - return the maximum gross target weight.
-- [ ] Remove only the blanket multi-symbol rejection block from `_unsupported_semantics(...)`.
-- [ ] Add `cash_sharing=True` and `group_by=True` to `vbt.Portfolio.from_signals(...)`.
-- [ ] Add portfolio metrics after funding adjustment:
+- [x] Remove only the blanket multi-symbol rejection block from `_unsupported_semantics(...)`.
+- [x] Add `cash_sharing=True` and `group_by=True` to `vbt.Portfolio.from_signals(...)`.
+- [x] Add portfolio metrics after funding adjustment:
 
 ```python
 metrics = {
@@ -194,13 +194,13 @@ metrics = {
 }
 ```
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 conda run -n quant pytest tests/test_vectorbtpro_backend.py -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add src/quant_strategies/validation/vectorbtpro_backend.py tests/test_vectorbtpro_backend.py
@@ -216,31 +216,31 @@ git commit -m "feat: support validation portfolio target weights"
 - Create: `tests/test_validation_capabilities.py`
 - Modify: `tests/test_validation_runner.py`
 
-- [ ] Add `backend_capability_matrix(backend_name, backend_results)` returning:
+- [x] Add `backend_capability_matrix(backend_name, backend_results)` returning:
   - `backend`;
   - sorted `observed_unsupported_semantics`;
   - `semantics`, a list of records with `semantic`, `status`, `details`, and `observed_unsupported`.
-- [ ] For `vectorbtpro`, record:
+- [x] For `vectorbtpro`, record:
   - supported: close fills, target-weight sizing;
   - conditional: portfolio target weights under close-fill, no threshold exits, no same-symbol overlap, no leverage, gross active target weight <= `1.0`;
   - unsupported: non-close fills, threshold exits, non-target-weight sizing, flat targets, leveraged weights, same-symbol overlap;
   - conditional: crypto perp funding linear additive adjustment.
-- [ ] For `fake`, record a single `test_double` supported semantic so tests have deterministic output.
-- [ ] Write `backend_capability_matrix.json` in `_write_validation_artifacts(...)` for all validation outcomes, including hard-no paths.
-- [ ] Embed the same matrix under `manifest["backend"]["capability_matrix"]`.
-- [ ] Include `backend_capability_matrix.json` in manifest `core_hashes`.
-- [ ] Add tests:
+- [x] For `fake`, record a single `test_double` supported semantic so tests have deterministic output.
+- [x] Write `backend_capability_matrix.json` in `_write_validation_artifacts(...)` for all validation outcomes, including hard-no paths.
+- [x] Embed the same matrix under `manifest["backend"]["capability_matrix"]`.
+- [x] Include `backend_capability_matrix.json` in manifest `core_hashes`.
+- [x] Add tests:
   - static VectorBT matrix marks portfolio target weight conditional;
   - observed unsupported semantic codes set `observed_unsupported=True`;
   - clear-yes validation writes capability artifact, embeds it in manifest, and hashes it;
   - hard-no data-audit failure still writes capability artifact, embeds it in manifest, and hashes it.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 conda run -n quant pytest tests/test_validation_capabilities.py tests/test_validation_runner.py::test_run_validation_writes_clear_yes_artifacts tests/test_validation_runner.py::test_run_validation_records_data_audit_failure -q
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add src/quant_strategies/validation/capabilities.py src/quant_strategies/validation/__init__.py src/quant_strategies/validation/manifest.py tests/test_validation_capabilities.py tests/test_validation_runner.py
@@ -253,33 +253,33 @@ git commit -m "feat: record validation backend capability matrix"
 - Modify: `README.md`
 - Modify: `docs/superpowers/specs/2026-05-26-foundation-repair-design.md`
 
-- [ ] Update README validation docs:
+- [x] Update README validation docs:
   - `StrategyDecision.observations` is the typed dependency contract;
   - validation audits observation rows against `as_of_time`, `decision_time`, and `available_at`;
   - `backend_capability_matrix.json` is written and embedded in the manifest;
   - VectorBT PRO portfolio target weights are conditional, not general portfolio validation;
   - capability support is not paper/live eligibility.
-- [ ] Update the rollout spec Phase 6 note to point at this plan and record that Season chose typed observations now.
-- [ ] Run focused tests:
+- [x] Update the rollout spec Phase 6 note to point at this plan and record that Season chose typed observations now.
+- [x] Run focused tests:
 
 ```bash
 conda run -n quant pytest tests/test_decision_models.py tests/test_validation_dependencies.py tests/test_validation_future_poison.py tests/test_vectorbtpro_backend.py tests/test_validation_capabilities.py tests/test_validation_runner.py -q
 ```
 
-- [ ] Run full suite:
+- [x] Run full suite:
 
 ```bash
 conda run -n quant pytest -q
 ```
 
-- [ ] Report changed-line counts:
+- [x] Report changed-line counts:
 
 ```bash
 git diff --stat
 git diff --shortstat
 ```
 
-- [ ] Commit:
+- [x] Commit:
 
 ```bash
 git add README.md docs/superpowers/specs/2026-05-26-foundation-repair-design.md
@@ -358,35 +358,35 @@ Execution order for same-session subagent-driven development: Task 1, Task 2, Ta
 
 Synthesized from the engineering review findings. Each task derives from a specific finding above. Run with Claude Code or Codex; checkbox as you ship.
 
-- [ ] **T1 (P1, human: ~1h / CC: ~10min)** — plan/order — Keep artifact claims behind implemented backend behavior.
+- [x] **T1 (P1, human: ~1h / CC: ~10min)** — plan/order — Keep artifact claims behind implemented backend behavior.
   - Surfaced by: Architecture Review — capability matrix must not claim conditional portfolio support before `VectorBTProBackend` supports it.
   - Files: `docs/superpowers/plans/2026-05-26-validation-depth-phase-6.md`
   - Verify: Task 3 appears before Task 4 in execution order.
 
-- [ ] **T2 (P2, human: ~1h / CC: ~10min)** — decisions — Use typed observations on `StrategyDecision`.
+- [x] **T2 (P2, human: ~1h / CC: ~10min)** — decisions — Use typed observations on `StrategyDecision`.
   - Surfaced by: User decision — Season chose typed field now over metadata convention.
   - Files: `src/quant_strategies/decisions/models.py`, `src/quant_strategies/decisions/__init__.py`, `tests/test_decision_models.py`
   - Verify: `conda run -n quant pytest tests/test_decision_models.py -q`
 
-- [ ] **T3 (P2, human: ~45min / CC: ~8min)** — validation — Reuse data-audit row index for observation audits.
+- [x] **T3 (P2, human: ~45min / CC: ~8min)** — validation — Reuse data-audit row index for observation audits.
   - Surfaced by: Performance Review — avoid scanning validation rows twice.
   - Files: `src/quant_strategies/validation/data_audit.py`, `src/quant_strategies/validation/dependencies.py`
   - Verify: `conda run -n quant pytest tests/test_validation_dependencies.py -q`
 
-- [ ] **T4 (P2, human: ~45min / CC: ~8min)** — tests — Add edge coverage for observation and portfolio failure branches.
+- [x] **T4 (P2, human: ~45min / CC: ~8min)** — tests — Add edge coverage for observation and portfolio failure branches.
   - Surfaced by: Test Review — malformed/missing dependency cases and staggered gross-exposure case need tests.
   - Files: `tests/test_validation_dependencies.py`, `tests/test_vectorbtpro_backend.py`
   - Verify: `conda run -n quant pytest tests/test_validation_dependencies.py tests/test_vectorbtpro_backend.py -q`
 
 ## Final Self-Review Checklist
 
-- [ ] New tests do not import `researched/`, `tested/`, `untested/`, `rank_03`, or legacy signal-only modules.
-- [ ] All strategies still use the canonical `StrategyDecision` contract.
-- [ ] Observation dependencies are typed fields, not metadata conventions.
-- [ ] Observation dependency audits reuse the existing data-audit row index.
-- [ ] Capability artifacts are written for successful and hard-no validation outcomes.
-- [ ] VectorBT PRO supports only constrained cash-sharing portfolio target weights.
-- [ ] Full suite passes with `conda run -n quant pytest -q`.
+- [x] New tests do not import `researched/`, `tested/`, `untested/`, `rank_03`, or legacy signal-only modules.
+- [x] All strategies still use the canonical `StrategyDecision` contract.
+- [x] Observation dependencies are typed fields, not metadata conventions.
+- [x] Observation dependency audits reuse the existing data-audit row index.
+- [x] Capability artifacts are written for successful and hard-no validation outcomes.
+- [x] VectorBT PRO supports only constrained cash-sharing portfolio target weights.
+- [x] Full suite passes with `conda run -n quant pytest -q`.
 
 ## GSTACK REVIEW REPORT
 
