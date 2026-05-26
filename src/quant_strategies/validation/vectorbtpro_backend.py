@@ -7,6 +7,11 @@ from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.backends import BackendRunResult
+from quant_strategies.validation.funding import (
+    FundingEventError,
+    funding_return_for_window,
+    has_funding_cashflow_rows,
+)
 
 
 class VectorBTProBackend:
@@ -108,6 +113,10 @@ class VectorBTProBackend:
             return _failed(self.name, f"metric_extraction_failed:{exc}")
         if metrics["trade_count"] != len(windows):
             return _failed(self.name, f"unexpected_trade_count:{metrics['trade_count']}:{len(windows)}")
+        try:
+            metrics = _funding_adjusted_metrics(metrics, rows, windows, config)
+        except FundingEventError as exc:
+            return _failed(self.name, f"invalid_funding_events:{exc}")
 
         return BackendRunResult(
             backend=self.name,
@@ -124,8 +133,6 @@ def _unsupported_semantics(
     config: Any,
 ) -> tuple[str, ...]:
     unsupported: list[str] = []
-    if _config_value(config, "data", "kind", default=None) == "crypto_perp_funding" or _has_funding_fields(rows):
-        unsupported.append("crypto_perp_funding_cashflows")
     if _config_value(config, "fill_model", "price", default="close") != "close":
         unsupported.append("non_close_fill_price")
     for item in decisions:
@@ -152,16 +159,6 @@ def _unsupported_semantics(
     return tuple(dict.fromkeys(unsupported))
 
 
-def _has_funding_fields(rows: list[dict[str, Any]]) -> bool:
-    funding_fields = ("funding_rate", "funding_timestamp", "has_funding_event")
-    for row in rows:
-        for field in funding_fields:
-            value = row.get(field)
-            if value is not None and value != "":
-                return True
-    return False
-
-
 def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDecision], config: Any) -> list[dict[str, Any]]:
     entry_lag = _entry_lag(config)
     exit_lag = _exit_lag(config)
@@ -185,6 +182,7 @@ def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDeci
             raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
 
         entry_time = symbol_close.index[entry_idx]
+        funding_entry_time = symbol_close.index[entry_idx - 1] if entry_idx > 0 else entry_time
         entry_key = (symbol, entry_time)
         if entry_key in entry_signals:
             raise ValueError(f"duplicate_entry_signal:{symbol}:{entry_time.isoformat()}")
@@ -212,6 +210,7 @@ def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDeci
                 "decision": item,
                 "symbol": symbol,
                 "entry_time": entry_time,
+                "funding_entry_time": funding_entry_time,
                 "exit_time": exit_time,
             }
         )
@@ -311,6 +310,39 @@ def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
         raise ValueError(f"invalid_trade_count:{trade_count}")
 
     return {"net_return": net_return, "trade_count": trade_count}
+
+
+def _funding_adjusted_metrics(
+    metrics: dict[str, float | int],
+    rows: list[dict[str, Any]],
+    windows: list[dict[str, Any]],
+    config: Any,
+) -> dict[str, float | int]:
+    data_kind = _config_value(config, "data", "kind", default=None)
+    if data_kind != "crypto_perp_funding" and not has_funding_cashflow_rows(rows):
+        return metrics
+
+    funding_return = 0.0
+    for window in windows:
+        decision = window["decision"]
+        if decision.target.direction == "flat":
+            continue
+        funding_return += funding_return_for_window(
+            rows,
+            symbol=window["symbol"],
+            entry_time=window["funding_entry_time"],
+            exit_time=window["exit_time"],
+            direction=decision.target.direction,
+            weight=decision.target.size,
+        )
+
+    price_cost_return = float(metrics["net_return"])
+    return {
+        **metrics,
+        "price_cost_return": price_cost_return,
+        "funding_return": funding_return,
+        "net_return": price_cost_return + funding_return,
+    }
 
 
 def _float_metric(value: Any) -> float:

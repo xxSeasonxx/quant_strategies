@@ -103,6 +103,44 @@ def decision(
     )
 
 
+def install_fake_vectorbtpro(monkeypatch, *, total_return: float = 0.0, trade_count: int = 1):
+    class FakeTrades:
+        def count(self):
+            return trade_count
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return total_return
+
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda *args, **kwargs: FakePortfolio())
+    )
+    monkeypatch.setitem(sys.modules, "vectorbtpro", fake_vbt)
+    return fake_vbt
+
+
+def funding_rows():
+    return [
+        {"symbol": "BTC-PERP", "timestamp": AS_OF, "close": 100.0},
+        {"symbol": "BTC-PERP", "timestamp": DECISION, "close": 101.0},
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "close": 102.0,
+            "funding_timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "funding_rate": 0.0003,
+            "has_funding_event": True,
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "close": 103.0,
+        },
+    ]
+
+
 def test_vectorbtpro_backend_reports_unsupported_threshold_exits():
     result = VectorBTProBackend().run(
         decisions=[decision(stop_loss_bps=100.0)],
@@ -114,33 +152,36 @@ def test_vectorbtpro_backend_reports_unsupported_threshold_exits():
     assert result.unsupported_semantics == ("threshold_exit_policy",)
 
 
-def test_vectorbtpro_backend_reports_unsupported_crypto_perp_funding_cashflows():
+def test_vectorbtpro_backend_adds_funding_return_for_crypto_perp_rows(monkeypatch):
+    install_fake_vectorbtpro(monkeypatch, total_return=0.01, trade_count=1)
     config = SimpleNamespace(data=SimpleNamespace(kind="crypto_perp_funding"))
 
     result = VectorBTProBackend().run(
         decisions=[decision()],
-        rows=rows(),
+        rows=funding_rows(),
         config=config,
     )
 
-    assert result.status == "unsupported"
-    assert result.unsupported_semantics == ("crypto_perp_funding_cashflows",)
+    assert result.status == "completed"
+    assert result.unsupported_semantics == ()
+    assert result.metrics["price_cost_return"] == pytest.approx(0.01)
+    assert result.metrics["funding_return"] == pytest.approx(-0.0003)
+    assert result.metrics["net_return"] == pytest.approx(0.0097)
 
 
-def test_vectorbtpro_backend_reports_unsupported_funding_rows_without_config():
-    funding_rows = [
-        {**row, "funding_rate": 0.0001, "funding_timestamp": row["timestamp"]}
-        for row in rows()
-    ]
+def test_vectorbtpro_backend_fails_on_incomplete_funding_event(monkeypatch):
+    install_fake_vectorbtpro(monkeypatch, total_return=0.01, trade_count=1)
+    bad_rows = funding_rows()
+    bad_rows[2] = {**bad_rows[2], "funding_rate": None}
 
     result = VectorBTProBackend().run(
         decisions=[decision()],
-        rows=funding_rows,
-        config=None,
+        rows=bad_rows,
+        config=SimpleNamespace(data=SimpleNamespace(kind="crypto_perp_funding")),
     )
 
-    assert result.status == "unsupported"
-    assert result.unsupported_semantics == ("crypto_perp_funding_cashflows",)
+    assert result.status == "failed"
+    assert any("invalid_funding_events:incomplete funding event" in warning for warning in result.warnings)
 
 
 def test_vectorbtpro_backend_runs_max_hold_decisions():
