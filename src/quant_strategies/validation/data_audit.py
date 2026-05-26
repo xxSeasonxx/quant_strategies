@@ -7,6 +7,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.validation.dependencies import audit_observation_dependencies
+from quant_strategies.validation.datetime_utils import parse_aware_datetime
 
 
 class DataAudit(BaseModel):
@@ -18,25 +20,6 @@ class DataAudit(BaseModel):
     violations: tuple[str, ...] = ()
 
 
-def _parse_aware_datetime(value: Any) -> tuple[datetime | None, str | None]:
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str):
-        raw_value = value.strip()
-        if raw_value.endswith("Z"):
-            raw_value = f"{raw_value[:-1]}+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw_value)
-        except ValueError:
-            return None, "invalid datetime"
-    else:
-        return None, "expected aware datetime"
-
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return None, "expected aware datetime"
-    return parsed, None
-
-
 def audit_decision_rows(
     rows: Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
@@ -45,7 +28,7 @@ def audit_decision_rows(
     row_index: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
     for row in rows:
         symbol = str(row.get("symbol"))
-        timestamp, reason = _parse_aware_datetime(row.get("timestamp"))
+        timestamp, reason = parse_aware_datetime(row.get("timestamp"))
         if timestamp is None:
             violations.append(f"invalid timestamp for {symbol}: {reason}")
             continue
@@ -69,7 +52,7 @@ def audit_decision_rows(
                     f"missing available_at for {decision.instrument.symbol} at {decision.as_of_time.isoformat()}"
                 )
                 continue
-            available_at, reason = _parse_aware_datetime(row.get("available_at"))
+            available_at, reason = parse_aware_datetime(row.get("available_at"))
             if available_at is None:
                 violations.append(
                     f"invalid available_at for {decision.instrument.symbol} at "
@@ -81,6 +64,8 @@ def audit_decision_rows(
                     f"as_of row for {decision.instrument.symbol} at {decision.as_of_time.isoformat()} "
                     "was available after decision_time"
                 )
+
+    violations.extend(audit_observation_dependencies(row_index, decisions))
 
     return DataAudit(
         row_count=len(rows),
