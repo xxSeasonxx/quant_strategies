@@ -85,6 +85,21 @@ def test_funding_window_is_entry_exclusive_and_exit_inclusive():
     assert result == pytest.approx(0.0030)
 
 
+def test_funding_symbol_matching_strips_row_symbol_whitespace():
+    rows = [row(1, symbol=" BTC-PERP ", funding_rate=0.0002, funding_minute=1, has_funding_event=True)]
+
+    result = funding_return_for_window(
+        rows,
+        symbol="BTC-PERP",
+        entry_time=START,
+        exit_time=START + timedelta(minutes=2),
+        direction="short",
+        weight=1.0,
+    )
+
+    assert result == pytest.approx(0.0002)
+
+
 def test_funding_observables_without_event_flag_do_not_create_cashflow():
     rows = [
         row(1, funding_rate=0.0020, funding_minute=1, has_funding_event=False),
@@ -107,6 +122,24 @@ def test_duplicate_matching_funding_events_are_counted_once():
     rows = [
         row(1, funding_rate=0.0002, funding_minute=1, has_funding_event=True),
         row(1, funding_rate=0.0002, funding_minute=1, has_funding_event=True),
+    ]
+
+    result = funding_return_for_window(
+        rows,
+        symbol="BTC-PERP",
+        entry_time=START,
+        exit_time=START + timedelta(minutes=2),
+        direction="short",
+        weight=1.0,
+    )
+
+    assert result == pytest.approx(0.0002)
+
+
+def test_near_equal_duplicate_funding_rates_are_counted_once():
+    rows = [
+        row(1, funding_rate=0.0002, funding_minute=1, has_funding_event=True),
+        row(1, funding_rate=0.0002 + 5e-16, funding_minute=1, has_funding_event=True),
     ]
 
     result = funding_return_for_window(
@@ -147,6 +180,18 @@ def test_incomplete_funding_event_fails_closed():
             symbol="BTC-PERP",
             entry_time=START,
             exit_time=START + timedelta(minutes=2),
+            direction="long",
+            weight=1.0,
+        )
+
+
+def test_exit_before_entry_fails_closed():
+    with pytest.raises(FundingEventError, match="exit_time must be on or after entry_time"):
+        funding_return_for_window(
+            [],
+            symbol="BTC-PERP",
+            entry_time=START + timedelta(minutes=2),
+            exit_time=START,
             direction="long",
             weight=1.0,
         )

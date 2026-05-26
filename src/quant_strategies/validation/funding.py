@@ -28,6 +28,8 @@ def funding_return_for_window(
 ) -> float:
     _require_aware_datetime(entry_time, "entry_time")
     _require_aware_datetime(exit_time, "exit_time")
+    if exit_time < entry_time:
+        raise FundingEventError("exit_time must be on or after entry_time")
     if direction not in {"long", "short"}:
         raise FundingEventError("direction must be 'long' or 'short'")
 
@@ -37,7 +39,7 @@ def funding_return_for_window(
 
     funding_rates_by_time: dict[datetime, float] = {}
     for row in rows:
-        if row.get("symbol") != symbol or row.get("has_funding_event") is not True:
+        if str(row.get("symbol", "")).strip() != symbol or row.get("has_funding_event") is not True:
             continue
 
         funding_timestamp = _funding_timestamp(row)
@@ -48,7 +50,7 @@ def funding_return_for_window(
         existing_rate = funding_rates_by_time.get(funding_timestamp)
         if existing_rate is None:
             funding_rates_by_time[funding_timestamp] = funding_rate
-        elif existing_rate != funding_rate:
+        elif not math.isclose(existing_rate, funding_rate, rel_tol=0.0, abs_tol=1e-15):
             raise FundingEventError(
                 f"conflicting funding rates for {symbol} at {funding_timestamp.isoformat()}"
             )
