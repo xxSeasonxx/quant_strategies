@@ -63,6 +63,30 @@ class InstrumentRef(DecisionModel):
         return _stripped_non_empty(value, "symbol")
 
 
+class ObservationRef(DecisionModel):
+    symbol: str
+    timestamp: datetime
+    field: str | None = None
+    source: str | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def validate_symbol(cls, value: str) -> str:
+        return _stripped_non_empty(value, "symbol")
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp(cls, value: datetime) -> datetime:
+        return _timezone_aware(value, "timestamp")
+
+    @field_validator("field", "source")
+    @classmethod
+    def validate_optional_text(cls, value: str | None, info) -> str | None:
+        if value is None:
+            return None
+        return _stripped_non_empty(value, info.field_name)
+
+
 class PositionTarget(DecisionModel):
     direction: Direction
     sizing_kind: SizingKind = "target_weight"
@@ -100,6 +124,7 @@ class StrategyDecision(DecisionModel):
     as_of_time: datetime
     target: PositionTarget
     exit_policy: ExitPolicy
+    observations: tuple[ObservationRef, ...] = ()
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("strategy_id")

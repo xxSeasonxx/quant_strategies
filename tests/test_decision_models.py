@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from quant_strategies.decisions import (
     ExitPolicy,
     InstrumentRef,
+    ObservationRef,
     PositionTarget,
     StrategyDecision,
 )
@@ -31,6 +32,70 @@ def test_strategy_decision_accepts_explicit_position_target():
     assert decision.instrument.symbol == "BTC-PERP"
     assert decision.target.direction == "short"
     assert decision.exit_policy.max_hold_bars == 480
+
+
+def test_strategy_decision_accepts_multiple_typed_observations():
+    decision = StrategyDecision(
+        strategy_id="cross_sectional_momentum",
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+        observations=(
+            ObservationRef(symbol="AAPL", timestamp=AS_OF_TIME, field="close", source="quant_data"),
+            ObservationRef(symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"),
+        ),
+    )
+
+    assert decision.observations == (
+        ObservationRef(symbol="AAPL", timestamp=AS_OF_TIME, field="close", source="quant_data"),
+        ObservationRef(symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"),
+    )
+
+
+def test_strategy_decision_defaults_observations_to_empty_tuple():
+    decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+
+    assert decision.observations == ()
+
+
+def test_observation_ref_rejects_naive_timestamp():
+    with pytest.raises(ValidationError, match="timestamp must be timezone-aware"):
+        ObservationRef(symbol="BTC-PERP", timestamp=datetime(2026, 1, 2, 12, 0))
+
+
+def test_observation_ref_rejects_empty_symbol():
+    with pytest.raises(ValidationError, match="symbol must be non-empty"):
+        ObservationRef(symbol=" ", timestamp=AS_OF_TIME)
+
+
+def test_strategy_decision_serializes_observations_to_json():
+    decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+        observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF_TIME, field="funding_rate"),),
+    )
+
+    assert decision.model_dump(mode="json")["observations"] == [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": "2026-01-02T12:00:00Z",
+            "field": "funding_rate",
+            "source": None,
+        }
+    ]
 
 
 def test_strategy_decision_requires_timezone_aware_times():
