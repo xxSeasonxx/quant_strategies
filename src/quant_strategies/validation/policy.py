@@ -72,6 +72,15 @@ def classify_validation(
     if not required_results:
         return PromotionDecision(decision="hard_no", reasons=("no_required_backend_results",))
 
+    for item in required_results:
+        result = item.result
+        if result.status == "failed":
+            return PromotionDecision(decision="hard_no", reasons=(f"{result.backend}_failed",))
+
+    unavailable = [item.result for item in required_results if item.result.status == "unavailable"]
+    if unavailable:
+        return PromotionDecision(decision="maybe", reasons=("backend_unavailable",))
+
     unsupported = [
         item.result
         for item in required_results
@@ -92,7 +101,7 @@ def classify_validation(
         if trade_count < min_trades:
             reasons.append("insufficient_trades")
         if net_return <= 0.0:
-            reasons.append("negative_net_return")
+            reasons.append("nonpositive_net_return")
 
     if reasons:
         return PromotionDecision(decision="hard_no", reasons=tuple(dict.fromkeys(reasons)))

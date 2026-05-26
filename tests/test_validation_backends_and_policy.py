@@ -230,7 +230,7 @@ def test_policy_ignores_diagnostic_scenarios_for_clear_yes():
     assert decision.reasons == ()
 
 
-def test_policy_hard_no_for_negative_net_return():
+def test_policy_hard_no_for_nonpositive_net_return():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -246,7 +246,26 @@ def test_policy_hard_no_for_negative_net_return():
     )
 
     assert decision.decision == "hard_no"
-    assert "negative_net_return" in decision.reasons
+    assert "nonpositive_net_return" in decision.reasons
+
+
+def test_policy_hard_no_for_zero_net_return():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            BackendRunResult(
+                backend="fake",
+                status="completed",
+                metrics={"net_return": 0.0, "trade_count": 50},
+                warnings=(),
+                unsupported_semantics=(),
+            )
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert "nonpositive_net_return" in decision.reasons
 
 
 def test_policy_hard_no_for_no_backend_results():
@@ -277,6 +296,61 @@ def test_policy_hard_no_for_non_completed_backend_status():
 
     assert decision.decision == "hard_no"
     assert "fake_failed" in decision.reasons
+
+
+def test_policy_maybe_for_required_backend_unavailable():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            BackendRunResult(
+                backend="vectorbtpro",
+                status="unavailable",
+                metrics={},
+                warnings=("vectorbtpro import failed",),
+                unsupported_semantics=(),
+            )
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "maybe"
+    assert "backend_unavailable" in decision.reasons
+
+
+def test_policy_prioritizes_failed_required_result_over_unsupported_result():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/base",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="failed",
+                    metrics={},
+                    warnings=("unfillable_exit",),
+                    unsupported_semantics=(),
+                ),
+            ),
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/realistic_costs",
+                required=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="unsupported",
+                    metrics={},
+                    warnings=(),
+                    unsupported_semantics=("threshold_exit_policy",),
+                ),
+            ),
+        ],
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert decision.reasons == ("fake_failed",)
 
 
 def test_policy_hard_no_for_insufficient_trades():

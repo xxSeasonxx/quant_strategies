@@ -38,7 +38,7 @@ def test_validate_cli_returns_one_for_hard_no(monkeypatch, tmp_path: Path, capsy
         lambda path, repo_root=None: ValidationRunResult(
             success=False,
             result_dir=tmp_path / "validation_results" / "run",
-            decision=PromotionDecision(decision="hard_no", reasons=("negative_net_return",)),
+            decision=PromotionDecision(decision="hard_no", reasons=("nonpositive_net_return",)),
             message="validation decision: hard_no",
         ),
     )

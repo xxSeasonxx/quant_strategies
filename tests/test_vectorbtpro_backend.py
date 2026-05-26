@@ -114,6 +114,35 @@ def test_vectorbtpro_backend_reports_unsupported_threshold_exits():
     assert result.unsupported_semantics == ("threshold_exit_policy",)
 
 
+def test_vectorbtpro_backend_reports_unsupported_crypto_perp_funding_cashflows():
+    config = SimpleNamespace(data=SimpleNamespace(kind="crypto_perp_funding"))
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=config,
+    )
+
+    assert result.status == "unsupported"
+    assert result.unsupported_semantics == ("crypto_perp_funding_cashflows",)
+
+
+def test_vectorbtpro_backend_reports_unsupported_funding_rows_without_config():
+    funding_rows = [
+        {**row, "funding_rate": 0.0001, "funding_timestamp": row["timestamp"]}
+        for row in rows()
+    ]
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=funding_rows,
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert result.unsupported_semantics == ("crypto_perp_funding_cashflows",)
+
+
 def test_vectorbtpro_backend_runs_max_hold_decisions():
     pytest.importorskip("vectorbtpro")
 

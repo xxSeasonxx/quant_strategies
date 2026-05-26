@@ -25,7 +25,28 @@ def test_expand_validation_matrix_includes_required_v1_scenarios():
     assert "validation_2026_h1/fill_lag_plus_1" in names
     assert "validation_2026_h1/param_threshold_down_10pct" in names
     assert "validation_2026_h1/param_threshold_up_10pct" in names
-    assert all(scenario.required for scenario in scenarios)
+    assert _scenario_by_id(scenarios, "validation_2026_h1/base").required is True
+    assert _scenario_by_id(scenarios, "validation_2026_h1/realistic_costs").required is True
+    assert _scenario_by_id(scenarios, "validation_2026_h1/stressed_costs").required is True
+    assert _scenario_by_id(scenarios, "validation_2026_h1/fill_lag_plus_1").required is True
+    assert _scenario_by_id(scenarios, "validation_2026_h1/param_threshold_down_10pct").required is False
+    assert _scenario_by_id(scenarios, "validation_2026_h1/param_threshold_up_10pct").required is False
+
+
+def test_base_scenario_uses_no_cost_baseline():
+    scenarios = expand_validation_matrix(
+        window_id="validation_2026_h1",
+        base_params={},
+        base_costs={"fee_bps_per_side": 0.5, "slippage_bps_per_side": 0.75},
+        base_fill={},
+    )
+
+    base = _scenario_by_id(scenarios, "validation_2026_h1/base")
+
+    assert base.cost_model == {
+        "fee_bps_per_side": 0.0,
+        "slippage_bps_per_side": 0.0,
+    }
 
 
 def test_matrix_scenario_records_overrides_explicitly():
@@ -112,6 +133,7 @@ def test_only_first_numeric_non_bool_param_is_perturbed_for_v1():
         "threshold": 0.9,
         "lookback": 20,
     }
+    assert threshold_down.required is False
 
 
 def test_scenario_override_maps_are_immutable_and_isolated_from_callers():

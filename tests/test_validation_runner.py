@@ -125,6 +125,7 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     assert promotion["decision"] == "clear_yes"
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(backend_summary["results"]) == 6
+    assert len([item for item in backend_summary["results"] if item["required"]]) == 4
     assert backend_summary["results"][0] == {
         "window_id": "validation_2026_h1",
         "scenario_id": "validation_2026_h1/base",
@@ -139,6 +140,12 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     }
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert (result.result_dir / "data_audit.json").exists()
+    assert (result.result_dir / "validation_config.toml").exists()
+    assert (result.result_dir / "strategy_snapshot.py").exists()
+    assert (result.result_dir / "decision_schema.json").exists()
+    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
+    assert robustness_matrix["decision"]["decision"] == "clear_yes"
+    assert len(robustness_matrix["scenarios"]) == 6
 
 
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
@@ -287,8 +294,11 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert result.decision.decision == "clear_yes"
     configs = {item.scenario_id: item for item in backend.configs}
     assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
-    assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.5
+    assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.0
+    assert configs["validation_2026_h1/base"].cost_model.slippage_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].fill_model.entry_lag_bars == 1
+    assert configs["validation_2026_h1/base"].data.kind == "crypto_perp_funding"
+    assert configs["validation_2026_h1/realistic_costs"].cost_model.fee_bps_per_side == 0.5
     assert configs["validation_2026_h1/stressed_costs"].cost_model.fee_bps_per_side == 1.0
     assert configs["validation_2026_h1/stressed_costs"].cost_model.slippage_bps_per_side == 1.0
     assert configs["validation_2026_h1/fill_lag_plus_1"].fill_model.entry_lag_bars == 2
@@ -360,6 +370,49 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     assert summary["results"][0]["scenario_id"] == "validation_2026_h1/base"
     assert summary["results"][0]["result"]["status"] == "failed"
     assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]
+
+
+def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_exit(
+    tmp_path: Path, monkeypatch
+):
+    package = write_package(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+
+    def exit_generation(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
+        raise SystemExit("signal code exited")
+
+    monkeypatch.setattr(
+        "quant_strategies.validation.load_decision_strategy",
+        lambda path, repo_root: exit_generation,
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_generation_failed",)
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["violations"] == [
+        "strategy_generation_failed: signal code exited"
+    ]
+    assert (result.result_dir / "promotion_decision.json").exists()
+
+
+def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit(
+    tmp_path: Path,
+):
+    package = write_package(tmp_path)
+    (package / "strategy.py").write_text("raise SystemExit('import exited')\n")
+
+    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_import_failed",)
+    assert result.result_dir is not None
+    assert (result.result_dir / "promotion_decision.json").exists()
+    assert (result.result_dir / "validation_report.md").exists()
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert summary["results"] == []
 
 
 class RecordingBackend:

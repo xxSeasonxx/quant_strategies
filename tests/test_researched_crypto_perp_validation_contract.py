@@ -135,3 +135,22 @@ def test_rank_03_validation_config_contract():
     assert config.params["long_hold_bars"] == 960
     assert config.params["require_exit_horizon"] is True
     assert config.params["weight"] == pytest.approx(1.0)
+
+
+def test_rank_03_exit_horizon_counts_symbol_bars_not_wall_clock_minutes():
+    module = load_module()
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    row_state = module._SymbolRows(
+        timestamps=(
+            start,
+            start + timedelta(minutes=1),
+            start + timedelta(minutes=10),
+        ),
+        closes_by_timestamp={},
+        conflicting_close_timestamps=frozenset(),
+        funding_event_rows=(),
+        latest_timestamp=start + timedelta(minutes=10),
+    )
+
+    assert module._has_exit_horizon(row_state, start + timedelta(minutes=1), 2) is False
+    assert module._has_exit_horizon(row_state, start, 2) is True

@@ -40,9 +40,10 @@ This plan implements the first end-to-end single-strategy validation slice. It d
 These decisions supersede any older code snippets below that show a simpler
 one-backend-run-per-window validator:
 
-- Validation must expand a required matrix before any `clear_yes` result:
-  base windows, realistic costs, stressed costs, fill-lag sensitivity, and
-  parameter perturbations.
+- Validation must expand a matrix before any `clear_yes` result. Required v1
+  scenarios are base, realistic costs, stressed costs, and fill-lag
+  sensitivity. Parameter perturbations are diagnostic until validation
+  regenerates decisions for each perturbed parameter set.
 - Validation must load rows once per window, then reuse those rows across all
   matrix scenarios for that window.
 - When config loading succeeds, data load failures, strategy import failures,
@@ -52,9 +53,12 @@ one-backend-run-per-window validator:
 - `PositionTarget.size` with `sizing_kind = "target_weight"` must affect the
   VectorBT PRO backend run. Unsupported sizing must be rejected explicitly.
 - Missing symbols, missing decision bars, missing entry fills, and missing exit
-  fills must not be silently skipped. Classify them as `hard_no` unless the
-  artifact explicitly shows a fair-test data-coverage limitation, in which case
-  use `maybe`.
+  fills must not be silently skipped. Classify backend `failed` results as
+  `hard_no`; classify backend `unavailable` results as `maybe`.
+- `base` is the no-cost gross baseline, `realistic_costs` is the configured
+  economic assumption, and `stressed_costs` doubles configured fee/slippage.
+- The VectorBT PRO backend must report crypto perp funding cashflow rows as
+  unsupported until funding PnL is modeled explicitly.
 - Tests must cover matrix expansion, failure artifacts, backend sizing, and
   unfillable-decision rejection.
 
@@ -66,7 +70,7 @@ validation.toml
   -> generate_decisions(rows, params)
   -> data audit
   -> expand validation matrix
-       base / realistic costs / stressed costs / fill lag / params
+       base / realistic costs / stressed costs / fill lag / diagnostic params
   -> backend adapter runs
   -> aggregate matrix results
   -> hard_no | maybe | clear_yes
@@ -1185,7 +1189,7 @@ def test_policy_clear_yes_for_positive_sufficient_backend_result():
     assert decision.reasons == ()
 
 
-def test_policy_hard_no_for_negative_net_return():
+def test_policy_hard_no_for_nonpositive_net_return():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -1201,7 +1205,7 @@ def test_policy_hard_no_for_negative_net_return():
     )
 
     assert decision.decision == "hard_no"
-    assert "negative_net_return" in decision.reasons
+    assert "nonpositive_net_return" in decision.reasons
 ```
 
 - [ ] **Step 2: Run tests and verify failure**
@@ -1332,7 +1336,7 @@ def classify_validation(
         if trade_count < min_trades:
             reasons.append("insufficient_trades")
         if net_return <= 0.0:
-            reasons.append("negative_net_return")
+            reasons.append("nonpositive_net_return")
 
     if reasons:
         return PromotionDecision(decision="hard_no", reasons=tuple(dict.fromkeys(reasons)))
@@ -1759,7 +1763,7 @@ def test_validate_cli_returns_one_for_hard_no(monkeypatch, tmp_path: Path, capsy
         lambda path, repo_root=None: ValidationRunResult(
             success=False,
             result_dir=tmp_path / "validation_results" / "run",
-            decision=PromotionDecision(decision="hard_no", reasons=("negative_net_return",)),
+            decision=PromotionDecision(decision="hard_no", reasons=("nonpositive_net_return",)),
             message="validation decision: hard_no",
         ),
     )
@@ -2594,6 +2598,7 @@ Modify `classify_validation(...)` so `clear_yes` requires:
 ```text
 all required scenarios completed
 no required scenario has unsupported semantics
+no required scenario has failed backend status
 each required scenario has trade_count >= min_trades
 each required scenario has net_return > 0
 ```

@@ -32,9 +32,10 @@ VectorBT PRO, the current internal evaluator, or any future paper/live adapter.
 - Use VectorBT PRO as the first robust validation backend.
 - Keep VectorBT PRO behind an adapter; strategy files must not import or emit
   VectorBT-specific objects.
-- Run a required validation matrix before any `clear_yes` decision. The matrix
-  must include base windows, realistic costs, stressed costs, fill-lag
-  sensitivity, and parameter perturbations for v1.
+- Run a validation matrix before any `clear_yes` decision. Required scenarios
+  must include base windows, realistic costs, stressed costs, and fill-lag
+  sensitivity. Parameter perturbations are diagnostic in v1 until validation
+  regenerates decisions per perturbed parameter set.
 - Produce auditable validation artifacts and a three-state decision:
   `hard_no`, `maybe`, or `clear_yes`.
 - Keep portfolio construction, paper trading, and live execution out of v1.
@@ -81,7 +82,7 @@ validation.toml
   -> generate_decisions(rows, params)
   -> data audit
   -> expand validation matrix
-       base / realistic costs / stressed costs / fill lag / params
+       base / realistic costs / stressed costs / fill lag / diagnostic params
   -> backend adapter runs
   -> aggregate matrix results
   -> hard_no | maybe | clear_yes
@@ -253,10 +254,12 @@ Pipeline:
 
 3. Matrix expansion
    - produce one base scenario per window
-   - produce realistic-cost and stressed-cost scenarios
-   - produce fill-lag sensitivity scenarios
-   - produce parameter perturbation scenarios around selected values
-   - mark any scenario as required or diagnostic before execution
+- produce realistic-cost and stressed-cost scenarios
+- produce fill-lag sensitivity scenarios
+- produce diagnostic parameter perturbation scenarios around selected values
+  without letting them decide `clear_yes` until scenario-specific decisions are
+  regenerated
+- mark any scenario as required or diagnostic before execution
 
 4. Backend simulation
    - run each required scenario through VectorBTProBackend
@@ -330,6 +333,13 @@ assumptions and falsifiers are documented
 manual review approves movement to tested/
 ```
 
+The base scenario is a no-cost gross baseline. The realistic-cost scenario is
+the configured economic assumption and is required. Stressed-cost scenarios
+double configured fee and slippage values. A required backend result with
+`status = "failed"` is a `hard_no` even if another required scenario is
+unsupported. A required backend result with `status = "unavailable"` is `maybe`
+with reason `backend_unavailable`, not evidence that the strategy failed.
+
 The validation tool may recommend `clear_yes`, but it must not automatically
 copy code into `tested/`.
 
@@ -360,6 +370,12 @@ hard failures, assumptions, unsupported semantics, and remaining risks.
 `robustness_matrix.json` should list every scenario, whether it was required or
 diagnostic, the backend status, the key metrics, and the classification reason
 when a scenario blocks `clear_yes`.
+
+`data_audit.json` records availability and decision-row checks. It should not be
+described as a complete proof that arbitrary strategy code is lookahead-free.
+The VectorBT PRO adapter must mark crypto perpetual funding cashflows as
+unsupported until funding PnL is modeled explicitly; close-only returns are not
+valid funding strategy evidence.
 
 ## Promotion Mechanics
 

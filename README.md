@@ -77,6 +77,21 @@ classifies each run as `hard_no`, `maybe`, or `clear_yes`. A `clear_yes`
 recommendation does not automatically move code into `tested/`; Season must
 approve that repository change.
 
+The v1 validation matrix treats `base` as a no-cost gross baseline,
+`realistic_costs` as the configured fee/slippage economics, and
+`stressed_costs` as doubled configured costs. Parameter perturbation scenarios
+are recorded as diagnostic evidence until validation regenerates decisions for
+each perturbed parameter set. The VectorBT PRO adapter currently rejects crypto
+perp funding cashflow rows as `unsupported_semantics` rather than simulating
+close-only returns that omit funding PnL.
+
+Validation artifacts include the frozen `validation_config.toml`,
+`strategy_snapshot.py`, `decision_schema.json`, `decision_records.jsonl`,
+`data_audit.json`, `backend_runs/summary.json`, `robustness_matrix.json`,
+`promotion_decision.json`, and `validation_report.md`. `data_audit.json`
+records decision/data availability checks; it is not a proof of complete
+lookahead freedom inside strategy code.
+
 ## Config Shape
 
 Run configs are TOML and validated with Pydantic before strategy import or data

@@ -436,7 +436,11 @@ def _filter_exit_horizon(
 
 
 def _has_exit_horizon(rows: _SymbolRows, decision_time: datetime, hold_bars: int) -> bool:
-    return decision_time + timedelta(minutes=hold_bars) <= rows.latest_timestamp
+    try:
+        decision_index = rows.timestamps.index(decision_time)
+    except ValueError:
+        return False
+    return decision_index + hold_bars < len(rows.timestamps)
 
 
 def _decision_candidates(

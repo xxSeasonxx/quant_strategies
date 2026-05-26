@@ -72,7 +72,12 @@ def expand_validation_matrix(
     """Build v1 validation scenarios as override maps for one validation window."""
 
     scenarios: list[MatrixScenario] = [
-        MatrixScenario(id=f"{window_id}/base", kind="base", params=base_params),
+        MatrixScenario(
+            id=f"{window_id}/base",
+            kind="base",
+            params=base_params,
+            cost_model={"fee_bps_per_side": 0.0, "slippage_bps_per_side": 0.0},
+        ),
         MatrixScenario(id=f"{window_id}/realistic_costs", kind="cost", cost_model=base_costs),
         MatrixScenario(
             id=f"{window_id}/stressed_costs",
@@ -99,6 +104,7 @@ def expand_validation_matrix(
             MatrixScenario(
                 id=f"{window_id}/param_{name}_down_10pct",
                 kind="parameter",
+                required=False,
                 params={**base_params, name: float(value) * 0.9},
             )
         )
@@ -106,6 +112,7 @@ def expand_validation_matrix(
             MatrixScenario(
                 id=f"{window_id}/param_{name}_up_10pct",
                 kind="parameter",
+                required=False,
                 params={**base_params, name: float(value) * 1.1},
             )
         )

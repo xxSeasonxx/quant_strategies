@@ -38,7 +38,7 @@ class VectorBTProBackend:
         except ValueError as exc:
             return _failed(self.name, str(exc))
 
-        unsupported = _unsupported_semantics(decisions, config)
+        unsupported = _unsupported_semantics(decisions, rows, config)
         if unsupported:
             return BackendRunResult(
                 backend=self.name,
@@ -118,8 +118,14 @@ class VectorBTProBackend:
         )
 
 
-def _unsupported_semantics(decisions: list[StrategyDecision], config: Any) -> tuple[str, ...]:
+def _unsupported_semantics(
+    decisions: list[StrategyDecision],
+    rows: list[dict[str, Any]],
+    config: Any,
+) -> tuple[str, ...]:
     unsupported: list[str] = []
+    if _config_value(config, "data", "kind", default=None) == "crypto_perp_funding" or _has_funding_fields(rows):
+        unsupported.append("crypto_perp_funding_cashflows")
     if _config_value(config, "fill_model", "price", default="close") != "close":
         unsupported.append("non_close_fill_price")
     for item in decisions:
@@ -144,6 +150,16 @@ def _unsupported_semantics(decisions: list[StrategyDecision], config: Any) -> tu
     if len(target_weight_symbols) > 1:
         unsupported.append("multi_asset_target_weight")
     return tuple(dict.fromkeys(unsupported))
+
+
+def _has_funding_fields(rows: list[dict[str, Any]]) -> bool:
+    funding_fields = ("funding_rate", "funding_timestamp", "has_funding_event")
+    for row in rows:
+        for field in funding_fields:
+            value = row.get(field)
+            if value is not None and value != "":
+                return True
+    return False
 
 
 def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDecision], config: Any) -> list[dict[str, Any]]:
