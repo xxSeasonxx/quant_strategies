@@ -23,8 +23,10 @@ from quant_strategies.validation.backends import (
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.validation.manifest import rows_sha256, write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
 from quant_strategies.validation.policy import PromotionDecision, classify_validation
+from quant_strategies.validation.research_manifest import check_research_manifest
 from quant_strategies.validation.strategy_loader import load_decision_strategy
 
 
@@ -51,21 +53,54 @@ def run_validation(
     all_decisions: list[StrategyDecision] = []
     backend_results: list[ScenarioBackendRunResult] = []
     data_audits: list[dict[str, Any]] = []
+    data_provenance: list[dict[str, Any]] = []
     min_trades = 10
     failure_reasons: list[str] = []
     required_scenario_ids: list[str] = []
+    backend_name = config.backend
+    research_manifest = check_research_manifest(
+        config_path=config_path,
+        strategy_path=config.strategy_path,
+        repo_root=root,
+    )
+    if not research_manifest["passed"]:
+        decision = PromotionDecision(
+            decision="hard_no",
+            reasons=("research_manifest_integrity_failed",),
+        )
+        _write_validation_artifacts(
+            result_dir=result_dir,
+            repo_root=root,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
+            decisions=all_decisions,
+            data_audits=data_audits,
+            data_provenance=data_provenance,
+            backend_results=backend_results,
+            decision=decision,
+            research_manifest=research_manifest,
+        )
+        return _validation_result(result_dir, decision)
 
     try:
         selected_backend = backend or get_backend(config.backend)
+        backend_name = _backend_name(selected_backend, config.backend)
     except BaseException as exc:
         _raise_interrupt(exc)
         decision = PromotionDecision(decision="hard_no", reasons=("backend_selection_failed",))
         _write_validation_artifacts(
             result_dir=result_dir,
+            repo_root=root,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
             decisions=all_decisions,
             data_audits=data_audits,
+            data_provenance=data_provenance,
             backend_results=backend_results,
             decision=decision,
+            research_manifest=research_manifest,
         )
         return _validation_result(result_dir, decision)
 
@@ -76,10 +111,16 @@ def run_validation(
         decision = PromotionDecision(decision="hard_no", reasons=("strategy_import_failed",))
         _write_validation_artifacts(
             result_dir=result_dir,
+            repo_root=root,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
             decisions=all_decisions,
             data_audits=data_audits,
+            data_provenance=data_provenance,
             backend_results=backend_results,
             decision=decision,
+            research_manifest=research_manifest,
         )
         return _validation_result(result_dir, decision)
 
@@ -89,6 +130,15 @@ def run_validation(
             loaded = data_loader.load_data(run_config)
         except BaseException as exc:
             _raise_interrupt(exc)
+            data_provenance.append(
+                _data_provenance(
+                    window.id,
+                    run_config,
+                    status="failed",
+                    rows=None,
+                    message=str(exc),
+                )
+            )
             data_audits.append(
                 _failed_data_audit(
                     window.id,
@@ -98,6 +148,9 @@ def run_validation(
                 )
             )
             continue
+        data_provenance.append(
+            _data_provenance(window.id, run_config, status="loaded", rows=loaded.rows)
+        )
 
         try:
             decision_output = generate_decisions(loaded.rows, config.params)
@@ -162,7 +215,7 @@ def run_validation(
                 except BaseException as exc:
                     _raise_interrupt(exc)
                     backend_result = _failed_backend_result(
-                        _backend_name(selected_backend, config.backend),
+                        backend_name,
                         f"backend_exception: {exc}",
                     )
                 else:
@@ -171,7 +224,7 @@ def run_validation(
                     except BaseException as exc:
                         _raise_interrupt(exc)
                         backend_result = _failed_backend_result(
-                            _backend_name(selected_backend, config.backend),
+                            backend_name,
                             f"invalid_backend_result: {exc}",
                         )
                 backend_results.append(
@@ -198,10 +251,16 @@ def run_validation(
         )
     _write_validation_artifacts(
         result_dir=result_dir,
+        repo_root=root,
+        config=config,
+        config_path=config_path,
+        backend_name=backend_name,
         decisions=all_decisions,
         data_audits=data_audits,
+        data_provenance=data_provenance,
         backend_results=backend_results,
         decision=decision,
+        research_manifest=research_manifest,
     )
     return _validation_result(result_dir, decision)
 
@@ -229,6 +288,33 @@ def _failed_data_audit(
         "passed": False,
         "violations": violations,
     }
+
+
+def _data_provenance(
+    window_id: str,
+    run_config: Any,
+    *,
+    status: str,
+    rows: list[dict[str, Any]] | None,
+    message: str | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "window_id": window_id,
+        "status": status,
+        "data": {
+            "kind": run_config.data.kind,
+            "dataset": run_config.data.dataset,
+            "symbols": list(run_config.data.symbols),
+            "start": run_config.data.start.isoformat(),
+            "end": run_config.data.end.isoformat(),
+            "strict": run_config.data.strict,
+        },
+        "row_count": 0 if rows is None else len(rows),
+        "rows_sha256": None if rows is None else rows_sha256(rows),
+    }
+    if message is not None:
+        payload["message"] = message
+    return payload
 
 
 def _plain_mapping(value: Any) -> dict[str, Any]:
@@ -286,10 +372,16 @@ def _write_static_validation_artifacts(*, result_dir: Path, config: Any, config_
 def _write_validation_artifacts(
     *,
     result_dir: Path,
+    repo_root: Path,
+    config: Any,
+    config_path: Path,
+    backend_name: str,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
+    data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
     decision: PromotionDecision,
+    research_manifest: dict[str, Any],
 ) -> None:
     decision_lines = [item.model_dump_json() for item in decisions]
     write_text_artifact(result_dir, "decision_records.jsonl", "\n".join(decision_lines))
@@ -340,6 +432,16 @@ def _write_validation_artifacts(
         "validation_report.md",
         f"# Validation Report\n\nDecision: `{decision.decision}`\n\n"
         f"Reasons: {', '.join(decision.reasons) or 'none'}\n",
+    )
+    write_validation_manifest(
+        result_dir,
+        repo_root=repo_root,
+        config=config,
+        config_path=config_path,
+        backend_name=backend_name,
+        data_provenance=data_provenance,
+        backend_results=backend_results,
+        research_manifest=research_manifest,
     )
 
 

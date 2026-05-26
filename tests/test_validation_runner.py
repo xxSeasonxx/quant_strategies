@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -101,6 +102,10 @@ def rows():
     ]
 
 
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     package = write_package(tmp_path)
     monkeypatch.setattr(
@@ -151,6 +156,21 @@ def test_run_validation_writes_clear_yes_artifacts(tmp_path: Path, monkeypatch):
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
     assert robustness_matrix["decision"]["decision"] == "clear_yes"
     assert len(robustness_matrix["scenarios"]) == 6
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["validation"]["strategy_id"] == "demo"
+    assert manifest["validation"]["backend"] == "fake"
+    assert manifest["strategy"]["path"] == "researched/demo/strategy.py"
+    assert manifest["research_manifest"] == {"found": False, "passed": True, "violations": []}
+    assert manifest["data"]["windows"][0]["status"] == "loaded"
+    assert manifest["data"]["windows"][0]["row_count"] == len(rows())
+    assert manifest["data"]["windows"][0]["rows_sha256"]
+    assert manifest["backend"]["status_counts"] == {"completed": 6}
+    assert manifest["core_hashes"]["decision_records.jsonl"] == file_sha256(
+        result.result_dir / "decision_records.jsonl"
+    )
+    assert manifest["artifacts"]["backend_runs/summary.json"]["sha256"] == file_sha256(
+        result.result_dir / "backend_runs" / "summary.json"
+    )
 
 
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
@@ -170,6 +190,44 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     assert audit["windows"][0]["passed"] is False
     assert audit["windows"][0]["violations"] == ["data_load_failed: data load returned no rows"]
     assert (result.result_dir / "promotion_decision.json").exists()
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["data"]["windows"][0]["status"] == "failed"
+    assert manifest["data"]["windows"][0]["row_count"] == 0
+    assert manifest["data"]["windows"][0]["rows_sha256"] is None
+
+
+def test_run_validation_blocks_stale_validation_ready_research_manifest(tmp_path: Path):
+    package = write_package(tmp_path)
+    (package / "manifest.json").write_text(
+        json.dumps(
+            {
+                "variants": [
+                    {
+                        "directory": ".",
+                        "lifecycle_status": "validation_ready",
+                        "strategy_sha256": "stale-strategy-hash",
+                        "validation_config_sha256": "stale-config-hash",
+                    }
+                ]
+            }
+        )
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("research_manifest_integrity_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["research_manifest"]["found"] is True
+    assert manifest["research_manifest"]["passed"] is False
+    assert manifest["research_manifest"]["lifecycle_status"] == "validation_ready"
+    assert manifest["research_manifest"]["violations"] == [
+        "research_manifest_strategy_hash_mismatch",
+        "research_manifest_validation_config_hash_mismatch",
+    ]
 
 
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):

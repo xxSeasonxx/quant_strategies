@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import csv
-import hashlib
-import importlib.metadata
 import json
 import re
 import shutil
-import subprocess
-import sys
 from collections.abc import Mapping
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
+from quant_strategies.provenance import (
+    artifact_hashes,
+    file_sha256,
+    git_identity,
+    package_versions,
+    python_identity,
+)
 from quant_strategies.runner.config import RunConfig
 
 
@@ -131,7 +134,7 @@ def write_run_manifest(
 ) -> None:
     payload = {
         "repository": _git_identity(repo_root, result_dir),
-        "python": {"version": sys.version.split()[0]},
+        "python": python_identity(),
         "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
         "evidence": evidence,
@@ -239,75 +242,23 @@ def _metadata_field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
 
 
 def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:
-    hashes: dict[str, dict[str, str]] = {}
-    for path in sorted(result_dir.iterdir()):
-        if not path.is_file() or path.name in {"run_manifest.json", "summary.json"}:
-            continue
-        hashes[path.name] = {"sha256": _file_sha256(path)}
-    return hashes
+    return artifact_hashes(
+        result_dir,
+        exclude_names={"run_manifest.json", "summary.json"},
+        recursive=False,
+    )
 
 
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return file_sha256(path)
 
 
 def _package_versions(package_names: list[str]) -> dict[str, str | None]:
-    versions: dict[str, str | None] = {}
-    for name in package_names:
-        try:
-            versions[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            versions[name] = None
-    return versions
+    return package_versions(package_names)
 
 
 def _git_identity(repo_root: Path, result_dir: Path) -> dict[str, Any]:
-    status = _git_output(
-        repo_root,
-        *_git_scoped_args(repo_root, result_dir, "status", "--porcelain", "--untracked-files=all"),
-    )
-    diff = _git_output(
-        repo_root,
-        *_git_scoped_args(repo_root, result_dir, "diff", "--binary", "HEAD"),
-    )
-    return {
-        "commit": _git_output(repo_root, "rev-parse", "HEAD"),
-        "short_commit": _git_output(repo_root, "rev-parse", "--short", "HEAD"),
-        "dirty": None if status is None else bool(status),
-        "status_porcelain_sha256": _text_sha256(status) if status else None,
-        "tracked_diff_sha256": _text_sha256(diff) if diff else None,
-    }
-
-
-def _git_scoped_args(repo_root: Path, result_dir: Path, *args: str) -> list[str]:
-    try:
-        relative_result_dir = result_dir.resolve().relative_to(repo_root.resolve())
-    except ValueError:
-        return list(args)
-    return [*args, "--", ".", f":(exclude){relative_result_dir.as_posix()}"]
-
-
-def _git_output(repo_root: Path, *args: str) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return result.stdout.rstrip("\n")
-
-
-def _text_sha256(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    return git_identity(repo_root, exclude_paths=(result_dir,))
 
 
 def _artifact_names(result_dir: Path, *, include_summary: bool) -> list[str]:
