@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from quant_strategies.decisions import StrategyDecision, validate_decision_output
 from quant_strategies.evidence_semantics import runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
@@ -51,7 +52,8 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
 
     try:
-        decisions = generate_decisions(loaded.rows, config.params)
+        decision_output = generate_decisions(loaded.rows, config.params)
+        decisions = _validated_decisions(decision_output, strategy_id=config.strategy_id)
         artifacts.write_decision_records(result_dir, decisions)
         signals = decisions_to_signal_rows(decisions)
         artifacts.write_signals(result_dir, signals)
@@ -156,6 +158,13 @@ def _failure_result(
         assessment_status="runner_failed",
         promotion_eligible=False,
     )
+
+
+def _validated_decisions(output: object, *, strategy_id: str) -> list[StrategyDecision]:
+    decisions, violations = validate_decision_output(output, strategy_id=strategy_id)
+    if violations:
+        raise ValueError("; ".join(violations))
+    return decisions
 
 
 def _summary_payload(

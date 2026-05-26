@@ -576,6 +576,67 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
+def test_invalid_decision_output_fails_before_writing_decision_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("def generate_decisions(rows, params):\n    return 'not decisions'\n")
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        data_loader,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "decision_generation"
+    assert "invalid_decision_output" in summary["message"]
+    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
+def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='other',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        data_loader,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "decision_generation"
+    assert "decision_strategy_id_mismatch[0]: expected demo, got other" in summary["message"]
+    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert_assessment(result, summary, assessment_status="runner_failed")
+
+
 def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)

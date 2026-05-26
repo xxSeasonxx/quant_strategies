@@ -4,7 +4,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from untested.crypto_perp_funding_crowding_reversal import generate_signals
+from quant_strategies.decisions import StrategyDecision
+from untested.crypto_perp_funding_crowding_reversal import generate_decisions
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -53,16 +54,38 @@ def params(**overrides: object) -> dict[str, object]:
     return values
 
 
-def test_generate_signals_returns_empty_for_empty_input():
-    assert generate_signals([], {}) == []
+def decision_payload(decision: StrategyDecision) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "symbol": decision.instrument.symbol,
+        "decision_time": decision.decision_time,
+        "as_of_time": decision.as_of_time,
+        "side": decision.target.direction,
+        "weight": decision.target.size,
+        "hold_bars": decision.exit_policy.max_hold_bars,
+        "max_hold_bars": decision.exit_policy.max_hold_bars,
+        **dict(decision.metadata),
+    }
+    for field in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+        value = getattr(decision.exit_policy, field)
+        if value is not None:
+            payload[field] = value
+    return payload
 
 
-def test_generate_signals_requires_expected_crypto_fields():
+def generate_payloads(bars: list[dict[str, object]], params: dict[str, object]) -> list[dict[str, object]]:
+    return [decision_payload(decision) for decision in generate_decisions(bars, params)]
+
+
+def test_generate_decisions_returns_empty_for_empty_input():
+    assert generate_decisions([], {}) == []
+
+
+def test_generate_decisions_requires_expected_crypto_fields():
     with pytest.raises(ValueError, match="missing required"):
-        generate_signals([{"symbol": "BTC-PERP", "timestamp": START}], params())
+        generate_decisions([{"symbol": "BTC-PERP", "timestamp": START}], params())
 
 
-def test_generate_signals_fades_same_direction_funding_and_return_extremes():
+def test_generate_decisions_fades_same_direction_funding_and_return_extremes():
     bars = (
         symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0002)
         + symbol_rows("ETH-PERP", 100.0, 99.0, 98.0, -0.0002)
@@ -70,7 +93,7 @@ def test_generate_signals_fades_same_direction_funding_and_return_extremes():
         + symbol_rows("XRP-PERP", 100.0, 101.0, 101.0, 0.00005)
     )
 
-    signals = sorted(generate_signals(bars, params()), key=lambda item: str(item["symbol"]))
+    signals = sorted(generate_payloads(bars, params()), key=lambda item: str(item["symbol"]))
 
     assert signals == [
         {
@@ -100,51 +123,51 @@ def test_generate_signals_fades_same_direction_funding_and_return_extremes():
     ]
 
 
-def test_generate_signals_enforces_minimum_cross_section():
+def test_generate_decisions_enforces_minimum_cross_section():
     bars = (
         symbol_rows("BTC-PERP", 100.0, 101.0, 101.0, 0.0002)
         + symbol_rows("ETH-PERP", 100.0, 99.0, 99.0, -0.0002)
         + symbol_rows("SOL-PERP", 100.0, 101.0, 101.0, 0.0002)
     )
 
-    assert generate_signals(bars, params(min_cross_section=4)) == []
+    assert generate_decisions(bars, params(min_cross_section=4)) == []
 
 
-def test_generate_signals_uses_completed_prior_close_not_decision_close():
+def test_generate_decisions_uses_completed_prior_close_not_decision_close():
     bars = symbol_rows("BTC-PERP", 100.0, 100.0, 200.0, 0.0003)
 
-    assert generate_signals(bars, params(min_cross_section=1)) == []
+    assert generate_decisions(bars, params(min_cross_section=1)) == []
 
 
-def test_generate_signals_allows_explicit_zero_decision_lag():
+def test_generate_decisions_allows_explicit_zero_decision_lag():
     bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
 
-    signals = generate_signals(bars, params(min_cross_section=1, decision_lag_minutes=0))
+    signals = generate_payloads(bars, params(min_cross_section=1, decision_lag_minutes=0))
 
     assert signals[0]["decision_time"] == START + timedelta(minutes=10)
     assert signals[0]["as_of_time"] == START + timedelta(minutes=10)
 
 
-def test_generate_signals_excludes_future_funding_events():
+def test_generate_decisions_excludes_future_funding_events():
     bars = [
         bar("BTC-PERP", 0, 100.0),
         bar("BTC-PERP", 9, 101.0, funding_rate=0.0003, funding_minute=20, has_funding_event=True),
         bar("BTC-PERP", 10, 101.0),
     ]
 
-    assert generate_signals(bars, params(min_cross_section=1)) == []
+    assert generate_decisions(bars, params(min_cross_section=1)) == []
 
 
-def test_generate_signals_requires_complete_funding_lookback():
+def test_generate_decisions_requires_complete_funding_lookback():
     bars = symbol_rows("BTC-PERP", 100.0, 101.0, 101.0, 0.0003)
 
-    assert generate_signals(bars, params(min_cross_section=1, funding_lookback_events=2)) == []
+    assert generate_decisions(bars, params(min_cross_section=1, funding_lookback_events=2)) == []
 
 
-def test_generate_signals_emits_optional_exit_controls():
+def test_generate_decisions_emits_optional_exit_controls():
     bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
 
-    signals = generate_signals(
+    signals = generate_payloads(
         bars,
         params(
             min_cross_section=1,

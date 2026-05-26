@@ -15,7 +15,7 @@ Required observables:
 Symbol, timestamp, and close price for one-minute FX bars covering each
 triangle leg.
 
-Signal rule:
+Decision rule:
 Compute triangular log residuals from completed closes, score the current
 residual against prior residuals only, attribute the recent residual move to
 the largest aligned leg, and trade that leg toward residual mean reversion after
@@ -40,8 +40,10 @@ import math
 from statistics import fmean, pstdev
 from typing import Any
 
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 
-__all__ = ["generate_signals"]
+
+__all__ = ["generate_decisions"]
 
 _Triangle = tuple[str, str, int, str, int]
 
@@ -63,7 +65,10 @@ _ADDITIONAL_AVAILABLE_TRIANGLES: tuple[_Triangle, ...] = (
 )
 
 
-def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, object]) -> list[dict[str, object]]:
+def generate_decisions(
+    bars: Sequence[Mapping[str, object]],
+    params: Mapping[str, object],
+) -> list[StrategyDecision]:
     if not bars:
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
@@ -108,7 +113,7 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
             candidates,
         )
 
-    signals: list[dict[str, object]] = []
+    decisions: list[StrategyDecision] = []
     for symbol, as_of_time in sorted(candidates, key=lambda key: (key[1], key[0])):
         entries = candidates[(symbol, as_of_time)]
         score = sum(float(entry["signal"]) * float(entry["strength"]) for entry in entries)
@@ -116,22 +121,27 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
             continue
         representative = max(entries, key=lambda entry: abs(float(entry["strength"])))
         decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
-        payload: dict[str, object] = {
-            "symbol": symbol,
-            "decision_time": decision_time,
-            "as_of_time": as_of_time,
-            "side": "long" if score > 0.0 else "short",
-            "weight": weight,
-            "hold_bars": max_hold_bars,
-            "max_hold_bars": max_hold_bars,
-            "residual_zscore": representative["residual_zscore"],
-            "residual_bps": representative["residual_bps"],
-            "attribution_score": sum(float(entry["attribution_score"]) for entry in entries),
-            "signal_family": "fx_triangular_residual_reversion",
-        }
-        payload.update(exit_controls)
-        signals.append(payload)
-    return signals
+        decisions.append(
+            StrategyDecision(
+                strategy_id="fx_triangular_residual_quote_smoke",
+                instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
+                decision_time=decision_time,
+                as_of_time=as_of_time,
+                target=PositionTarget(
+                    direction="long" if score > 0.0 else "short",
+                    sizing_kind="target_weight",
+                    size=weight,
+                ),
+                exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
+                metadata={
+                    "residual_zscore": representative["residual_zscore"],
+                    "residual_bps": representative["residual_bps"],
+                    "attribution_score": sum(float(entry["attribution_score"]) for entry in entries),
+                    "signal_family": "fx_triangular_residual_reversion",
+                },
+            )
+        )
+    return decisions
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:

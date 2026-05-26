@@ -72,7 +72,9 @@ def generate_decisions(rows, params):
 
 The runner and validation workflows share the same decision contract. The
 runner adapts `StrategyDecision` objects to its internal smoke engine request;
-strategy files do not emit engine-specific signals.
+strategy files do not emit engine-specific signals. Every emitted
+`StrategyDecision.strategy_id` must match the config `strategy_id`; mismatches
+fail before decision records or engine artifacts are written.
 
 Validation writes generated artifacts under ignored `validation_results/` and
 classifies each run as `hard_no`, `maybe`, or `clear_yes`. A `clear_yes`
@@ -137,8 +139,10 @@ mode = "validate"
 ```
 
 Supported data kinds are `bars`, `crypto_perp_funding`, and
-`forex_with_quotes`. `strategy_path` and `output.results_dir` must resolve
-inside this repository. Relative config paths passed to `run_config(...,
+`forex_with_quotes`. `strategy_id` is the expected strategy identity emitted by
+the strategy's `StrategyDecision` records, not a loose run label.
+`strategy_path` and `output.results_dir` must resolve inside this repository.
+Relative config paths passed to `run_config(...,
 repo_root=...)` resolve against the effective repository root, so automation can
 call `run_config("runs/<experiment>.toml", repo_root=repo)` from
 another current working directory.

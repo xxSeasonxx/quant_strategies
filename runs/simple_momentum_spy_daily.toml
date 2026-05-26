@@ -1,5 +1,5 @@
 strategy_path = "examples/strategies/simple_momentum.py"
-strategy_id = "simple_momentum_spy_daily"
+strategy_id = "simple_momentum"
 
 [data]
 kind = "bars"

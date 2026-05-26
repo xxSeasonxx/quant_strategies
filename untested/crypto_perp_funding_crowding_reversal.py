@@ -16,7 +16,7 @@ Required observables:
 Symbol, timestamp, close, funding timestamp, funding rate, and funding-event
 flag for crypto perpetual bars.
 
-Signal rule:
+Decision rule:
 On a sparse as-of cadence, use completed prior closes and funding events at or
 before the as-of time. Emit decisions after the as-of bar can be observed. Short
 the strongest positive funding plus positive return tail, and long the
@@ -40,13 +40,18 @@ from datetime import datetime, timedelta
 import math
 from typing import Any
 
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 
-__all__ = ["generate_signals"]
+
+__all__ = ["generate_decisions"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "close", "funding_timestamp", "funding_rate", "has_funding_event"}
 
 
-def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, object]) -> list[dict[str, object]]:
+def generate_decisions(
+    bars: Sequence[Mapping[str, object]],
+    params: Mapping[str, object],
+) -> list[StrategyDecision]:
     if not bars:
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
@@ -76,7 +81,7 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
         }
     )
 
-    signals: list[dict[str, object]] = []
+    decisions: list[StrategyDecision] = []
     for as_of_time in as_of_times:
         candidates = _decision_candidates(
             rows_by_symbol,
@@ -105,14 +110,14 @@ def generate_signals(bars: Sequence[Mapping[str, object]], params: Mapping[str, 
             positive_tail,
             key=lambda item: (-item["funding_pressure_bps"], -item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate, decision_time, as_of_time, "short", weight, max_hold_bars, exit_controls))
+            decisions.append(_decision(candidate, decision_time, as_of_time, "short", weight, max_hold_bars, exit_controls))
         for candidate in sorted(
             negative_tail,
             key=lambda item: (item["funding_pressure_bps"], item["return_extension_bps"], item["symbol"]),
         )[:top_n]:
-            signals.append(_signal(candidate, decision_time, as_of_time, "long", weight, max_hold_bars, exit_controls))
+            decisions.append(_decision(candidate, decision_time, as_of_time, "long", weight, max_hold_bars, exit_controls))
 
-    return signals
+    return decisions
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:
@@ -262,7 +267,7 @@ def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, param
     return minute_of_day % decision_interval_minutes == 0
 
 
-def _signal(
+def _decision(
     candidate: dict[str, Any],
     decision_time: datetime,
     as_of_time: datetime,
@@ -270,21 +275,20 @@ def _signal(
     weight: float,
     max_hold_bars: int,
     exit_controls: Mapping[str, object],
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "symbol": candidate["symbol"],
-        "decision_time": decision_time,
-        "as_of_time": as_of_time,
-        "side": side,
-        "weight": weight,
-        "hold_bars": max_hold_bars,
-        "max_hold_bars": max_hold_bars,
-        "funding_pressure_bps": candidate["funding_pressure_bps"],
-        "entry_return_extension_bps": candidate["return_extension_bps"],
-        "signal_family": "crypto_perp_funding_crowding_reversal",
-    }
-    payload.update(exit_controls)
-    return payload
+) -> StrategyDecision:
+    return StrategyDecision(
+        strategy_id="crypto_perp_funding_crowding_reversal_smoke",
+        instrument=InstrumentRef(kind="crypto_perp", symbol=str(candidate["symbol"])),
+        decision_time=decision_time,
+        as_of_time=as_of_time,
+        target=PositionTarget(direction=side, sizing_kind="target_weight", size=weight),
+        exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
+        metadata={
+            "funding_pressure_bps": candidate["funding_pressure_bps"],
+            "entry_return_extension_bps": candidate["return_extension_bps"],
+            "signal_family": "crypto_perp_funding_crowding_reversal",
+        },
+    )
 
 
 def _as_datetime(value: object) -> datetime:

@@ -7,7 +7,8 @@ import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.engine_runner import build_request, evaluate_request
-from untested.fx_triangular_residual_reversion import generate_signals
+from quant_strategies.decisions import StrategyDecision
+from untested.fx_triangular_residual_reversion import generate_decisions
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -75,20 +76,42 @@ def engine_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return result
 
 
-def test_generate_signals_returns_empty_for_empty_input():
-    assert generate_signals([], {}) == []
+def decision_payload(decision: StrategyDecision) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "symbol": decision.instrument.symbol,
+        "decision_time": decision.decision_time,
+        "as_of_time": decision.as_of_time,
+        "side": decision.target.direction,
+        "weight": decision.target.size,
+        "hold_bars": decision.exit_policy.max_hold_bars,
+        "max_hold_bars": decision.exit_policy.max_hold_bars,
+        **dict(decision.metadata),
+    }
+    for field in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+        value = getattr(decision.exit_policy, field)
+        if value is not None:
+            payload[field] = value
+    return payload
 
 
-def test_generate_signals_rejects_duplicate_symbol_timestamp_closes():
+def generate_payloads(bars: list[dict[str, object]], params: dict[str, object]) -> list[dict[str, object]]:
+    return [decision_payload(decision) for decision in generate_decisions(bars, params)]
+
+
+def test_generate_decisions_returns_empty_for_empty_input():
+    assert generate_decisions([], {}) == []
+
+
+def test_generate_decisions_rejects_duplicate_symbol_timestamp_closes():
     bars = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
     bars.append({"symbol": "EURJPY", "timestamp": START, "close": 100.0})
 
     with pytest.raises(ValueError, match="duplicate"):
-        generate_signals(bars, params())
+        generate_decisions(bars, params())
 
 
-def test_generate_signals_uses_prior_residuals_for_direct_cross_short():
-    signals = generate_signals(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params())
+def test_generate_decisions_uses_prior_residuals_for_direct_cross_short():
+    signals = generate_payloads(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params())
 
     assert signals == [
         {
@@ -107,8 +130,8 @@ def test_generate_signals_uses_prior_residuals_for_direct_cross_short():
     ]
 
 
-def test_generate_signals_maps_synthetic_leg_reversion_side():
-    signals = generate_signals(usdjpy_residual_rows([0.0, 0.001, 0.002, 0.0]), params())
+def test_generate_decisions_maps_synthetic_leg_reversion_side():
+    signals = generate_payloads(usdjpy_residual_rows([0.0, 0.001, 0.002, 0.0]), params())
 
     assert signals == [
         {
@@ -129,7 +152,7 @@ def test_generate_signals_maps_synthetic_leg_reversion_side():
 
 def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
     rows = engine_rows(direct_residual_rows([0.0, 0.001, 0.002, 0.0, 0.0, 0.0]))
-    signals = generate_signals(rows, params(hold_bars=1))
+    signals = generate_payloads(rows, params(hold_bars=1))
 
     assert signals[0]["as_of_time"] == START + timedelta(minutes=2)
     assert signals[0]["decision_time"] == START + timedelta(minutes=3)
@@ -149,8 +172,8 @@ def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
     assert trade["exit_time"] == "2024-01-01T00:05:00Z"
 
 
-def test_generate_signals_allows_explicit_zero_decision_lag():
-    signals = generate_signals(
+def test_generate_decisions_allows_explicit_zero_decision_lag():
+    signals = generate_payloads(
         direct_residual_rows([0.0, 0.001, 0.002, 0.0]),
         params(decision_lag_minutes=0),
     )
@@ -159,10 +182,10 @@ def test_generate_signals_allows_explicit_zero_decision_lag():
     assert signals[0]["decision_time"] == START + timedelta(minutes=2)
 
 
-def test_generate_signals_suppresses_repeated_same_zone_entries():
+def test_generate_decisions_suppresses_repeated_same_zone_entries():
     residuals = [-0.0001, 0.0, 0.0001, -0.0001, 0.0, 0.005, 0.006, 0.0]
 
-    signals = generate_signals(
+    signals = generate_payloads(
         direct_residual_rows(residuals),
         params(zscore_window_bars=5, min_zscore_observations=5),
     )
@@ -184,29 +207,29 @@ def test_generate_signals_suppresses_repeated_same_zone_entries():
     ]
 
 
-def test_generate_signals_requires_enough_residual_history():
-    assert generate_signals(direct_residual_rows([0.005, 0.0]), params(min_zscore_observations=3)) == []
+def test_generate_decisions_requires_enough_residual_history():
+    assert generate_decisions(direct_residual_rows([0.005, 0.0]), params(min_zscore_observations=3)) == []
 
 
-def test_generate_signals_rejects_unknown_triangle_set():
+def test_generate_decisions_rejects_unknown_triangle_set():
     with pytest.raises(ValueError, match="triangle_set"):
-        generate_signals(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(triangle_set="typo"))
+        generate_decisions(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(triangle_set="typo"))
 
 
-def test_generate_signals_returns_empty_below_threshold():
-    signals = generate_signals(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(entry_zscore=100.0))
-
-    assert signals == []
-
-
-def test_generate_signals_returns_empty_for_zero_variance_history():
-    signals = generate_signals(direct_residual_rows([0.0, 0.0, 0.005, 0.0]), params())
+def test_generate_decisions_returns_empty_below_threshold():
+    signals = generate_decisions(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(entry_zscore=100.0))
 
     assert signals == []
 
 
-def test_generate_signals_emits_optional_exit_controls():
-    signals = generate_signals(
+def test_generate_decisions_returns_empty_for_zero_variance_history():
+    signals = generate_decisions(direct_residual_rows([0.0, 0.0, 0.005, 0.0]), params())
+
+    assert signals == []
+
+
+def test_generate_decisions_emits_optional_exit_controls():
+    signals = generate_payloads(
         direct_residual_rows([0.0, 0.001, 0.002, 0.0]),
         params(
             max_hold_bars=8,

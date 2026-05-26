@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import StrategyDecision, validate_decision_output
 from quant_strategies.runner import data_loader
 from quant_strategies.runner.config import default_repo_root
 from quant_strategies.validation.artifacts import (
@@ -114,7 +114,7 @@ def run_validation(
             )
             continue
 
-        decisions, violations = _validate_decisions(decision_output, strategy_id=config.strategy_id)
+        decisions, violations = validate_decision_output(decision_output, strategy_id=config.strategy_id)
         if violations:
             data_audits.append(
                 _failed_data_audit(
@@ -229,34 +229,6 @@ def _failed_data_audit(
         "passed": False,
         "violations": violations,
     }
-
-
-def _validate_decisions(
-    output: object,
-    *,
-    strategy_id: str,
-) -> tuple[list[StrategyDecision], tuple[str, ...]]:
-    if (
-        isinstance(output, str | bytes | bytearray)
-        or isinstance(output, Mapping)
-        or not isinstance(output, Sequence)
-    ):
-        return [], ("invalid_decision_output",)
-
-    decisions: list[StrategyDecision] = []
-    violations: list[str] = []
-    for index, item in enumerate(output):
-        if not isinstance(item, StrategyDecision):
-            violations.append(f"invalid_decision_output[{index}]")
-            continue
-        if item.strategy_id != strategy_id:
-            violations.append(
-                f"decision_strategy_id_mismatch[{index}]: expected {strategy_id}, got {item.strategy_id}"
-            )
-            continue
-        decisions.append(item)
-
-    return decisions, tuple(violations)
 
 
 def _plain_mapping(value: Any) -> dict[str, Any]:
