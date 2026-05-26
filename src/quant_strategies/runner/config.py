@@ -12,6 +12,7 @@ from quant_strategies.runner.errors import ConfigError
 
 DataKind = Literal["bars", "crypto_perp_funding", "forex_with_quotes"]
 RunMode = Literal["screen", "validate"]
+ArtifactProfile = Literal["full", "summary"]
 
 
 class RunnerConfigModel(BaseModel):
@@ -94,6 +95,7 @@ class CostModelConfig(RunnerConfigModel):
 class OutputConfig(RunnerConfigModel):
     results_dir: Path
     mode: RunMode
+    artifact_profile: ArtifactProfile = "full"
 
     @field_validator("results_dir")
     @classmethod

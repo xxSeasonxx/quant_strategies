@@ -148,6 +148,8 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results"
 mode = "validate"
+# Optional. Use "summary" for broad quick research loops.
+artifact_profile = "full"
 ```
 
 Supported data kinds are `bars`, `crypto_perp_funding`, and
@@ -193,7 +195,7 @@ engine_request.json
 run_manifest.json
 summary.json
 notes.md
-evidence.json    when engine evidence is available
+evidence.json    when engine evidence is available in full mode
 ```
 
 `strategy_input_rows.csv` is the human-readable record of what the strategy saw.
@@ -202,11 +204,21 @@ fields, and quote fields in JSON-compatible form. `decision_records.jsonl` is
 the canonical strategy output record. `signals.csv` is an internal smoke-engine
 adapter artifact generated from decisions. `engine_request.json` is the exact
 request passed to `quant_strategies.engine` and intentionally omits fields not
-used by the evaluator. `data_manifest.json` records row counts, timestamp
-ranges, metadata field coverage, and the strategy-input JSONL hash.
+used by the evaluator. `data_manifest.json` records the artifact profile, row
+counts, timestamp ranges, metadata field coverage, the normalized row hash, and
+the strategy-input JSONL hash when full input rows are written.
 `run_manifest.json` records best-effort code/dependency identity, internal
-evidence schema identity, dirty worktree hashes when available, and hashes of
-generated run artifacts.
+evidence schema identity, artifact profile, dirty worktree hashes when
+available, and hashes of generated run artifacts.
+
+Runner artifact profiles control artifact size, not strategy or engine
+semantics. `artifact_profile = "full"` writes raw strategy input CSV/JSONL,
+decision records, internal signal CSV, engine request JSON, and engine evidence
+JSON. `artifact_profile = "summary"` is for broad quick-research loops: it
+writes `artifact_profile_summary.json` with row counts, normalized row hash,
+sampled rows, decision summary, signal summary, and compact scoreable engine
+metrics. Summary mode omits the full row files, full decision records, internal
+signal CSV, full engine request, and full evidence packet.
 
 Runner artifacts are smoke evidence. They include `evidence_class`,
 `strategy_contract`, `return_model`, `funding_model`, `promotion_eligible`,
@@ -220,12 +232,13 @@ preserved in `decision_records.jsonl`, carried through internal signal
 `signal_metadata`.
 
 `summary.json` has stable top-level keys: `strategy_id`, `mode`, `success`,
-`status`, `stage`, `message`, `artifacts`, `engine`, `run_completed`,
-`assessment_status`, `evidence_class`, `strategy_contract`, `return_model`,
-`funding_model`, `promotion_eligible`, `paper_trade_eligible`,
-`live_eligible`, and `requires_manual_approval`. `success` is the existing
-runner/CLI outcome flag. New consumers should use `assessment_status` and the
-eligibility fields when interpreting research meaning:
+`artifact_profile`, `status`, `stage`, `message`, `artifacts`, `engine`,
+`run_completed`, `assessment_status`, `evidence_class`, `strategy_contract`,
+`return_model`, `funding_model`, `promotion_eligible`,
+`paper_trade_eligible`, `live_eligible`, and `requires_manual_approval`.
+`success` is the existing runner/CLI outcome flag. New consumers should use
+`assessment_status` and the eligibility fields when interpreting research
+meaning:
 
 ```text
 screen       -> assessment_status = "screened", promotion_eligible = false

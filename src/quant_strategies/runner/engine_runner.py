@@ -49,6 +49,12 @@ class EngineRun:
     passed: bool | None
 
 
+@dataclass(frozen=True)
+class _BarIndex:
+    bars_by_symbol: dict[str, tuple[Bar, ...]]
+    positions_by_symbol: dict[str, dict[datetime, int]]
+
+
 def build_request(
     *,
     strategy_id: str,
@@ -72,32 +78,38 @@ def build_request(
     return request
 
 
-def evaluate_request(request: EvaluationRequest, *, mode: EngineMode) -> EngineRun:
+def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_evidence: bool = True) -> EngineRun:
     try:
         if mode == "screen":
             screen_result = screen(request)
-            packet = build_evidence_packet(request, screening_result=screen_result)
+            packet = build_evidence_packet(request, screening_result=screen_result) if include_evidence else None
             return EngineRun(
                 mode="screen",
-                screen_summary=screen_result.model_dump(mode="json"),
+                screen_summary=_screen_summary(screen_result, include_trades=include_evidence),
                 validate_summary=None,
-                evidence_json=evidence_json(packet),
+                evidence_json=evidence_json(packet) if packet is not None else "",
                 passed=None,
             )
 
         report = validate(request)
-        packet = build_evidence_packet(
-            request,
-            screening_result=report.screening_result,
-            validation_report=report,
+        packet = (
+            build_evidence_packet(
+                request,
+                screening_result=report.screening_result,
+                validation_report=report,
+            )
+            if include_evidence
+            else None
         )
         return EngineRun(
             mode="validate",
             screen_summary=(
-                report.screening_result.model_dump(mode="json") if report.screening_result is not None else None
+                _screen_summary(report.screening_result, include_trades=include_evidence)
+                if report.screening_result is not None
+                else None
             ),
-            validate_summary=report.model_dump(mode="json"),
-            evidence_json=evidence_json(packet),
+            validate_summary=_validation_summary(report, include_trades=include_evidence),
+            evidence_json=evidence_json(packet) if packet is not None else "",
             passed=report.passed,
         )
     except Exception as exc:
@@ -106,6 +118,21 @@ def evaluate_request(request: EvaluationRequest, *, mode: EngineMode) -> EngineR
 
 def request_json(request: EvaluationRequest) -> str:
     return json.dumps(request.model_dump(mode="json", exclude_none=True), indent=2, sort_keys=True) + "\n"
+
+
+def _screen_summary(result, *, include_trades: bool) -> dict[str, Any]:
+    payload = result.model_dump(mode="json", exclude={"trades"} if not include_trades else None)
+    if include_trades:
+        return payload
+    payload["trade_count"] = result.trade_count
+    return payload
+
+
+def _validation_summary(report, *, include_trades: bool) -> dict[str, Any]:
+    payload = report.model_dump(mode="json", exclude={"screening_result": {"trades"}} if not include_trades else None)
+    if not include_trades and report.screening_result is not None and isinstance(payload.get("screening_result"), dict):
+        payload["screening_result"]["trade_count"] = report.screening_result.trade_count
+    return payload
 
 
 def _bar_from_row(row: dict[str, Any]) -> Bar:
@@ -193,17 +220,13 @@ def _as_datetime(value: object, field_name: str) -> datetime:
 
 
 def _assert_fillable(request: EvaluationRequest) -> None:
-    bars_by_symbol: dict[str, list[Bar]] = {}
-    for bar in request.bars:
-        bars_by_symbol.setdefault(bar.symbol, []).append(bar)
-    for symbol_bars in bars_by_symbol.values():
-        symbol_bars.sort(key=lambda bar: bar.timestamp)
+    indexed = _build_bar_index(request.bars)
 
     for signal in request.spec.signals:
-        symbol_bars = bars_by_symbol.get(signal.symbol)
+        symbol_bars = indexed.bars_by_symbol.get(signal.symbol)
         if not symbol_bars:
             raise RequestBuildError(f"missing bars for signal symbol: {signal.symbol}")
-        decision_index = _decision_index(symbol_bars, signal)
+        decision_index = _decision_index(indexed, signal)
         entry_index = decision_index + request.fill_model.entry_lag_bars
         max_hold_bars = signal.max_hold_bars or signal.hold_bars
         last_trigger_index = entry_index + max_hold_bars
@@ -220,10 +243,29 @@ def _assert_fillable(request: EvaluationRequest) -> None:
                 _assert_quote_fill_bar(symbol_bars[exit_index], "exit")
 
 
-def _decision_index(symbol_bars: list[Bar], signal: Signal) -> int:
-    for index, bar in enumerate(symbol_bars):
-        if bar.timestamp == signal.decision_time:
-            return index
+def _build_bar_index(bars: tuple[Bar, ...]) -> _BarIndex:
+    grouped: dict[str, list[Bar]] = {}
+    for bar in bars:
+        grouped.setdefault(bar.symbol, []).append(bar)
+
+    bars_by_symbol: dict[str, tuple[Bar, ...]] = {}
+    positions_by_symbol: dict[str, dict[datetime, int]] = {}
+    for symbol, symbol_bars in grouped.items():
+        ordered = sorted(symbol_bars, key=lambda bar: bar.timestamp)
+        positions: dict[datetime, int] = {}
+        for index, bar in enumerate(ordered):
+            if bar.timestamp in positions:
+                raise RequestBuildError(f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}")
+            positions[bar.timestamp] = index
+        bars_by_symbol[symbol] = tuple(ordered)
+        positions_by_symbol[symbol] = positions
+    return _BarIndex(bars_by_symbol=bars_by_symbol, positions_by_symbol=positions_by_symbol)
+
+
+def _decision_index(indexed: _BarIndex, signal: Signal) -> int:
+    position = indexed.positions_by_symbol.get(signal.symbol, {}).get(signal.decision_time)
+    if position is not None:
+        return position
     raise RequestBuildError(f"decision_time does not match a bar timestamp: {signal.decision_time.isoformat()}")
 
 

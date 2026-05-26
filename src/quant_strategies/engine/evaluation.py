@@ -30,17 +30,25 @@ class _ExitSelection:
     reason: ExitReason
 
 
+@dataclass(frozen=True)
+class _IndexedBars:
+    bars_by_symbol: dict[str, tuple[Bar, ...]]
+    positions_by_symbol: dict[str, dict[datetime, int]]
+    funding_events_by_symbol: dict[str, tuple[Bar, ...]]
+    has_funding_events: bool
+
+
 def screen(request: EvaluationRequest) -> ScreeningResult:
-    bars_by_symbol = _bars_by_symbol(request.bars)
-    if not bars_by_symbol:
+    indexed = _index_bars(request.bars)
+    if not indexed.bars_by_symbol:
         raise EvaluationError("bars are required")
 
     trades: list[Trade] = []
     for signal in request.spec.signals:
-        symbol_bars = bars_by_symbol.get(signal.symbol)
+        symbol_bars = indexed.bars_by_symbol.get(signal.symbol)
         if not symbol_bars:
             raise EvaluationError(f"missing bars for signal symbol: {signal.symbol}")
-        decision_index = _decision_index(symbol_bars, signal.decision_time)
+        decision_index = _decision_index(indexed, signal.symbol, signal.decision_time)
         entry_index = decision_index + request.fill_model.entry_lag_bars
         if entry_index >= len(symbol_bars):
             raise EvaluationError(f"entry fill is outside available bars: {signal.symbol}")
@@ -59,7 +67,8 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
         direction = 1.0 if signal.side is Side.LONG else -1.0
         gross_return = direction * ((exit_price - entry_price) / entry_price) * signal.weight
         funding_return = _funding_return(
-            symbol_bars,
+            indexed,
+            signal.symbol,
             entry_bar.timestamp,
             exit_bar.timestamp,
             signal.side,
@@ -150,27 +159,41 @@ def validate(
     )
 
 
-def _bars_by_symbol(bars: tuple[Bar, ...]) -> dict[str, tuple[Bar, ...]]:
+def _index_bars(bars: tuple[Bar, ...]) -> _IndexedBars:
     grouped: dict[str, list[Bar]] = defaultdict(list)
     for bar in bars:
         grouped[bar.symbol].append(bar)
 
-    result: dict[str, tuple[Bar, ...]] = {}
+    bars_by_symbol: dict[str, tuple[Bar, ...]] = {}
+    positions_by_symbol: dict[str, dict[datetime, int]] = {}
+    funding_events_by_symbol: dict[str, tuple[Bar, ...]] = {}
+    has_funding_events = False
     for symbol, symbol_bars in grouped.items():
         ordered = sorted(symbol_bars, key=lambda bar: bar.timestamp)
-        seen = set()
-        for bar in ordered:
-            if bar.timestamp in seen:
+        positions: dict[datetime, int] = {}
+        funding_events: list[Bar] = []
+        for index, bar in enumerate(ordered):
+            if bar.timestamp in positions:
                 raise EvaluationError(f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}")
-            seen.add(bar.timestamp)
-        result[symbol] = tuple(ordered)
-    return result
+            positions[bar.timestamp] = index
+            if bar.has_funding_event:
+                funding_events.append(bar)
+                has_funding_events = True
+        bars_by_symbol[symbol] = tuple(ordered)
+        positions_by_symbol[symbol] = positions
+        funding_events_by_symbol[symbol] = tuple(funding_events)
+    return _IndexedBars(
+        bars_by_symbol=bars_by_symbol,
+        positions_by_symbol=positions_by_symbol,
+        funding_events_by_symbol=funding_events_by_symbol,
+        has_funding_events=has_funding_events,
+    )
 
 
-def _decision_index(bars: tuple[Bar, ...], decision_time) -> int:
-    for index, bar in enumerate(bars):
-        if bar.timestamp == decision_time:
-            return index
+def _decision_index(indexed: _IndexedBars, symbol: str, decision_time: datetime) -> int:
+    position = indexed.positions_by_symbol.get(symbol, {}).get(decision_time)
+    if position is not None:
+        return position
     raise EvaluationError(f"decision_time does not match a bar timestamp: {decision_time.isoformat()}")
 
 
@@ -243,16 +266,18 @@ def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:
 
 
 def _funding_return(
-    bars: tuple[Bar, ...],
+    indexed: _IndexedBars,
+    symbol: str,
     entry_time: datetime,
     exit_time: datetime,
     side: Side,
     weight: float,
 ) -> float:
+    if not indexed.has_funding_events:
+        return 0.0
+
     rates_by_timestamp: dict[datetime, float] = {}
-    for bar in bars:
-        if not bar.has_funding_event:
-            continue
+    for bar in indexed.funding_events_by_symbol.get(symbol, ()):
         if bar.funding_timestamp is None or bar.funding_rate is None:
             raise EvaluationError(f"incomplete funding event: {bar.symbol} at {bar.timestamp.isoformat()}")
         if not entry_time < bar.funding_timestamp <= exit_time:

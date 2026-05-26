@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ SUMMARY_KEYS = {
     "engine",
     "run_completed",
     "assessment_status",
+    "artifact_profile",
     "evidence_class",
     "strategy_contract",
     "return_model",
@@ -118,6 +120,7 @@ def write_config(
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
     mode: str = "validate",
+    artifact_profile: str = "full",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
@@ -149,6 +152,7 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results"
 mode = "{mode}"
+artifact_profile = "{artifact_profile}"
 '''.lstrip()
     )
     return config_path
@@ -168,12 +172,14 @@ def assert_assessment(
     assessment_status: str,
     run_completed: bool = True,
     promotion_eligible: bool = False,
+    artifact_profile: str = "full",
 ) -> None:
     assert result.run_completed is run_completed
     assert result.assessment_status == assessment_status
     assert result.promotion_eligible is promotion_eligible
     assert summary["run_completed"] is run_completed
     assert summary["assessment_status"] == assessment_status
+    assert summary["artifact_profile"] == artifact_profile
     assert summary["evidence_class"] == "runner_smoke"
     assert summary["strategy_contract"] == "decision"
     assert summary["return_model"] == "sum_weighted_trade_return"
@@ -215,9 +221,96 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert summary["stage"] == "completed"
     assert summary["success"] is True
     assert summary["status"] == "passed"
-    assert summary["engine"] == {"passed": True, "trade_count": 1}
+    assert summary["engine"]["passed"] is True
+    assert summary["engine"]["trade_count"] == 1
+    assert summary["engine"]["gross_return"] > 0
+    assert summary["engine"]["funding_return"] == 0.0
+    assert summary["engine"]["cost_return"] == 0.0
+    assert summary["engine"]["net_return"] > 0
+    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_passed")
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
+
+
+def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+    monkeypatch.setattr(
+        data_loader,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    names = {path.name for path in result.result_dir.iterdir() if path.is_file()}
+    assert names == {
+        "config.toml",
+        "strategy_snapshot.py",
+        "data_manifest.json",
+        "artifact_profile_summary.json",
+        "run_manifest.json",
+        "summary.json",
+        "notes.md",
+    }
+    assert "strategy_input_rows.csv" not in names
+    assert "strategy_input_rows.jsonl" not in names
+    assert "decision_records.jsonl" not in names
+    assert "signals.csv" not in names
+    assert "engine_request.json" not in names
+    assert "evidence.json" not in names
+
+    summary = read_summary(result.result_dir)
+    assert_assessment(result, summary, assessment_status="smoke_passed", artifact_profile="summary")
+    assert summary["engine"]["passed"] is True
+    assert summary["engine"]["trade_count"] == 1
+    assert summary["engine"]["gross_return"] is not None
+    assert summary["engine"]["funding_return"] == 0.0
+    assert summary["engine"]["cost_return"] == 0.0
+    assert summary["engine"]["net_return"] is not None
+    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
+
+    profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
+    assert profile["artifact_profile"] == "summary"
+    assert profile["rows"]["row_count"] == 6
+    assert profile["rows"]["sample_count"] == 5
+    assert profile["decisions"]["count"] == 1
+    assert profile["signals"]["count"] == 1
+    assert profile["engine"]["passed"] is True
+    assert profile["engine"]["trade_count"] == 1
+    assert profile["engine"]["gross_return"] is not None
+    assert profile["engine"]["cost_return"] is not None
+    assert profile["engine"]["net_return"] is not None
+
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["artifact_profile"] == "summary"
+    assert data_manifest["strategy_input_rows_jsonl_sha256"] is None
+    assert len(data_manifest["normalized_rows_sha256"]) == 64
+    assert profile["rows"]["normalized_rows_sha256"] == data_manifest["normalized_rows_sha256"]
+
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    assert run_manifest["artifact_profile"] == "summary"
+    assert "artifact_profile_summary.json" in run_manifest["artifacts"]
+    assert "engine_request.json" not in run_manifest["artifacts"]
+
+
+def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        engine_runner,
+        "evidence_json",
+        lambda packet: (_ for _ in ()).throw(AssertionError("summary mode should not serialize evidence")),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    assert not (result.result_dir / "evidence.json").exists()
 
 
 def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -233,7 +326,12 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert summary["mode"] == "screen"
     assert summary["stage"] == "completed"
     assert summary["status"] == "screened"
-    assert summary["engine"] == {"passed": None, "trade_count": 1}
+    assert summary["engine"]["passed"] is None
+    assert summary["engine"]["trade_count"] == 1
+    assert summary["engine"]["gross_return"] < 0
+    assert summary["engine"]["funding_return"] == 0.0
+    assert summary["engine"]["cost_return"] == 0.0
+    assert summary["engine"]["net_return"] < 0
     assert_assessment(result, summary, assessment_status="screened")
     notes = (result.result_dir / "notes.md").read_text()
     assert "status: screened" in notes
@@ -302,7 +400,11 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert summary["mode"] == "validate"
     assert summary["stage"] == "completed"
     assert summary["status"] == "failed"
-    assert summary["engine"] == {"passed": False, "trade_count": 1}
+    assert summary["engine"]["passed"] is False
+    assert summary["engine"]["trade_count"] == 1
+    assert summary["engine"]["gross_return"] < 0
+    assert summary["engine"]["net_return"] < 0
+    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_failed")
     assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
 
@@ -437,6 +539,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
     assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
     assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v2"}
+    assert run_manifest["artifact_profile"] == "full"
     assert run_manifest["evidence"] == {
         "evidence_class": "runner_smoke",
         "strategy_contract": "decision",
@@ -461,14 +564,41 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
         "end": "2024-01-05",
         "strict": True,
     }
+    assert data_manifest["artifact_profile"] == "full"
     assert data_manifest["rows"]["total"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["min_timestamp"] == "2024-01-01T00:00:00+00:00"
     assert data_manifest["rows"]["by_symbol"]["SPY"]["max_timestamp"] == "2024-01-04T00:00:00+00:00"
     assert data_manifest["strategy_input_rows_jsonl_sha256"] == run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
+    assert len(data_manifest["normalized_rows_sha256"]) == 64
     summary = read_summary(result.result_dir)
     assert "run_manifest.json" in summary["artifacts"]
     assert "data_manifest.json" in summary["artifacts"]
+
+
+def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
+    loaded_rows[0]["research_nan"] = float("nan")
+    loaded_rows[0]["research_decimal"] = Decimal("1.25")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=loaded_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    jsonl_rows = [
+        json.loads(line)
+        for line in (result.result_dir / "strategy_input_rows.jsonl").read_text().splitlines()
+    ]
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert jsonl_rows[0]["research_nan"] is None
+    assert jsonl_rows[0]["research_decimal"] == 1.25
+    assert len(data_manifest["normalized_rows_sha256"]) == 64
 
 
 def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -863,7 +993,9 @@ def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
     monkeypatch.setattr(
         engine_runner,
         "evaluate_request",
-        lambda request, *, mode: (_ for _ in ()).throw(EvaluationRunError("engine unavailable")),
+        lambda request, *, mode, include_evidence=True: (_ for _ in ()).throw(
+            EvaluationRunError("engine unavailable")
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)

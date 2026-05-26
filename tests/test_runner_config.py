@@ -75,6 +75,7 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.strategy_id == "demo"
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
+    assert config.output.artifact_profile == "full"
     assert config.params == {"weight": 1.0}
 
 
@@ -127,6 +128,25 @@ def test_unknown_output_mode_is_rejected(tmp_path: Path):
 
     with pytest.raises(ConfigError, match="output.mode"):
         load_config(write_config(tmp_path, output_mode="paper"), repo_root=tmp_path)
+
+
+def test_summary_artifact_profile_is_accepted(tmp_path: Path):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    path.write_text(path.read_text().replace('mode = "validate"\n', 'mode = "validate"\nartifact_profile = "summary"\n'))
+
+    config = load_config(path, repo_root=tmp_path)
+
+    assert config.output.artifact_profile == "summary"
+
+
+def test_unknown_artifact_profile_is_rejected(tmp_path: Path):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    path.write_text(path.read_text().replace('mode = "validate"\n', 'mode = "validate"\nartifact_profile = "compact"\n'))
+
+    with pytest.raises(ConfigError, match="artifact_profile"):
+        load_config(path, repo_root=tmp_path)
 
 
 def test_unsupported_data_kind_is_rejected(tmp_path: Path):

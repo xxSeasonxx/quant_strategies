@@ -145,6 +145,36 @@ def test_screen_applies_funding_cashflows_after_entry_through_exit():
     assert result.net_return == pytest.approx(0.0)
 
 
+def test_engine_bar_index_builds_positions_by_symbol():
+    from quant_strategies.engine.evaluation import _index_bars
+
+    indexed = _index_bars(bars_for("BTC", [100.0, 101.0, 102.0]))
+
+    assert indexed.positions_by_symbol["BTC"][DECISION] == 0
+    assert indexed.positions_by_symbol["BTC"][DECISION.replace(minute=31)] == 1
+    assert indexed.has_funding_events is False
+
+
+def test_engine_bar_index_rejects_duplicate_symbol_timestamp():
+    from quant_strategies.engine.evaluation import _index_bars
+
+    duplicate_bars = bars_for("BTC", [100.0, 101.0, 102.0])
+    duplicate_bars = duplicate_bars + (duplicate_bars[0],)
+
+    with pytest.raises(EvaluationError, match="duplicate bar timestamp"):
+        _index_bars(duplicate_bars)
+
+
+def test_engine_bar_index_preindexes_funding_events_by_symbol():
+    from quant_strategies.engine.evaluation import _index_bars
+
+    indexed = _index_bars(funding_bars_for("BTC-PERP") + bars_for("ETH-PERP", [100.0, 101.0, 102.0]))
+
+    assert indexed.has_funding_events is True
+    assert len(indexed.funding_events_by_symbol["BTC-PERP"]) == 2
+    assert indexed.funding_events_by_symbol["ETH-PERP"] == ()
+
+
 def test_screen_weight_scales_return_exposure():
     request = EvaluationRequest(
         spec=StrategySpec(

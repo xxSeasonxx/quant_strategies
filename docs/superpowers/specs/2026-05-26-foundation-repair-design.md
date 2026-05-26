@@ -189,11 +189,14 @@ Improve `quant_autoresearch` throughput only after artifacts cannot overclaim.
 - Reuse the index for fillability and evaluation.
 - Skip or pre-index funding scans for non-funding data.
 - Add `artifact_profile = "summary"` for quick research:
-  - row countsre
+  - row counts
   - normalized row hash
   - sampled rows
   - signal/decision summary
+  - compact scoreable engine metrics
   - no full CSV/JSONL or full engine request by default
+- `artifact_profile = "full"` remains the default for manual reruns and curated
+candidates.
 - Keep full artifacts for curated reruns and promotion candidates.
 - Add an autoresearch-scale benchmark with runtime and artifact-byte limits.
 

@@ -5,7 +5,7 @@ import json
 import re
 import shutil
 from collections.abc import Mapping
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from quant_strategies.provenance import (
     python_identity,
 )
 from quant_strategies.runner.config import RunConfig
+from quant_strategies.runner.artifact_profiles import json_safe_value, row_ranges_by_symbol
 
 
 def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path:
@@ -42,7 +43,7 @@ def initialize_run_artifacts(config_path: Path, config: RunConfig, result_dir: P
         shutil.copyfile(config.strategy_path, result_dir / "strategy_snapshot.py")
 
 
-def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> None:
+def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> str:
     preferred_fields = [
         "symbol",
         "timestamp",
@@ -63,7 +64,9 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> N
         "has_funding_event",
     ]
     write_csv(result_dir / "strategy_input_rows.csv", rows, preferred_fields=preferred_fields)
-    write_jsonl(result_dir / "strategy_input_rows.jsonl", rows)
+    jsonl_path = result_dir / "strategy_input_rows.jsonl"
+    write_jsonl(jsonl_path, rows)
+    return _file_sha256(jsonl_path)
 
 
 def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
@@ -95,7 +98,7 @@ def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
     lines = [
         decision.model_dump_json()
         if hasattr(decision, "model_dump_json")
-        else json.dumps(_json_value(decision), sort_keys=True)
+        else json.dumps(json_safe_value(decision), sort_keys=True)
         for decision in decisions
     ]
     (result_dir / "decision_records.jsonl").write_text("\n".join(lines) + ("\n" if lines else ""))
@@ -109,8 +112,16 @@ def write_evidence(result_dir: Path, evidence_json: str) -> None:
     (result_dir / "evidence.json").write_text(evidence_json)
 
 
-def write_data_manifest(result_dir: Path, config: RunConfig, rows: list[dict[str, Any]]) -> None:
+def write_data_manifest(
+    result_dir: Path,
+    config: RunConfig,
+    rows: list[dict[str, Any]],
+    *,
+    strategy_input_rows_jsonl_sha256: str | None,
+    normalized_rows_hash: str,
+) -> None:
     payload = {
+        "artifact_profile": config.output.artifact_profile,
         "data": {
             "kind": config.data.kind,
             "dataset": config.data.dataset,
@@ -121,9 +132,10 @@ def write_data_manifest(result_dir: Path, config: RunConfig, rows: list[dict[str
         },
         "rows": {
             "total": len(rows),
-            "by_symbol": _row_ranges_by_symbol(rows),
+            "by_symbol": row_ranges_by_symbol(rows),
         },
-        "strategy_input_rows_jsonl_sha256": _file_sha256(result_dir / "strategy_input_rows.jsonl"),
+        "strategy_input_rows_jsonl_sha256": strategy_input_rows_jsonl_sha256,
+        "normalized_rows_sha256": normalized_rows_hash,
         "metadata_field_coverage": _metadata_field_coverage(rows),
     }
     _write_json(result_dir / "data_manifest.json", payload)
@@ -134,12 +146,14 @@ def write_run_manifest(
     *,
     repo_root: Path,
     evidence: dict[str, object],
+    artifact_profile: str,
 ) -> None:
     payload = {
         "repository": _git_identity(repo_root, result_dir),
         "python": python_identity(),
         "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
+        "artifact_profile": artifact_profile,
         "evidence": evidence,
         "artifacts": _artifact_hashes(result_dir),
     }
@@ -159,7 +173,7 @@ def write_notes(result_dir: Path, notes: str) -> None:
 def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w") as handle:
         for row in rows:
-            handle.write(json.dumps(_json_value(row), sort_keys=True) + "\n")
+            handle.write(json.dumps(json_safe_value(row), sort_keys=True) + "\n")
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], *, preferred_fields: list[str]) -> None:
@@ -184,45 +198,12 @@ def _csv_value(value: object) -> object:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, Mapping | list | tuple):
-        return json.dumps(_json_value(value), sort_keys=True)
+        return json.dumps(json_safe_value(value), sort_keys=True)
     return value
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, datetime | date):
-        return value.isoformat()
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_json_value(item) for item in value]
-    return value
-
-
-def _row_ranges_by_symbol(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    by_symbol: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        symbol = str(row.get("symbol", ""))
-        timestamp = row.get("timestamp")
-        summary = by_symbol.setdefault(
-            symbol,
-            {"count": 0, "min_timestamp": None, "max_timestamp": None},
-        )
-        summary["count"] += 1
-        if timestamp is None:
-            continue
-        if summary["min_timestamp"] is None or timestamp < summary["min_timestamp"]:
-            summary["min_timestamp"] = timestamp
-        if summary["max_timestamp"] is None or timestamp > summary["max_timestamp"]:
-            summary["max_timestamp"] = timestamp
-
-    for summary in by_symbol.values():
-        summary["min_timestamp"] = _json_value(summary["min_timestamp"])
-        summary["max_timestamp"] = _json_value(summary["max_timestamp"])
-    return dict(sorted(by_symbol.items()))
 
 
 def _metadata_field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:

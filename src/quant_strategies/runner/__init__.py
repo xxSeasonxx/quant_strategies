@@ -18,6 +18,7 @@ from quant_strategies.runner import (
     engine_runner,
     strategy_loader,
 )
+from quant_strategies.runner.artifact_profiles import normalized_rows_sha256, write_summary_profile_artifact
 from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
 
@@ -62,17 +63,27 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
 
     try:
         loaded = data_loader.load_data(config)
-        artifacts.write_strategy_input_rows(result_dir, loaded.rows)
-        artifacts.write_data_manifest(result_dir, config, loaded.rows)
+        normalized_rows_hash = normalized_rows_sha256(loaded.rows)
+        strategy_input_rows_jsonl_sha256 = None
+        if config.output.artifact_profile == "full":
+            strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(result_dir, loaded.rows)
+        artifacts.write_data_manifest(
+            result_dir,
+            config,
+            loaded.rows,
+            strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+            normalized_rows_hash=normalized_rows_hash,
+        )
     except RunnerError as exc:
         return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
 
     try:
         decision_output = generate_decisions(frozen_rows(loaded.rows), frozen_params(validated_params))
         decisions = _validated_decisions(decision_output, strategy_id=config.strategy_id)
-        artifacts.write_decision_records(result_dir, decisions)
         signals = decisions_to_signal_rows(decisions)
-        artifacts.write_signals(result_dir, signals)
+        if config.output.artifact_profile == "full":
+            artifacts.write_decision_records(result_dir, decisions)
+            artifacts.write_signals(result_dir, signals)
     except Exception as exc:
         return _failure_result(
             config,
@@ -95,23 +106,40 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             fill_model=config.fill_model,
             cost_model=config.cost_model,
         )
-        artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
+        if config.output.artifact_profile == "full":
+            artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
     except RunnerError as exc:
         return _failure_result(config, result_dir, "request_build", str(exc), repo_root=effective_repo_root)
 
     try:
-        engine_run = engine_runner.evaluate_request(request, mode=config.output.mode)
+        engine_run = engine_runner.evaluate_request(
+            request,
+            mode=config.output.mode,
+            include_evidence=config.output.artifact_profile == "full",
+        )
     except RunnerError as exc:
         return _failure_result(config, result_dir, "engine_evaluation", str(exc), repo_root=effective_repo_root)
 
-    if engine_run.evidence_json:
+    engine_summary = _compact_engine_summary(engine_run)
+    if config.output.artifact_profile == "full" and engine_run.evidence_json:
         artifacts.write_evidence(result_dir, engine_run.evidence_json)
+    if config.output.artifact_profile == "summary":
+        write_summary_profile_artifact(
+            result_dir,
+            config=config,
+            rows=loaded.rows,
+            decisions=decisions,
+            signals=signals,
+            engine=engine_summary,
+            normalized_rows_hash=normalized_rows_hash,
+        )
     notes = _completion_notes(config, engine_run)
     artifacts.write_notes(result_dir, notes)
     artifacts.write_run_manifest(
         result_dir,
         repo_root=effective_repo_root,
         evidence=runner_evidence_semantics(config.data.kind),
+        artifact_profile=config.output.artifact_profile,
     )
     success = _result_success(engine_run)
     assessment_status = _assessment_status(engine_run)
@@ -123,7 +151,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             status=_result_status(engine_run),
             stage="completed",
             message=notes.strip(),
-            engine={"passed": engine_run.passed, "trade_count": _trade_count(engine_run)},
+            engine=engine_summary,
             assessment_status=assessment_status,
         ),
     )
@@ -152,6 +180,7 @@ def _failure_result(
         result_dir,
         repo_root=repo_root,
         evidence=runner_evidence_semantics(config.data.kind),
+        artifact_profile=config.output.artifact_profile,
     )
     artifacts.write_summary(
         result_dir,
@@ -197,6 +226,7 @@ def _summary_payload(
     return {
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,
+        "artifact_profile": config.output.artifact_profile,
         "success": success,
         "status": status,
         "stage": stage,
@@ -219,6 +249,26 @@ def _trade_count(engine_run: engine_runner.EngineRun) -> int | None:
             value = screening_result.get("trade_count")
             return int(value) if value is not None else None
     return None
+
+
+def _compact_engine_summary(engine_run: engine_runner.EngineRun) -> dict[str, object]:
+    source = engine_run.screen_summary
+    if source is None and engine_run.validate_summary is not None:
+        screening_result = engine_run.validate_summary.get("screening_result")
+        source = screening_result if isinstance(screening_result, dict) else None
+
+    summary: dict[str, object] = {"passed": engine_run.passed, "trade_count": _trade_count(engine_run)}
+    for key in ("gross_return", "funding_return", "cost_return", "net_return"):
+        summary[key] = source.get(key) if isinstance(source, dict) else None
+    if engine_run.validate_summary is not None:
+        gates = engine_run.validate_summary.get("gates")
+        if isinstance(gates, list):
+            summary["gates"] = [
+                {"name": gate.get("name"), "passed": gate.get("passed"), "detail": gate.get("detail")}
+                for gate in gates
+                if isinstance(gate, dict)
+            ]
+    return summary
 
 
 def _failure_notes(stage: str, message: str) -> str:

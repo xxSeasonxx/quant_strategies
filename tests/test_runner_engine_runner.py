@@ -164,6 +164,39 @@ def test_build_request_rejects_missing_decision_bar():
         )
 
 
+def test_runner_bar_index_builds_positions_by_symbol():
+    from quant_strategies.runner.engine_runner import _build_bar_index
+
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 101.0, 102.0, 104.0),
+        signals=[signal()],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    indexed = _build_bar_index(request.bars)
+
+    assert indexed.positions_by_symbol["SPY"][request.bars[0].timestamp] == 0
+    assert indexed.positions_by_symbol["SPY"][request.bars[1].timestamp] == 1
+
+
+def test_runner_bar_index_rejects_duplicate_symbol_timestamp():
+    from quant_strategies.runner.engine_runner import _build_bar_index
+
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 101.0, 102.0, 104.0),
+        signals=[signal()],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+    duplicate_bars = request.bars + (request.bars[0],)
+
+    with pytest.raises(RequestBuildError, match="duplicate bar timestamp"):
+        _build_bar_index(duplicate_bars)
+
+
 def test_build_request_translates_missing_required_bar_field():
     bad_rows = bars(100.0, 101.0, 102.0, 104.0)
     del bad_rows[0]["close"]
@@ -290,3 +323,22 @@ def test_evaluate_request_runs_screen_and_validate_apis():
     assert validate_run.passed is True
     assert validate_run.validate_summary["passed"] is True
     assert "validation_report" in validate_run.evidence_json
+
+
+def test_evaluate_request_can_skip_evidence_and_trade_serialization():
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 101.0, 102.0, 104.0),
+        signals=[signal()],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    screen_run = evaluate_request(request, mode="screen", include_evidence=False)
+    validate_run = evaluate_request(request, mode="validate", include_evidence=False)
+
+    assert screen_run.evidence_json == ""
+    assert "trades" not in screen_run.screen_summary
+    assert validate_run.evidence_json == ""
+    assert validate_run.validate_summary["screening_result"]["trade_count"] == 1
+    assert "trades" not in validate_run.validate_summary["screening_result"]
