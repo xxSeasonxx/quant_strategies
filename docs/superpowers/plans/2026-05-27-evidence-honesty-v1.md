@@ -10,6 +10,144 @@
 
 ---
 
+## What Already Exists
+
+- Runner result writing already centralizes artifact JSON in `runner/artifacts.py`; reuse it instead of adding a second artifact writer.
+- Runner summaries already flow through `_summary_payload`; add evidence-quality fields there instead of creating a parallel summary format.
+- `metadata_field_coverage` already counts row metadata in `data_manifest.json`; keep it and add a focused `available_at` evidence-quality payload beside it.
+- Validation already gates decision output through `validate_decision_output`, declared row lineage through `audit_decision_rows`, and readiness through `check_validation_readiness`; insert hidden-lookahead replay between audit and readiness.
+- Validation already writes all machine-readable artifacts through `_write_validation_artifacts`; thread `failure_details` through that path instead of writing ad hoc files.
+- Validation backend names are type-restricted in `ValidationConfig`; backend-selection failure tests must monkeypatch `quant_strategies.validation.get_backend` rather than use invalid TOML.
+
+## NOT In Scope
+
+- No `researched/` package compatibility, manifests, variant ontology, or market-validation claims.
+- No legacy strategy-output accommodation or adapters.
+- No VectorBT Pro setup/package refactor.
+- No scenario backend typing refactor.
+- No change that makes missing runner `available_at` fatal.
+- No hidden-lookahead replay for diagnostic parameter scenarios in v1; required backend scenarios reuse base decisions, so base replay covers the decisions that gate validation.
+- No new public artifact-reader facade.
+
+## Data Flow
+
+Runner evidence quality:
+
+```text
+run_config
+  -> load_data(config)
+  -> artifacts.evidence_quality(rows)
+  -> write_data_manifest(..., rows)  # writes the same quality payload
+  -> generate_decisions(frozen_rows, frozen_params)
+  -> engine evaluation
+  -> write_summary(..., evidence_quality=quality)
+```
+
+Validation hidden-lookahead and failure details:
+
+```text
+run_validation
+  -> load config and create result_dir
+  -> get_backend / load_strategy / validate_params
+       -> on fatal exception: _failure_detail(stage, exc)
+       -> _failure_result(..., failure_details=[...])
+  -> per window:
+       load rows -> generate baseline decisions -> validate output
+       -> audit_decision_rows
+       -> check_hidden_lookahead(full rows, baseline decisions)
+       -> if audit + replay + readiness pass: run backend scenarios
+  -> _write_validation_artifacts(..., failure_details=[])
+```
+
+## Failure Modes
+
+| Codepath | Realistic failure | Planned handling | Planned test |
+|---|---|---|---|
+| Runner evidence quality | Rows have no `available_at` and could be overread as causal evidence | Non-fatal `missing` status, `causality_verified = false`, explicit warnings | `test_run_config_writes_success_artifacts` |
+| Runner evidence quality | Rows have mixed `available_at` coverage | Non-fatal `partial` status and warning | `test_run_config_marks_partial_available_at_coverage` |
+| Runner failure before data load | No rows exist for quality calculation | Empty-row quality has total `0`, fraction `None`, still says causality is not verified | `test_run_config_writes_data_failure_summary` |
+| Validation backend selection | Backend registry raises despite valid config | `backend_selection_failed` plus structured exception detail | `test_run_validation_records_backend_selection_failure_details` |
+| Validation strategy import | Strategy file is missing or invalid | `strategy_import_failed` plus structured exception detail | `test_run_validation_records_strategy_import_failure_details` |
+| Hidden-lookahead replay | Strategy changes a decision when future rows are removed | `hidden_lookahead_detected`; backend is not called | `test_run_validation_blocks_hidden_lookahead_strategy` |
+| Hidden-lookahead replay | Strategy cannot run on truncated rows | `hidden_lookahead_check_failed`; backend is not called | `test_run_validation_records_hidden_lookahead_replay_failure` |
+
+## Test Coverage Diagram
+
+```text
+CODE PATHS                                                    TESTS
+[+] runner/artifacts.evidence_quality(rows)
+  |-- all rows have available_at ---------------------------- [planned] complete coverage test
+  |-- some rows have available_at --------------------------- [planned] partial coverage test
+  |-- no rows have available_at ----------------------------- [planned] success artifact test
+  `-- empty rows -------------------------------------------- [planned] data failure summary test
+
+[+] runner._summary_payload(..., evidence_quality)
+  |-- completed summary includes fields --------------------- [planned] success artifact test
+  `-- failure summary includes fields ----------------------- [planned] data failure summary test
+
+[+] validation._failure_detail(stage, exc)
+  |-- backend selection exception --------------------------- [planned] monkeypatched get_backend test
+  |-- strategy import exception ----------------------------- [planned] missing strategy test
+  `-- param validation exception ---------------------------- [planned] existing branch plus detail threading
+
+[+] validation.lookahead.check_hidden_lookahead(...)
+  |-- replay matches baseline ------------------------------- [planned] as-of-only unit test
+  |-- replay fingerprint differs ---------------------------- [planned] future-sensitive unit test
+  |-- replay raises ----------------------------------------- [planned] replay exception unit test
+  |-- duplicate replay key ---------------------------------- [not planned] defensive branch, covered by implementation simplicity
+  `-- missing replay decision ------------------------------- [covered by fingerprint mismatch path]
+
+[+] validation.run_validation integration
+  |-- lookahead fails before backend scenarios -------------- [planned] backend calls == 0
+  |-- replay error preserves detailed violation ------------- [planned] data_audit assertions
+  `-- existing future-poison tests remain unchanged --------- [planned] focused verification command
+```
+
+The only uncovered defensive branch is duplicate replay keys. It is a guard
+against invalid replay output after `validate_decision_output`; exercising it
+would require an artificial duplicate-decision fixture and does not change the
+public behavior of this v1 bundle.
+
+## Worktree Parallelization Strategy
+
+| Step | Modules touched | Depends on |
+|---|---|---|
+| Runner evidence quality | `src/quant_strategies/runner`, `tests` | - |
+| Validation failure details | `src/quant_strategies/validation`, `tests` | - |
+| Hidden-lookahead replay | `src/quant_strategies/validation`, `tests` | Validation failure details only for final artifact plumbing |
+| README update | `README.md` | Runner + validation wording stabilized |
+
+Parallel lanes:
+
+- Lane A: Runner evidence quality.
+- Lane B: Validation failure details -> hidden-lookahead replay. Keep these sequential because both touch `validation/__init__.py`.
+- Lane C: README update after lanes A and B.
+
+Execution order: launch Lane A and Lane B in parallel agents, merge/review both,
+then do Lane C locally.
+
+Conflict flags: Lane B owns `src/quant_strategies/validation/__init__.py` and
+`tests/test_validation_runner.py`; no other lane should edit those files.
+
+## Implementation Tasks
+
+- [ ] **T1 (P1, human: ~1h / CC: ~10min)** - Runner evidence quality - add artifact fields without changing runner pass/fail semantics.
+  - Surfaced by: foundation review finding on runner evidence overread risk.
+  - Files: `src/quant_strategies/runner/artifacts.py`, `src/quant_strategies/runner/__init__.py`, `tests/test_runner_api_cli.py`.
+  - Verify: `conda run -n quant pytest tests/test_runner_api_cli.py -q`.
+- [ ] **T2 (P1, human: ~45min / CC: ~10min)** - Validation failure details - persist structured exception details for fatal validation setup failures.
+  - Surfaced by: foundation review finding on swallowed validation exception context.
+  - Files: `src/quant_strategies/validation/__init__.py`, `tests/test_validation_runner.py`.
+  - Verify: `conda run -n quant pytest tests/test_validation_runner.py -q`.
+- [ ] **T3 (P1, human: ~2h / CC: ~20min)** - Hidden-lookahead replay - add validation-only replay check and block hidden future-row dependence before backend scenarios.
+  - Surfaced by: foundation review finding on undeclared future-row dependence.
+  - Files: `src/quant_strategies/validation/lookahead.py`, `src/quant_strategies/validation/__init__.py`, `tests/test_validation_lookahead.py`, `tests/test_validation_runner.py`.
+  - Verify: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_validation_runner.py tests/test_validation_future_poison.py -q`.
+- [ ] **T4 (P2, human: ~20min / CC: ~5min)** - README evidence wording - document that runner evidence is non-causal smoke and validation replay is advisory gating.
+  - Surfaced by: stale-doc risk from new artifact semantics.
+  - Files: `README.md`.
+  - Verify: `conda run -n quant pytest tests/test_readme_contract.py -q`.
+
 ## File Structure
 
 Create:
@@ -32,6 +170,10 @@ Modify:
   - Assert hidden-lookahead integration and validation failure details.
 - `README.md`
   - Document evidence-quality fields and validation hidden-lookahead replay at a high level.
+
+Read/verify unchanged:
+- `tests/test_validation_future_poison.py`
+  - Existing future-poison tests must remain green without edit.
 
 Do not modify:
 - `src/quant_strategies/validation/research_manifest.py`; it was deleted and must stay gone.
@@ -58,7 +200,7 @@ In `tests/test_runner_api_cli.py`, add these keys to `SUMMARY_KEYS`:
     "evidence_quality_warnings",
 ```
 
-- [ ] **Step 2: Add assertions for complete coverage**
+- [ ] **Step 2: Add assertions for missing coverage**
 
 In `test_run_config_writes_success_artifacts`, keep the existing row fixture
 call without `research_fields`; then add assertions after
@@ -82,6 +224,24 @@ call without `research_fields`; then add assertions after
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+```
+
+In `test_run_config_writes_data_failure_summary`, add focused assertions for
+empty-row quality:
+
+```python
+    assert summary["data_availability_status"] == "missing"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 0,
+        "total": 0,
+        "fraction": None,
+    }
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "available_at_missing",
+        "runner_causality_not_verified",
+    ]
 ```
 
 Add a focused complete-coverage test near the existing data-manifest tests:
@@ -136,17 +296,17 @@ def test_run_config_marks_partial_available_at_coverage(
     summary = read_summary(result.result_dir)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert summary["data_availability_status"] == "partial"
-    assert summary["availability_coverage"] == {
-        "field": "available_at",
-        "present": 2,
-        "total": 3,
-        "fraction": pytest.approx(2 / 3),
-    }
+    coverage = summary["availability_coverage"]
+    assert coverage["field"] == "available_at"
+    assert coverage["present"] == 2
+    assert coverage["total"] == 3
+    assert coverage["fraction"] == pytest.approx(2 / 3)
     assert summary["evidence_quality_warnings"] == [
         "available_at_partial",
         "runner_causality_not_verified",
     ]
     assert data_manifest["data_availability_status"] == "partial"
+    assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(2 / 3)
 ```
 
 - [ ] **Step 3: Run tests and verify failure**
@@ -277,7 +437,17 @@ git commit -m "feat: report runner evidence quality"
 - Modify: `src/quant_strategies/validation/__init__.py`
 - Modify: `tests/test_validation_runner.py`
 
-- [ ] **Step 1: Add strategy import failure test**
+- [ ] **Step 1: Assert success artifacts carry empty failure details**
+
+In the existing happy-path validation artifact tests, assert normal artifacts
+carry an empty failure-details list:
+
+```python
+    assert decision_payload["failure_details"] == []
+    assert robustness_matrix["failure_details"] == []
+```
+
+- [ ] **Step 2: Add strategy import failure test**
 
 In `tests/test_validation_runner.py`, add:
 
@@ -303,18 +473,32 @@ def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
     assert robustness_matrix["failure_details"] == decision_payload["failure_details"]
 ```
 
-- [ ] **Step 2: Add backend selection failure test**
+- [ ] **Step 3: Add param validation failure-detail assertions**
+
+In existing `test_run_validation_rejects_unknown_params_with_strategy_validator`,
+add:
+
+```python
+    assert decision_payload["failure_details"][0]["stage"] == "param_validation"
+    assert decision_payload["failure_details"][0]["type"] == "ValueError"
+    assert "unknown params" in decision_payload["failure_details"][0]["message"]
+```
+
+- [ ] **Step 4: Add backend selection failure test**
 
 Add:
 
 ```python
-def test_run_validation_records_backend_selection_failure_details(tmp_path: Path):
+def test_run_validation_records_backend_selection_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     candidate = write_candidate(tmp_path)
-    (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml")
-        .read_text()
-        .replace('backend = "fake"', 'backend = "unknown"')
-    )
+
+    def fail_backend_selection(name: str):
+        raise RuntimeError("backend registry down")
+
+    monkeypatch.setattr("quant_strategies.validation.get_backend", fail_backend_selection)
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
@@ -325,13 +509,13 @@ def test_run_validation_records_backend_selection_failure_details(tmp_path: Path
     assert decision_payload["failure_details"] == [
         {
             "stage": "backend_selection",
-            "type": "ValueError",
-            "message": "unsupported validation backend: unknown",
+            "type": "RuntimeError",
+            "message": "backend registry down",
         }
     ]
 ```
 
-- [ ] **Step 3: Run tests and verify failure**
+- [ ] **Step 5: Run tests and verify failure**
 
 Run:
 
@@ -341,7 +525,7 @@ conda run -n quant pytest tests/test_validation_runner.py -q
 
 Expected: FAIL because `failure_details` is not included in validation artifacts.
 
-- [ ] **Step 4: Add failure-detail helper**
+- [ ] **Step 6: Add failure-detail helper**
 
 In `src/quant_strategies/validation/__init__.py`, add near `_hard_no_decision`:
 
@@ -354,7 +538,7 @@ def _failure_detail(stage: str, exc: Exception) -> dict[str, str]:
     }
 ```
 
-- [ ] **Step 5: Thread failure_details through artifact writing**
+- [ ] **Step 7: Thread failure_details through artifact writing**
 
 Change `_failure_result` signature:
 
@@ -406,7 +590,7 @@ Update the normal completed call in `run_validation`:
         failure_details=[],
 ```
 
-- [ ] **Step 6: Add early exception details**
+- [ ] **Step 8: Add early exception details**
 
 In the `except Exception as exc` branch around `get_backend`, call:
 
@@ -426,7 +610,7 @@ In the `except Exception as exc` branch around `validate_strategy_params`, call:
             failure_details=[_failure_detail("param_validation", exc)],
 ```
 
-- [ ] **Step 7: Run focused tests**
+- [ ] **Step 9: Run focused tests**
 
 Run:
 
@@ -436,7 +620,7 @@ conda run -n quant pytest tests/test_validation_runner.py -q
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit validation failure details**
+- [ ] **Step 10: Commit validation failure details**
 
 ```bash
 git add src/quant_strategies/validation/__init__.py tests/test_validation_runner.py
@@ -709,7 +893,7 @@ git commit -m "feat: add validation lookahead replay check"
 **Files:**
 - Modify: `src/quant_strategies/validation/__init__.py`
 - Modify: `tests/test_validation_runner.py`
-- Modify: `tests/test_validation_future_poison.py`
+- Verify unchanged: `tests/test_validation_future_poison.py`
 
 - [ ] **Step 1: Add validation runner integration test**
 
@@ -757,7 +941,7 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    if len(rows) < 2:\n"
+        "    if len(rows) < 3:\n"
         "        raise RuntimeError('need future row')\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -850,7 +1034,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit validation integration**
 
 ```bash
-git add src/quant_strategies/validation/__init__.py tests/test_validation_runner.py tests/test_validation_future_poison.py
+git add src/quant_strategies/validation/__init__.py tests/test_validation_runner.py
 git commit -m "feat: enforce validation lookahead replay"
 ```
 
@@ -884,17 +1068,9 @@ available within each decision's information set. A mismatch becomes
 `hidden_lookahead_check_failed`.
 ```
 
-- [ ] **Step 2: Update README contract assertions**
+- [ ] **Step 2: Run README contract test**
 
-Add these explicit assertions to `tests/test_readme_contract.py`:
-
-```python
-    assert "data_availability_status" in text
-    assert "causality_verified" in text
-    assert "hidden-lookahead replay check" in text
-```
-
-Then run:
+Run the existing README contract test without changing it:
 
 ```bash
 conda run -n quant pytest tests/test_readme_contract.py -q
@@ -938,7 +1114,7 @@ Expected:
 - [ ] **Step 6: Commit docs and final test updates**
 
 ```bash
-git add README.md tests/test_readme_contract.py
+git add README.md
 git commit -m "docs: explain evidence honesty fields"
 ```
 
@@ -950,7 +1126,7 @@ Review scope:
 - runner evidence quality fields,
 - validation hidden-lookahead replay,
 - validation failure details,
-- README contract updates.
+- README evidence-honesty updates.
 
 Critical review question:
 
@@ -968,3 +1144,29 @@ Does this implementation keep the bundle small and avoid reintroducing researche
 - [ ] No `researched/` validation ontology is reintroduced.
 - [ ] Evidence-quality fields are present in both `summary.json` and `data_manifest.json`.
 - [ ] Full suite passes with `conda run -n quant pytest -q`.
+
+## Plan-Eng Review Summary
+
+- Step 0 Scope Challenge: scope accepted after keeping implementation to eight files and explicitly dropping the extra README contract-test edit.
+- Architecture Review: 1 issue found and fixed in the plan: backend-selection failure must be tested by monkeypatching `get_backend`, not by invalid TOML.
+- Code Quality Review: 1 issue found and fixed in the plan: runner coverage wording now distinguishes missing, partial, complete, and empty-row coverage.
+- Test Review: diagram produced; 2 gaps fixed in the plan: empty-row runner quality assertions and replay-exception integration using `len(rows) < 3`.
+- Performance Review: 0 issues. Replay is O(decisions * rows) and validation-only; acceptable for this advisory gate.
+- TODOS.md updates: no repo `TODOS.md` exists and no deferred TODO is needed for this v1.
+- Failure modes: 0 critical gaps after plan updates.
+- Outside voice: skipped; prior cross-model review already informed the design, and no new outside-voice finding is being incorporated here.
+- Parallelization: 3 lanes; 2 can start in parallel, README waits until code semantics settle.
+- Lake Score: 4/4 review recommendations chose the complete option within the v1 scope.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | - | not run |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | - | not run |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 4 plan issues fixed, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 0 | - | not applicable |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | - | not run |
+
+- **UNRESOLVED:** 0.
+- **VERDICT:** ENG CLEARED - ready to implement.
