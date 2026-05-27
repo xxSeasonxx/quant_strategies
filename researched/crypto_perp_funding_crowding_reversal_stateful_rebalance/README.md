@@ -2,6 +2,9 @@
 
 Researched handoff package built from the selected 15 archive and the fresh new_15 rerun. These candidates are smoke-screened research outputs, not market validation or live-trading approval.
 
+This is a frozen archive, not an active validation layout. See `ARCHIVE.md`
+before using any variant or legacy evidence file.
+
 ## Families
 
 - `families/family_01_primary_time_only_exit`: primary family `time_only_exit`

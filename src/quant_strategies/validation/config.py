@@ -109,6 +109,42 @@ class PaperReadinessConfig(ValidationConfigModel):
     max_fill_lag_net_loss: float = Field(default=-0.02, le=0.0)
 
 
+class SearchPressureConfig(ValidationConfigModel):
+    candidate_count: int | None = Field(default=None, ge=1)
+    trial_count: int | None = Field(default=None, ge=1)
+    parameter_search_space: dict[str, Any] = Field(default_factory=dict)
+    selection_rule: str | None = None
+    split_ids: tuple[str, ...] = ()
+
+    @field_validator("selection_rule")
+    @classmethod
+    def normalize_selection_rule(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        rule = value.strip()
+        if not rule:
+            raise ValueError("search_pressure.selection_rule cannot be empty")
+        return rule
+
+    @field_validator("split_ids")
+    @classmethod
+    def normalize_split_ids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        split_ids = tuple(item.strip() for item in value)
+        if any(not item for item in split_ids):
+            raise ValueError("search_pressure.split_ids cannot contain empty ids")
+        if len(split_ids) != len(set(split_ids)):
+            raise ValueError("search_pressure.split_ids cannot contain duplicates")
+        return split_ids
+
+
+class ScenarioRunConfig(ValidationConfigModel):
+    scenario_id: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+    fill_model: FillModelConfig
+    cost_model: CostModelConfig
+    data: DataConfig
+
+
 class ValidationConfig(ValidationConfigModel):
     _base_dir_path: Path = PrivateAttr(default_factory=lambda: Path.cwd().resolve())
 
@@ -123,6 +159,7 @@ class ValidationConfig(ValidationConfigModel):
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig
     paper_readiness: PaperReadinessConfig = Field(default_factory=PaperReadinessConfig)
+    search_pressure: SearchPressureConfig = Field(default_factory=SearchPressureConfig)
 
     def model_post_init(self, context: Any, /) -> None:
         base = context.get("base_dir") if isinstance(context, dict) else None

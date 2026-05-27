@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -254,6 +254,18 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
         tmp_path,
         window_ids=("validation_2026_h1", "validation_2026_h2"),
     )
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml").read_text()
+        + """
+
+[search_pressure]
+candidate_count = 120
+trial_count = 18
+parameter_search_space = { weight = [0.5, 1.0, 1.5] }
+selection_rule = "top risk-adjusted smoke score"
+split_ids = ["validation_2026_h1", "validation_2026_h2"]
+"""
+    )
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
         lambda config: LoadedData(rows=rows()),
@@ -335,7 +347,11 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
     assert decision_payload["failed_gates"] == []
     assert decision_payload["failure_details"] == []
     assert decision_payload["overfit_controls"] == {
-        "trial_count": None,
+        "candidate_count": 120,
+        "trial_count": 18,
+        "parameter_search_space": {"weight": [0.5, 1.0, 1.5]},
+        "selection_rule": "top risk-adjusted smoke score",
+        "split_ids": ["validation_2026_h1", "validation_2026_h2"],
         "deflated_sharpe": None,
         "monte_carlo": None,
     }
@@ -354,6 +370,7 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
 
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
     assert robustness_matrix["decision"]["decision"] == "paper_candidate"
+    assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
     assert robustness_matrix["decision"]["failed_gates"] == []
     assert "gate_details" in robustness_matrix["decision"]
     assert len(robustness_matrix["scenarios"]) == 12
@@ -403,6 +420,13 @@ def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
         (candidate / "validation.toml")
         .read_text()
         .replace('strategy_path = "strategy.py"', 'strategy_path = "missing.py"')
+        + """
+
+[search_pressure]
+candidate_count = 20
+trial_count = 5
+selection_rule = "manual shortlist"
+"""
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -414,8 +438,12 @@ def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
     assert decision_payload["failure_details"][0]["stage"] == "strategy_import"
     assert decision_payload["failure_details"][0]["type"] == "ValidationStrategyLoadError"
     assert "missing.py" in decision_payload["failure_details"][0]["message"]
+    assert decision_payload["overfit_controls"]["candidate_count"] == 20
+    assert decision_payload["overfit_controls"]["trial_count"] == 5
+    assert decision_payload["overfit_controls"]["selection_rule"] == "manual shortlist"
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
     assert robustness_matrix["failure_details"] == decision_payload["failure_details"]
+    assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
 
 
 def test_run_validation_records_backend_selection_failure_details(
@@ -767,6 +795,14 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
 def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace(
+            'strict = true\nstart = "2026-01-01"\nend = "2026-06-30"',
+            'strict = true\nstart = "2025-01-01"\nend = "2026-12-31"',
+        )
+    )
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
@@ -780,6 +816,8 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert configs["validation_2026_h1/base"].cost_model.slippage_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].fill_model.entry_lag_bars == 1
     assert configs["validation_2026_h1/base"].data.kind == "crypto_perp_funding"
+    assert configs["validation_2026_h1/base"].data.start == date(2026, 1, 1)
+    assert configs["validation_2026_h1/base"].data.end == date(2026, 6, 30)
     assert configs["validation_2026_h1/realistic_costs"].cost_model.fee_bps_per_side == 0.5
     assert configs["validation_2026_h1/stressed_costs"].cost_model.fee_bps_per_side == 1.0
     assert configs["validation_2026_h1/stressed_costs"].cost_model.slippage_bps_per_side == 1.0

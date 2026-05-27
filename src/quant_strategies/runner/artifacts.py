@@ -111,7 +111,7 @@ def write_evidence(result_dir: Path, evidence_json: str) -> None:
     (result_dir / "evidence.json").write_text(evidence_json)
 
 
-def evidence_quality(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def evidence_quality(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(rows)
     present = sum(1 for row in rows if row.get("available_at") is not None)
     fraction = None if total == 0 else present / total
@@ -132,8 +132,50 @@ def evidence_quality(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "total": total,
             "fraction": fraction,
         },
+        "row_contract": row_contract_status(config, rows),
         "causality_verified": False,
         "evidence_quality_warnings": warnings,
+    }
+
+
+def row_contract_status(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    required_fields = _required_row_fields(config)
+    if not rows:
+        return {
+            "data_kind": config.data.kind,
+            "status": "not_evaluated",
+            "required_fields": list(required_fields),
+            "missing_required_fields": {},
+            "timestamp_status": "empty",
+            "duplicate_key_count": 0,
+            "funding_event_missing_fields": {},
+            "freshness_status": "not_evaluated",
+            "quant_data_feedback": ["row_contract_not_evaluated:no_rows"],
+        }
+    missing_required_fields = {
+        field: count
+        for field in required_fields
+        if (count := sum(1 for row in rows if row.get(field) is None)) > 0
+    }
+    duplicate_key_count = _duplicate_key_count(rows)
+    timestamp_status = _timestamp_status(rows)
+    funding_event_missing_fields = _funding_event_missing_fields(config, rows)
+    feedback = _row_contract_feedback(
+        missing_required_fields=missing_required_fields,
+        duplicate_key_count=duplicate_key_count,
+        timestamp_status=timestamp_status,
+        funding_event_missing_fields=funding_event_missing_fields,
+    )
+    return {
+        "data_kind": config.data.kind,
+        "status": "passed" if not feedback else "failed",
+        "required_fields": list(required_fields),
+        "missing_required_fields": missing_required_fields,
+        "timestamp_status": timestamp_status,
+        "duplicate_key_count": duplicate_key_count,
+        "funding_event_missing_fields": funding_event_missing_fields,
+        "freshness_status": "not_evaluated",
+        "quant_data_feedback": feedback,
     }
 
 
@@ -145,7 +187,7 @@ def write_data_manifest(
     strategy_input_rows_jsonl_sha256: str | None,
     normalized_rows_hash: str,
 ) -> None:
-    quality = evidence_quality(rows)
+    quality = evidence_quality(config, rows)
     payload = {
         "artifact_profile": config.output.artifact_profile,
         "data": {
@@ -250,6 +292,97 @@ def _metadata_field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, 
                 "total": total,
             }
     return coverage
+
+
+def _required_row_fields(config: RunConfig) -> tuple[str, ...]:
+    fields = ["symbol", "timestamp", "open", "high", "low", "close"]
+    if config.data.kind == "crypto_perp_funding":
+        fields.append("has_funding_event")
+    if config.data.kind == "forex_with_quotes" and config.fill_model.price == "quote":
+        fields.extend(["bid", "ask", "mid"])
+    return tuple(fields)
+
+
+def _duplicate_key_count(rows: list[dict[str, Any]]) -> int:
+    seen: set[tuple[str, object]] = set()
+    duplicates = 0
+    for row in rows:
+        key = (str(row.get("symbol", "")), row.get("timestamp"))
+        if key in seen:
+            duplicates += 1
+        else:
+            seen.add(key)
+    return duplicates
+
+
+def _timestamp_status(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "empty"
+    aware = 0
+    invalid = 0
+    for row in rows:
+        if _is_aware_timestamp(row.get("timestamp")):
+            aware += 1
+        else:
+            invalid += 1
+    if aware == len(rows):
+        return "aware"
+    if invalid == len(rows):
+        return "invalid_or_naive"
+    return "mixed"
+
+
+def _is_aware_timestamp(value: object) -> bool:
+    if isinstance(value, datetime):
+        return value.tzinfo is not None and value.utcoffset() is not None
+    if isinstance(value, str):
+        raw = value.strip()
+        if raw.endswith("Z"):
+            raw = f"{raw[:-1]}+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return False
+        return parsed.tzinfo is not None and parsed.utcoffset() is not None
+    return False
+
+
+def _funding_event_missing_fields(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, int]:
+    if config.data.kind != "crypto_perp_funding":
+        return {}
+    fields = ("funding_timestamp", "funding_rate")
+    missing: dict[str, int] = {}
+    for field in fields:
+        count = sum(
+            1
+            for row in rows
+            if row.get("has_funding_event") is True and row.get(field) is None
+        )
+        if count:
+            missing[field] = count
+    return missing
+
+
+def _row_contract_feedback(
+    *,
+    missing_required_fields: dict[str, int],
+    duplicate_key_count: int,
+    timestamp_status: str,
+    funding_event_missing_fields: dict[str, int],
+) -> list[str]:
+    feedback = [
+        f"missing_required_field:{field}:{count}"
+        for field, count in sorted(missing_required_fields.items())
+    ]
+    feedback.extend(
+        f"missing_funding_event_field:{field}:{count}"
+        for field, count in sorted(funding_event_missing_fields.items())
+    )
+    if duplicate_key_count:
+        feedback.append(f"duplicate_symbol_timestamp_keys:{duplicate_key_count}")
+    if timestamp_status not in {"aware", "empty"}:
+        feedback.append(f"timestamp_status:{timestamp_status}")
+    return feedback
 
 
 def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:

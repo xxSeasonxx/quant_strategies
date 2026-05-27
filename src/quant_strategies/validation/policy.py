@@ -29,7 +29,11 @@ class ValidationPolicyDecision(BaseModel):
     gate_details: dict[str, str] = Field(default_factory=dict)
     overfit_controls: dict[str, Any | None] = Field(
         default_factory=lambda: {
+            "candidate_count": None,
             "trial_count": None,
+            "parameter_search_space": {},
+            "selection_rule": None,
+            "split_ids": [],
             "deflated_sharpe": None,
             "monte_carlo": None,
         }
@@ -84,20 +88,30 @@ def classify_validation(
     required_scenario_count: int | None = None,
     required_scenario_ids: Sequence[str] | None = None,
     paper_readiness: object | None = None,
+    search_pressure: object | None = None,
 ) -> ValidationPolicyDecision:
+    overfit_controls = overfit_controls_from_search_pressure(search_pressure)
+
+    def finish(decision: ValidationPolicyDecision) -> ValidationPolicyDecision:
+        return decision.model_copy(update={"overfit_controls": overfit_controls})
+
     if not data_passed:
-        return _decision(
-            "hard_no",
-            reasons=("data_audit_failed",),
-            failed=("data_audit",),
-            details={"data_audit": "failed"},
+        return finish(
+            _decision(
+                "hard_no",
+                reasons=("data_audit_failed",),
+                failed=("data_audit",),
+                details={"data_audit": "failed"},
+            )
         )
     if not backend_results:
-        return _decision(
-            "hard_no",
-            reasons=("no_backend_results",),
-            failed=("backend_results",),
-            details={"backend_results": "none"},
+        return finish(
+            _decision(
+                "hard_no",
+                reasons=("no_backend_results",),
+                failed=("backend_results",),
+                details={"backend_results": "none"},
+            )
         )
 
     scenario_results = tuple(_scenario_result(item) for item in backend_results)
@@ -108,19 +122,35 @@ def classify_validation(
         required_scenario_ids=required_scenario_ids,
     )
     if required_gate is not None:
-        return required_gate
+        return finish(required_gate)
 
     backend_gate = _backend_execution_gate(required_results, min_trades=min_trades)
     if backend_gate.decision != "mechanical_pass":
-        return backend_gate
+        return finish(backend_gate)
 
-    return _paper_readiness_decision(
-        required_results,
-        min_trades=min_trades,
-        paper_readiness=paper_readiness,
-        base_passed_gates=backend_gate.passed_gates,
-        base_gate_details=backend_gate.gate_details,
+    return finish(
+        _paper_readiness_decision(
+            required_results,
+            min_trades=min_trades,
+            paper_readiness=paper_readiness,
+            base_passed_gates=backend_gate.passed_gates,
+            base_gate_details=backend_gate.gate_details,
+        )
     )
+
+
+def overfit_controls_from_search_pressure(search_pressure: object | None) -> dict[str, Any | None]:
+    parameter_search_space = _settings_value(search_pressure, "parameter_search_space", {})
+    split_ids = _settings_value(search_pressure, "split_ids", ())
+    return {
+        "candidate_count": _settings_value(search_pressure, "candidate_count", None),
+        "trial_count": _settings_value(search_pressure, "trial_count", None),
+        "parameter_search_space": dict(parameter_search_space or {}),
+        "selection_rule": _settings_value(search_pressure, "selection_rule", None),
+        "split_ids": list(split_ids or ()),
+        "deflated_sharpe": None,
+        "monte_carlo": None,
+    }
 
 
 def _scenario_result(
@@ -260,7 +290,7 @@ def _backend_execution_gate(
     unavailable = [item.result for item in required_results if item.result.status == "unavailable"]
     if unavailable:
         return _decision(
-            "watchlist",
+            "hard_no",
             reasons=("backend_unavailable",),
             failed=("required_backend_available",),
             details={"required_backend_available": f"{len(unavailable)} unavailable"},

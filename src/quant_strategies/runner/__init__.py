@@ -64,7 +64,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     try:
         loaded = data_loader.load_data(config)
         normalized_rows_hash = normalized_rows_sha256(loaded.rows)
-        evidence_quality = artifacts.evidence_quality(loaded.rows)
+        evidence_quality = artifacts.evidence_quality(config, loaded.rows)
         strategy_input_rows_jsonl_sha256 = None
         if config.output.artifact_profile == "full":
             strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(result_dir, loaded.rows)
@@ -217,7 +217,7 @@ def _failure_result(
             message=message,
             engine={"passed": None, "trade_count": None},
             assessment_status="runner_failed",
-            evidence_quality=evidence_quality or artifacts.evidence_quality([]),
+            evidence_quality=evidence_quality or artifacts.evidence_quality(config, []),
         ),
     )
     return RunResult(

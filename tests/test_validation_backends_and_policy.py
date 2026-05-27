@@ -23,7 +23,11 @@ def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
     assert isinstance(decision.failed_gates, tuple)
     assert isinstance(decision.gate_details, dict)
     assert decision.overfit_controls == {
+        "candidate_count": None,
         "trial_count": None,
+        "parameter_search_space": {},
+        "selection_rule": None,
+        "split_ids": [],
         "deflated_sharpe": None,
         "monte_carlo": None,
     }
@@ -187,6 +191,42 @@ def test_policy_paper_candidate_when_all_paper_gates_pass():
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
     assert_advisory_only(decision)
+
+
+def test_policy_records_search_pressure_inputs_for_paper_candidate():
+    search_pressure = type(
+        "SearchPressure",
+        (),
+        {
+            "candidate_count": 120,
+            "trial_count": 18,
+            "parameter_search_space": {"lookback": [12, 24, 48]},
+            "selection_rule": "top risk-adjusted smoke score",
+            "split_ids": ("validation_2026_h1", "validation_2026_h2"),
+        },
+    )()
+
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=paper_ready_scenarios(),
+        min_trades=10,
+        paper_readiness=PaperReadinessConfig(),
+        search_pressure=search_pressure,
+    )
+
+    assert decision.decision == "paper_candidate"
+    assert decision.overfit_controls == {
+        "candidate_count": 120,
+        "trial_count": 18,
+        "parameter_search_space": {"lookback": [12, 24, 48]},
+        "selection_rule": "top risk-adjusted smoke score",
+        "split_ids": ["validation_2026_h1", "validation_2026_h2"],
+        "deflated_sharpe": None,
+        "monte_carlo": None,
+    }
+    assert decision.evidence_class == "validation_advisory"
+    assert decision.requires_manual_approval is True
+    assert decision.paper_trade_eligible is False
 
 
 def test_policy_watchlist_for_one_cost_window():
@@ -486,7 +526,7 @@ def test_policy_hard_no_for_non_completed_backend_status():
     assert_advisory_only(decision)
 
 
-def test_policy_watchlist_for_required_backend_unavailable():
+def test_policy_hard_no_for_required_backend_unavailable():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -501,12 +541,12 @@ def test_policy_watchlist_for_required_backend_unavailable():
         min_trades=10,
     )
 
-    assert decision.decision == "watchlist"
+    assert decision.decision == "hard_no"
     assert "backend_unavailable" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_invalid_completed_metrics_before_unavailable_watchlist():
+def test_policy_hard_no_for_invalid_completed_metrics_before_backend_unavailable():
     decision = classify_validation(
         data_passed=True,
         backend_results=[

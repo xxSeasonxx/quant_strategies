@@ -37,6 +37,7 @@ SUMMARY_KEYS = {
     "requires_manual_approval",
     "data_availability_status",
     "availability_coverage",
+    "row_contract",
     "causality_verified",
     "evidence_quality_warnings",
 }
@@ -239,6 +240,16 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "total": 4,
         "fraction": 0.0,
     }
+    assert summary["row_contract"]["status"] == "passed"
+    assert summary["row_contract"]["required_fields"] == [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+    ]
+    assert summary["row_contract"]["quant_data_feedback"] == []
     assert summary["causality_verified"] is False
     assert summary["evidence_quality_warnings"] == [
         "available_at_missing",
@@ -247,6 +258,7 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
+    assert data_manifest["row_contract"] == summary["row_contract"]
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
     assert_assessment(result, summary, assessment_status="smoke_passed")
@@ -621,6 +633,64 @@ def test_run_config_marks_partial_available_at_coverage(
     assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(2 / 3)
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+
+
+def test_run_config_records_row_contract_feedback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
+    contract_rows[1].pop("high")
+    contract_rows[2]["timestamp"] = contract_rows[1]["timestamp"]
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=contract_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    row_contract = summary["row_contract"]
+    assert row_contract["status"] == "failed"
+    assert row_contract["missing_required_fields"] == {"high": 1}
+    assert row_contract["duplicate_key_count"] == 1
+    assert row_contract["timestamp_status"] == "aware"
+    assert row_contract["quant_data_feedback"] == [
+        "missing_required_field:high:1",
+        "duplicate_symbol_timestamp_keys:1",
+    ]
+    assert data_manifest["row_contract"] == row_contract
+
+
+def test_run_config_requires_crypto_funding_event_indicator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbol="BTC-PERP",
+        dataset=None,
+    )
+    contract_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+    for row in contract_rows:
+        row["symbol"] = "BTC-PERP"
+        row.pop("has_funding_event")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=contract_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    row_contract = summary["row_contract"]
+    assert row_contract["status"] == "failed"
+    assert row_contract["missing_required_fields"] == {"has_funding_event": 4}
+    assert row_contract["quant_data_feedback"] == [
+        "missing_required_field:has_funding_event:4"
+    ]
 
 
 def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

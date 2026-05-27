@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from quant_strategies.boundary import frozen_params, frozen_rows
@@ -28,13 +27,18 @@ from quant_strategies.validation.backends import (
     get_backend,
 )
 from quant_strategies.validation.capabilities import backend_capability_matrix
+from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
 from quant_strategies.validation.lookahead import check_hidden_lookahead
 from quant_strategies.validation.manifest import rows_sha256, write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
-from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
+from quant_strategies.validation.policy import (
+    ValidationPolicyDecision,
+    classify_validation,
+    overfit_controls_from_search_pressure,
+)
 from quant_strategies.validation.readiness import check_validation_readiness
 from quant_strategies.validation.strategy_loader import load_decision_strategy
 
@@ -256,6 +260,7 @@ def run_validation(
                     config=config,
                     scenario=scenario,
                     base_params=base_params,
+                    data=run_config.data,
                 )
                 decision_outcome = _scenario_decision_outcome(
                     scenario=scenario,
@@ -313,7 +318,7 @@ def run_validation(
 
     data_passed = all(audit["passed"] for audit in data_audits)
     if failure_reasons:
-        decision = _hard_no_decision(failure_reasons)
+        decision = _hard_no_decision(failure_reasons, search_pressure=config.search_pressure)
     else:
         decision = classify_validation(
             data_passed=data_passed,
@@ -321,6 +326,7 @@ def run_validation(
             min_trades=min_trades,
             required_scenario_ids=tuple(required_scenario_ids),
             paper_readiness=config.paper_readiness,
+            search_pressure=config.search_pressure,
         )
     _write_validation_artifacts(
         result_dir=result_dir,
@@ -348,13 +354,18 @@ def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> 
     )
 
 
-def _hard_no_decision(reasons: str | Sequence[str]) -> ValidationPolicyDecision:
+def _hard_no_decision(
+    reasons: str | Sequence[str],
+    *,
+    search_pressure: object | None = None,
+) -> ValidationPolicyDecision:
     reason_tuple = (reasons,) if isinstance(reasons, str) else tuple(dict.fromkeys(reasons))
     return ValidationPolicyDecision(
         decision="hard_no",
         reasons=reason_tuple,
         failed_gates=reason_tuple,
         gate_details={reason: "failed" for reason in reason_tuple},
+        overfit_controls=overfit_controls_from_search_pressure(search_pressure),
     )
 
 
@@ -381,7 +392,10 @@ def _failure_result(
     reason: str,
     failure_details: list[dict[str, str]] | None = None,
 ) -> ValidationRunResult:
-    decision = _hard_no_decision(reason)
+    decision = _hard_no_decision(
+        reason,
+        search_pressure=getattr(config, "search_pressure", None),
+    )
     _write_validation_artifacts(
         result_dir=result_dir,
         repo_root=repo_root,
@@ -455,17 +469,16 @@ def _scenario_config(
     config: Any,
     scenario: MatrixScenario,
     base_params: Mapping[str, Any],
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        scenario_id=scenario.id,
-        params={**_plain_mapping(base_params), **scenario.params},
-        cost_model=SimpleNamespace(
-            **{**_plain_mapping(config.cost_model), **scenario.cost_model}
-        ),
-        fill_model=SimpleNamespace(
-            **{**_plain_mapping(config.fill_model), **scenario.fill_model}
-        ),
-        data=SimpleNamespace(**_plain_mapping(config.data)),
+    data: Any,
+) -> ScenarioRunConfig:
+    return ScenarioRunConfig.model_validate(
+        {
+            "scenario_id": scenario.id,
+            "params": {**_plain_mapping(base_params), **scenario.params},
+            "cost_model": {**_plain_mapping(config.cost_model), **scenario.cost_model},
+            "fill_model": {**_plain_mapping(config.fill_model), **scenario.fill_model},
+            "data": _plain_mapping(data),
+        }
     )
 
 

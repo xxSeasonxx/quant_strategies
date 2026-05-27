@@ -7,6 +7,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.validation.config import ScenarioRunConfig
 
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
@@ -46,7 +47,7 @@ class ValidationBackend(Protocol):
         *,
         decisions: list[StrategyDecision],
         rows: Sequence[Mapping[str, Any]],
-        config: Any,
+        config: ScenarioRunConfig,
     ) -> BackendRunResult:
         raise NotImplementedError
 
@@ -68,7 +69,7 @@ class FakeBackend:
         *,
         decisions: list[StrategyDecision],
         rows: Sequence[Mapping[str, Any]],
-        config: Any,
+        config: ScenarioRunConfig,
     ) -> BackendRunResult:
         return self._result
 

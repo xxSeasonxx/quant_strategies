@@ -63,10 +63,13 @@ These gates are mechanical checks only; they do not test statistical
 significance, regime robustness, capacity, or execution quality.
 
 Runner summaries and data manifests include evidence-quality fields:
-`data_availability_status`, `availability_coverage`, `causality_verified`, and
-`evidence_quality_warnings`. Runner smoke keeps missing availability non-fatal
-for search, but it records that uncertainty and never claims hidden-lookahead
-causality verification.
+`data_availability_status`, `availability_coverage`, `row_contract`,
+`causality_verified`, and `evidence_quality_warnings`. Runner smoke keeps
+missing availability non-fatal for search, but it records that uncertainty and
+never claims hidden-lookahead causality verification. `row_contract` reports the
+loaded row schema status for the configured `data.kind`, including missing
+required fields, timestamp awareness, duplicate symbol/timestamp keys, and
+`quant_data_feedback` strings for upstream data fixes.
 
 ## Validation Configs
 
@@ -116,6 +119,35 @@ max_fill_lag_net_loss = -0.02
 The stress and fill-lag loss floors apply to the worst required scenario net
 return across validation windows.
 
+Validation configs can optionally record the search pressure behind a retained
+candidate:
+
+```toml
+[search_pressure]
+candidate_count = 120
+trial_count = 18
+parameter_search_space = { lookback = [12, 24, 48] }
+selection_rule = "top risk-adjusted smoke score"
+split_ids = ["validation_2026_h1", "validation_2026_h2"]
+```
+
+These fields are artifact metadata only. They make missing overfit/search
+context explicit; they do not compute statistical corrections or change
+eligibility flags.
+
+The default validation backend is `vectorbtpro`. Install the optional backend
+dependencies before running real validation:
+
+```bash
+conda run -n quant python -m pip install -e '.[vectorbtpro]'
+```
+
+VectorBT Pro may require package access or private index configuration outside
+this repository.
+
+If the configured backend cannot be imported, validation records
+`backend_unavailable` as a setup `hard_no`, not as a research `watchlist`.
+
 ## Validation Runs
 
 `quant-strategies validate path/to/candidate/validation.toml` runs advisory
@@ -134,8 +166,8 @@ scenarios, runs the configured backend, and classifies the candidate as
 `hard_no`, `mechanical_pass`, `watchlist`, or `paper_candidate`. A
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
-`watchlist` captures unavailable or unsupported required backend semantics, or
-positive evidence that misses paper-readiness gates. A `paper_candidate`
+`watchlist` captures unsupported required backend semantics, or positive
+evidence that misses paper-readiness gates. A `paper_candidate`
 requires mechanical validation plus paper-readiness gates such as multiple
 windows, enough realistic-cost trades, no zero-trade windows, positive
 realistic-cost evidence, sufficient positive-window fraction, and stressed-cost
@@ -188,7 +220,9 @@ or contract change is complete.
 
 Downstream research systems should own the research loop and modify only a
 candidate `strategy.py` plus `experiment.toml`, while consuming the public
-runner API for execution. See `docs/quant-autoresearch-consumer.md` for the
+runner API for execution. `quant_strategies.runner.run_config` and
+`quant_strategies.runner.RunResult` are the stable Python consumer surface; no
+top-level facade is promised. See `docs/quant-autoresearch-consumer.md` for the
 consumer contract.
 
 ## Promotion Discipline

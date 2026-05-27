@@ -51,6 +51,10 @@ workspace = Path("/path/to/candidate_workspace").resolve()
 result = run_config("experiment.toml", repo_root=workspace)
 ```
 
+`quant_strategies.runner.run_config` and `quant_strategies.runner.RunResult`
+are the stable Python API for downstream execution. The package root does not
+re-export them; import from the `runner` subpackage deliberately.
+
 The CLI equivalent is:
 
 ```bash
@@ -186,6 +190,10 @@ machine interface.
 
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
+Use `data_availability_status`, `availability_coverage`, `row_contract`, and
+`evidence_quality_warnings` as ranking filters before comparing smoke scores.
+`row_contract.quant_data_feedback` is the handoff channel for missing fields,
+duplicate keys, timestamp issues, and other upstream `quant_data` contract gaps.
 
 ## What autoresearch Should Not Own
 
@@ -212,6 +220,11 @@ conda run -n quant quant-strategies validate \
 Validation is not based on `researched/`, package manifests, or family/variant
 layouts. Old artifacts that need validation should be copied into a normal
 candidate workspace with `strategy.py` and `validation.toml`.
+
+For retained candidates, include `[search_pressure]` in `validation.toml` when
+available so validation artifacts carry candidate counts, trial counts,
+parameter search space, selection rule, and split identities. These fields are
+metadata, not statistical proof.
 
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.

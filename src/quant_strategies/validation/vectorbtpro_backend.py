@@ -7,6 +7,7 @@ from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.backends import BackendRunResult
+from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.funding import (
     FundingEventError,
     funding_return_for_window,
@@ -22,7 +23,7 @@ class VectorBTProBackend:
         *,
         decisions: list[StrategyDecision],
         rows: Sequence[Mapping[str, Any]],
-        config: Any,
+        config: ScenarioRunConfig,
     ) -> BackendRunResult:
         try:
             import pandas as pd

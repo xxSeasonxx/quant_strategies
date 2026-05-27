@@ -2,6 +2,10 @@
 
 Use this package as a starting point for comprehensive validation in `quant_strategies`. Do not treat the screening scores as live-trading evidence.
 
+This package is archived evidence. Validation now runs from an explicit
+`validation.toml` plus its referenced `strategy.py`; it does not validate the
+`researched/` family/variant tree directly.
+
 ## Selected Families
 
 - primary: `time_only_exit`

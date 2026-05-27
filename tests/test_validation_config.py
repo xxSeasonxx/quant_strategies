@@ -161,6 +161,36 @@ max_fill_lag_net_loss = -0.03
     assert config.paper_readiness.max_fill_lag_net_loss == -0.03
 
 
+def test_load_validation_config_accepts_search_pressure_metadata(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text()
+        + """
+
+[search_pressure]
+candidate_count = 120
+trial_count = 18
+parameter_search_space = { lookback = [12, 24, 48], threshold = [0.5, 1.0] }
+selection_rule = "top risk-adjusted smoke score"
+split_ids = ["validation_2026_h1", "validation_2026_h2"]
+"""
+    )
+
+    config = load_validation_config(config_path)
+
+    assert config.search_pressure.candidate_count == 120
+    assert config.search_pressure.trial_count == 18
+    assert config.search_pressure.parameter_search_space == {
+        "lookback": [12, 24, 48],
+        "threshold": [0.5, 1.0],
+    }
+    assert config.search_pressure.selection_rule == "top risk-adjusted smoke score"
+    assert config.search_pressure.split_ids == ("validation_2026_h1", "validation_2026_h2")
+
+
 @pytest.mark.parametrize(
     ("paper_readiness_text", "message"),
     [
