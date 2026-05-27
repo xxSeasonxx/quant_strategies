@@ -1,0 +1,14 @@
+{
+  "attempt": 30,
+  "commit": "4ac5d5b",
+  "config_path": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_05/config.toml",
+  "family": "selection_or_breadth",
+  "rank": 5,
+  "source_result_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_05",
+  "symbol_count": 5,
+  "variant_id": "6ab0f5592ae055c10c5c19cc821aa7ba1e4e9d88094eecb25d832697de12f5b7",
+  "window_days": 180,
+  "window_end": "2026-04-13",
+  "window_id": "locked_recent_2026",
+  "window_start": "2025-10-16"
+}

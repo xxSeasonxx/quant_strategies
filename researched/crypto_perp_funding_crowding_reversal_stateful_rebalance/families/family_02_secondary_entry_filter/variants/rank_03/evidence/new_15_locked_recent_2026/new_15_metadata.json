@@ -1,0 +1,14 @@
+{
+  "attempt": 23,
+  "commit": "4ac5d5b",
+  "config_path": "results/selected_15/family_02_secondary_entry_filter/rank_03/config.toml",
+  "family": "entry_filter",
+  "rank": 3,
+  "source_result_dir": "results/selected_15/family_02_secondary_entry_filter/rank_03",
+  "symbol_count": 5,
+  "variant_id": "ffe9b872bde8623e55248bb459869cd4da02838880e7b75ef079fb0f0483ba67",
+  "window_days": 180,
+  "window_end": "2026-04-13",
+  "window_id": "locked_recent_2026",
+  "window_start": "2025-10-16"
+}

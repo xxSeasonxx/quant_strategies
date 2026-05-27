@@ -19,6 +19,7 @@ def decisions_to_signal_rows(decisions: list[StrategyDecision]) -> list[dict[str
                 f"{decision.instrument.symbol}"
             )
 
+        metadata = decision.model_dump(mode="json")["metadata"]
         row: dict[str, Any] = {
             "symbol": decision.instrument.symbol,
             "decision_time": decision.decision_time,
@@ -26,7 +27,7 @@ def decisions_to_signal_rows(decisions: list[StrategyDecision]) -> list[dict[str
             "side": decision.target.direction,
             "weight": decision.target.size,
             "max_hold_bars": decision.exit_policy.max_hold_bars,
-            "metadata": dict(decision.metadata),
+            "metadata": metadata,
         }
         if decision.exit_policy.stop_loss_bps is not None:
             row["stop_loss_bps"] = decision.exit_policy.stop_loss_bps

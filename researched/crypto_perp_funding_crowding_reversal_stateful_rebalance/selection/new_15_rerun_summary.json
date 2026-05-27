@@ -1,0 +1,41 @@
+{
+  "scored_count": 15,
+  "top_variants": [
+    {
+      "family": "time_only_exit",
+      "rank": 1,
+      "rerun_raw_net_return": 0.8163238336123732,
+      "rerun_score": 0.004535132408957629,
+      "rerun_trade_count": 909
+    },
+    {
+      "family": "time_only_exit",
+      "rank": 2,
+      "rerun_raw_net_return": 0.6834821909593503,
+      "rerun_score": 0.0037971232831075013,
+      "rerun_trade_count": 697
+    },
+    {
+      "family": "entry_filter",
+      "rank": 1,
+      "rerun_raw_net_return": 0.6563854047535337,
+      "rerun_score": 0.003646585581964076,
+      "rerun_trade_count": 510
+    },
+    {
+      "family": "selection_or_breadth",
+      "rank": 1,
+      "rerun_raw_net_return": 0.6560958707386165,
+      "rerun_score": 0.0036449770596589806,
+      "rerun_trade_count": 666
+    },
+    {
+      "family": "selection_or_breadth",
+      "rank": 2,
+      "rerun_raw_net_return": 0.6560958707386165,
+      "rerun_score": 0.0036449770596589806,
+      "rerun_trade_count": 666
+    }
+  ],
+  "variant_count": 15
+}

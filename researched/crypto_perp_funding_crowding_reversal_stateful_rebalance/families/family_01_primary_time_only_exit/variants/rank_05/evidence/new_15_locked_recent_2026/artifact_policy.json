@@ -1,0 +1,19 @@
+{
+  "copied_files": [
+    "data_manifest.json",
+    "decision_records.jsonl",
+    "evidence.json",
+    "new_15_metadata.json",
+    "notes.md",
+    "run_manifest.json",
+    "score.json",
+    "signals.csv",
+    "strategy_snapshot.py",
+    "summary.json"
+  ],
+  "omitted_large_artifacts": [
+    "engine_request.json",
+    "strategy_input_rows.csv",
+    "strategy_input_rows.jsonl"
+  ]
+}

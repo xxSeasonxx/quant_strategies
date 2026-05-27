@@ -1,0 +1,22 @@
+{
+  "attempt": 40,
+  "commit": "30a5b4b",
+  "cost_stress_id": "realistic_costs",
+  "cost_stress_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/stateful_rebalance_bold_100/promotion_0040_crypto_perp_funding_crowding_reversal_stateful_rebalance/cost_stress/realistic_costs/2026-05-26T062647Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
+  "description": "promote 20h decision bucket",
+  "eligible_for_promotion": true,
+  "failed_reasons": [],
+  "promotion_score": 0.002616925888698787,
+  "recent_window_ids": [
+    "validation_2025_h1",
+    "validation_2025_h2",
+    "locked_recent_2026"
+  ],
+  "rotating_probe_result_dir": "/Users/Season_Yang/Personal/quant_autoresearch/results/stateful_rebalance_bold_100/promotion_0040_crypto_perp_funding_crowding_reversal_stateful_rebalance/rotating_probe/stress_2022_ftx/2026-05-26T062813Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
+  "rotating_probe_window_id": "stress_2022_ftx",
+  "source_result_dirs": {
+    "locked_recent_2026": "/Users/Season_Yang/Personal/quant_autoresearch/results/stateful_rebalance_bold_100/2026-05-26T062227Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
+    "validation_2025_h1": "/Users/Season_Yang/Personal/quant_autoresearch/results/stateful_rebalance_bold_100/promotion_0040_crypto_perp_funding_crowding_reversal_stateful_rebalance/windows/validation_2025_h1/2026-05-26T062354Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
+    "validation_2025_h2": "/Users/Season_Yang/Personal/quant_autoresearch/results/stateful_rebalance_bold_100/promotion_0040_crypto_perp_funding_crowding_reversal_stateful_rebalance/windows/validation_2025_h2/2026-05-26T062520Z-crypto_perp_funding_crowding_reversal_stateful_rebalance"
+  }
+}

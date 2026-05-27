@@ -71,6 +71,101 @@ def test_load_validation_config_resolves_paths_inside_repo(tmp_path: Path):
     assert config.strategy_path == tmp_path / "researched" / "demo" / "strategy.py"
     assert config.output.results_dir == tmp_path / "validation_results" / "demo"
     assert config.windows[0].id == "validation_2026_h1"
+    assert config.paper_readiness.enabled is True
+    assert config.paper_readiness.min_windows == 2
+    assert config.paper_readiness.min_total_trades == 30
+    assert config.paper_readiness.min_positive_window_fraction == 0.5
+    assert config.paper_readiness.max_stressed_net_loss == -0.02
+    assert config.paper_readiness.max_fill_lag_net_loss == -0.02
+
+
+def test_load_validation_config_accepts_paper_readiness_overrides(tmp_path: Path):
+    write_strategy(tmp_path / "researched" / "demo" / "strategy.py")
+    config_path = tmp_path / "researched" / "demo" / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text()
+        + """
+
+[paper_readiness]
+enabled = false
+min_windows = 3
+min_total_trades = 45
+min_positive_window_fraction = 0.75
+max_stressed_net_loss = -0.05
+max_fill_lag_net_loss = -0.03
+"""
+    )
+
+    config = load_validation_config(config_path, repo_root=tmp_path)
+
+    assert config.paper_readiness.enabled is False
+    assert config.paper_readiness.min_windows == 3
+    assert config.paper_readiness.min_total_trades == 45
+    assert config.paper_readiness.min_positive_window_fraction == 0.75
+    assert config.paper_readiness.max_stressed_net_loss == -0.05
+    assert config.paper_readiness.max_fill_lag_net_loss == -0.03
+
+
+@pytest.mark.parametrize(
+    ("paper_readiness_text", "message"),
+    [
+        (
+            """
+[paper_readiness]
+min_windows = 0
+""",
+            "greater than or equal to 1",
+        ),
+        (
+            """
+[paper_readiness]
+min_total_trades = 0
+""",
+            "greater than or equal to 1",
+        ),
+        (
+            """
+[paper_readiness]
+min_positive_window_fraction = -0.1
+""",
+            "greater than or equal to 0",
+        ),
+        (
+            """
+[paper_readiness]
+min_positive_window_fraction = 1.1
+""",
+            "less than or equal to 1",
+        ),
+        (
+            """
+[paper_readiness]
+max_stressed_net_loss = 0.01
+""",
+            "less than or equal to 0",
+        ),
+        (
+            """
+[paper_readiness]
+max_fill_lag_net_loss = 0.01
+""",
+            "less than or equal to 0",
+        ),
+    ],
+)
+def test_load_validation_config_rejects_invalid_paper_readiness(
+    tmp_path: Path,
+    paper_readiness_text: str,
+    message: str,
+):
+    write_strategy(tmp_path / "researched" / "demo" / "strategy.py")
+    config_path = tmp_path / "researched" / "demo" / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(config_path.read_text() + paper_readiness_text)
+
+    with pytest.raises(ValidationConfigError, match=message):
+        load_validation_config(config_path, repo_root=tmp_path)
 
 
 def test_validation_config_converts_to_run_config_with_repo_root_override(tmp_path: Path):

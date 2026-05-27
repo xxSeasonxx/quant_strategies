@@ -103,6 +103,42 @@ def test_decisions_to_signal_rows_preserves_engine_fields():
     ]
 
 
+def test_decisions_to_signal_rows_converts_nested_metadata_for_engine_request():
+    timestamp = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    nested_decision = StrategyDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=timestamp,
+        as_of_time=timestamp,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
+        exit_policy=ExitPolicy(max_hold_bars=3),
+        metadata={"outer": {"items": [{"x": 1}]}},
+    )
+    rows = [
+        {
+            "symbol": "SPY",
+            "timestamp": timestamp + timedelta(days=index),
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+        }
+        for index in range(5)
+    ]
+
+    signal_rows = decisions_to_signal_rows([nested_decision])
+    request = build_request(
+        strategy_id="demo",
+        rows=rows,
+        signals=signal_rows,
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    assert signal_rows[0]["metadata"] == {"outer": {"items": [{"x": 1}]}}
+    assert request.spec.signals[0].metadata == {"outer": {"items": [{"x": 1}]}}
+
+
 def test_decisions_to_signal_rows_rejects_flat_targets():
     with pytest.raises(RequestBuildError, match="flat target"):
         decisions_to_signal_rows([decision(direction="flat", size=0.0)])

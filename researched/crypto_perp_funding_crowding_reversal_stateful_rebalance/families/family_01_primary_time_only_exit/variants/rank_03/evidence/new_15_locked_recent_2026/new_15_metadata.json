@@ -1,0 +1,14 @@
+{
+  "attempt": 18,
+  "commit": "4ac5d5b",
+  "config_path": "results/selected_15/family_01_primary_time_only_exit/rank_03/config.toml",
+  "family": "time_only_exit",
+  "rank": 3,
+  "source_result_dir": "results/selected_15/family_01_primary_time_only_exit/rank_03",
+  "symbol_count": 5,
+  "variant_id": "8b0b8ac447e6dcea8ad3d5ae389f3d20feb3b9884be60d420d255eb7c4aa7f0e",
+  "window_days": 180,
+  "window_end": "2026-04-13",
+  "window_id": "locked_recent_2026",
+  "window_start": "2025-10-16"
+}

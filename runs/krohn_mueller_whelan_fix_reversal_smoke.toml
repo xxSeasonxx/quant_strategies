@@ -1,0 +1,36 @@
+strategy_path = "untested/krohn_mueller_whelan_fix_reversal.py"
+strategy_id = "krohn_mueller_whelan_fix_reversal_smoke"
+
+[data]
+kind = "forex_with_quotes"
+symbols = [
+  "AUDUSD",
+  "EURUSD",
+  "GBPUSD",
+  "NZDUSD",
+  "USDCAD",
+  "USDCHF",
+  "USDJPY",
+]
+start = "2024-01-08"
+end = "2024-01-08"
+strict = true
+
+[params]
+decision_lead_minutes = 2
+observation_lag_minutes = 1
+weight = 0.25
+max_hold_bars = 2
+
+[fill_model]
+price = "quote"
+entry_lag_bars = 1
+exit_lag_bars = 0
+
+[cost_model]
+fee_bps_per_side = 0.0
+slippage_bps_per_side = 0.0
+
+[output]
+results_dir = "results"
+mode = "screen"

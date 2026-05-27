@@ -326,7 +326,54 @@ def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
     if trade_count < 0:
         raise ValueError(f"invalid_trade_count:{trade_count}")
 
-    return {"net_return": net_return, "trade_count": trade_count}
+    return {
+        "net_return": net_return,
+        "trade_count": trade_count,
+        **_optional_portfolio_metrics(portfolio),
+    }
+
+
+def _optional_portfolio_metrics(portfolio: Any) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    try:
+        trades = getattr(portfolio, "trades")
+    except Exception:
+        trades = None
+    optional_metrics = (
+        ("max_drawdown", _try_metric_call(portfolio, "get_max_drawdown")),
+        ("profit_factor", _try_metric_call(trades, "profit_factor")),
+        ("win_rate", _try_metric_call(trades, "win_rate")),
+    )
+    for name, value in optional_metrics:
+        metric = _optional_float_metric(value)
+        if metric is not None:
+            metrics[name] = metric
+    return metrics
+
+
+def _try_metric_call(owner: Any, name: str) -> Any | None:
+    if owner is None:
+        return None
+    try:
+        value = getattr(owner, name)
+    except Exception:
+        return None
+    try:
+        return value() if callable(value) else value
+    except Exception:
+        return None
+
+
+def _optional_float_metric(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        metric = _float_metric(value)
+    except Exception:
+        return None
+    if not math.isfinite(metric):
+        return None
+    return metric
 
 
 def _funding_adjusted_metrics(
