@@ -16,9 +16,9 @@ def main(argv: list[str] | None = None) -> int:
     run_parser.add_argument("--repo-root", type=Path, default=None, help="repository root for relative config paths")
     run_parser.add_argument("config", type=Path)
 
-    validate_parser = subparsers.add_parser("validate", help="validate one researched strategy package or config")
-    validate_parser.add_argument("--repo-root", type=Path, default=None, help="repository root for relative paths")
-    validate_parser.add_argument("package_or_config", type=Path)
+    validate_parser = subparsers.add_parser("validate", help="validate one validation TOML config")
+    validate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative validation config path")
+    validate_parser.add_argument("config", type=Path)
 
     args = parser.parse_args(argv)
 
@@ -35,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "validate":
         try:
-            result = run_validation(args.package_or_config, repo_root=args.repo_root)
+            result = run_validation(args.config, repo_root=args.repo_root)
         except ValidationError as exc:
             print(f"validation failed: {exc}")
             return 1

@@ -33,7 +33,8 @@ ignored artifacts under `results/`.
 bars and decisions. Aggregate smoke totals live under
 `smoke_score.sum_weighted_trade_*`.
 
-`validation` runs advisory researched-package checks. Advisory outcomes are
+`validation` runs advisory checks from an explicit `validation.toml` plus the
+referenced `strategy.py`. Advisory outcomes are
 `hard_no`, `mechanical_pass`, `watchlist`, and `paper_candidate`;
 `promotion_eligible`, `paper_trade_eligible`, and `live_eligible` remain false.
 
@@ -61,27 +62,33 @@ smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
 These gates are mechanical checks only; they do not test statistical
 significance, regime robustness, capacity, or execution quality.
 
-## Researched Packages
+## Validation Configs
 
-Validation-ready researched packages use the canonical layout:
+Validation is addressed by an explicit TOML config file:
 
 ```text
-researched/<package>/
-  manifest.json
+candidate_workspace/
   strategy.py
   validation.toml
 ```
 
-The manifest must identify the package variant, lifecycle status, strategy
-hash, and validation-config hash. Backend execution is blocked when layout,
-manifest integrity, readiness metadata, or observation lineage fails.
+Relative paths in `validation.toml` resolve from the config file directory.
+`strategy_path` and `[output] results_dir` must stay inside that directory.
+The validator does not special-case `researched/`, package manifests,
+family/variant directories, or any repository layout.
 
-Validation configs include minimal readiness metadata:
+Every validation config includes minimal readiness metadata:
 
 ```toml
+strategy_path = "strategy.py"
+strategy_id = "candidate"
+
 [readiness]
 min_observations_per_decision = 1
 required_observation_fields = ["close"]
+
+[output]
+results_dir = "validation_results/candidate"
 ```
 
 This is intentionally small. It proves the strategy declared enough local row
@@ -103,15 +110,15 @@ max_fill_lag_net_loss = -0.02
 The stress and fill-lag loss floors apply to the worst required scenario net
 return across validation windows.
 
-## Package Validation
+## Validation Runs
 
-`quant-strategies validate path/to/researched/package` runs advisory validation
-for a researched package. It checks package layout, manifest hashes, readiness
-metadata, strategy import, parameter validation, data loading, decision output,
-and observation lineage before backend execution.
+`quant-strategies validate path/to/candidate/validation.toml` runs advisory
+validation for the config and referenced strategy. It checks readiness metadata,
+strategy import, parameter validation, data loading, decision output, and
+observation lineage before backend execution.
 
 For each validation window, the validator expands required and diagnostic
-scenarios, runs the configured backend, and classifies the package as
+scenarios, runs the configured backend, and classifies the candidate as
 `hard_no`, `mechanical_pass`, `watchlist`, or `paper_candidate`. A
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
@@ -135,7 +142,7 @@ write `strategy_input_rows.csv`, `strategy_input_rows.jsonl`,
 `decision_records.jsonl`, `signals.csv`, `engine_request.json`, and
 `evidence.json`.
 
-Package validation artifacts include:
+Validation artifacts include:
 
 - `decision_records.jsonl`
 - `data_audit.json`
@@ -156,7 +163,7 @@ Use the `quant` conda environment for Python commands:
 ```bash
 conda run -n quant pytest
 conda run -n quant quant-strategies run path/to/config.toml
-conda run -n quant quant-strategies validate path/to/researched/package
+conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 ```
 
 Run focused tests for narrow edits, then the full suite before claiming a reset
@@ -171,8 +178,8 @@ consumer contract.
 
 ## Promotion Discipline
 
-`researched/` contains frozen packages produced by upstream research. It does
-not mean market validation.
+`researched/` may contain frozen packages produced by upstream research. It does
+not mean market validation, and validation does not treat it as special.
 
 Moving a strategy to `tested/` requires the separate validation process Season
 approves. Advisory validation artifacts can support review, but they do not

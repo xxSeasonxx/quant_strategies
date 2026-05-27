@@ -22,6 +22,8 @@ def test_readme_uses_generic_foundation_contract_language():
 
     assert "generate_decisions(rows, params) -> list[StrategyDecision]" in text
     assert "validation_decision.json" in text
+    assert "quant-strategies validate path/to/candidate/validation.toml" in text
+    assert "validation does not treat it as special" in text
     assert "hard_no" in text
     assert "mechanical_pass" in text
     assert "watchlist" in text

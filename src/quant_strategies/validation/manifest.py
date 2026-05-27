@@ -30,13 +30,13 @@ def write_validation_manifest(
     result_dir: Path,
     *,
     repo_root: Path,
+    path_base: Path,
     config: Any,
     config_path: Path,
     backend_name: str,
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
     capability_matrix: dict[str, Any],
-    research_manifest: dict[str, Any],
 ) -> Path:
     payload = {
         "repository": git_identity(repo_root, exclude_paths=(result_dir,)),
@@ -47,11 +47,11 @@ def write_validation_manifest(
         "validation": {
             "strategy_id": config.strategy_id,
             "backend": backend_name,
-            "config_path": _relative_path(config_path, repo_root),
+            "config_path": _relative_path(config_path, path_base),
             "config_sha256": _optional_hash(config_path),
         },
         "strategy": {
-            "path": _relative_path(Path(config.strategy_path), repo_root),
+            "path": _relative_path(Path(config.strategy_path), path_base),
             "snapshot_sha256": _optional_hash(result_dir / "strategy_snapshot.py"),
         },
         "data": {"windows": data_provenance},
@@ -60,7 +60,6 @@ def write_validation_manifest(
             backend_results=backend_results,
             capability_matrix=capability_matrix,
         ),
-        "research_manifest": research_manifest,
         "core_hashes": _core_hashes(result_dir),
         "artifacts": artifact_hashes(
             result_dir,

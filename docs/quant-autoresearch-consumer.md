@@ -200,10 +200,21 @@ validation and does not authorize promotion, paper trading, or live trading.
   the search loop,
 - add compatibility adapters for old strategy output contracts.
 
-If a candidate later needs packaging, review, or validation, that is a separate
-handoff workflow outside the autoresearch loop. The autoresearch output should
-be the selected `strategy.py`, selected `experiment.toml`, and the runner
-artifacts that explain why it was selected.
+If a candidate later needs review or validation, that is a separate handoff
+workflow outside the autoresearch loop. Create an explicit `validation.toml` in
+the candidate workspace, point it at `strategy.py`, and run:
+
+```bash
+conda run -n quant quant-strategies validate \
+  /path/to/candidate_workspace/validation.toml
+```
+
+Validation is not based on `researched/`, package manifests, or family/variant
+layouts. Old artifacts that need validation should be copied into a normal
+candidate workspace with `strategy.py` and `validation.toml`.
+
+The autoresearch output should be the selected `strategy.py`, selected
+`experiment.toml`, and the runner artifacts that explain why it was selected.
 
 ## Acceptance Checklist
 

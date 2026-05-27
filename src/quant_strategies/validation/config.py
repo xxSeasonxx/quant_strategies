@@ -22,8 +22,6 @@ from quant_strategies.runner.config import (
     FillModelConfig,
     OutputConfig as RunnerOutputConfig,
     RunConfig,
-    _resolve_inside_repo,
-    default_repo_root,
 )
 from quant_strategies.validation.errors import ValidationConfigError
 
@@ -35,9 +33,27 @@ class ValidationConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def _repo_root(info: ValidationInfo) -> Path:
-    root = info.context.get("repo_root") if info.context else None
-    return Path(root).resolve() if root is not None else default_repo_root()
+def _path_anchor(path: str | Path, *, repo_root: Path | None = None) -> Path:
+    if repo_root is not None:
+        return Path(repo_root).resolve()
+    if Path(path).is_absolute():
+        return Path("/")
+    return Path.cwd().resolve()
+
+
+def _config_base(info: ValidationInfo) -> Path:
+    base = info.context.get("base_dir") if info.context else None
+    return Path(base).resolve() if base is not None else Path.cwd().resolve()
+
+
+def _resolve_inside_config_dir(value: Path, base_dir: Path, field_name: str) -> Path:
+    resolved = value if value.is_absolute() else base_dir / value
+    resolved = resolved.resolve()
+    try:
+        resolved.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"{field_name} must resolve inside config directory: {base_dir}") from exc
+    return resolved
 
 
 class ValidationWindow(ValidationConfigModel):
@@ -66,7 +82,7 @@ class ValidationOutputConfig(ValidationConfigModel):
     @field_validator("results_dir")
     @classmethod
     def validate_results_dir(cls, value: Path, info: ValidationInfo) -> Path:
-        return _resolve_inside_repo(value, _repo_root(info), "output.results_dir")
+        return _resolve_inside_config_dir(value, _config_base(info), "output.results_dir")
 
 
 class ValidationReadinessConfig(ValidationConfigModel):
@@ -94,7 +110,7 @@ class PaperReadinessConfig(ValidationConfigModel):
 
 
 class ValidationConfig(ValidationConfigModel):
-    _repo_root_path: Path = PrivateAttr(default_factory=default_repo_root)
+    _base_dir_path: Path = PrivateAttr(default_factory=lambda: Path.cwd().resolve())
 
     strategy_path: Path
     strategy_id: str = Field(min_length=1)
@@ -105,18 +121,22 @@ class ValidationConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     output: ValidationOutputConfig
-    readiness: ValidationReadinessConfig | None = None
+    readiness: ValidationReadinessConfig
     paper_readiness: PaperReadinessConfig = Field(default_factory=PaperReadinessConfig)
 
     def model_post_init(self, context: Any, /) -> None:
-        root = context.get("repo_root") if isinstance(context, dict) else None
-        repo_root = Path(root).resolve() if root is not None else default_repo_root()
-        object.__setattr__(self, "_repo_root_path", repo_root)
+        base = context.get("base_dir") if isinstance(context, dict) else None
+        base_dir = Path(base).resolve() if base is not None else Path.cwd().resolve()
+        object.__setattr__(self, "_base_dir_path", base_dir)
+
+    @property
+    def base_dir(self) -> Path:
+        return self._base_dir_path
 
     @field_validator("strategy_path")
     @classmethod
     def validate_strategy_path(cls, value: Path, info: ValidationInfo) -> Path:
-        return _resolve_inside_repo(value, _repo_root(info), "strategy_path")
+        return _resolve_inside_config_dir(value, _config_base(info), "strategy_path")
 
     @field_validator("strategy_id")
     @classmethod
@@ -127,7 +147,7 @@ class ValidationConfig(ValidationConfigModel):
         return strategy_id
 
     def to_run_config(self, window: ValidationWindow, *, results_dir: Path) -> RunConfig:
-        context = {"repo_root": self._repo_root_path}
+        context = {"repo_root": self.base_dir}
         output = RunnerOutputConfig.model_validate(
             {"results_dir": results_dir, "mode": "validate"},
             context=context,
@@ -147,19 +167,20 @@ class ValidationConfig(ValidationConfigModel):
 
 
 def resolve_validation_config_path(path: str | Path, *, repo_root: Path | None = None) -> Path:
-    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+    anchor = _path_anchor(path, repo_root=repo_root)
     candidate = Path(path)
     if not candidate.is_absolute():
-        candidate = root / candidate
+        candidate = anchor / candidate
     candidate = candidate.resolve()
     if candidate.is_dir():
-        candidate = candidate / "validation.toml"
+        raise ValidationConfigError("validation config path must be a TOML file, not a directory")
+    if candidate.suffix != ".toml":
+        raise ValidationConfigError("validation config path must be a TOML file")
     return candidate
 
 
 def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -> ValidationConfig:
-    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
-    config_path = resolve_validation_config_path(path, repo_root=root)
+    config_path = resolve_validation_config_path(path, repo_root=repo_root)
     try:
         payload = tomllib.loads(config_path.read_text())
     except OSError as exc:
@@ -168,6 +189,9 @@ def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -
         raise ValidationConfigError(f"invalid TOML in validation config: {exc}") from exc
 
     try:
-        return ValidationConfig.model_validate(payload, context={"repo_root": root})
+        return ValidationConfig.model_validate(
+            payload,
+            context={"base_dir": config_path.parent},
+        )
     except ValidationError as exc:
         raise ValidationConfigError(str(exc)) from exc

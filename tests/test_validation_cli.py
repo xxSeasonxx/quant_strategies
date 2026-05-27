@@ -33,11 +33,11 @@ def test_validate_cli_returns_zero_for_completed_advisory_decisions(
         fake_run_validation,
     )
 
-    code = cli.main(["validate", "--repo-root", str(tmp_path), "researched/demo"])
+    code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
 
     assert code == 0
     assert decision in capsys.readouterr().out
-    assert calls == [(Path("researched/demo"), tmp_path)]
+    assert calls == [(Path("candidate/validation.toml"), tmp_path)]
 
 
 def test_validate_cli_returns_one_for_hard_no(monkeypatch, tmp_path: Path, capsys):
@@ -51,7 +51,7 @@ def test_validate_cli_returns_one_for_hard_no(monkeypatch, tmp_path: Path, capsy
         ),
     )
 
-    code = cli.main(["validate", "--repo-root", str(tmp_path), "researched/demo"])
+    code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
 
     assert code == 1
     assert "hard_no" in capsys.readouterr().out
@@ -66,7 +66,7 @@ def test_validate_cli_returns_one_for_validation_error(monkeypatch, tmp_path: Pa
         fake_run_validation,
     )
 
-    code = cli.main(["validate", "--repo-root", str(tmp_path), "researched/demo"])
+    code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
 
     assert code == 1
     assert "validation failed: bad config" in capsys.readouterr().out

@@ -15,20 +15,21 @@ from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError
 from quant_strategies.validation import run_validation
 from quant_strategies.validation.backends import BackendRunResult, FakeBackend
+from quant_strategies.validation.errors import ValidationConfigError
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 
 
-def write_package(
+def write_candidate(
     tmp_path: Path,
     *,
     backend: str | None = "fake",
     window_ids: tuple[str, ...] = ("validation_2026_h1",),
 ) -> Path:
-    package = tmp_path / "researched" / "demo"
-    package.mkdir(parents=True)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir(parents=True)
     strategy_text = (
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
@@ -42,7 +43,7 @@ def write_package(
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     ).replace("size=1.0", "size=float(params.get('weight', 1.0))")
-    (package / "strategy.py").write_text(strategy_text)
+    (candidate / "strategy.py").write_text(strategy_text)
     backend_line = f'backend = "{backend}"\n' if backend is not None else ""
     window_blocks = "\n".join(
         f"""
@@ -53,9 +54,9 @@ end = "2026-06-30"
 """.strip()
         for window_id in window_ids
     )
-    (package / "validation.toml").write_text(
+    (candidate / "validation.toml").write_text(
         f"""
-strategy_path = "researched/demo/strategy.py"
+strategy_path = "strategy.py"
 strategy_id = "demo"
 {backend_line}
 
@@ -88,8 +89,7 @@ required_observation_fields = ["close"]
 results_dir = "validation_results/demo"
 """.lstrip()
     )
-    write_manifest(package)
-    return package
+    return candidate
 
 
 def decision(strategy_id: str = "demo") -> StrategyDecision:
@@ -116,24 +116,6 @@ def file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def write_manifest(package: Path, *, lifecycle_status: str = "validation_ready") -> None:
-    (package / "manifest.json").write_text(
-        json.dumps(
-            {
-                "variants": [
-                    {
-                        "directory": ".",
-                        "lifecycle_status": lifecycle_status,
-                        "strategy_sha256": file_sha256(package / "strategy.py"),
-                        "validation_config_sha256": file_sha256(package / "validation.toml"),
-                    }
-                ]
-            },
-            sort_keys=True,
-        )
-    )
-
-
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
@@ -142,7 +124,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     tmp_path: Path,
     monkeypatch,
 ):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
         lambda config: LoadedData(rows=rows()),
@@ -157,7 +139,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
         )
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.success is True
     assert result.decision.decision == "watchlist"
@@ -220,11 +202,9 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["validation"]["strategy_id"] == "demo"
     assert manifest["validation"]["backend"] == "fake"
-    assert manifest["strategy"]["path"] == "researched/demo/strategy.py"
-    assert manifest["research_manifest"]["found"] is True
-    assert manifest["research_manifest"]["passed"] is True
-    assert manifest["research_manifest"]["lifecycle_status"] == "validation_ready"
-    assert manifest["research_manifest"]["violations"] == []
+    assert manifest["validation"]["config_path"] == "validation.toml"
+    assert manifest["strategy"]["path"] == "strategy.py"
+    assert "research_manifest" not in manifest
     assert manifest["data"]["windows"][0]["status"] == "loaded"
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
     assert manifest["data"]["windows"][0]["rows_sha256"]
@@ -268,7 +248,7 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
     tmp_path: Path,
     monkeypatch,
 ):
-    package = write_package(
+    candidate = write_candidate(
         tmp_path,
         window_ids=("validation_2026_h1", "validation_2026_h2"),
     )
@@ -337,7 +317,7 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
         }
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.success is True
     assert result.decision.decision == "paper_candidate"
@@ -386,14 +366,14 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
 
 
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
 
     def raise_data_load_error(config: Any) -> LoadedData:
         raise DataLoadError("data load returned no rows")
 
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", raise_data_load_error)
 
-    result = run_validation(package, repo_root=tmp_path, backend=FakeBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
 
     assert result.decision.decision == "hard_no"
     assert "data_audit_failed" in result.decision.reasons
@@ -413,177 +393,20 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     )
 
 
-def test_run_validation_blocks_stale_validation_ready_research_manifest(tmp_path: Path):
-    package = write_package(tmp_path)
-    (package / "manifest.json").write_text(
+def test_run_validation_ignores_unconfigured_manifest_next_to_config(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "manifest.json").write_text(
         json.dumps(
             {
                 "variants": [
                     {
                         "directory": ".",
-                        "lifecycle_status": "validation_ready",
+                        "lifecycle_status": "draft",
                         "strategy_sha256": "stale-strategy-hash",
                         "validation_config_sha256": "stale-config-hash",
-                    }
-                ]
-            }
-        )
-    )
-    backend = RecordingBackend()
-
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["found"] is True
-    assert manifest["research_manifest"]["passed"] is False
-    assert manifest["research_manifest"]["lifecycle_status"] == "validation_ready"
-    assert manifest["research_manifest"]["violations"] == [
-        "research_manifest_strategy_hash_mismatch",
-        "research_manifest_validation_config_hash_mismatch",
-    ]
-
-
-def test_run_validation_blocks_malformed_research_manifest_variants(tmp_path: Path):
-    package = write_package(tmp_path)
-    (package / "manifest.json").write_text(json.dumps({"variants": {"directory": "."}}))
-    backend = RecordingBackend()
-
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["found"] is True
-    assert manifest["research_manifest"]["passed"] is False
-    assert manifest["research_manifest"]["violations"] == [
-        "research_manifest_variants_invalid"
-    ]
-
-
-def test_run_validation_blocks_missing_research_manifest(tmp_path: Path):
-    package = write_package(tmp_path)
-    (package / "manifest.json").unlink()
-    backend = RecordingBackend()
-
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"] == {
-        "is_researched_package": True,
-        "found": False,
-        "passed": False,
-        "violations": ["research_manifest_missing"],
-    }
-
-
-def test_run_validation_blocks_missing_research_manifest_variant(
-    tmp_path: Path,
-):
-    package = write_package(tmp_path)
-    (package / "manifest.json").write_text(
-        json.dumps(
-            {
-                "variants": [
-                    {
-                        "directory": "other_variant",
-                        "lifecycle_status": "validation_ready",
-                    }
-                ]
-            }
-        )
-    )
-    backend = RecordingBackend()
-
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["passed"] is False
-    assert manifest["research_manifest"]["violations"] == ["research_manifest_variant_missing"]
-
-
-def test_run_validation_blocks_invalid_researched_layout(tmp_path: Path):
-    package = write_package(tmp_path)
-    nested = package / "variant"
-    nested.mkdir()
-    (nested / "validation.toml").write_text((package / "validation.toml").read_text())
-    backend = RecordingBackend()
-
-    result = run_validation(nested / "validation.toml", repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["violations"] == ["research_manifest_invalid_layout"]
-
-
-def test_run_validation_blocks_external_config_pointing_at_researched_strategy(tmp_path: Path):
-    package = write_package(tmp_path)
-    external_config = tmp_path / "external" / "validation.toml"
-    external_config.parent.mkdir()
-    external_config.write_text(
-        (package / "validation.toml")
-        .read_text()
-        .replace('results_dir = "validation_results/demo"', 'results_dir = "validation_results/external"')
-    )
-    backend = RecordingBackend()
-
-    result = run_validation(external_config, repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("research_manifest_integrity_failed",)
-    assert backend.calls == 0
-    assert result.result_dir is not None
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"]["is_researched_package"] is True
-    assert manifest["research_manifest"]["found"] is False
-    assert manifest["research_manifest"]["passed"] is False
-    assert manifest["research_manifest"]["violations"] == ["research_manifest_invalid_layout"]
-
-
-def test_run_validation_ignores_parent_manifest_for_non_researched_config(
-    tmp_path: Path,
-    monkeypatch,
-):
-    source_package = write_package(tmp_path)
-    scratch_root = tmp_path / "scratch"
-    package = scratch_root / "demo"
-    package.mkdir(parents=True)
-    (package / "strategy.py").write_text((source_package / "strategy.py").read_text())
-    validation_text = (source_package / "validation.toml").read_text()
-    validation_text = validation_text.replace(
-        'strategy_path = "researched/demo/strategy.py"',
-        'strategy_path = "scratch/demo/strategy.py"',
-    )
-    validation_text = validation_text.replace(
-        '\n[readiness]\nmin_observations_per_decision = 1\nrequired_observation_fields = ["close"]\n',
-        "\n",
-    )
-    (package / "validation.toml").write_text(validation_text)
-    (scratch_root / "manifest.json").write_text(
-        json.dumps(
-            {
-                "variants": [
-                    {
-                        "directory": "demo",
-                        "lifecycle_status": "validation_ready",
-                        "strategy_sha256": file_sha256(package / "strategy.py"),
-                        "validation_config_sha256": file_sha256(package / "validation.toml"),
                     }
                 ]
             }
@@ -592,44 +415,79 @@ def test_run_validation_ignores_parent_manifest_for_non_researched_config(
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
-    result = run_validation(package / "validation.toml", repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "watchlist"
     assert backend.calls == 6
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    assert manifest["research_manifest"] == {
-        "is_researched_package": False,
-        "found": False,
-        "passed": True,
-        "violations": [],
-    }
+    assert "research_manifest" not in manifest
 
 
-def test_run_validation_blocks_missing_readiness_metadata(tmp_path: Path):
-    package = write_package(tmp_path)
-    validation_text = (package / "validation.toml").read_text()
+def test_run_validation_requires_explicit_toml_path(tmp_path: Path):
+    candidate = write_candidate(tmp_path)
+    backend = RecordingBackend()
+
+    with pytest.raises(ValidationConfigError, match="validation config path must be a TOML file"):
+        run_validation(candidate, repo_root=tmp_path, backend=backend)
+
+    assert backend.calls == 0
+
+
+def test_run_validation_rejects_nested_config_strategy_escape(tmp_path: Path):
+    candidate = write_candidate(tmp_path)
+    nested = candidate / "variant"
+    nested.mkdir()
+    (nested / "validation.toml").write_text(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace('strategy_path = "strategy.py"', 'strategy_path = "../strategy.py"')
+    )
+    backend = RecordingBackend()
+
+    with pytest.raises(ValidationConfigError, match="strategy_path must resolve inside config directory"):
+        run_validation(nested / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert backend.calls == 0
+
+
+def test_run_validation_rejects_external_config_pointing_at_candidate_strategy(tmp_path: Path):
+    candidate = write_candidate(tmp_path)
+    external_config = tmp_path / "external" / "validation.toml"
+    external_config.parent.mkdir()
+    external_config.write_text(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace('strategy_path = "strategy.py"', 'strategy_path = "../candidate/strategy.py"')
+        .replace('results_dir = "validation_results/demo"', 'results_dir = "validation_results/external"')
+    )
+    backend = RecordingBackend()
+
+    with pytest.raises(ValidationConfigError, match="strategy_path must resolve inside config directory"):
+        run_validation(external_config, repo_root=tmp_path, backend=backend)
+
+    assert backend.calls == 0
+
+
+def test_run_validation_requires_readiness_at_config_load(tmp_path: Path):
+    candidate = write_candidate(tmp_path)
+    validation_text = (candidate / "validation.toml").read_text()
     validation_text = validation_text.replace(
         '\n[readiness]\nmin_observations_per_decision = 1\nrequired_observation_fields = ["close"]\n',
         "\n",
     )
-    (package / "validation.toml").write_text(validation_text)
-    write_manifest(package)
+    (candidate / "validation.toml").write_text(validation_text)
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    with pytest.raises(ValidationConfigError, match="readiness"):
+        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("validation_readiness_failed",)
     assert backend.calls == 0
-    assert result.result_dir is not None
-    audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert audit["windows"][0]["violations"] == ["validation_readiness_metadata_missing"]
 
 
 def test_run_validation_blocks_missing_required_observations(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text(
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
@@ -641,11 +499,10 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("validation_readiness_failed",)
@@ -659,7 +516,7 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
 
 
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setattr(
@@ -667,7 +524,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
         lambda path, repo_root: lambda loaded_rows, params: [decision("other")],
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert backend.calls == 0
@@ -679,7 +536,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
 
 
 def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setattr(
@@ -687,7 +544,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
         lambda path, repo_root: lambda loaded_rows, params: "not decisions",
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert backend.calls == 0
@@ -697,11 +554,11 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
 
 
 def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path, backend=None)
+    candidate = write_candidate(tmp_path, backend=None)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setitem(sys.modules, "vectorbtpro", SimpleNamespace())
 
-    result = run_validation(package, repo_root=tmp_path)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     assert result.decision.decision == "hard_no"
     assert result.result_dir is not None
@@ -730,7 +587,7 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
 
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = ScenarioAwareBackend(
         {
@@ -744,7 +601,7 @@ def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, m
         }
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert "insufficient_trades" in result.decision.reasons
@@ -754,7 +611,7 @@ def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, m
 def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path, window_ids=("validation_2026_h1", "validation_2026_h2"))
+    candidate = write_candidate(tmp_path, window_ids=("validation_2026_h1", "validation_2026_h2"))
     loaded_row_ids = []
 
     def load_data(config: Any) -> LoadedData:
@@ -765,7 +622,7 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", load_data)
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "watchlist"
     assert "min_total_trades" in result.decision.failed_gates
@@ -791,11 +648,11 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
 
 def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "watchlist"
     configs = {item.scenario_id: item for item in backend.configs}
@@ -839,8 +696,8 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
     tmp_path: Path,
     monkeypatch,
 ):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text(
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def validate_params(params):\n"
         "    if float(params['weight']) > 1.0:\n"
@@ -857,11 +714,10 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
-    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "watchlist"
     assert backend.calls == 5
@@ -887,8 +743,8 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
 def test_run_validation_rejects_unknown_params_with_strategy_validator(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text(
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def validate_params(params):\n"
         "    extra = set(params).difference({'weight'})\n"
@@ -906,15 +762,14 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
-    validation_config = (package / "validation.toml").read_text()
-    (package / "validation.toml").write_text(
+    validation_config = (candidate / "validation.toml").read_text()
+    (candidate / "validation.toml").write_text(
         validation_config.replace("weight = 1.0", "weight = 1.0\ntypo = 2.0")
     )
-    write_manifest(package)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("param_validation_failed",)
@@ -931,20 +786,19 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
 
 
 def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text(
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
         "def generate_decisions(rows, params):\n"
         "    rows[0]['close'] = 999.0\n"
         "    return []\n"
     )
-    write_manifest(package)
     loaded_rows = rows()
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
         lambda config: LoadedData(rows=loaded_rows),
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -955,19 +809,18 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
 
 
 def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text(
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
         "def generate_decisions(rows, params):\n"
         "    params['weight'] = 2.0\n"
         "    return []\n"
     )
-    write_manifest(package)
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
         lambda config: LoadedData(rows=rows()),
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -979,7 +832,7 @@ def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypat
 def test_run_validation_writes_failure_artifacts_for_strategy_generation_exception(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
 
     def raise_generation_error(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
@@ -990,7 +843,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
         lambda path, repo_root: raise_generation_error,
     )
 
-    result = run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -1007,11 +860,11 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
 def test_run_validation_writes_failure_artifacts_for_backend_exception(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = ExplodingBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("exploding_failed",)
@@ -1028,11 +881,11 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
 def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = MalformedBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("malformed_failed",)
@@ -1047,11 +900,11 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
 
 
 def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     backend = InvalidStatusBackend()
 
-    result = run_validation(package, repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("invalid_status_failed",)
@@ -1063,17 +916,17 @@ def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypat
 
 
 def test_run_validation_propagates_backend_system_exit(tmp_path: Path, monkeypatch):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
 
     with pytest.raises(SystemExit, match="backend exited"):
-        run_validation(package, repo_root=tmp_path, backend=ExitingBackend())
+        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=ExitingBackend())
 
 
 def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_exit(
     tmp_path: Path, monkeypatch
 ):
-    package = write_package(tmp_path)
+    candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
 
     def exit_generation(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
@@ -1085,18 +938,17 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
     )
 
     with pytest.raises(SystemExit, match="signal code exited"):
-        run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
 
 def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit(
     tmp_path: Path,
 ):
-    package = write_package(tmp_path)
-    (package / "strategy.py").write_text("raise SystemExit('import exited')\n")
-    write_manifest(package)
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text("raise SystemExit('import exited')\n")
 
     with pytest.raises(SystemExit, match="import exited"):
-        run_validation(package, repo_root=tmp_path, backend=RecordingBackend())
+        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
 
 class RecordingBackend:
