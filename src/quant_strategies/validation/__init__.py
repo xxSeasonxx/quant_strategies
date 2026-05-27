@@ -31,6 +31,7 @@ from quant_strategies.validation.capabilities import backend_capability_matrix
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.validation.lookahead import check_hidden_lookahead
 from quant_strategies.validation.manifest import rows_sha256, write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
 from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
@@ -96,6 +97,7 @@ def run_validation(
             data_provenance=data_provenance,
             backend_results=backend_results,
             reason="backend_selection_failed",
+            failure_details=[_failure_detail("backend_selection", exc)],
         )
 
     try:
@@ -113,6 +115,7 @@ def run_validation(
             data_provenance=data_provenance,
             backend_results=backend_results,
             reason="strategy_import_failed",
+            failure_details=[_failure_detail("strategy_import", exc)],
         )
 
     try:
@@ -138,6 +141,7 @@ def run_validation(
             data_provenance=data_provenance,
             backend_results=backend_results,
             reason="param_validation_failed",
+            failure_details=[_failure_detail("param_validation", exc)],
         )
 
     for window in config.windows:
@@ -211,6 +215,27 @@ def run_validation(
 
         audit_payload = {"window_id": window.id, **audit.model_dump(mode="json")}
         if audit.passed:
+            lookahead = check_hidden_lookahead(
+                generate_decisions,
+                rows=loaded.rows,
+                params=base_params,
+                baseline_decisions=decisions,
+                strategy_id=config.strategy_id,
+            )
+            if not lookahead.passed:
+                reason = (
+                    "hidden_lookahead_check_failed"
+                    if any(
+                        item.startswith("hidden_lookahead_check_failed")
+                        for item in lookahead.violations
+                    )
+                    else "hidden_lookahead_detected"
+                )
+                failure_reasons.append(reason)
+                audit_payload["passed"] = False
+                audit_payload["violations"] = list(audit.violations) + list(lookahead.violations)
+
+        if audit_payload["passed"]:
             readiness_violations = check_validation_readiness(decisions, config.readiness)
             if readiness_violations:
                 failure_reasons.append("validation_readiness_failed")
@@ -309,6 +334,7 @@ def run_validation(
         data_provenance=data_provenance,
         backend_results=backend_results,
         decision=decision,
+        failure_details=[],
     )
     return _validation_result(result_dir, decision)
 
@@ -332,6 +358,14 @@ def _hard_no_decision(reasons: str | Sequence[str]) -> ValidationPolicyDecision:
     )
 
 
+def _failure_detail(stage: str, exc: Exception) -> dict[str, str]:
+    return {
+        "stage": stage,
+        "type": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
 def _failure_result(
     *,
     result_dir: Path,
@@ -345,6 +379,7 @@ def _failure_result(
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
     reason: str,
+    failure_details: list[dict[str, str]] | None = None,
 ) -> ValidationRunResult:
     decision = _hard_no_decision(reason)
     _write_validation_artifacts(
@@ -359,6 +394,7 @@ def _failure_result(
         data_provenance=data_provenance,
         backend_results=backend_results,
         decision=decision,
+        failure_details=failure_details or [],
     )
     return _validation_result(result_dir, decision)
 
@@ -571,7 +607,9 @@ def _write_validation_artifacts(
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
     decision: ValidationPolicyDecision,
+    failure_details: list[dict[str, str]] | None = None,
 ) -> None:
+    failure_details = failure_details or []
     capability_matrix = backend_capability_matrix(backend_name, backend_results)
     decision_lines = [item.model_dump_json() for item in decisions]
     write_text_artifact(result_dir, "decision_records.jsonl", "\n".join(decision_lines))
@@ -624,14 +662,13 @@ def _write_validation_artifacts(
                 }
                 for item in backend_results
             ],
+            "failure_details": failure_details,
         },
     )
     write_json_artifact(result_dir, "backend_capability_matrix.json", capability_matrix)
-    write_json_artifact(
-        result_dir,
-        "validation_decision.json",
-        decision.model_dump(mode="json"),
-    )
+    decision_payload = decision.model_dump(mode="json")
+    decision_payload["failure_details"] = failure_details
+    write_json_artifact(result_dir, "validation_decision.json", decision_payload)
     failed_gates = ", ".join(decision.failed_gates) or "none"
     passed_gates = ", ".join(decision.passed_gates) or "none"
     reasons = ", ".join(decision.reasons) or "none"

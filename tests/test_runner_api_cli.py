@@ -35,6 +35,10 @@ SUMMARY_KEYS = {
     "paper_trade_eligible",
     "live_eligible",
     "requires_manual_approval",
+    "data_availability_status",
+    "availability_coverage",
+    "causality_verified",
+    "evidence_quality_warnings",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
 
@@ -228,6 +232,23 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
     assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] > 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
+    assert summary["data_availability_status"] == "missing"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 0,
+        "total": 4,
+        "fraction": 0.0,
+    }
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "available_at_missing",
+        "runner_causality_not_verified",
+    ]
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["data_availability_status"] == summary["data_availability_status"]
+    assert data_manifest["availability_coverage"] == summary["availability_coverage"]
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
     assert_assessment(result, summary, assessment_status="smoke_passed")
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
 
@@ -430,6 +451,18 @@ def test_run_config_writes_data_failure_summary(
     assert "strict data window failed" in (result.result_dir / "notes.md").read_text()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "data_load"
+    assert summary["data_availability_status"] == "missing"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 0,
+        "total": 0,
+        "fraction": None,
+    }
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "available_at_missing",
+        "runner_causality_not_verified",
+    ]
     assert_assessment(result, summary, assessment_status="runner_failed")
     assert (result.result_dir / "run_manifest.json").exists()
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
@@ -521,6 +554,73 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert manifest["metadata_field_coverage"]["available_at"] == {"present": 4, "total": 4}
     assert manifest["metadata_field_coverage"]["quote_ingested_at"] == {"present": 4, "total": 4}
+
+
+def test_run_config_marks_complete_available_at_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        data_loader,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["data_availability_status"] == "complete"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 3,
+        "total": 3,
+        "fraction": 1.0,
+    }
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
+    assert data_manifest["data_availability_status"] == "complete"
+    assert data_manifest["availability_coverage"] == summary["availability_coverage"]
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+
+
+def test_run_config_marks_partial_available_at_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    partial_rows = rows(100.0, 101.0, 102.0, research_fields=True)
+    partial_rows[1].pop("available_at")
+    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=partial_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["data_availability_status"] == "partial"
+    coverage = summary["availability_coverage"]
+    assert coverage["field"] == "available_at"
+    assert coverage["present"] == 2
+    assert coverage["total"] == 3
+    assert coverage["fraction"] == pytest.approx(2 / 3)
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "available_at_partial",
+        "runner_causality_not_verified",
+    ]
+    assert data_manifest["data_availability_status"] == "partial"
+    assert data_manifest["availability_coverage"]["field"] == "available_at"
+    assert data_manifest["availability_coverage"]["present"] == 2
+    assert data_manifest["availability_coverage"]["total"] == 3
+    assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(2 / 3)
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
 
 
 def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -796,6 +896,13 @@ def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_reque
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "data_readiness"
     assert "available after decision_time" in summary["message"]
+    assert summary["data_availability_status"] == "complete"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 4,
+        "total": 4,
+        "fraction": 1.0,
+    }
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 

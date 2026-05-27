@@ -62,6 +62,12 @@ smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
 These gates are mechanical checks only; they do not test statistical
 significance, regime robustness, capacity, or execution quality.
 
+Runner summaries and data manifests include evidence-quality fields:
+`data_availability_status`, `availability_coverage`, `causality_verified`, and
+`evidence_quality_warnings`. Runner smoke keeps missing availability non-fatal
+for search, but it records that uncertainty and never claims hidden-lookahead
+causality verification.
+
 ## Validation Configs
 
 Validation is addressed by an explicit TOML config file:
@@ -117,6 +123,12 @@ validation for the config and referenced strategy. It checks readiness metadata,
 strategy import, parameter validation, data loading, decision output, and
 observation lineage before backend execution.
 
+Validation also runs a hidden-lookahead replay check before backend scenarios.
+The check compares baseline decisions against decisions generated from rows
+available within each decision's information set. A mismatch becomes
+`hidden_lookahead_detected`; replay errors become
+`hidden_lookahead_check_failed`.
+
 For each validation window, the validator expands required and diagnostic
 scenarios, runs the configured backend, and classifies the candidate as
 `hard_no`, `mechanical_pass`, `watchlist`, or `paper_candidate`. A
@@ -155,6 +167,9 @@ Validation artifacts include:
 
 Manifests hash the core artifacts needed to audit what code, config, data, and
 decisions produced a run.
+`validation_decision.json` and `robustness_matrix.json` include
+`failure_details` for fatal setup failures that validation catches, while stable
+policy reason strings remain unchanged.
 
 ## Commands
 

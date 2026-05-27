@@ -64,6 +64,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     try:
         loaded = data_loader.load_data(config)
         normalized_rows_hash = normalized_rows_sha256(loaded.rows)
+        evidence_quality = artifacts.evidence_quality(loaded.rows)
         strategy_input_rows_jsonl_sha256 = None
         if config.output.artifact_profile == "full":
             strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(result_dir, loaded.rows)
@@ -91,12 +92,20 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "decision_generation",
             f"strategy execution failed: {exc}",
             repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
         )
 
     try:
         data_readiness.assert_decision_rows_ready(loaded.rows, signals)
     except RunnerError as exc:
-        return _failure_result(config, result_dir, "data_readiness", str(exc), repo_root=effective_repo_root)
+        return _failure_result(
+            config,
+            result_dir,
+            "data_readiness",
+            str(exc),
+            repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
+        )
 
     try:
         request = engine_runner.build_request(
@@ -109,7 +118,14 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         if config.output.artifact_profile == "full":
             artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
     except RunnerError as exc:
-        return _failure_result(config, result_dir, "request_build", str(exc), repo_root=effective_repo_root)
+        return _failure_result(
+            config,
+            result_dir,
+            "request_build",
+            str(exc),
+            repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
+        )
 
     try:
         engine_run = engine_runner.evaluate_request(
@@ -118,7 +134,14 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             include_evidence=config.output.artifact_profile == "full",
         )
     except RunnerError as exc:
-        return _failure_result(config, result_dir, "engine_evaluation", str(exc), repo_root=effective_repo_root)
+        return _failure_result(
+            config,
+            result_dir,
+            "engine_evaluation",
+            str(exc),
+            repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
+        )
 
     engine_summary = _compact_engine_summary(engine_run)
     if config.output.artifact_profile == "full" and engine_run.evidence_json:
@@ -153,6 +176,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             message=notes.strip(),
             engine=engine_summary,
             assessment_status=assessment_status,
+            evidence_quality=evidence_quality,
         ),
     )
     return RunResult(
@@ -173,6 +197,7 @@ def _failure_result(
     message: str,
     *,
     repo_root: Path,
+    evidence_quality: dict[str, object] | None = None,
 ) -> RunResult:
     notes = _failure_notes(stage, message)
     artifacts.write_notes(result_dir, notes)
@@ -192,6 +217,7 @@ def _failure_result(
             message=message,
             engine={"passed": None, "trade_count": None},
             assessment_status="runner_failed",
+            evidence_quality=evidence_quality or artifacts.evidence_quality([]),
         ),
     )
     return RunResult(
@@ -221,6 +247,7 @@ def _summary_payload(
     message: str,
     engine: dict[str, object],
     assessment_status: str,
+    evidence_quality: dict[str, object],
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
@@ -246,6 +273,7 @@ def _summary_payload(
         "run_completed": True,
         "assessment_status": assessment_status,
         **semantics,
+        **evidence_quality,
     }
 
 

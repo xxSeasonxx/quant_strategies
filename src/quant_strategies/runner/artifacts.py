@@ -111,6 +111,32 @@ def write_evidence(result_dir: Path, evidence_json: str) -> None:
     (result_dir / "evidence.json").write_text(evidence_json)
 
 
+def evidence_quality(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total = len(rows)
+    present = sum(1 for row in rows if row.get("available_at") is not None)
+    fraction = None if total == 0 else present / total
+    if total > 0 and present == total:
+        status = "complete"
+        warnings = ["runner_causality_not_verified"]
+    elif present > 0:
+        status = "partial"
+        warnings = ["available_at_partial", "runner_causality_not_verified"]
+    else:
+        status = "missing"
+        warnings = ["available_at_missing", "runner_causality_not_verified"]
+    return {
+        "data_availability_status": status,
+        "availability_coverage": {
+            "field": "available_at",
+            "present": present,
+            "total": total,
+            "fraction": fraction,
+        },
+        "causality_verified": False,
+        "evidence_quality_warnings": warnings,
+    }
+
+
 def write_data_manifest(
     result_dir: Path,
     config: RunConfig,
@@ -119,6 +145,7 @@ def write_data_manifest(
     strategy_input_rows_jsonl_sha256: str | None,
     normalized_rows_hash: str,
 ) -> None:
+    quality = evidence_quality(rows)
     payload = {
         "artifact_profile": config.output.artifact_profile,
         "data": {
@@ -136,6 +163,7 @@ def write_data_manifest(
         "strategy_input_rows_jsonl_sha256": strategy_input_rows_jsonl_sha256,
         "normalized_rows_sha256": normalized_rows_hash,
         "metadata_field_coverage": _metadata_field_coverage(rows),
+        **quality,
     }
     _write_json(result_dir / "data_manifest.json", payload)
 

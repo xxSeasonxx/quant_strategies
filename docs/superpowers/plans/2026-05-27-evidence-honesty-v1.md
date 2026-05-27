@@ -733,6 +733,22 @@ def test_hidden_lookahead_check_detects_future_sensitive_strategy():
     assert result.violations == ("hidden_lookahead_detected",)
 
 
+def test_hidden_lookahead_check_excludes_future_timestamp_even_when_available_early():
+    rows = [row(AS_OF, 100.0, available_at=AS_OF), row(FUTURE, 999.0, available_at=DECISION)]
+    baseline = future_sensitive_strategy(rows, {})
+
+    result = check_hidden_lookahead(
+        future_sensitive_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+    )
+
+    assert result.passed is False
+    assert result.violations == ("hidden_lookahead_detected",)
+
+
 def test_hidden_lookahead_check_reports_replay_exceptions():
     rows = [row(AS_OF, 100.0, available_at=AS_OF), row(FUTURE, 999.0, available_at=FUTURE)]
     baseline = replay_raising_strategy(rows, {})
@@ -837,15 +853,17 @@ def check_hidden_lookahead(
 
 
 def _row_visible_for_decision(row: Mapping[str, Any], decision: StrategyDecision) -> bool:
+    timestamp, _ = parse_aware_datetime(row.get("timestamp"))
+    if timestamp is None or timestamp > decision.as_of_time:
+        return False
+
     available_value = row.get("available_at")
     if available_value is not None:
         available_at, _ = parse_aware_datetime(available_value)
         if available_at is not None:
             return available_at <= decision.decision_time
-    timestamp, _ = parse_aware_datetime(row.get("timestamp"))
-    if timestamp is None:
-        return False
-    return timestamp <= decision.as_of_time
+
+    return True
 
 
 def _decision_key(decision: StrategyDecision) -> str:
@@ -911,7 +929,7 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=size),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
@@ -946,7 +964,7 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"

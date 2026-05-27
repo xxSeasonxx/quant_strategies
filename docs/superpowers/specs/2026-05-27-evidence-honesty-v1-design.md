@@ -47,9 +47,12 @@ For each validation window:
 1. Generate baseline decisions from the full loaded window.
 2. For each baseline decision, build a truncated row set containing only rows
    that are in the decision information set:
-   - if `available_at` is present and valid, keep rows with
+   - first require `timestamp <= decision.as_of_time`;
+   - if `available_at` is present and valid, also require
      `available_at <= decision.decision_time`;
-   - otherwise keep rows with `timestamp <= decision.as_of_time`.
+   - if `available_at` is missing or invalid, fall back to the timestamp rule
+     only for replay filtering. Separate data-audit checks still report
+     declared rows with bad availability metadata.
 3. Re-run `generate_decisions` on the truncated rows.
 4. Normalize and compare decision fingerprints for the same `strategy_id`.
 

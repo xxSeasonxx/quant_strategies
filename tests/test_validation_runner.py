@@ -36,7 +36,7 @@ def write_candidate(
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
@@ -156,6 +156,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True
+    assert decision_payload["failure_details"] == []
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
@@ -191,6 +192,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert robustness_matrix["decision"]["decision"] == "watchlist"
     assert "min_windows" in robustness_matrix["decision"]["failed_gates"]
     assert len(robustness_matrix["scenarios"]) == 6
+    assert robustness_matrix["failure_details"] == []
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `watchlist`" in report
     assert "Reasons: paper_readiness_gates_failed" in report
@@ -331,6 +333,7 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True
     assert decision_payload["failed_gates"] == []
+    assert decision_payload["failure_details"] == []
     assert decision_payload["overfit_controls"] == {
         "trial_count": None,
         "deflated_sharpe": None,
@@ -354,6 +357,7 @@ def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
     assert robustness_matrix["decision"]["failed_gates"] == []
     assert "gate_details" in robustness_matrix["decision"]
     assert len(robustness_matrix["scenarios"]) == 12
+    assert robustness_matrix["failure_details"] == []
 
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `paper_candidate`" in report
@@ -391,6 +395,53 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
         result.result_dir / "backend_capability_matrix.json"
     )
+
+
+def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
+    candidate = write_candidate(tmp_path)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace('strategy_path = "strategy.py"', 'strategy_path = "missing.py"')
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_import_failed",)
+    assert result.result_dir is not None
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["failure_details"][0]["stage"] == "strategy_import"
+    assert decision_payload["failure_details"][0]["type"] == "ValidationStrategyLoadError"
+    assert "missing.py" in decision_payload["failure_details"][0]["message"]
+    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
+    assert robustness_matrix["failure_details"] == decision_payload["failure_details"]
+
+
+def test_run_validation_records_backend_selection_failure_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+
+    def fail_backend_selection(name: str):
+        raise RuntimeError("backend registry down")
+
+    monkeypatch.setattr("quant_strategies.validation.get_backend", fail_backend_selection)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("backend_selection_failed",)
+    assert result.result_dir is not None
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["failure_details"] == [
+        {
+            "stage": "backend_selection",
+            "type": "RuntimeError",
+            "message": "backend registry down",
+        }
+    ]
 
 
 def test_run_validation_ignores_unconfigured_manifest_next_to_config(
@@ -493,7 +544,7 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
@@ -512,6 +563,67 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
     assert audit["windows"][0]["violations"] == [
         "decision[0] has 0 observations; requires at least 1",
         "decision[0] missing required observation fields: ['close']",
+    ]
+
+
+def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeypatch):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    future_rows = [row for row in rows if row['timestamp'] > rows[0]['timestamp']]\n"
+        "    size = 2.0 if len(future_rows) > 1 else 1.0\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=size),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("hidden_lookahead_detected",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["passed"] is False
+    assert audit["windows"][0]["violations"] == ["hidden_lookahead_detected"]
+
+
+def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, monkeypatch):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 3:\n"
+        "        raise RuntimeError('need future row')\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("hidden_lookahead_check_failed",)
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["violations"] == [
+        "hidden_lookahead_check_failed: RuntimeError: need future row"
     ]
 
 
@@ -555,6 +667,12 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
 
 def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path, backend=None)
+    (candidate / "strategy.py").write_text(
+        (candidate / "strategy.py")
+        .read_text()
+        .replace("decision_time=rows[0]['timestamp']", "decision_time=rows[1]['timestamp']")
+        .replace("as_of_time=rows[0]['timestamp']", "as_of_time=rows[1]['timestamp']")
+    )
     monkeypatch.setattr("quant_strategies.runner.data_loader.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setitem(sys.modules, "vectorbtpro", SimpleNamespace())
 
@@ -707,7 +825,7 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
@@ -755,7 +873,7 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
+        "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
         "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
@@ -783,6 +901,9 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
     assert decision_payload["failed_gates"] == ["param_validation_failed"]
     assert decision_payload["gate_details"]["param_validation_failed"] == "failed"
+    assert decision_payload["failure_details"][0]["stage"] == "param_validation"
+    assert decision_payload["failure_details"][0]["type"] == "ValueError"
+    assert "unknown params" in decision_payload["failure_details"][0]["message"]
 
 
 def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch):
