@@ -326,16 +326,14 @@ def run_validation(
 
     data_passed = all(audit["passed"] for audit in data_audits)
     if failure_reasons:
-        decision = ValidationPolicyDecision(
-            decision="hard_no",
-            reasons=tuple(dict.fromkeys(failure_reasons)),
-        )
+        decision = _hard_no_decision(failure_reasons)
     else:
         decision = classify_validation(
             data_passed=data_passed,
             backend_results=backend_results,
             min_trades=min_trades,
             required_scenario_ids=tuple(required_scenario_ids),
+            paper_readiness=config.paper_readiness,
         )
     _write_validation_artifacts(
         result_dir=result_dir,
@@ -355,10 +353,20 @@ def run_validation(
 
 def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> ValidationRunResult:
     return ValidationRunResult(
-        success=decision.decision == "mechanical_pass",
+        success=decision.decision in {"mechanical_pass", "watchlist", "paper_candidate"},
         result_dir=result_dir,
         decision=decision,
         message=f"validation decision: {decision.decision}",
+    )
+
+
+def _hard_no_decision(reasons: str | Sequence[str]) -> ValidationPolicyDecision:
+    reason_tuple = (reasons,) if isinstance(reasons, str) else tuple(dict.fromkeys(reasons))
+    return ValidationPolicyDecision(
+        decision="hard_no",
+        reasons=reason_tuple,
+        failed_gates=reason_tuple,
+        gate_details={reason: "failed" for reason in reason_tuple},
     )
 
 
@@ -376,7 +384,7 @@ def _failure_result(
     research_manifest: dict[str, Any],
     reason: str,
 ) -> ValidationRunResult:
-    decision = ValidationPolicyDecision(decision="hard_no", reasons=(reason,))
+    decision = _hard_no_decision(reason)
     _write_validation_artifacts(
         result_dir=result_dir,
         repo_root=repo_root,
@@ -663,11 +671,25 @@ def _write_validation_artifacts(
         "validation_decision.json",
         decision.model_dump(mode="json"),
     )
+    failed_gates = ", ".join(decision.failed_gates) or "none"
+    passed_gates = ", ".join(decision.passed_gates) or "none"
+    reasons = ", ".join(decision.reasons) or "none"
+    gate_details = "\n".join(
+        f"- {name}: {detail}" for name, detail in sorted(decision.gate_details.items())
+    )
+    if not gate_details:
+        gate_details = "- none"
     write_text_artifact(
         result_dir,
         "validation_report.md",
-        f"# Validation Report\n\nDecision: `{decision.decision}`\n\n"
-        f"Reasons: {', '.join(decision.reasons) or 'none'}\n",
+        (
+            "# Validation Report\n\n"
+            f"Decision: `{decision.decision}`\n\n"
+            f"Reasons: {reasons}\n\n"
+            f"Passed gates: {passed_gates}\n\n"
+            f"Failed gates: {failed_gates}\n\n"
+            f"Gate details:\n{gate_details}\n"
+        ),
     )
     write_validation_manifest(
         result_dir,

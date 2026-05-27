@@ -138,7 +138,10 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-def test_run_validation_writes_mechanical_pass_artifacts(tmp_path: Path, monkeypatch):
+def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
+    tmp_path: Path,
+    monkeypatch,
+):
     package = write_package(tmp_path)
     monkeypatch.setattr(
         "quant_strategies.runner.data_loader.load_data",
@@ -156,16 +159,21 @@ def test_run_validation_writes_mechanical_pass_artifacts(tmp_path: Path, monkeyp
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_pass"
+    assert result.success is True
+    assert result.decision.decision == "watchlist"
+    assert result.decision.reasons == ("paper_readiness_gates_failed",)
+    assert "min_windows" in result.decision.failed_gates
+    assert "min_total_trades" in result.decision.failed_gates
+    assert "aggregate_realistic_net_positive" in result.decision.passed_gates
     assert result.result_dir is not None
-    promotion = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert promotion["decision"] == "mechanical_pass"
-    assert promotion["evidence_class"] == "validation_advisory"
-    assert promotion["advisory_decision"] == "mechanical_pass"
-    assert promotion["promotion_eligible"] is False
-    assert promotion["paper_trade_eligible"] is False
-    assert promotion["live_eligible"] is False
-    assert promotion["requires_manual_approval"] is True
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["decision"] == "watchlist"
+    assert decision_payload["evidence_class"] == "validation_advisory"
+    assert decision_payload["advisory_decision"] == "watchlist"
+    assert decision_payload["promotion_eligible"] is False
+    assert decision_payload["paper_trade_eligible"] is False
+    assert decision_payload["live_eligible"] is False
+    assert decision_payload["requires_manual_approval"] is True
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
@@ -198,8 +206,17 @@ def test_run_validation_writes_mechanical_pass_artifacts(tmp_path: Path, monkeyp
     assert (result.result_dir / "strategy_snapshot.py").exists()
     assert (result.result_dir / "decision_schema.json").exists()
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "mechanical_pass"
+    assert robustness_matrix["decision"]["decision"] == "watchlist"
+    assert "min_windows" in robustness_matrix["decision"]["failed_gates"]
     assert len(robustness_matrix["scenarios"]) == 6
+    report = (result.result_dir / "validation_report.md").read_text()
+    assert "Decision: `watchlist`" in report
+    assert "Reasons: paper_readiness_gates_failed" in report
+    assert "Passed gates: " in report
+    assert "Failed gates: " in report
+    assert "Gate details:" in report
+    assert "- min_windows: 1 >= 2" in report
+    assert "- min_total_trades: 20 >= 30" in report
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["validation"]["strategy_id"] == "demo"
     assert manifest["validation"]["backend"] == "fake"
@@ -245,6 +262,127 @@ def test_run_validation_writes_mechanical_pass_artifacts(tmp_path: Path, monkeyp
     assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
         base_decision_file
     )
+
+
+def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
+    tmp_path: Path,
+    monkeypatch,
+):
+    package = write_package(
+        tmp_path,
+        window_ids=("validation_2026_h1", "validation_2026_h2"),
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.data_loader.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+    backend = ScenarioAwareBackend(
+        {
+            "validation_2026_h1/base": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": 0.03, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h1/realistic_costs": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": 0.02, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h1/stressed_costs": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": -0.005, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h1/fill_lag_plus_1": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": -0.004, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h2/base": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": 0.025, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h2/realistic_costs": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": 0.015, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h2/stressed_costs": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": -0.005, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+            "validation_2026_h2/fill_lag_plus_1": BackendRunResult(
+                backend="scenario_aware",
+                status="completed",
+                metrics={"net_return": -0.004, "trade_count": 20},
+                warnings=(),
+                unsupported_semantics=(),
+            ),
+        }
+    )
+
+    result = run_validation(package, repo_root=tmp_path, backend=backend)
+
+    assert result.success is True
+    assert result.decision.decision == "paper_candidate"
+    assert result.result_dir is not None
+    assert backend.calls == 12
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["decision"] == "paper_candidate"
+    assert decision_payload["advisory_decision"] == "paper_candidate"
+    assert decision_payload["promotion_eligible"] is False
+    assert decision_payload["paper_trade_eligible"] is False
+    assert decision_payload["live_eligible"] is False
+    assert decision_payload["requires_manual_approval"] is True
+    assert decision_payload["failed_gates"] == []
+    assert decision_payload["overfit_controls"] == {
+        "trial_count": None,
+        "deflated_sharpe": None,
+        "monte_carlo": None,
+    }
+    assert set(decision_payload["passed_gates"]) >= {
+        "mechanical_validation",
+        "min_windows",
+        "min_total_trades",
+        "no_zero_trade_windows",
+        "aggregate_realistic_net_positive",
+        "positive_window_fraction",
+        "stressed_net_floor",
+        "fill_lag_net_floor",
+    }
+    assert decision_payload["gate_details"]["min_windows"] == "2 >= 2"
+    assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
+
+    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
+    assert robustness_matrix["decision"]["decision"] == "paper_candidate"
+    assert robustness_matrix["decision"]["failed_gates"] == []
+    assert "gate_details" in robustness_matrix["decision"]
+    assert len(robustness_matrix["scenarios"]) == 12
+
+    report = (result.result_dir / "validation_report.md").read_text()
+    assert "Decision: `paper_candidate`" in report
+    assert "Reasons: none" in report
+    assert "Passed gates: " in report
+    assert "Failed gates: none" in report
+    assert "Gate details:" in report
+    assert "- min_total_trades: 40 >= 30" in report
+    assert "- stressed_net_floor: -0.005 >= -0.02" in report
 
 
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
@@ -456,7 +594,7 @@ def test_run_validation_ignores_parent_manifest_for_non_researched_config(
 
     result = run_validation(package / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_pass"
+    assert result.decision.decision == "watchlist"
     assert backend.calls == 6
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
@@ -629,7 +767,8 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_pass"
+    assert result.decision.decision == "watchlist"
+    assert "min_total_trades" in result.decision.failed_gates
     assert len(loaded_row_ids) == 2
     assert backend.calls == 12
     h1_row_ids = {
@@ -658,7 +797,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_pass"
+    assert result.decision.decision == "watchlist"
     configs = {item.scenario_id: item for item in backend.configs}
     decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
     assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
@@ -724,7 +863,7 @@ def test_run_validation_records_failed_parameter_generation_without_backend_call
 
     result = run_validation(package, repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_pass"
+    assert result.decision.decision == "watchlist"
     assert backend.calls == 5
     assert result.result_dir is not None
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
@@ -783,6 +922,12 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert "param_validation_failed: unknown params" in audit["windows"][0]["violations"][0]
+    report = (result.result_dir / "validation_report.md").read_text()
+    assert "Failed gates: none" not in report
+    assert "Failed gates: param_validation_failed" in report
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["failed_gates"] == ["param_validation_failed"]
+    assert decision_payload["gate_details"]["param_validation_failed"] == "failed"
 
 
 def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch):
@@ -849,9 +994,12 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
 
     assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("strategy_generation_failed",)
+    assert result.decision.failed_gates == ("strategy_generation_failed",)
     assert result.result_dir is not None
     assert (result.result_dir / "validation_decision.json").exists()
-    assert (result.result_dir / "validation_report.md").exists()
+    report = (result.result_dir / "validation_report.md").read_text()
+    assert "Failed gates: none" not in report
+    assert "Failed gates: strategy_generation_failed" in report
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert summary["results"] == []
 

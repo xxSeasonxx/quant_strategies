@@ -84,6 +84,15 @@ class ValidationReadinessConfig(ValidationConfigModel):
         return fields
 
 
+class PaperReadinessConfig(ValidationConfigModel):
+    enabled: bool = True
+    min_windows: int = Field(default=2, ge=1)
+    min_total_trades: int = Field(default=30, ge=1)
+    min_positive_window_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    max_stressed_net_loss: float = Field(default=-0.02, le=0.0)
+    max_fill_lag_net_loss: float = Field(default=-0.02, le=0.0)
+
+
 class ValidationConfig(ValidationConfigModel):
     _repo_root_path: Path = PrivateAttr(default_factory=default_repo_root)
 
@@ -97,6 +106,7 @@ class ValidationConfig(ValidationConfigModel):
     cost_model: CostModelConfig
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig | None = None
+    paper_readiness: PaperReadinessConfig = Field(default_factory=PaperReadinessConfig)
 
     def model_post_init(self, context: Any, /) -> None:
         root = context.get("repo_root") if isinstance(context, dict) else None

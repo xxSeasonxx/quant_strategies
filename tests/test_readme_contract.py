@@ -14,6 +14,7 @@ def test_readme_uses_generic_foundation_contract_language():
         "fx" + "_triangular_residual",
         "crypto" + "_perp_funding_crowding_reversal",
         "_smoke.toml",
+        "maybe",
     )
     for term in forbidden_terms:
         assert term not in text
@@ -21,5 +22,13 @@ def test_readme_uses_generic_foundation_contract_language():
 
     assert "generate_decisions(rows, params) -> list[StrategyDecision]" in text
     assert "validation_decision.json" in text
+    assert "hard_no" in text
     assert "mechanical_pass" in text
+    assert "watchlist" in text
+    assert "paper_candidate" in text
+    assert "[paper_readiness]" in text
+    assert "min_windows = 2" in text
+    assert "min_total_trades = 30" in text
+    assert "max_stressed_net_loss = -0.02" in text
+    assert "max_fill_lag_net_loss = -0.02" in text
     assert "smoke_score.sum_weighted_trade_*" in text

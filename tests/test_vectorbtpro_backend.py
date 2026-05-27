@@ -142,6 +142,98 @@ def funding_rows():
     ]
 
 
+def test_vectorbtpro_backend_extracts_available_optional_metrics(monkeypatch):
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        def profit_factor(self):
+            return 2.5
+
+        def win_rate(self):
+            return 0.75
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return 0.04
+
+        def get_max_drawdown(self):
+            return -0.12
+
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda *args, **kwargs: FakePortfolio())
+    )
+    monkeypatch.setitem(sys.modules, "vectorbtpro", fake_vbt)
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["net_return"] == pytest.approx(0.04)
+    assert result.metrics["trade_count"] == 1
+    assert result.metrics["max_drawdown"] == pytest.approx(-0.12)
+    assert result.metrics["profit_factor"] == pytest.approx(2.5)
+    assert result.metrics["win_rate"] == pytest.approx(0.75)
+
+
+def test_vectorbtpro_backend_ignores_missing_optional_metrics(monkeypatch):
+    install_fake_vectorbtpro(monkeypatch, total_return=0.04, trade_count=1)
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["net_return"] == pytest.approx(0.04)
+    assert result.metrics["trade_count"] == 1
+    assert "max_drawdown" not in result.metrics
+    assert "profit_factor" not in result.metrics
+    assert "win_rate" not in result.metrics
+
+
+def test_vectorbtpro_backend_ignores_failed_and_nonfinite_optional_metrics(monkeypatch):
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        def profit_factor(self):
+            raise RuntimeError("optional metric unavailable")
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def get_total_return(self):
+            return 0.04
+
+        def get_max_drawdown(self):
+            return float("nan")
+
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda *args, **kwargs: FakePortfolio())
+    )
+    monkeypatch.setitem(sys.modules, "vectorbtpro", fake_vbt)
+
+    result = VectorBTProBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["net_return"] == pytest.approx(0.04)
+    assert result.metrics["trade_count"] == 1
+    assert "max_drawdown" not in result.metrics
+    assert "profit_factor" not in result.metrics
+    assert "win_rate" not in result.metrics
+
+
 def test_vectorbtpro_backend_reports_unsupported_threshold_exits():
     result = VectorBTProBackend().run(
         decisions=[decision(stop_loss_bps=100.0)],

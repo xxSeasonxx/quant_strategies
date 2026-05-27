@@ -1,0 +1,65 @@
+{
+  "artifact_profile": "full",
+  "artifacts": [
+    "config.toml",
+    "data_manifest.json",
+    "decision_records.jsonl",
+    "engine_request.json",
+    "evidence.json",
+    "notes.md",
+    "run_manifest.json",
+    "signals.csv",
+    "strategy_input_rows.csv",
+    "strategy_input_rows.jsonl",
+    "strategy_snapshot.py",
+    "summary.json"
+  ],
+  "assessment_status": "smoke_passed",
+  "engine": {
+    "gates": [
+      {
+        "detail": "screening completed",
+        "name": "valid_inputs",
+        "passed": true
+      },
+      {
+        "detail": "665 >= 1",
+        "name": "min_trades",
+        "passed": true
+      },
+      {
+        "detail": "sum_weighted_trade_gross_return=0.645033051897",
+        "name": "positive_gross",
+        "passed": true
+      },
+      {
+        "detail": "sum_weighted_trade_net_return=0.649974387897",
+        "name": "positive_net",
+        "passed": true
+      }
+    ],
+    "passed": true,
+    "smoke_score": {
+      "sum_weighted_trade_cost_return": 0.0,
+      "sum_weighted_trade_funding_return": 0.004941336,
+      "sum_weighted_trade_gross_return": 0.6450330518974394,
+      "sum_weighted_trade_net_return": 0.6499743878974394
+    },
+    "trade_count": 665
+  },
+  "evidence_class": "runner_smoke",
+  "funding_model": "linear_additive_adjustment",
+  "live_eligible": false,
+  "message": "# Run Complete\n\nstrategy_id: crypto_perp_funding_crowding_reversal_stateful_rebalance\nmode: validate\nstatus: passed\nreturn_scope: price-and-funding; supplied funding events are included when they fall inside engine-held intervals.\ninterpretation: runner smoke evidence only; not market robustness or promotion evidence.",
+  "mode": "validate",
+  "paper_trade_eligible": false,
+  "promotion_eligible": false,
+  "requires_manual_approval": true,
+  "return_model": "smoke_score.sum_weighted_trade_net_return",
+  "run_completed": true,
+  "stage": "completed",
+  "status": "passed",
+  "strategy_contract": "decision",
+  "strategy_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance",
+  "success": true
+}

@@ -1,0 +1,63 @@
+{
+  "artifact_profile": "full",
+  "artifacts": {
+    "config.toml": {
+      "sha256": "66e7159d6c9280797790abd2819b9f96f38c824997a4508c12da208ca2c788bd"
+    },
+    "data_manifest.json": {
+      "sha256": "639b041a05f161837a76895404ee004912443c9a861b5747a45921019443e813"
+    },
+    "decision_records.jsonl": {
+      "sha256": "715d75bc12e2d659f3a97f1a41b7378768e9815d190bb2dddaf4f9365d3fbf2f"
+    },
+    "engine_request.json": {
+      "sha256": "621b3b63d8d8b1d6374cc432c4ba61005bbbc3c2590eb7bf7c95b188e945b656"
+    },
+    "evidence.json": {
+      "sha256": "7a5c66d6b02f8d4c6d41e978b626173d1274c5fa016eb95465194418095eb110"
+    },
+    "notes.md": {
+      "sha256": "2ba1ab50516465a6619657316c1616c397a5d04656f784b2012dbfb9b9401062"
+    },
+    "signals.csv": {
+      "sha256": "ea3c3f9f88d00c78bedb1929d69c4bc0328aa354a55d4c4be62045f818580db4"
+    },
+    "strategy_input_rows.csv": {
+      "sha256": "8660a95d0e04de6b04e46414b6104ac8217003c99571acb20ef7a5185b5cf663"
+    },
+    "strategy_input_rows.jsonl": {
+      "sha256": "2d6ec5d782865ba82ca6f2c11aa18d232bb056439618d46271d1c965317b9e0d"
+    },
+    "strategy_snapshot.py": {
+      "sha256": "112a92b01cae0c9f271c5edbb24ff250f5cb2f7a69f47d1f8e0cb3ce0590d7f6"
+    }
+  },
+  "engine": {
+    "evidence_schema": "quant_strategies.engine.evidence/v2"
+  },
+  "evidence": {
+    "evidence_class": "runner_smoke",
+    "funding_model": "linear_additive_adjustment",
+    "live_eligible": false,
+    "paper_trade_eligible": false,
+    "promotion_eligible": false,
+    "requires_manual_approval": true,
+    "return_model": "smoke_score.sum_weighted_trade_net_return",
+    "strategy_contract": "decision"
+  },
+  "packages": {
+    "pydantic": "2.12.5",
+    "quant-data": "0.1.0",
+    "quant-strategies": "0.1.0"
+  },
+  "python": {
+    "version": "3.12.13"
+  },
+  "repository": {
+    "commit": "4ac5d5be551a9ec73743d3567cf18e52286fa1cd",
+    "dirty": true,
+    "short_commit": "4ac5d5b",
+    "status_porcelain_sha256": "37efd0c01ccdd2de9ea1c491024361e4e9bbc9882060e840f82bc9b0cdc3ea3a",
+    "tracked_diff_sha256": "643652948d4498a242c10f3e9cf224376c716c44d7e5882b9cec49a6f58031ae"
+  }
+}
