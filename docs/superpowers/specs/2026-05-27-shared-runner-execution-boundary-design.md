@@ -7,8 +7,7 @@ Date: 2026-05-27
 Extract the duplicated runner/validation strategy execution path into one small
 internal boundary. The boundary should make runner and validation use the same
 strategy loading, parameter validation, data loading, decision generation,
-decision validation, signal conversion, row hashing, and evidence-quality
-calculation.
+decision validation, row hashing, and evidence-quality calculation.
 
 This is a refactor. It should preserve behavior and artifact semantics.
 
@@ -66,7 +65,6 @@ def execute_strategy_run(
 - `validated_params`
 - `loaded_rows`
 - `decisions`
-- `signals`
 - `normalized_rows_sha256`
 - `evidence_quality`
 
@@ -107,9 +105,11 @@ stage into existing audit/failure artifacts.
 1. Resolve and load `RunConfig`.
 2. Create the result directory and initialize static snapshots.
 3. Call `execute_strategy_run(config, repo_root=effective_repo_root)`.
-4. Write data manifest, strategy input rows, decision records, and signals from
-   the result according to `artifact_profile`.
-5. Continue with runner data readiness, engine request building, engine
+4. Write data manifest and strategy input rows from the result according to
+   `artifact_profile`.
+5. Convert decisions to runner smoke-engine signals in `runner.run_config`.
+6. Write decision records and signals according to `artifact_profile`.
+7. Continue with runner data readiness, engine request building, engine
    evaluation, evidence writing, summary-profile writing, notes, run manifest,
    and summary.
 
@@ -145,7 +145,6 @@ Validation remains the owner of:
 - `runner.strategy_loader`
 - `runner.artifact_profiles.normalized_rows_sha256`
 - `runner.artifacts.evidence_quality`
-- `runner.decision_adapter.decisions_to_signal_rows`
 - `decisions.validate_strategy_params`
 - `decisions.validate_decision_output`
 - `boundary.frozen_rows` and `boundary.frozen_params`
@@ -162,15 +161,18 @@ It must not depend on:
 
 Add focused tests for `runner.execution`:
 
-- success returns loaded rows, validated params, decisions, signals, row hash,
-  and evidence quality.
+- success returns loaded rows, validated params, decisions, row hash, and
+  evidence quality.
 - strategy import failure reports `stage = "strategy_import"`.
 - param validation failure reports `stage = "param_validation"`.
 - data load failure reports `stage = "data_load"`.
 - invalid decision output reports `stage = "decision_generation"`.
+- valid `StrategyDecision` shapes unsupported by the runner signal adapter, such
+  as `flat`, remain valid execution-boundary results.
 
 Update existing runner tests only where assertions need the new internal call
-path. Runner artifact expectations should remain unchanged.
+path. Runner artifact expectations should remain unchanged, and runner-only
+signal adapter failures should still preserve loaded data artifacts.
 
 Update validation tests to ensure:
 
@@ -180,6 +182,8 @@ Update validation tests to ensure:
 - per-window scenario configs still carry window-scoped `data.start` and
   `data.end`,
 - hidden-lookahead and readiness behavior are unchanged.
+- valid decisions unsupported by the runner signal adapter reach validation
+  backends and are classified through backend unsupported semantics.
 
 Run focused tests first, then the full suite.
 

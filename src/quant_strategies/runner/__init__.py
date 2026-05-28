@@ -3,24 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from quant_strategies.boundary import frozen_params, frozen_rows
-from quant_strategies.decisions import (
-    StrategyDecision,
-    validate_decision_output,
-    validate_strategy_params,
-)
 from quant_strategies.evidence_semantics import runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
     config as config_module,
-    data_loader,
     data_readiness,
     engine_runner,
-    strategy_loader,
 )
-from quant_strategies.runner.artifact_profiles import normalized_rows_sha256, write_summary_profile_artifact
+from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
+from quant_strategies.runner.execution import StrategyExecutionError, execute_strategy_run
 
 
 @dataclass(frozen=True)
@@ -46,57 +39,65 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
     artifacts.initialize_run_artifacts(config_file, config, result_dir)
 
     try:
-        generate_decisions = strategy_loader.load_strategy(config.strategy_path, repo_root=effective_repo_root)
-    except RunnerError as exc:
-        return _failure_result(config, result_dir, "strategy_import", str(exc), repo_root=effective_repo_root)
-
-    try:
-        validated_params = validate_strategy_params(generate_decisions, config.params)
-    except Exception as exc:
+        execution = execute_strategy_run(config, repo_root=effective_repo_root)
+    except StrategyExecutionError as exc:
+        if (
+            exc.stage == "decision_generation"
+            and exc.loaded_rows is not None
+            and exc.normalized_rows_sha256 is not None
+        ):
+            strategy_input_rows_jsonl_sha256 = None
+            if config.output.artifact_profile == "full":
+                strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(
+                    result_dir,
+                    exc.loaded_rows,
+                )
+            artifacts.write_data_manifest(
+                result_dir,
+                config,
+                exc.loaded_rows,
+                strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+                normalized_rows_hash=exc.normalized_rows_sha256,
+            )
         return _failure_result(
             config,
             result_dir,
-            "param_validation",
-            f"param validation failed: {exc}",
+            exc.stage,
+            str(exc),
             repo_root=effective_repo_root,
+            evidence_quality=exc.evidence_quality,
         )
 
-    try:
-        loaded = data_loader.load_data(config)
-        normalized_rows_hash = normalized_rows_sha256(loaded.rows)
-        evidence_quality = artifacts.evidence_quality(config, loaded.rows)
-        strategy_input_rows_jsonl_sha256 = None
-        if config.output.artifact_profile == "full":
-            strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(result_dir, loaded.rows)
-        artifacts.write_data_manifest(
+    strategy_input_rows_jsonl_sha256 = None
+    if config.output.artifact_profile == "full":
+        strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(
             result_dir,
-            config,
-            loaded.rows,
-            strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
-            normalized_rows_hash=normalized_rows_hash,
+            execution.loaded_rows,
         )
-    except RunnerError as exc:
-        return _failure_result(config, result_dir, "data_load", str(exc), repo_root=effective_repo_root)
-
+    artifacts.write_data_manifest(
+        result_dir,
+        config,
+        execution.loaded_rows,
+        strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+        normalized_rows_hash=execution.normalized_rows_sha256,
+    )
     try:
-        decision_output = generate_decisions(frozen_rows(loaded.rows), frozen_params(validated_params))
-        decisions = _validated_decisions(decision_output, strategy_id=config.strategy_id)
-        signals = decisions_to_signal_rows(decisions)
-        if config.output.artifact_profile == "full":
-            artifacts.write_decision_records(result_dir, decisions)
-            artifacts.write_signals(result_dir, signals)
-    except Exception as exc:
+        signals = decisions_to_signal_rows(execution.decisions)
+    except RunnerError as exc:
         return _failure_result(
             config,
             result_dir,
             "decision_generation",
             f"strategy execution failed: {exc}",
             repo_root=effective_repo_root,
-            evidence_quality=evidence_quality,
+            evidence_quality=execution.evidence_quality,
         )
+    if config.output.artifact_profile == "full":
+        artifacts.write_decision_records(result_dir, execution.decisions)
+        artifacts.write_signals(result_dir, signals)
 
     try:
-        data_readiness.assert_decision_rows_ready(loaded.rows, signals)
+        data_readiness.assert_decision_rows_ready(execution.loaded_rows, signals)
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -104,13 +105,13 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "data_readiness",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=evidence_quality,
+            evidence_quality=execution.evidence_quality,
         )
 
     try:
         request = engine_runner.build_request(
             strategy_id=config.strategy_id,
-            rows=loaded.rows,
+            rows=execution.loaded_rows,
             signals=signals,
             fill_model=config.fill_model,
             cost_model=config.cost_model,
@@ -124,7 +125,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "request_build",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=evidence_quality,
+            evidence_quality=execution.evidence_quality,
         )
 
     try:
@@ -140,7 +141,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "engine_evaluation",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=evidence_quality,
+            evidence_quality=execution.evidence_quality,
         )
 
     engine_summary = _compact_engine_summary(engine_run)
@@ -150,11 +151,11 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         write_summary_profile_artifact(
             result_dir,
             config=config,
-            rows=loaded.rows,
-            decisions=decisions,
+            rows=execution.loaded_rows,
+            decisions=execution.decisions,
             signals=signals,
             engine=engine_summary,
-            normalized_rows_hash=normalized_rows_hash,
+            normalized_rows_hash=execution.normalized_rows_sha256,
         )
     notes = _completion_notes(config, engine_run)
     artifacts.write_notes(result_dir, notes)
@@ -176,7 +177,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             message=notes.strip(),
             engine=engine_summary,
             assessment_status=assessment_status,
-            evidence_quality=evidence_quality,
+            evidence_quality=execution.evidence_quality,
         ),
     )
     return RunResult(
@@ -229,13 +230,6 @@ def _failure_result(
         assessment_status="runner_failed",
         promotion_eligible=False,
     )
-
-
-def _validated_decisions(output: object, *, strategy_id: str) -> list[StrategyDecision]:
-    decisions, violations = validate_decision_output(output, strategy_id=strategy_id)
-    if violations:
-        raise ValueError("; ".join(violations))
-    return decisions
 
 
 def _summary_payload(

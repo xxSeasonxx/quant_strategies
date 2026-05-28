@@ -4,7 +4,9 @@
 
 **Goal:** Refactor runner and validation to share one internal strategy execution boundary while preserving runner and validation artifact behavior.
 
-**Architecture:** Add `quant_strategies.runner.execution` as the only shared execution boundary. It loads strategy/data, validates params and decisions, converts decisions to signals, and returns a typed result; runner and validation keep ownership of artifacts, smoke engine, audit, lookahead, readiness, backend matrix, and policy.
+**Architecture:** Add `quant_strategies.runner.execution` as the only shared execution boundary. It loads strategy/data, validates params and decisions, and returns a typed result with row/evidence context; runner keeps ownership of smoke-engine signal conversion and artifacts, while validation keeps ownership of audit, lookahead, readiness, backend matrix, and policy.
+
+**Post-review correction:** The initial draft below placed `decisions_to_signal_rows` inside `execute_strategy_run`. Code review found that this leaked runner smoke-engine semantics into validation. The accepted implementation keeps signal conversion in `runner.run_config`; any older snippets below that mention `execution.signals` are superseded by this correction.
 
 **Tech Stack:** Python 3.12, dataclasses, Pydantic config models, pytest, existing `quant_data` loader APIs.
 
@@ -14,7 +16,7 @@
 
 - Create `src/quant_strategies/runner/execution.py`
   - Owns `StrategyExecutionResult`, `StrategyExecutionError`, and `execute_strategy_run`.
-  - Depends on runner config/data/strategy loader, decision validation, signal adapter, row hash, and evidence quality.
+  - Depends on runner config/data/strategy loader, decision validation, row hash, and evidence quality.
   - Must not import validation modules or engine evaluation.
 
 - Create `tests/test_runner_execution.py`
@@ -22,7 +24,7 @@
 
 - Modify `src/quant_strategies/runner/__init__.py`
   - Replace duplicated strategy/data/decision setup with `execute_strategy_run`.
-  - Keep artifact writing, data readiness, engine request/evaluation, notes, manifest, and summary in runner.
+  - Keep signal conversion, artifact writing, data readiness, engine request/evaluation, notes, manifest, and summary in runner.
 
 - Modify `src/quant_strategies/validation/__init__.py`
   - Replace duplicated strategy/data/decision setup with `execute_strategy_run` per validation window.
@@ -164,7 +166,7 @@ def validate_params(params):
 valid_generate_decisions.validate_params = validate_params
 
 
-def test_execute_strategy_run_returns_validated_decisions_and_signals(
+def test_execute_strategy_run_returns_validated_decisions_and_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -185,8 +187,6 @@ def test_execute_strategy_run_returns_validated_decisions_and_signals(
     assert result.loaded_rows == rows()
     assert len(result.decisions) == 1
     assert result.decisions[0].target.size == 0.5
-    assert result.signals[0]["symbol"] == "SPY"
-    assert result.signals[0]["weight"] == 0.5
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"
 
@@ -211,6 +211,7 @@ def test_execute_strategy_run_reports_strategy_import_failure(
     assert exc_info.value.stage == "strategy_import"
     assert str(exc_info.value) == "missing strategy"
     assert exc_info.value.loaded_rows is None
+    assert exc_info.value.normalized_rows_sha256 is None
     assert exc_info.value.violations == ()
 
 
@@ -263,6 +264,7 @@ def test_execute_strategy_run_reports_data_load_failure(
     assert exc_info.value.stage == "data_load"
     assert str(exc_info.value) == "data load returned no rows"
     assert exc_info.value.loaded_rows is None
+    assert exc_info.value.normalized_rows_sha256 is None
 
 
 def test_execute_strategy_run_reports_invalid_decision_output(
@@ -289,6 +291,7 @@ def test_execute_strategy_run_reports_invalid_decision_output(
     assert exc_info.value.stage == "decision_generation"
     assert str(exc_info.value) == "invalid_decision_output"
     assert exc_info.value.loaded_rows == rows()
+    assert len(exc_info.value.normalized_rows_sha256) == 64
     assert exc_info.value.decision_count == 0
     assert exc_info.value.violations == ("invalid_decision_output",)
     assert exc_info.value.evidence_quality["data_availability_status"] == "complete"
@@ -325,7 +328,6 @@ from quant_strategies.decisions import (
 from quant_strategies.runner import artifacts, data_loader, strategy_loader
 from quant_strategies.runner.artifact_profiles import normalized_rows_sha256
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
 
 
@@ -343,7 +345,6 @@ class StrategyExecutionResult:
     validated_params: dict[str, Any]
     loaded_rows: list[dict[str, Any]]
     decisions: list[StrategyDecision]
-    signals: list[dict[str, Any]]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
 
@@ -355,6 +356,7 @@ class StrategyExecutionError(RunnerError):
         message: str,
         *,
         loaded_rows: list[dict[str, Any]] | None = None,
+        normalized_rows_sha256: str | None = None,
         evidence_quality: dict[str, Any] | None = None,
         violations: tuple[str, ...] = (),
         decision_count: int = 0,
@@ -362,6 +364,7 @@ class StrategyExecutionError(RunnerError):
         super().__init__(message)
         self.stage = stage
         self.loaded_rows = loaded_rows
+        self.normalized_rows_sha256 = normalized_rows_sha256
         self.evidence_quality = evidence_quality
         self.violations = violations
         self.decision_count = decision_count
@@ -411,11 +414,11 @@ def execute_strategy_run(
                 "decision_generation",
                 "; ".join(violations),
                 loaded_rows=rows,
+                normalized_rows_sha256=row_hash,
                 evidence_quality=evidence_quality,
                 violations=tuple(violations),
                 decision_count=len(decisions),
             )
-        signals = decisions_to_signal_rows(decisions)
     except StrategyExecutionError:
         raise
     except Exception as exc:
@@ -423,6 +426,7 @@ def execute_strategy_run(
             "decision_generation",
             f"strategy execution failed: {exc}",
             loaded_rows=rows,
+            normalized_rows_sha256=row_hash,
             evidence_quality=evidence_quality,
         ) from exc
 
@@ -431,7 +435,6 @@ def execute_strategy_run(
         validated_params=validated_params,
         loaded_rows=rows,
         decisions=decisions,
-        signals=signals,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence_quality,
     )
@@ -485,6 +488,14 @@ Open `tests/test_runner_api_cli.py` and confirm `test_run_config_writes_success_
 
 If one of these assertions is missing, add it to `test_run_config_writes_success_artifacts`.
 
+Also extend `test_invalid_decision_output_fails_before_writing_decision_records` to assert decision-generation failures still preserve pre-decision data artifacts:
+
+```python
+    assert (result.result_dir / "strategy_input_rows.csv").exists()
+    assert (result.result_dir / "strategy_input_rows.jsonl").exists()
+    assert (result.result_dir / "data_manifest.json").exists()
+```
+
 - [ ] **Step 2: Run the runner artifact test as a baseline**
 
 Run:
@@ -527,6 +538,7 @@ from quant_strategies.runner import (
     engine_runner,
 )
 from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
+from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.execution import (
     StrategyExecutionError,
     execute_strategy_run,
@@ -535,12 +547,30 @@ from quant_strategies.runner.execution import (
 
 - [ ] **Step 4: Replace the duplicated execution block in `run_config`**
 
-In `run_config`, replace the strategy load, param validation, data load, decision generation, and signal conversion blocks with:
+In `run_config`, replace the strategy load, param validation, data load, and decision generation blocks with the shared boundary. Keep runner-only signal conversion local:
 
 ```python
     try:
         execution = execute_strategy_run(config, repo_root=effective_repo_root)
     except StrategyExecutionError as exc:
+        if (
+            exc.stage == "decision_generation"
+            and exc.loaded_rows is not None
+            and exc.normalized_rows_sha256 is not None
+        ):
+            strategy_input_rows_jsonl_sha256 = None
+            if config.output.artifact_profile == "full":
+                strategy_input_rows_jsonl_sha256 = artifacts.write_strategy_input_rows(
+                    result_dir,
+                    exc.loaded_rows,
+                )
+            artifacts.write_data_manifest(
+                result_dir,
+                config,
+                exc.loaded_rows,
+                strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+                normalized_rows_hash=exc.normalized_rows_sha256,
+            )
         return _failure_result(
             config,
             result_dir,
@@ -563,9 +593,20 @@ In `run_config`, replace the strategy load, param validation, data load, decisio
         strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
         normalized_rows_hash=execution.normalized_rows_sha256,
     )
+    try:
+        signals = decisions_to_signal_rows(execution.decisions)
+    except RunnerError as exc:
+        return _failure_result(
+            config,
+            result_dir,
+            "decision_generation",
+            f"strategy execution failed: {exc}",
+            repo_root=effective_repo_root,
+            evidence_quality=execution.evidence_quality,
+        )
     if config.output.artifact_profile == "full":
         artifacts.write_decision_records(result_dir, execution.decisions)
-        artifacts.write_signals(result_dir, execution.signals)
+        artifacts.write_signals(result_dir, signals)
 ```
 
 - [ ] **Step 5: Replace downstream runner local variables**
@@ -585,7 +626,7 @@ with:
 ```python
 execution.loaded_rows
 execution.decisions
-execution.signals
+signals
 execution.normalized_rows_sha256
 execution.evidence_quality
 ```
@@ -593,14 +634,14 @@ execution.evidence_quality
 Specific calls should look like:
 
 ```python
-data_readiness.assert_decision_rows_ready(execution.loaded_rows, execution.signals)
+data_readiness.assert_decision_rows_ready(execution.loaded_rows, signals)
 ```
 
 ```python
 request = engine_runner.build_request(
     strategy_id=config.strategy_id,
     rows=execution.loaded_rows,
-    signals=execution.signals,
+    signals=signals,
     fill_model=config.fill_model,
     cost_model=config.cost_model,
 )
@@ -612,7 +653,7 @@ write_summary_profile_artifact(
     config=config,
     rows=execution.loaded_rows,
     decisions=execution.decisions,
-    signals=execution.signals,
+    signals=signals,
     engine=engine_summary,
     normalized_rows_hash=execution.normalized_rows_sha256,
 )
@@ -700,6 +741,10 @@ def test_run_validation_preserves_invalid_decision_output_audit(
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert audit["windows"][0]["passed"] is False
     assert audit["windows"][0]["violations"] == ["invalid_decision_output"]
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["data"]["windows"][0]["status"] == "loaded"
+    assert manifest["data"]["windows"][0]["row_count"] == len(rows())
+    assert manifest["data"]["windows"][0]["rows_sha256"] is not None
 ```
 
 Also update existing validation monkeypatches that patch:
@@ -717,6 +762,14 @@ to patch:
 ```
 
 Only update tests whose execution path now goes through `runner.execution`.
+
+Update `test_run_validation_records_strategy_import_failure_details` so it asserts the artifact does not expose the shared wrapper or legacy validation loader type:
+
+```python
+    assert decision_payload["failure_details"][0]["type"] == "StrategyLoadError"
+    assert decision_payload["failure_details"][0]["type"] != "StrategyExecutionError"
+    assert decision_payload["failure_details"][0]["type"] != "ValidationStrategyLoadError"
+```
 
 - [ ] **Step 2: Run focused validation tests to verify failure before refactor**
 
@@ -790,7 +843,7 @@ Inside the `for window in config.windows:` loop, replace the current data-load a
                     data_provenance=data_provenance,
                     backend_results=backend_results,
                     reason="strategy_import_failed",
-                    failure_details=[_failure_detail("strategy_import", exc)],
+                    failure_details=[_execution_failure_detail("strategy_import", exc)],
                 )
             if exc.stage == "param_validation":
                 data_audits.append(
@@ -813,7 +866,7 @@ Inside the `for window in config.windows:` loop, replace the current data-load a
                     data_provenance=data_provenance,
                     backend_results=backend_results,
                     reason="param_validation_failed",
-                    failure_details=[_failure_detail("param_validation", exc)],
+                    failure_details=[_execution_failure_detail("param_validation", exc)],
                 )
             if exc.stage == "data_load":
                 data_provenance.append(
@@ -836,6 +889,15 @@ Inside the `for window in config.windows:` loop, replace the current data-load a
                 continue
             if exc.stage == "decision_generation":
                 loaded_rows = exc.loaded_rows or []
+                if exc.loaded_rows is not None:
+                    data_provenance.append(
+                        _data_provenance(
+                            window.id,
+                            run_config,
+                            status="loaded",
+                            rows=loaded_rows,
+                        )
+                    )
                 if exc.violations:
                     data_audits.append(
                         _failed_data_audit(
@@ -856,6 +918,14 @@ Inside the `for window in config.windows:` loop, replace the current data-load a
                         )
                     )
                 continue
+```
+
+Add this validation-local helper near `_failure_detail` so artifacts expose the underlying cause instead of the shared wrapper. Do not keep validation-specific legacy loader code or normalize back to `ValidationStrategyLoadError`; the new stable detail type is the underlying runner/validation cause type.
+
+```python
+def _execution_failure_detail(stage: str, exc: StrategyExecutionError) -> dict[str, str]:
+    cause = exc.__cause__ if exc.__cause__ is not None else exc
+    return _failure_detail(stage, cause)
 ```
 
 Then immediately after the `try/except`, add:
@@ -947,13 +1017,15 @@ git commit -m "refactor: route validation through execution boundary"
 Run:
 
 ```bash
-rg -n "validate_decision_output|load_decision_strategy|load_strategy|data_loader.load_data|normalized_rows_sha256|decisions_to_signal_rows|frozen_params" src/quant_strategies/runner src/quant_strategies/validation
+rg -n "validate_decision_output|load_decision_strategy|load_strategy|data_loader.load_data|normalized_rows_sha256|frozen_params" src/quant_strategies/runner src/quant_strategies/validation
+rg -n "decisions_to_signal_rows" src/quant_strategies/runner src/quant_strategies/validation
 ```
 
 Expected:
 
 - `runner/execution.py` may contain all shared execution dependencies.
-- `runner/__init__.py` should not contain `validate_decision_output`, `load_strategy`, `data_loader.load_data`, `normalized_rows_sha256`, `decisions_to_signal_rows`, or `frozen_params`.
+- `runner/__init__.py` should not contain `validate_decision_output`, `load_strategy`, `data_loader.load_data`, `normalized_rows_sha256`, or `frozen_params`.
+- `runner/__init__.py` may contain `decisions_to_signal_rows`; validation should not.
 - `validation/__init__.py` may still contain `validate_strategy_params` and `frozen_rows` for parameter scenario regeneration and backend row freezing.
 - `validation/__init__.py` should not contain direct base-window `data_loader.load_data`, `load_decision_strategy`, or `validate_decision_output`.
 
@@ -1074,7 +1146,7 @@ Expected:
 
 Spec coverage:
 
-- Shared execution module: Task 1.
+- Shared execution module: Task 1; post-review fix keeps runner-only signal conversion outside the shared validation path.
 - Runner uses shared boundary and keeps artifacts/engine ownership: Task 2.
 - Validation uses shared boundary and keeps audit/lookahead/readiness/backend/policy ownership: Task 3.
 - No researched layout accommodation: Task 4.
@@ -1089,5 +1161,91 @@ Placeholder scan:
 Type consistency:
 
 - `StrategyExecutionResult`, `StrategyExecutionError`, and `execute_strategy_run` are introduced in Task 1 and used by runner/validation in Tasks 2-3.
+- `StrategyExecutionResult` intentionally returns validated decisions, not runner smoke-engine signals.
 - `StrategyExecutionError.stage` values match the design spec.
 - Validation-specific `failure_details`, audit payloads, and policy decisions remain validation-owned.
+
+---
+
+## Eng Review Amendments
+
+### What Already Exists
+
+- `runner.run_config` already writes data input artifacts before decision generation and must keep doing so on decision-generation failure.
+- `validation.run_validation` already records loaded-window provenance before decision generation and must keep that manifest trail on invalid decisions or strategy exceptions.
+- `ValidationConfig.to_run_config(...)` already creates window-scoped runner configs; reuse it rather than adding a validation-specific runner harness.
+- `runner.strategy_loader` already wraps the shared decision strategy loader; the new boundary should use it and should not keep validation-specific legacy loader code.
+
+### NOT in Scope
+
+- Public API changes: this remains an internal runner module.
+- Validation calling `runner.run_config`: validation keeps audit, lookahead, backend matrix, and policy ownership.
+- Legacy `researched/` accommodation: no active validation behavior should return.
+- Exact legacy `ValidationStrategyLoadError` artifact type preservation: failure details should unwrap the execution error to the real underlying cause, not normalize back to legacy validation loader artifacts.
+
+### Test Coverage Diagram
+
+```text
+CODE PATHS                                                     USER / ARTIFACT FLOWS
+[+] runner.execution.execute_strategy_run                      [+] Runner full run
+  |-- [3STAR TESTED] success returns rows, params, decisions,       |-- [3STAR TESTED] success artifacts unchanged
+  |                  row hash, evidence quality                    |-- [3STAR REQUIRED] invalid decisions keep data artifacts
+  |-- [3STAR TESTED] flat decisions remain valid at boundary        |-- [3STAR TESTED] signal adapter failure keeps data artifacts
+  |-- [3STAR TESTED] strategy_import                               `-- [3STAR TESTED] readiness failure keeps prior artifacts
+  |-- [3STAR TESTED] param_validation
+  |-- [3STAR TESTED] data_load                                    [+] Validation window
+  `-- [3STAR REQUIRED] decision_generation carries rows,           |-- [3STAR REQUIRED] invalid decisions keep loaded provenance
+                      row hash, evidence, violations             |-- [3STAR TESTED] data-load failure artifacts
+                                                                 |-- [3STAR TESTED] strategy import failure details
+[+] validation.run_validation                                    |-- [3STAR TESTED] param validation failure details
+  |-- [3STAR REQUIRED] maps execution decision errors to audit      |-- [3STAR TESTED] hidden lookahead unchanged
+  |-- [3STAR REQUIRED] unwraps execution cause in failure_details   `-- [3STAR TESTED] scenario window config dates unchanged
+  |-- [3STAR TESTED] scenario matrix uses window data
+  `-- [3STAR TESTED] backend calls use frozen loaded rows
+
+COVERAGE TARGET: 100% of changed paths before full-suite run.
+Legend: 3STAR behavior + edge + error | REQUIRED = added by this eng review.
+```
+
+### Failure Modes
+
+- Strategy import fails: runner returns `strategy_import`; validation writes structured failure details from the underlying cause.
+- Param validation fails: runner returns `param_validation`; validation writes config-level data audit and failure details.
+- Data load fails: runner returns `data_load`; validation records failed data provenance and failed audit for that window.
+- Decision generation returns invalid output: runner preserves input rows and data manifest, validation preserves loaded provenance and failed audit.
+- Decision generation raises: runner preserves input rows and data manifest, validation records `strategy_generation_failed` and loaded provenance.
+- Readiness/lookahead/backend failures: remain validation-owned and covered by existing focused suites.
+
+### Worktree Parallelization
+
+Sequential implementation, no parallelization opportunity. Runner and validation both depend on the new `runner.execution` contract, and the test updates overlap the same two test modules.
+
+### Implementation Tasks
+
+Synthesized from this review's findings. Each task derives from a specific finding above. Run with Claude Code or Codex; checkbox as you ship.
+
+- [ ] **T1 (P1, human: ~45min / CC: ~10min)** - runner artifacts - Preserve data artifacts on decision-generation failure
+  - Surfaced by: Architecture Review D1 - `execute_strategy_run` success-only return would otherwise drop pre-decision runner artifacts.
+  - Files: `src/quant_strategies/runner/execution.py`, `src/quant_strategies/runner/__init__.py`, `tests/test_runner_execution.py`, `tests/test_runner_api_cli.py`
+  - Verify: `conda run -n quant pytest tests/test_runner_execution.py tests/test_runner_api_cli.py::test_invalid_decision_output_fails_before_writing_decision_records -q`
+- [ ] **T2 (P1, human: ~30min / CC: ~8min)** - validation provenance - Preserve loaded-window provenance on decision-generation failure
+  - Surfaced by: Architecture Review D2 - validation would otherwise keep the audit failure but lose the loaded data provenance.
+  - Files: `src/quant_strategies/validation/__init__.py`, `tests/test_validation_runner.py`
+  - Verify: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_preserves_invalid_decision_output_audit -q`
+- [ ] **T3 (P2, human: ~20min / CC: ~5min)** - validation failure details - Unwrap execution errors in validation artifacts
+  - Surfaced by: Architecture Review D3 - `failure_details.type` should expose the underlying cause, not the shared wrapper or legacy validation loader type.
+  - Files: `src/quant_strategies/validation/__init__.py`, `tests/test_validation_runner.py`
+  - Verify: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_records_strategy_import_failure_details -q`
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | - | - |
+| Codex Review | `/codex review` | Independent 2nd opinion | 0 | - | - |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 12 | CLEAR | 3 issues, 0 critical gaps |
+| Design Review | `/plan-design-review` | UI/UX gaps | 1 | CLEAR | score: 10/10 -> 10/10, 1 decisions |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | - | - |
+
+- **UNRESOLVED:** 0
+- **VERDICT:** ENG CLEARED - ready to implement.

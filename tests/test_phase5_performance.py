@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, Signal, StrategySpec, screen
-from quant_strategies.runner import data_loader, run_config
+from quant_strategies.runner import execution, run_config
 from quant_strategies.runner.data_loader import LoadedData
 
 
@@ -158,7 +158,7 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
     monkeypatch: pytest.MonkeyPatch,
 ):
     config_path = runner_config(tmp_path)
-    monkeypatch.setattr(data_loader, "load_data", lambda config: LoadedData(rows=runner_rows()))
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=runner_rows()))
 
     result = run_config(config_path, repo_root=tmp_path)
 
