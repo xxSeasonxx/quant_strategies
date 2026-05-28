@@ -215,3 +215,48 @@ def test_default_engine_uses_public_quant_data_engine_factory_without_env_discov
     data_loader._default_engine()
 
     assert captured == [((), {})]
+
+
+def test_default_engine_reuses_current_factory_engine(monkeypatch: pytest.MonkeyPatch):
+    engine = object()
+    calls = 0
+
+    def fake_get_engine():
+        nonlocal calls
+        calls += 1
+        return engine
+
+    monkeypatch.setattr(data_loader, "get_engine", fake_get_engine)
+
+    first = data_loader._default_engine()
+    second = data_loader._default_engine()
+
+    assert first is engine
+    assert second is engine
+    assert calls == 1
+
+
+def test_default_engine_refreshes_when_factory_changes(monkeypatch: pytest.MonkeyPatch):
+    first_engine = object()
+    second_engine = object()
+    first_calls = 0
+    second_calls = 0
+
+    def first_factory():
+        nonlocal first_calls
+        first_calls += 1
+        return first_engine
+
+    def second_factory():
+        nonlocal second_calls
+        second_calls += 1
+        return second_engine
+
+    monkeypatch.setattr(data_loader, "get_engine", first_factory)
+    assert data_loader._default_engine() is first_engine
+
+    monkeypatch.setattr(data_loader, "get_engine", second_factory)
+    assert data_loader._default_engine() is second_engine
+
+    assert first_calls == 1
+    assert second_calls == 1

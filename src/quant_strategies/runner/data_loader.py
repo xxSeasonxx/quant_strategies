@@ -37,6 +37,8 @@ class _LazyLoaderProxy:
 
 get_engine: Any | None = None
 loader: Any = _LazyLoaderProxy()
+_default_engine_factory: Any | None = None
+_default_engine_value: object = _UNSET
 
 
 @dataclass(frozen=True)
@@ -147,7 +149,12 @@ def _rows_from_frame(frame: object) -> list[dict[str, Any]]:
 
 
 def _default_engine() -> object:
-    return _get_engine()()
+    global _default_engine_factory, _default_engine_value
+    factory = _get_engine()
+    if _default_engine_value is _UNSET or _default_engine_factory is not factory:
+        _default_engine_value = factory()
+        _default_engine_factory = factory
+    return _default_engine_value
 
 
 def _loader() -> Any:

@@ -41,6 +41,8 @@ ignored artifacts under `results/`.
 Database engine creation and environment configuration are owned by
 `quant_data`; the runner does not discover upstream `.env` files. Tests and
 specialized callers can inject an explicit engine at the data-loader boundary.
+When no explicit engine is provided, the runner reuses one default `quant_data`
+engine per Python process.
 
 Runner and validation share one internal execution boundary for strategy import,
 parameter validation, data loading, frozen strategy execution, decision
