@@ -250,41 +250,16 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                 )
             _validate_ohlc_order(normalized, issues)
 
-            if data_kind == "crypto_perp_funding":
-                if _is_missing(normalized, "has_funding_event"):
-                    issues.append(
-                        _issue(
-                            "row_missing_required_field",
-                            "has_funding_event",
-                            normalized,
-                            severity="error",
-                            message="row is missing required field 'has_funding_event'",
-                        )
-                    )
-                if normalized.get("has_funding_event") is True:
-                    _normalize_funding_event_fields(normalized, issues)
-
-            if data_kind == "forex_with_quotes" and fill_price == "quote":
-                for field_name in _QUOTE_FIELDS:
-                    if _is_missing(normalized, field_name):
-                        issues.append(
-                            _issue(
-                                "row_missing_quote_field",
-                                field_name,
-                                normalized,
-                                severity="error",
-                                message=f"quote fill row is missing required quote field {field_name!r}",
-                            )
-                        )
-                        continue
-                    _normalize_numeric_field(
-                        normalized,
-                        field_name,
-                        issues,
-                        minimum=0.0,
-                        allow_zero=False,
-                    )
-                _validate_quote_order(normalized, issues)
+            _normalize_funding_fields(
+                normalized,
+                issues,
+                require_has_funding_event=data_kind == "crypto_perp_funding",
+            )
+            _normalize_quote_fields(
+                normalized,
+                issues,
+                require_fields=data_kind == "forex_with_quotes" and fill_price == "quote",
+            )
 
             available_at = normalized.get("available_at")
             if _is_missing(normalized, "available_at"):
@@ -580,7 +555,10 @@ def _is_missing(row: Mapping[str, Any], field_name: str) -> bool:
 def _is_missing_required_field(row: Mapping[str, Any], field_name: str) -> bool:
     if _is_missing(row, field_name):
         return True
-    return field_name == "symbol" and _is_blank_symbol(row.get(field_name))
+    if field_name != "symbol":
+        return False
+    value = row.get(field_name)
+    return not isinstance(value, str) or _is_blank_symbol(value)
 
 
 def _is_blank_symbol(value: Any) -> bool:
@@ -589,9 +567,11 @@ def _is_blank_symbol(value: Any) -> bool:
 
 def _symbol_for_issue(row: Mapping[str, Any]) -> str | None:
     value = row.get("symbol")
-    if value is None:
+    if not isinstance(value, str):
         return None
-    return str(value)
+    if _is_blank_symbol(value):
+        return None
+    return value
 
 
 def _issue(
@@ -666,20 +646,50 @@ def _normalize_numeric_field(
     return parsed
 
 
-def _normalize_funding_event_fields(
+def _normalize_funding_fields(
     row: dict[str, Any],
     issues: _IssueSink,
+    *,
+    require_has_funding_event: bool,
 ) -> None:
-    if _is_missing(row, "funding_timestamp"):
+    has_funding_event = row.get("has_funding_event")
+    funding_event_required = False
+
+    if _is_missing(row, "has_funding_event"):
+        if require_has_funding_event:
+            issues.append(
+                _issue(
+                    "row_missing_required_field",
+                    "has_funding_event",
+                    row,
+                    severity="error",
+                    message="row is missing required field 'has_funding_event'",
+                )
+            )
+    elif not isinstance(has_funding_event, bool):
         issues.append(
             _issue(
                 "row_invalid_funding_fields",
-                "funding_timestamp",
+                "has_funding_event",
                 row,
                 severity="error",
-                message="funding event row is missing funding_timestamp",
+                message="has_funding_event must be a boolean",
             )
         )
+    else:
+        funding_event_required = has_funding_event
+
+    if _is_missing(row, "funding_timestamp"):
+        if funding_event_required:
+            issues.append(
+                _issue(
+                    "row_invalid_funding_fields",
+                    "funding_timestamp",
+                    row,
+                    severity="error",
+                    message="funding event row is missing funding_timestamp",
+                )
+            )
     else:
         parsed_funding_timestamp, _ = parse_aware_datetime(row.get("funding_timestamp"))
         if parsed_funding_timestamp is None:
@@ -696,15 +706,16 @@ def _normalize_funding_event_fields(
             row["funding_timestamp"] = parsed_funding_timestamp
 
     if _is_missing(row, "funding_rate"):
-        issues.append(
-            _issue(
-                "row_invalid_funding_fields",
-                "funding_rate",
-                row,
-                severity="error",
-                message="funding event row is missing funding_rate",
+        if funding_event_required:
+            issues.append(
+                _issue(
+                    "row_invalid_funding_fields",
+                    "funding_rate",
+                    row,
+                    severity="error",
+                    message="funding event row is missing funding_rate",
+                )
             )
-        )
         return
     parsed_funding_rate = _finite_float(row.get("funding_rate"))
     if parsed_funding_rate is None:
@@ -719,6 +730,35 @@ def _normalize_funding_event_fields(
         )
         return
     row["funding_rate"] = parsed_funding_rate
+
+
+def _normalize_quote_fields(
+    row: dict[str, Any],
+    issues: _IssueSink,
+    *,
+    require_fields: bool,
+) -> None:
+    for field_name in _QUOTE_FIELDS:
+        if _is_missing(row, field_name):
+            if require_fields:
+                issues.append(
+                    _issue(
+                        "row_missing_quote_field",
+                        field_name,
+                        row,
+                        severity="error",
+                        message=f"quote fill row is missing required quote field {field_name!r}",
+                    )
+                )
+            continue
+        _normalize_numeric_field(
+            row,
+            field_name,
+            issues,
+            minimum=0.0,
+            allow_zero=False,
+        )
+    _validate_quote_order(row, issues)
 
 
 def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
@@ -745,13 +785,19 @@ def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
 
 
 def _validate_quote_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
-    values = {field_name: row.get(field_name) for field_name in _QUOTE_FIELDS}
-    if not all(isinstance(value, float) and value > 0 for value in values.values()):
-        return
-    bid = values["bid"]
-    ask = values["ask"]
-    mid = values["mid"]
-    if bid <= ask and bid <= mid <= ask:
+    values = {
+        field_name: value
+        for field_name in _QUOTE_FIELDS
+        if isinstance((value := row.get(field_name)), float) and value > 0
+    }
+    bid = values.get("bid")
+    ask = values.get("ask")
+    mid = values.get("mid")
+    if (
+        (bid is None or ask is None or bid <= ask)
+        and (mid is None or bid is None or mid >= bid)
+        and (mid is None or ask is None or mid <= ask)
+    ):
         return
     issues.append(
         _issue(
@@ -759,7 +805,7 @@ def _validate_quote_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
             "quote",
             row,
             severity="error",
-            message="quote fields must satisfy bid <= ask and bid <= mid <= ask",
+            message="quote fields must satisfy bid <= ask and bid <= mid <= ask when quote pairs are present",
         )
     )
 

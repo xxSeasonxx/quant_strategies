@@ -92,10 +92,18 @@ def test_docs_describe_runner_normalized_row_contract():
     assert re.search(r"Invalid `available_at` is a\s+row contract failure", consumer)
     assert "`row_contract.issues`" in readme
     assert "`row_contract.issues`" in consumer
-    assert "`issue_count`, `issue_reasons`, and" in readme
-    assert "`issue_count`, `issue_reasons`, and" in consumer
-    assert "`quant_data_feedback` preserve complete counts" in readme
-    assert "`quant_data_feedback` preserve complete counts" in consumer
+    assert "`issue_count` and `issue_reasons` preserve" in readme
+    assert "`issue_count` and `issue_reasons` preserve" in consumer
+    assert "`quant_data_feedback`\nsummarizes error handoff items" in readme
+    assert "`row_contract.quant_data_feedback`\nsummarizes error handoff items" in consumer
+    assert (
+        "Search-mode missing\n`available_at` warnings remain excluded from `quant_data_feedback`"
+        in readme
+    )
+    assert (
+        "Search-mode missing\n`available_at` warnings remain excluded from `quant_data_feedback`"
+        in consumer
+    )
     for reason in row_issue_reasons:
         assert reason in combined
 

@@ -118,6 +118,21 @@ def test_empty_or_blank_symbol_emits_missing_required_field(symbol: str):
     assert normalized.row_contract_summary()["status"] == "failed"
 
 
+@pytest.mark.parametrize("symbol", [123, Decimal("1")])
+def test_non_string_symbol_emits_missing_required_field(symbol: object):
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(symbol=symbol)],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_missing_required_field", "symbol")
+    ]
+    assert normalized.row_contract_summary()["missing_required_fields"] == {"symbol": 1}
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
 def test_duplicate_symbol_timestamp_emits_duplicate_issue_and_index_keeps_first_row():
     first = valid_row(close=100.5)
     second = valid_row(close=100.7)
@@ -230,6 +245,31 @@ def test_quote_fill_missing_quote_field_emits_quote_issue():
 
 
 @pytest.mark.parametrize(
+    ("quotes", "field_name"),
+    [
+        ({"bid": 0.0}, "bid"),
+        ({"ask": "not-a-number"}, "ask"),
+        ({"mid": float("inf")}, "mid"),
+    ],
+)
+def test_optional_quote_fields_are_validated_under_close_fill(
+    quotes: dict[str, object],
+    field_name: str,
+):
+    normalized = NormalizedRows.from_rows(
+        config("forex_with_quotes", fill_price="close"),
+        [valid_row(symbol="EURUSD", **quotes)],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_numeric_field", field_name)
+    ]
+    assert normalized.row_contract_summary()["missing_required_fields"] == {}
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
+@pytest.mark.parametrize(
     "quotes",
     [
         {"bid": 1.2, "ask": 1.1, "mid": 1.15},
@@ -250,6 +290,30 @@ def test_quote_fill_invalid_quote_order_emits_invalid_numeric_field(
         ("row_invalid_numeric_field", "quote")
     ]
     assert "bid <= ask and bid <= mid <= ask" in normalized.issues[0].message
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "quotes",
+    [
+        {"bid": 1.2, "ask": 1.1},
+        {"bid": 1.0, "mid": 0.9},
+        {"ask": 1.1, "mid": 1.2},
+    ],
+)
+def test_optional_quote_order_is_validated_when_pairs_are_present(
+    quotes: dict[str, float],
+):
+    normalized = NormalizedRows.from_rows(
+        config("forex_with_quotes", fill_price="close"),
+        [valid_row(symbol="EURUSD", **quotes)],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_numeric_field", "quote")
+    ]
+    assert normalized.row_contract_summary()["missing_required_fields"] == {}
     assert normalized.row_contract_summary()["status"] == "failed"
 
 
@@ -277,6 +341,44 @@ def test_crypto_funding_event_missing_or_invalid_fields_emit_funding_issue():
         "funding_rate": 1,
         "funding_timestamp": 1,
     }
+
+
+def test_optional_funding_fields_are_validated_without_funding_event():
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [
+            valid_row(funding_rate="not-a-number"),
+            valid_row(
+                timestamp=TIMESTAMP + timedelta(minutes=1),
+                has_funding_event=False,
+                funding_timestamp=datetime(2024, 1, 1, 10, 0),
+            ),
+        ],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_funding_fields", "funding_rate"),
+        ("row_invalid_funding_fields", "funding_timestamp"),
+    ]
+    assert normalized.row_contract_summary()["funding_event_missing_fields"] == {
+        "funding_rate": 1,
+        "funding_timestamp": 1,
+    }
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
+def test_non_bool_has_funding_event_emits_funding_issue():
+    normalized = NormalizedRows.from_rows(
+        config("crypto_perp_funding"),
+        [valid_row(symbol="BTC-PERP", has_funding_event="true")],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_funding_fields", "has_funding_event")
+    ]
+    assert normalized.row_contract_summary()["status"] == "failed"
 
 
 def test_projection_rows_are_mapping_compatible_and_hash_ordering_is_stable():

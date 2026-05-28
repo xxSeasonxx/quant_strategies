@@ -131,9 +131,10 @@ fixes. Stable issue reasons include `row_missing_required_field`,
 `row_duplicate_symbol_timestamp`, `row_invalid_available_at`,
 `row_missing_available_at`, `row_missing_quote_field`, and
 `row_invalid_funding_fields`. Runner artifacts may sample or compact
-`row_contract.issues`, while `issue_count`, `issue_reasons`, and
-`quant_data_feedback` preserve complete counts and reason summaries for
-consumers.
+`row_contract.issues`, while `issue_count` and `issue_reasons` preserve
+complete counts and reason summaries for consumers. `quant_data_feedback`
+summarizes error handoff items for upstream data fixes. Search-mode missing
+`available_at` warnings remain excluded from `quant_data_feedback`.
 
 Runner artifacts also declare `artifact_trust_tier`. Summary-profile runs are
 the default and are `search_only`: useful for fast ranking but not enough to

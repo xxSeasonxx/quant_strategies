@@ -289,11 +289,11 @@ Runner `summary.json` and `data_manifest.json` expose reasons such as
 `row_duplicate_symbol_timestamp`, `row_invalid_available_at`,
 `row_missing_available_at`, `row_missing_quote_field`, and
 `row_invalid_funding_fields`. `row_contract.issues` may be sampled or compacted
-in artifacts, while `issue_count`, `issue_reasons`, and
-`quant_data_feedback` preserve complete counts and reason summaries for
-consumers. `row_contract.quant_data_feedback` is the handoff channel for missing
-fields, duplicate keys, timestamp issues, and other upstream `quant_data`
-contract gaps.
+in artifacts, while `issue_count` and `issue_reasons` preserve complete counts
+and reason summaries for consumers. `row_contract.quant_data_feedback`
+summarizes error handoff items for missing fields, duplicate keys, timestamp
+issues, and other upstream `quant_data` contract gaps. Search-mode missing
+`available_at` warnings remain excluded from `quant_data_feedback`.
 
 ## What autoresearch Should Not Own
 
