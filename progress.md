@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 39: P4 StrategyGenerator Protocol false-positive rejection.
+Phase 40: P2 runner observation dependency audit.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-strategy-generator-protocol-false-positive-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-generator-protocol-false-positive.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-runner-observation-audit-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-runner-observation-audit.md`
 
 ## Finding Triage
 
@@ -66,6 +66,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-generator
 | Validation artifacts do not fully reproduce backend metrics | Partly true, Phase 27 | Snapshot validation input rows per loaded window and link them from manifest; per-backend fill/trade/funding/cost ledgers remain future work unless backend exposes them. |
 | Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
 | Validation lookahead replay reparses row visibility per decision | Confirmed true, Phase 26 | Cache parsed row visibility metadata and visible frozen row slices in the shared causality checker. |
+| Runner does not audit declared `ObservationRef` dependencies | Confirmed true, Phase 40 | Move observation dependency audit to a neutral helper and run it before causality replay or runner engine request construction. |
 | `researched/` folder convention is not enforced by runner/validation | Rejected false positive, Phase 38 | PRD C-4/C-6 and docs make validation layout-agnostic and promotion a separate human process; adding path special-casing would contradict the contract. |
 | Public `generate_decisions` Protocol missing | Rejected false positive, Phase 39 | `StrategyGenerator` is already defined in `decisions.strategy_loader`, re-exported from `quant_strategies.decisions`, documented for consumers, and covered by a public import test. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
@@ -1074,3 +1075,29 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-generator
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review confirmed the `StrategyGenerator` false-positive rejection is justified. One Important progress-log copy/paste issue was fixed before commit.
 - 2026-05-28: Committed Phase 39.
+
+## Phase 40 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add runner declared-observation audit regression.
+- [x] Share observation dependency audit helper.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 40 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_rejects_future_declared_observation_before_request_build -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_rejects_future_declared_observation_before_request_build tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_validation_dependencies.py -q` -> failed because `validation.data_audit` still needed `parse_aware_datetime` for as-of row auditing after row-index extraction.
+- 2026-05-28: Restored the validation datetime parser import.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_rejects_future_declared_observation_before_request_build tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_validation_dependencies.py -q` -> 10 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_validation_dependencies.py tests/test_validation_runner.py -q` -> 90 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 525 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical or Important issues. Nice-to-have stale plan checkboxes were fixed before commit.
+- 2026-05-28: `git diff --check` -> passed after review bookkeeping updates.
+- 2026-05-28: Committed Phase 40.

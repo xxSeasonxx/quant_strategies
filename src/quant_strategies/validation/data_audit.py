@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.validation.dependencies import audit_observation_dependencies
+from quant_strategies.observation_dependencies import (
+    audit_observation_dependencies,
+    observation_row_index,
+)
 from quant_strategies.validation.datetime_utils import parse_aware_datetime
 
 
@@ -25,14 +27,8 @@ def audit_decision_rows(
     decisions: list[StrategyDecision],
 ) -> DataAudit:
     violations: list[str] = []
-    row_index: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
-    for row in rows:
-        symbol = str(row.get("symbol"))
-        timestamp, reason = parse_aware_datetime(row.get("timestamp"))
-        if timestamp is None:
-            violations.append(f"invalid timestamp for {symbol}: {reason}")
-            continue
-        row_index.setdefault((symbol, timestamp), []).append(row)
+    row_index, timestamp_violations = observation_row_index(rows)
+    violations.extend(timestamp_violations)
 
     for decision in decisions:
         key = (decision.instrument.symbol, decision.as_of_time)

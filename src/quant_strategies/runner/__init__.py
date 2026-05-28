@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
+from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, runner_evidence_semantics
+from quant_strategies.observation_dependencies import (
+    audit_observation_dependencies,
+    observation_row_index,
+)
 from quant_strategies.runner import (
     artifacts,
     config as config_module,
@@ -80,6 +85,17 @@ def run_config(
         config,
         execution.loaded_rows,
     )
+    observation_failure = _audit_observation_dependencies(
+        config,
+        result_dir,
+        execution,
+        strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+        repo_root=effective_repo_root,
+        event_emitter=events,
+    )
+    if observation_failure is not None:
+        return observation_failure
+
     causality, evidence_quality = _prepare_causality_evidence(config, execution, events)
     _write_execution_data_manifest(
         result_dir,
@@ -411,6 +427,56 @@ def _check_causality(
             passed=False,
             violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
         )
+
+
+def _audit_observation_dependencies(
+    config: config_module.RunConfig,
+    result_dir: Path,
+    execution: StrategyExecutionResult,
+    *,
+    strategy_input_rows_jsonl_sha256: str | None,
+    repo_root: Path,
+    event_emitter: RunnerStageEmitter,
+) -> RunResult | None:
+    try:
+        with event_emitter.stage(
+            "observation_audit",
+            strategy_id=config.strategy_id,
+            decision_count=len(execution.decisions),
+        ):
+            _assert_declared_observations_causal(execution.loaded_rows, execution.decisions)
+    except RunnerError as exc:
+        _write_execution_data_manifest(
+            result_dir,
+            config,
+            rows=execution.loaded_rows,
+            strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
+            normalized_rows_hash=execution.normalized_rows_sha256,
+            evidence_quality=execution.evidence_quality,
+        )
+        return _failure_result(
+            config,
+            result_dir,
+            "observation_audit",
+            str(exc),
+            repo_root=repo_root,
+            evidence_quality=execution.evidence_quality,
+            event_emitter=event_emitter,
+        )
+    return None
+
+
+def _assert_declared_observations_causal(
+    rows: list[dict[str, Any]],
+    decisions: list[StrategyDecision],
+) -> None:
+    row_index, timestamp_violations = observation_row_index(rows)
+    violations = (
+        *timestamp_violations,
+        *audit_observation_dependencies(row_index, decisions),
+    )
+    if violations:
+        raise data_readiness.DataReadinessError("; ".join(violations))
 
 
 def _causality_message(result: LookaheadCheckResult) -> str:

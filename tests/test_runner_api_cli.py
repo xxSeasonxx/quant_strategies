@@ -885,6 +885,55 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     )
 
 
+def test_run_config_rejects_future_declared_observation_before_request_build(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from datetime import datetime, timezone\n"
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='SPY', timestamp=datetime(2024, 1, 3, tzinfo=timezone.utc), field='close'),),\n"
+        "    )]\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+    )
+    events: list[dict[str, object]] = []
+
+    result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["stage"] == "observation_audit"
+    assert "references future row" in str(summary["message"])
+    assert summary["assessment_status"] == "runner_failed"
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    assert not (result.result_dir / "engine_request.json").exists()
+    assert any(
+        event["stage"] == "observation_audit"
+        and event["status"] == "failed"
+        and "references future row" in str(event["error"])
+        for event in events
+    )
+    assert not any(event["stage"] == "causality_check" for event in events)
+
+
 def test_run_config_records_row_contract_feedback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1553,6 +1602,7 @@ def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: p
         "causality_check",
         "request_build",
         "data_readiness",
+        "observation_audit",
         "engine_evaluation",
         "artifact_writes",
     }.issubset(completed_stages)
