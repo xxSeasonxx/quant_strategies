@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+from bisect import bisect_right
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +24,12 @@ class _VisibleRow:
     available_at: datetime | None
 
 
+@dataclass(frozen=True)
+class _VisibleRowIndex:
+    rows: tuple[_VisibleRow, ...]
+    timestamps: tuple[datetime, ...]
+
+
 DecisionGenerator = Callable[
     [Sequence[Mapping[str, Any]], Mapping[str, Any]],
     object,
@@ -40,43 +46,43 @@ def check_hidden_lookahead(
 ) -> LookaheadCheckResult:
     row_index = _visible_row_index(rows)
     visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]] = {}
+    replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
     replay_params = frozen_params(params)
     for baseline in baseline_decisions:
-        replay_rows = _visible_rows_for_decision(
-            row_index,
-            baseline,
-            visible_rows_cache=visible_rows_cache,
-        )
-        try:
-            replay_output = generate_decisions(replay_rows, replay_params)
-        except Exception as exc:
-            return LookaheadCheckResult(
-                passed=False,
-                violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
+        cache_key = (baseline.as_of_time, baseline.decision_time)
+        replay_decision_ids = replay_decision_ids_cache.get(cache_key)
+        if replay_decision_ids is None:
+            replay_rows = _visible_rows_for_decision(
+                row_index,
+                baseline,
+                visible_rows_cache=visible_rows_cache,
             )
-
-        replay_decisions, violations = validate_decision_output(
-            replay_output,
-            strategy_id=strategy_id,
-        )
-        if violations:
-            return LookaheadCheckResult(
-                passed=False,
-                violations=(f"hidden_lookahead_check_failed: {'; '.join(violations)}",),
-            )
-
-        replay_by_key: dict[str, StrategyDecision] = {}
-        for replay in replay_decisions:
-            key = _decision_key(replay)
-            if key in replay_by_key:
+            try:
+                replay_output = generate_decisions(replay_rows, replay_params)
+            except SystemExit as exc:
                 return LookaheadCheckResult(
                     passed=False,
-                    violations=("hidden_lookahead_check_failed: duplicate replay decision key",),
+                    violations=(f"hidden_lookahead_check_failed: SystemExit: {exc}",),
                 )
-            replay_by_key[key] = replay
+            except Exception as exc:
+                return LookaheadCheckResult(
+                    passed=False,
+                    violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
+                )
 
-        replay = replay_by_key.get(_decision_key(baseline))
-        if replay is None or _decision_fingerprint(replay) != _decision_fingerprint(baseline):
+            replay_decisions, violations = validate_decision_output(
+                replay_output,
+                strategy_id=strategy_id,
+            )
+            if violations:
+                return LookaheadCheckResult(
+                    passed=False,
+                    violations=(f"hidden_lookahead_check_failed: {'; '.join(violations)}",),
+                )
+            replay_decision_ids = frozenset(replay.decision_id for replay in replay_decisions)
+            replay_decision_ids_cache[cache_key] = replay_decision_ids
+
+        if baseline.decision_id not in replay_decision_ids:
             return LookaheadCheckResult(
                 passed=False,
                 violations=("hidden_lookahead_detected",),
@@ -85,8 +91,17 @@ def check_hidden_lookahead(
     return LookaheadCheckResult(passed=True)
 
 
-def _visible_row_index(rows: Sequence[Mapping[str, Any]]) -> tuple[_VisibleRow, ...]:
-    return tuple(_visible_row(row) for row in rows)
+def _visible_row_index(rows: Sequence[Mapping[str, Any]]) -> _VisibleRowIndex:
+    visible_rows = []
+    for row in rows:
+        visible_row = _visible_row(row)
+        if visible_row.timestamp is not None:
+            visible_rows.append(visible_row)
+    ordered_rows = tuple(sorted(visible_rows, key=lambda item: item.timestamp))
+    return _VisibleRowIndex(
+        rows=ordered_rows,
+        timestamps=tuple(item.timestamp for item in ordered_rows if item.timestamp is not None),
+    )
 
 
 def _visible_row(row: Mapping[str, Any]) -> _VisibleRow:
@@ -104,7 +119,7 @@ def _visible_row(row: Mapping[str, Any]) -> _VisibleRow:
 
 
 def _visible_rows_for_decision(
-    row_index: tuple[_VisibleRow, ...],
+    row_index: _VisibleRowIndex,
     decision: StrategyDecision,
     *,
     visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]],
@@ -114,21 +129,19 @@ def _visible_rows_for_decision(
     if cached is not None:
         return cached
 
+    prefix_end = bisect_right(row_index.timestamps, decision.as_of_time)
     replay_rows = frozen_rows(
         [
             item.row
-            for item in row_index
-            if _row_visible_for_decision(item, decision)
+            for item in row_index.rows[:prefix_end]
+            if _row_available_for_decision(item, decision)
         ]
     )
     visible_rows_cache[cache_key] = replay_rows
     return replay_rows
 
 
-def _row_visible_for_decision(row: _VisibleRow, decision: StrategyDecision) -> bool:
-    if row.timestamp is None or row.timestamp > decision.as_of_time:
-        return False
-
+def _row_available_for_decision(row: _VisibleRow, decision: StrategyDecision) -> bool:
     if row.available_at is not None:
         return row.available_at <= decision.decision_time
 
@@ -136,21 +149,3 @@ def _row_visible_for_decision(row: _VisibleRow, decision: StrategyDecision) -> b
     # back to timestamp-only visibility so bad provenance does not masquerade as
     # a hidden-lookahead strategy failure.
     return True
-
-
-def _decision_key(decision: StrategyDecision) -> str:
-    return json.dumps(
-        {
-            "decision_id": decision.decision_id,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def _decision_fingerprint(decision: StrategyDecision) -> str:
-    return json.dumps(
-        decision.model_dump(mode="json"),
-        sort_keys=True,
-        separators=(",", ":"),
-    )

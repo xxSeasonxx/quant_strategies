@@ -4,6 +4,8 @@ import math
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 
+from quant_strategies.funding import funding_rates_match
+
 
 class FundingEventError(ValueError):
     """Raised when funding cashflow rows cannot be evaluated safely."""
@@ -50,7 +52,7 @@ def funding_return_for_window(
         existing_rate = funding_rates_by_time.get(funding_timestamp)
         if existing_rate is None:
             funding_rates_by_time[funding_timestamp] = funding_rate
-        elif not math.isclose(existing_rate, funding_rate, rel_tol=0.0, abs_tol=1e-15):
+        elif not funding_rates_match(existing_rate, funding_rate):
             raise FundingEventError(
                 f"conflicting funding rates for {symbol} at {funding_timestamp.isoformat()}"
             )

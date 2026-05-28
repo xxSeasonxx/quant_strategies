@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from quant_strategies.decisions import StrategyDecision
 
@@ -110,6 +110,7 @@ class EvaluationRequest(EngineModel):
     bars: tuple[Bar, ...] = ()
     fill_model: FillModel = Field(default_factory=FillModel)
     cost_model: CostModel = Field(default_factory=CostModel)
+    _indexed_bars: Any = PrivateAttr(default=None)
 
 
 class Trade(EngineModel):

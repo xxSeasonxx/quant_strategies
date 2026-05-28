@@ -238,6 +238,36 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     assert run.screen_summary["trades"][0]["net_return"] == pytest.approx(0.099)
 
 
+def test_evaluate_request_reuses_request_build_bar_index(monkeypatch: pytest.MonkeyPatch):
+    import quant_strategies.engine.bar_index as shared_bar_index
+    import quant_strategies.engine.evaluation as evaluation
+    import quant_strategies.runner.engine_runner as runner_engine_runner
+
+    build_calls = 0
+    original_build_bar_index = shared_bar_index.build_bar_index
+
+    def counting_build_bar_index(*args, **kwargs):
+        nonlocal build_calls
+        build_calls += 1
+        return original_build_bar_index(*args, **kwargs)
+
+    monkeypatch.setattr(runner_engine_runner, "build_bar_index", counting_build_bar_index)
+    monkeypatch.setattr(evaluation, "build_bar_index", counting_build_bar_index)
+
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 101.0, 102.0, 104.0),
+        decisions=[decision()],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    run = evaluate_request(request, mode="screen")
+
+    assert run.screen_summary["trade_count"] == 1
+    assert build_calls == 1
+
+
 def test_build_request_accepts_zero_decisions_as_no_op():
     request = build_request(
         strategy_id="demo",

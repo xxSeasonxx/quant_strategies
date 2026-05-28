@@ -139,7 +139,7 @@ def test_duplicate_matching_funding_events_are_counted_once():
 def test_near_equal_duplicate_funding_rates_are_counted_once():
     rows = [
         row(1, funding_rate=0.0002, funding_minute=1, has_funding_event=True),
-        row(1, funding_rate=0.0002 + 5e-16, funding_minute=1, has_funding_event=True),
+        row(1, funding_rate=0.0002 + 5e-13, funding_minute=1, has_funding_event=True),
     ]
 
     result = funding_return_for_window(

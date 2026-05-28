@@ -82,6 +82,10 @@ conda run -n quant quant-strategies run \
   experiment.toml
 ```
 
+CLI exit codes are `0` for structured usable evidence, `1` for infrastructure
+or execution failure, `2` for validation `hard_no`, and `3` for data readiness
+or audit failure.
+
 Use `--events-jsonl` to write the same stage events to stderr while keeping
 stdout as the result directory for scripts.
 
@@ -234,10 +238,10 @@ that as search evidence about the candidate, not as a runner failure.
 artifacts were written:
 
 ```python
-result.success
 result.result_dir
 result.message
 result.run_completed
+result.failure_stage
 result.assessment_status
 result.artifact_trust_tier
 result.data_availability_status
@@ -256,7 +260,8 @@ Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
 Use `assessment_status`, `causality_verified`, `data_availability_status`,
 `availability_coverage`, `row_contract`, `artifact_trust_tier`, and
-`evidence_quality_warnings` as ranking filters before comparing smoke scores.
+`evidence_quality_warnings` as ranking filters before comparing smoke scores;
+never rank from `run_completed` alone.
 Treat `smoke_passed` as stronger mechanical evidence than `smoke_unverified`;
 `smoke_unverified` means the smoke gates passed but row availability coverage
 was missing, partial, or invalid, so the runner could not claim causality

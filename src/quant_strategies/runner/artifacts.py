@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import hashlib
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -12,13 +14,204 @@ from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.provenance import (
     artifact_hashes,
-    file_sha256,
     git_identity,
     package_versions,
     python_identity,
 )
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.artifact_profiles import json_safe_value, row_ranges_by_symbol
+from quant_strategies.runner.artifact_profiles import (
+    canonical_row_line,
+    json_safe_value,
+)
+
+
+_METADATA_COVERAGE_FIELDS = (
+    "available_at",
+    "bar_ingested_at",
+    "quote_ingested_at",
+    "funding_ingested_at",
+    "joined_refreshed_at",
+)
+
+
+@dataclass(frozen=True)
+class RowSummary:
+    total: int
+    ranges_by_symbol: dict[str, dict[str, Any]]
+    normalized_rows_sha256: str
+    data_availability_status: str
+    availability_coverage: dict[str, Any]
+    row_contract: dict[str, Any]
+    metadata_field_coverage: dict[str, dict[str, int]]
+
+    @classmethod
+    def from_rows(
+        cls,
+        config: RunConfig,
+        rows: list[dict[str, Any]],
+        *,
+        normalized_rows_hash: str | None = None,
+    ) -> RowSummary:
+        required_fields = _required_row_fields(config)
+        missing_required_counts = {field: 0 for field in required_fields}
+        funding_event_missing_counts = {"funding_timestamp": 0, "funding_rate": 0}
+        metadata_present = {field: 0 for field in _METADATA_COVERAGE_FIELDS}
+        metadata_seen: set[str] = set()
+        ranges_by_symbol: dict[str, dict[str, Any]] = {}
+        seen_keys: set[tuple[str, object]] = set()
+        duplicate_key_count = 0
+        aware_timestamps = 0
+        invalid_timestamps = 0
+        availability_present = 0
+        availability_invalid = 0
+        digest = hashlib.sha256() if normalized_rows_hash is None else None
+
+        for row in rows:
+            if digest is not None:
+                line = canonical_row_line(row)
+                digest.update(line.encode("utf-8"))
+                digest.update(b"\n")
+
+            symbol = str(row.get("symbol", ""))
+            timestamp = row.get("timestamp")
+            symbol_range = ranges_by_symbol.setdefault(
+                symbol,
+                {"count": 0, "min_timestamp": None, "max_timestamp": None},
+            )
+            symbol_range["count"] += 1
+            if timestamp is not None:
+                if symbol_range["min_timestamp"] is None or timestamp < symbol_range["min_timestamp"]:
+                    symbol_range["min_timestamp"] = timestamp
+                if symbol_range["max_timestamp"] is None or timestamp > symbol_range["max_timestamp"]:
+                    symbol_range["max_timestamp"] = timestamp
+
+            key = (symbol, timestamp)
+            if key in seen_keys:
+                duplicate_key_count += 1
+            else:
+                seen_keys.add(key)
+
+            if _is_aware_timestamp(timestamp):
+                aware_timestamps += 1
+            else:
+                invalid_timestamps += 1
+
+            for field in required_fields:
+                if row.get(field) is None:
+                    missing_required_counts[field] += 1
+
+            if config.data.kind == "crypto_perp_funding" and row.get("has_funding_event") is True:
+                for field in funding_event_missing_counts:
+                    if row.get(field) is None:
+                        funding_event_missing_counts[field] += 1
+
+            for field in _METADATA_COVERAGE_FIELDS:
+                if field in row:
+                    metadata_seen.add(field)
+                    if row.get(field) is not None:
+                        metadata_present[field] += 1
+
+            available_at = row.get("available_at")
+            if available_at is None:
+                continue
+            parsed_available_at, _ = parse_aware_datetime(available_at)
+            if parsed_available_at is None:
+                availability_invalid += 1
+                continue
+            availability_present += 1
+
+        total = len(rows)
+        availability_fraction = None if total == 0 else availability_present / total
+        if total > 0 and availability_present == total:
+            availability_status = "complete"
+        elif availability_invalid > 0:
+            availability_status = "invalid"
+        elif availability_present > 0:
+            availability_status = "partial"
+        else:
+            availability_status = "missing"
+        availability_coverage: dict[str, Any] = {
+            "field": "available_at",
+            "present": availability_present,
+            "total": total,
+            "fraction": availability_fraction,
+        }
+        if availability_invalid:
+            availability_coverage["invalid"] = availability_invalid
+
+        if not rows:
+            timestamp_status = "empty"
+        elif aware_timestamps == total:
+            timestamp_status = "aware"
+        elif invalid_timestamps == total:
+            timestamp_status = "invalid_or_naive"
+        else:
+            timestamp_status = "mixed"
+
+        missing_required_fields = {
+            field: count for field, count in missing_required_counts.items() if count > 0
+        }
+        funding_event_missing_fields = {
+            field: count
+            for field, count in funding_event_missing_counts.items()
+            if count > 0 and config.data.kind == "crypto_perp_funding"
+        }
+        feedback = (
+            ["row_contract_not_evaluated:no_rows"]
+            if not rows
+            else _row_contract_feedback(
+                missing_required_fields=missing_required_fields,
+                duplicate_key_count=duplicate_key_count,
+                timestamp_status=timestamp_status,
+                funding_event_missing_fields=funding_event_missing_fields,
+            )
+        )
+        row_contract = {
+            "data_kind": config.data.kind,
+            "status": "not_evaluated" if not rows else "passed" if not feedback else "failed",
+            "required_fields": list(required_fields),
+            "missing_required_fields": missing_required_fields,
+            "timestamp_status": timestamp_status,
+            "duplicate_key_count": duplicate_key_count,
+            "funding_event_missing_fields": funding_event_missing_fields,
+            "freshness_status": "not_evaluated",
+            "quant_data_feedback": feedback,
+        }
+        metadata_field_coverage = {
+            field: {"present": metadata_present[field], "total": total}
+            for field in _METADATA_COVERAGE_FIELDS
+            if field in metadata_seen
+        }
+        json_ranges = {}
+        for symbol, summary in ranges_by_symbol.items():
+            json_ranges[symbol] = {
+                "count": summary["count"],
+                "min_timestamp": json_safe_value(summary["min_timestamp"]),
+                "max_timestamp": json_safe_value(summary["max_timestamp"]),
+            }
+        return cls(
+            total=total,
+            ranges_by_symbol=dict(sorted(json_ranges.items())),
+            normalized_rows_sha256=normalized_rows_hash or digest.hexdigest(),
+            data_availability_status=availability_status,
+            availability_coverage=availability_coverage,
+            row_contract=row_contract,
+            metadata_field_coverage=metadata_field_coverage,
+        )
+
+    def evidence_quality(self, *, causality_verified: bool) -> dict[str, Any]:
+        payload = {
+            "data_availability_status": self.data_availability_status,
+            "availability_coverage": self.availability_coverage,
+            "row_contract": self.row_contract,
+        }
+        payload.update(
+            _causality_evidence(
+                self.data_availability_status,
+                causality_verified=causality_verified,
+            )
+        )
+        return payload
 
 
 def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path:
@@ -45,8 +238,7 @@ def initialize_run_artifacts(config_path: Path, config: RunConfig, result_dir: P
 
 def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> str:
     jsonl_path = result_dir / "strategy_input_rows.jsonl"
-    write_jsonl(jsonl_path, rows)
-    return _file_sha256(jsonl_path)
+    return write_jsonl(jsonl_path, rows)
 
 
 def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
@@ -68,42 +260,7 @@ def evidence_quality(
     *,
     causality_verified: bool = False,
 ) -> dict[str, Any]:
-    total = len(rows)
-    present = 0
-    invalid = 0
-    for row in rows:
-        value = row.get("available_at")
-        if value is None:
-            continue
-        parsed, _ = parse_aware_datetime(value)
-        if parsed is None:
-            invalid += 1
-            continue
-        present += 1
-    fraction = None if total == 0 else present / total
-    if total > 0 and present == total:
-        status = "complete"
-    elif invalid > 0:
-        status = "invalid"
-    elif present > 0:
-        status = "partial"
-    else:
-        status = "missing"
-    coverage: dict[str, Any] = {
-        "field": "available_at",
-        "present": present,
-        "total": total,
-        "fraction": fraction,
-    }
-    if invalid:
-        coverage["invalid"] = invalid
-    payload = {
-        "data_availability_status": status,
-        "availability_coverage": coverage,
-        "row_contract": row_contract_status(config, rows),
-    }
-    payload.update(_causality_evidence(status, causality_verified=causality_verified))
-    return payload
+    return RowSummary.from_rows(config, rows).evidence_quality(causality_verified=causality_verified)
 
 
 def with_causality_verification(
@@ -145,44 +302,7 @@ def _causality_evidence(
 
 
 def row_contract_status(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
-    required_fields = _required_row_fields(config)
-    if not rows:
-        return {
-            "data_kind": config.data.kind,
-            "status": "not_evaluated",
-            "required_fields": list(required_fields),
-            "missing_required_fields": {},
-            "timestamp_status": "empty",
-            "duplicate_key_count": 0,
-            "funding_event_missing_fields": {},
-            "freshness_status": "not_evaluated",
-            "quant_data_feedback": ["row_contract_not_evaluated:no_rows"],
-        }
-    missing_required_fields = {
-        field: count
-        for field in required_fields
-        if (count := sum(1 for row in rows if row.get(field) is None)) > 0
-    }
-    duplicate_key_count = _duplicate_key_count(rows)
-    timestamp_status = _timestamp_status(rows)
-    funding_event_missing_fields = _funding_event_missing_fields(config, rows)
-    feedback = _row_contract_feedback(
-        missing_required_fields=missing_required_fields,
-        duplicate_key_count=duplicate_key_count,
-        timestamp_status=timestamp_status,
-        funding_event_missing_fields=funding_event_missing_fields,
-    )
-    return {
-        "data_kind": config.data.kind,
-        "status": "passed" if not feedback else "failed",
-        "required_fields": list(required_fields),
-        "missing_required_fields": missing_required_fields,
-        "timestamp_status": timestamp_status,
-        "duplicate_key_count": duplicate_key_count,
-        "funding_event_missing_fields": funding_event_missing_fields,
-        "freshness_status": "not_evaluated",
-        "quant_data_feedback": feedback,
-    }
+    return RowSummary.from_rows(config, rows).row_contract
 
 
 def write_data_manifest(
@@ -190,11 +310,12 @@ def write_data_manifest(
     config: RunConfig,
     rows: list[dict[str, Any]],
     *,
-    strategy_input_rows_jsonl_sha256: str | None,
     normalized_rows_hash: str,
+    row_summary: RowSummary | None = None,
     evidence_quality_payload: dict[str, Any] | None = None,
 ) -> None:
-    quality = evidence_quality_payload or evidence_quality(config, rows)
+    row_summary = row_summary or RowSummary.from_rows(config, rows, normalized_rows_hash=normalized_rows_hash)
+    quality = evidence_quality_payload or row_summary.evidence_quality(causality_verified=False)
     payload = {
         "artifact_profile": config.output.artifact_profile,
         "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
@@ -207,13 +328,12 @@ def write_data_manifest(
             "strict": config.data.strict,
         },
         "rows": {
-            "total": len(rows),
-            "by_symbol": row_ranges_by_symbol(rows),
+            "total": row_summary.total,
+            "by_symbol": row_summary.ranges_by_symbol,
         },
-        "strategy_input_rows_jsonl_sha256": strategy_input_rows_jsonl_sha256,
-        "normalized_rows_sha256": normalized_rows_hash,
+        "normalized_rows_sha256": row_summary.normalized_rows_sha256,
         "metric_semantics": smoke_score_metric_semantics(config.data.kind),
-        "metadata_field_coverage": _metadata_field_coverage(rows),
+        "metadata_field_coverage": row_summary.metadata_field_coverage,
         **quality,
     }
     _write_json(result_dir / "data_manifest.json", payload)
@@ -249,10 +369,17 @@ def write_notes(result_dir: Path, notes: str) -> None:
     (result_dir / "notes.md").write_text(notes.rstrip() + "\n")
 
 
-def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
     with path.open("w") as handle:
         for row in rows:
-            handle.write(json.dumps(json_safe_value(row), sort_keys=True) + "\n")
+            line = canonical_row_line(row)
+            handle.write(line + "\n")
+            digest.update(line.encode("utf-8"))
+            digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _canonical_json_line(value: Any) -> str:
@@ -267,25 +394,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def _metadata_field_coverage(rows: list[dict[str, Any]]) -> dict[str, dict[str, int]]:
-    fields = (
-        "available_at",
-        "bar_ingested_at",
-        "quote_ingested_at",
-        "funding_ingested_at",
-        "joined_refreshed_at",
-    )
-    coverage: dict[str, dict[str, int]] = {}
-    total = len(rows)
-    for field in fields:
-        if any(field in row for row in rows):
-            coverage[field] = {
-                "present": sum(1 for row in rows if row.get(field) is not None),
-                "total": total,
-            }
-    return coverage
-
-
 def _required_row_fields(config: RunConfig) -> tuple[str, ...]:
     fields = ["symbol", "timestamp", "open", "high", "low", "close"]
     if config.data.kind == "crypto_perp_funding":
@@ -293,35 +401,6 @@ def _required_row_fields(config: RunConfig) -> tuple[str, ...]:
     if config.data.kind == "forex_with_quotes" and config.fill_model.price == "quote":
         fields.extend(["bid", "ask", "mid"])
     return tuple(fields)
-
-
-def _duplicate_key_count(rows: list[dict[str, Any]]) -> int:
-    seen: set[tuple[str, object]] = set()
-    duplicates = 0
-    for row in rows:
-        key = (str(row.get("symbol", "")), row.get("timestamp"))
-        if key in seen:
-            duplicates += 1
-        else:
-            seen.add(key)
-    return duplicates
-
-
-def _timestamp_status(rows: list[dict[str, Any]]) -> str:
-    if not rows:
-        return "empty"
-    aware = 0
-    invalid = 0
-    for row in rows:
-        if _is_aware_timestamp(row.get("timestamp")):
-            aware += 1
-        else:
-            invalid += 1
-    if aware == len(rows):
-        return "aware"
-    if invalid == len(rows):
-        return "invalid_or_naive"
-    return "mixed"
 
 
 def _is_aware_timestamp(value: object) -> bool:
@@ -337,22 +416,6 @@ def _is_aware_timestamp(value: object) -> bool:
             return False
         return parsed.tzinfo is not None and parsed.utcoffset() is not None
     return False
-
-
-def _funding_event_missing_fields(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, int]:
-    if config.data.kind != "crypto_perp_funding":
-        return {}
-    fields = ("funding_timestamp", "funding_rate")
-    missing: dict[str, int] = {}
-    for field in fields:
-        count = sum(
-            1
-            for row in rows
-            if row.get("has_funding_event") is True and row.get(field) is None
-        )
-        if count:
-            missing[field] = count
-    return missing
 
 
 def _row_contract_feedback(
@@ -383,10 +446,6 @@ def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:
         exclude_names={"run_manifest.json", "summary.json"},
         recursive=False,
     )
-
-
-def _file_sha256(path: Path) -> str:
-    return file_sha256(path)
 
 
 def _package_versions(package_names: list[str]) -> dict[str, str | None]:

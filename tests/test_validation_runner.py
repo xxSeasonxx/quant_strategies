@@ -164,12 +164,14 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.success is True
+    assert not hasattr(result, "success")
+    assert result.run_completed is True
+    assert result.failure_stage is None
     assert result.decision.decision == "watchlist"
     assert result.decision.reasons == ("paper_readiness_gates_failed",)
     assert "min_windows" in result.decision.failed_gates
     assert "min_total_trades" in result.decision.failed_gates
-    assert "aggregate_realistic_net_positive" in result.decision.passed_gates
+    assert "compounded_realistic_net_positive" in result.decision.passed_gates
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
     assert decision_payload["decision"] == "watchlist"
@@ -418,7 +420,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.decision.decision == "mechanical_review_candidate"
     assert result.decision.reasons == ("deflation_not_evaluated",)
     assert result.result_dir is not None
@@ -447,7 +449,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "aggregate_realistic_net_positive",
+        "compounded_realistic_net_positive",
         "positive_window_fraction",
         "stressed_net_floor",
         "fill_lag_net_floor",
@@ -1293,8 +1295,35 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
         lambda path, repo_root: exit_generation,
     )
 
-    with pytest.raises(SystemExit, match="signal code exited"):
-        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.failure_stage == "decision_generation"
+    assert result.result_dir is not None
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["reasons"] == ["strategy_generation_failed"]
+
+
+def test_run_validation_writes_failure_artifacts_for_validate_params_system_exit(
+    tmp_path: Path,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "def validate_params(params):\n"
+        "    raise SystemExit('params exited')\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.failure_stage == "param_validation"
+    assert result.result_dir is not None
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["failure_details"][0]["stage"] == "param_validation"
+    assert decision_payload["failure_details"][0]["type"] == "SystemExit"
+    assert decision_payload["failure_details"][0]["message"] == "params exited"
 
 
 def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit(
@@ -1303,8 +1332,14 @@ def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text("raise SystemExit('import exited')\n")
 
-    with pytest.raises(SystemExit, match="import exited"):
-        run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+
+    assert result.decision.decision == "hard_no"
+    assert result.failure_stage == "strategy_import"
+    assert result.result_dir is not None
+    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
+    assert decision_payload["failure_details"][0]["stage"] == "strategy_import"
+    assert "strategy import exited: import exited" in decision_payload["failure_details"][0]["message"]
 
 
 class RecordingBackend:

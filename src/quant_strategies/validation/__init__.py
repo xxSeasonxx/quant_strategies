@@ -59,10 +59,11 @@ if _TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ValidationRunResult:
-    success: bool
     result_dir: Path | None
     decision: ValidationPolicyDecision
     message: str
+    run_completed: bool = True
+    failure_stage: str | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,7 @@ class _ValidationState:
     data_provenance: list[dict[str, Any]] = _field(default_factory=list)
     failure_reasons: list[str] = _field(default_factory=list)
     required_scenario_ids: list[str] = _field(default_factory=list)
+    failure_stage: str | None = None
 
 
 _MIN_VALIDATION_TRADES = 10
@@ -134,6 +136,7 @@ def run_validation(
             data_provenance=state.data_provenance,
             backend_results=state.backend_results,
             reason="backend_selection_failed",
+            failure_stage="backend_selection",
             failure_details=[_failure_detail("backend_selection", exc)],
         )
 
@@ -167,7 +170,7 @@ def run_validation(
         decision=decision,
         failure_details=[],
     )
-    return _validation_result(result_dir, decision)
+    return _validation_result(result_dir, decision, failure_stage=state.failure_stage)
 
 
 def _run_validation_window(
@@ -219,6 +222,7 @@ def _handle_window_execution_error(
             context,
             state,
             reason="strategy_import_failed",
+            failure_stage="strategy_import",
             failure_details=[_execution_failure_detail("strategy_import", exc)],
         )
     if exc.stage == "param_validation":
@@ -234,9 +238,12 @@ def _handle_window_execution_error(
             context,
             state,
             reason="param_validation_failed",
+            failure_stage="param_validation",
             failure_details=[_execution_failure_detail("param_validation", exc)],
         )
     if exc.stage == "data_load":
+        if state.failure_stage is None:
+            state.failure_stage = "data_load"
         state.data_provenance.append(
             _data_provenance(
                 window.id,
@@ -256,6 +263,8 @@ def _handle_window_execution_error(
         )
         return None
     if exc.stage == "decision_generation":
+        if state.failure_stage is None:
+            state.failure_stage = "decision_generation"
         if exc.loaded_rows is not None:
             rows_path, rows_hash = _write_window_rows(
                 result_dir=context.result_dir,
@@ -307,6 +316,8 @@ def _audit_window_execution(
         audit = audit_decision_rows(strategy_rows, decisions)
     except Exception as exc:
         state.failure_reasons.append("data_audit_failed")
+        if state.failure_stage is None:
+            state.failure_stage = "data_audit"
         return _failed_data_audit(
             window.id,
             row_count=len(execution.loaded_rows),
@@ -333,6 +344,8 @@ def _audit_window_execution(
                 else "hidden_lookahead_detected"
             )
             state.failure_reasons.append(reason)
+            if state.failure_stage is None:
+                state.failure_stage = "data_audit"
             audit_payload["passed"] = False
             audit_payload["violations"] = list(audit.violations) + list(lookahead.violations)
 
@@ -340,6 +353,8 @@ def _audit_window_execution(
         readiness_violations = check_validation_readiness(decisions, context.config.readiness)
         if readiness_violations:
             state.failure_reasons.append("validation_readiness_failed")
+            if state.failure_stage is None:
+                state.failure_stage = "validation_readiness"
             audit_payload["passed"] = False
             audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
     return audit_payload
@@ -442,6 +457,8 @@ def _classify_validation_state(
             state.failure_reasons,
             search_pressure=context.config.search_pressure,
         )
+    if not data_passed and state.failure_stage is None:
+        state.failure_stage = "data_audit"
     return classify_validation(
         data_passed=data_passed,
         backend_results=state.backend_results,
@@ -457,6 +474,7 @@ def _failure_result_from_state(
     state: _ValidationState,
     *,
     reason: str,
+    failure_stage: str,
     failure_details: list[dict[str, str]],
 ) -> ValidationRunResult:
     return _failure_result(
@@ -472,16 +490,23 @@ def _failure_result_from_state(
         data_provenance=state.data_provenance,
         backend_results=state.backend_results,
         reason=reason,
+        failure_stage=failure_stage,
         failure_details=failure_details,
     )
 
 
-def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> ValidationRunResult:
+def _validation_result(
+    result_dir: Path,
+    decision: ValidationPolicyDecision,
+    *,
+    failure_stage: str | None,
+) -> ValidationRunResult:
     return ValidationRunResult(
-        success=decision.decision in {"mechanical_pass", "watchlist", "mechanical_review_candidate"},
         result_dir=result_dir,
         decision=decision,
         message=f"validation decision: {decision.decision}",
+        run_completed=True,
+        failure_stage=failure_stage,
     )
 
 
@@ -532,6 +557,7 @@ def _failure_result(
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
     reason: str,
+    failure_stage: str,
     failure_details: list[dict[str, str]] | None = None,
 ) -> ValidationRunResult:
     decision = _hard_no_decision(
@@ -553,7 +579,7 @@ def _failure_result(
         decision=decision,
         failure_details=failure_details or [],
     )
-    return _validation_result(result_dir, decision)
+    return _validation_result(result_dir, decision, failure_stage=failure_stage)
 
 
 def _failed_data_audit(
@@ -649,6 +675,16 @@ def _scenario_decision_outcome(
     try:
         scenario_params = validate_strategy_params(generate_decisions, scenario_config.params)
         decision_output = generate_decisions(frozen_rows(rows), frozen_params(scenario_params))
+    except SystemExit as exc:
+        return _ScenarioDecisionOutcome(
+            decisions=[],
+            decision_generation_status="failed",
+            decisions_regenerated=False,
+            failure=_failed_backend_result(
+                backend_name,
+                f"parameter_decision_generation_failed: SystemExit: {exc}",
+            ),
+        )
     except Exception as exc:
         return _ScenarioDecisionOutcome(
             decisions=[],

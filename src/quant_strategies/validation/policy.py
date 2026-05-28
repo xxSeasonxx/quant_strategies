@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Iterable, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -324,7 +325,7 @@ _PAPER_READINESS_GATES: tuple[str, ...] = (
     "min_windows",
     "min_total_trades",
     "no_zero_trade_windows",
-    "aggregate_realistic_net_positive",
+    "compounded_realistic_net_positive",
     "positive_window_fraction",
     "stressed_net_floor",
     "fill_lag_net_floor",
@@ -385,8 +386,8 @@ def _paper_readiness_decision(
         for item in realistic
         if complete_metrics[item.scenario_id].trade_count == 0
     ]
-    realistic_net = sum(metrics.net_return for metrics in realistic_metrics)
-    positive_realistic_evidence = realistic_net > 0.0
+    compounded_realistic_net = _compounded_return(metrics.net_return for metrics in realistic_metrics)
+    positive_realistic_evidence = compounded_realistic_net > 0.0
     positive_windows = sum(
         1 for item in realistic if complete_metrics[item.scenario_id].net_return > 0.0
     )
@@ -417,9 +418,9 @@ def _paper_readiness_decision(
                 else "passed"
             ),
         ),
-        "aggregate_realistic_net_positive": (
+        "compounded_realistic_net_positive": (
             positive_realistic_evidence,
-            _gate_detail(realistic_net, ">", 0.0)
+            _gate_detail(compounded_realistic_net, ">", 0.0)
             if has_realistic
             else _missing_scenario_detail("cost"),
         ),
@@ -484,6 +485,10 @@ def _settings_value(settings: object | None, name: str, default: object) -> obje
     if settings is None:
         return default
     return getattr(settings, name, default)
+
+
+def _compounded_return(returns: Iterable[float]) -> float:
+    return math.prod(1.0 + value for value in returns) - 1.0
 
 
 def _paper_enabled(settings: object | None) -> bool:

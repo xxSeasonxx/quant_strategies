@@ -13,8 +13,7 @@ from quant_strategies.decisions import (
     validate_strategy_params,
 )
 from quant_strategies.decisions.models import StrategyDecision
-from quant_strategies.runner.artifact_profiles import normalized_rows_sha256 as rows_sha256
-from quant_strategies.runner.artifacts import evidence_quality as assess_evidence_quality
+from quant_strategies.runner.artifacts import RowSummary
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.data_loader import load_data
 from quant_strategies.runner.errors import RunnerError, StrategyLoadError
@@ -43,6 +42,7 @@ class StrategyExecutionResult:
     decisions: list[StrategyDecision]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
+    row_summary: RowSummary
 
 
 class StrategyExecutionError(RunnerError):
@@ -54,6 +54,7 @@ class StrategyExecutionError(RunnerError):
         loaded_rows: list[dict[str, Any]] | None = None,
         normalized_rows_sha256: str | None = None,
         evidence_quality: dict[str, Any] | None = None,
+        row_summary: RowSummary | None = None,
         violations: tuple[str, ...] = (),
         decision_count: int | None = None,
     ) -> None:
@@ -62,6 +63,7 @@ class StrategyExecutionError(RunnerError):
         self.loaded_rows = loaded_rows
         self.normalized_rows_sha256 = normalized_rows_sha256
         self.evidence_quality = evidence_quality
+        self.row_summary = row_summary
         self.violations = violations
         self.decision_count = decision_count
 
@@ -69,11 +71,18 @@ class StrategyExecutionError(RunnerError):
 def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecutionResult:
     try:
         generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
+    except SystemExit as exc:
+        raise StrategyExecutionError("strategy_import", f"strategy import exited: {_system_exit_message(exc)}") from exc
     except RunnerError as exc:
         raise StrategyExecutionError("strategy_import", str(exc)) from exc
 
     try:
         validated_params = validate_strategy_params(generate_decisions, config.params)
+    except SystemExit as exc:
+        raise StrategyExecutionError(
+            "param_validation",
+            f"param validation exited: {_system_exit_message(exc)}",
+        ) from exc
     except Exception as exc:
         raise StrategyExecutionError(
             "param_validation",
@@ -86,8 +95,9 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
     rows = loaded.rows
-    row_hash = rows_sha256(rows)
-    evidence = assess_evidence_quality(config, rows)
+    row_summary = RowSummary.from_rows(config, rows)
+    row_hash = row_summary.normalized_rows_sha256
+    evidence = row_summary.evidence_quality(causality_verified=False)
     strategy_rows = frozen_rows(rows)
     strategy_params = frozen_params(validated_params)
 
@@ -103,11 +113,22 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
                 loaded_rows=rows,
                 normalized_rows_sha256=row_hash,
                 evidence_quality=evidence,
+                row_summary=row_summary,
                 violations=tuple(violations),
                 decision_count=decision_count,
             )
     except StrategyExecutionError:
         raise
+    except SystemExit as exc:
+        raise StrategyExecutionError(
+            "decision_generation",
+            f"strategy execution exited: {_system_exit_message(exc)}",
+            loaded_rows=rows,
+            normalized_rows_sha256=row_hash,
+            evidence_quality=evidence,
+            row_summary=row_summary,
+            decision_count=decision_count,
+        ) from exc
     except Exception as exc:
         raise StrategyExecutionError(
             "decision_generation",
@@ -115,6 +136,7 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
             loaded_rows=rows,
             normalized_rows_sha256=row_hash,
             evidence_quality=evidence,
+            row_summary=row_summary,
             decision_count=decision_count,
         ) from exc
 
@@ -127,6 +149,7 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         decisions=decisions,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,
+        row_summary=row_summary,
     )
 
 
@@ -135,3 +158,7 @@ def _load_strategy(path: str | Path, *, repo_root: Path | None = None) -> Genera
         return load_decision_strategy(path, repo_root=repo_root)
     except DecisionStrategyLoadError as exc:
         raise StrategyLoadError(str(exc)) from exc
+
+
+def _system_exit_message(exc: SystemExit) -> str:
+    return str(exc) or repr(exc.code)

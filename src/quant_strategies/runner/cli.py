@@ -10,6 +10,14 @@ from quant_strategies.validation import run_validation
 from quant_strategies.validation.errors import ValidationError
 
 
+_DATA_FAILURE_STAGES = {
+    "data_readiness",
+    "observation_audit",
+    "data_audit",
+    "validation_readiness",
+}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="quant-strategies")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -34,14 +42,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:
             result = run_config(args.config, repo_root=args.repo_root)
-        if result.success:
+        if _run_exit_code(result) == 0:
             print(result.result_dir)
             return 0
         if result.notes_path is not None:
             print(f"run failed; see {result.notes_path}")
         else:
             print(f"run failed: {result.message}")
-        return 1
+        return _run_exit_code(result)
 
     if args.command == "validate":
         try:
@@ -50,9 +58,28 @@ def main(argv: list[str] | None = None) -> int:
             print(f"validation failed: {exc}")
             return 1
         print(f"{result.message}; artifacts: {result.result_dir}")
-        if result.decision.decision == "hard_no":
-            return 1
-        return 0
+        return _validation_exit_code(result)
 
     parser.error(f"unknown command: {args.command}")
     return 2
+
+
+def _run_exit_code(result: object) -> int:
+    failure_stage = getattr(result, "failure_stage", None)
+    if failure_stage in _DATA_FAILURE_STAGES:
+        return 3
+    if failure_stage is not None or not getattr(result, "run_completed", False):
+        return 1
+    return 0
+
+
+def _validation_exit_code(result: object) -> int:
+    failure_stage = getattr(result, "failure_stage", None)
+    if failure_stage in _DATA_FAILURE_STAGES:
+        return 3
+    if failure_stage is not None or not getattr(result, "run_completed", False):
+        return 1
+    decision = getattr(getattr(result, "decision", None), "decision", None)
+    if decision == "hard_no":
+        return 2
+    return 0

@@ -30,11 +30,11 @@ from quant_strategies.runner.execution import (
 
 @dataclass(frozen=True)
 class RunResult:
-    success: bool
     result_dir: Path | None
     notes_path: Path | None
     message: str
     run_completed: bool = False
+    failure_stage: str | None = None
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
     artifact_trust_tier: str | None = None
@@ -62,7 +62,12 @@ def run_config(
             config_file = config_module.resolve_config_path(config_path, repo_root=effective_repo_root)
             config = config_module.load_config(config_file, repo_root=effective_repo_root)
     except RunnerError as exc:
-        return RunResult(success=False, result_dir=None, notes_path=None, message=str(exc))
+        return RunResult(
+            result_dir=None,
+            notes_path=None,
+            message=str(exc),
+            failure_stage="config_load",
+        )
 
     with events.stage("artifact_initialization", strategy_id=config.strategy_id):
         result_dir = artifacts.create_result_dir(config)
@@ -80,7 +85,7 @@ def run_config(
             event_emitter=events,
         )
 
-    strategy_input_rows_jsonl_sha256 = _write_strategy_input_rows_if_full(
+    _write_strategy_input_rows_if_full(
         result_dir,
         config,
         execution.loaded_rows,
@@ -89,7 +94,6 @@ def run_config(
         config,
         result_dir,
         execution,
-        strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
         repo_root=effective_repo_root,
         event_emitter=events,
     )
@@ -101,8 +105,8 @@ def run_config(
         result_dir,
         config,
         rows=execution.loaded_rows,
-        strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
         normalized_rows_hash=execution.normalized_rows_sha256,
+        row_summary=execution.row_summary,
         evidence_quality=evidence_quality,
     )
     if not causality.passed:
@@ -140,7 +144,7 @@ def run_config(
     if failure is not None:
         return failure
 
-    success, assessment_status, notes = _write_completion_artifacts(
+    assessment_status, notes = _write_completion_artifacts(
         config,
         result_dir,
         execution,
@@ -150,11 +154,11 @@ def run_config(
         event_emitter=events,
     )
     return RunResult(
-        success=success,
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",
         message=notes.strip(),
         run_completed=True,
+        failure_stage=None,
         assessment_status=assessment_status,
         promotion_eligible=False,
         artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
@@ -175,7 +179,7 @@ def _execution_failure_result(
         and exc.loaded_rows is not None
         and exc.normalized_rows_sha256 is not None
     ):
-        strategy_input_rows_jsonl_sha256 = _write_strategy_input_rows_if_full(
+        _write_strategy_input_rows_if_full(
             result_dir,
             config,
             exc.loaded_rows,
@@ -184,8 +188,8 @@ def _execution_failure_result(
             result_dir,
             config,
             rows=exc.loaded_rows,
-            strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
             normalized_rows_hash=exc.normalized_rows_sha256,
+            row_summary=exc.row_summary,
             evidence_quality=exc.evidence_quality,
         )
     return _failure_result(
@@ -203,10 +207,10 @@ def _write_strategy_input_rows_if_full(
     result_dir: Path,
     config: config_module.RunConfig,
     rows: list[dict[str, Any]],
-) -> str | None:
+) -> None:
     if config.output.artifact_profile != "full":
-        return None
-    return artifacts.write_strategy_input_rows(result_dir, rows)
+        return
+    artifacts.write_strategy_input_rows(result_dir, rows)
 
 
 def _write_execution_data_manifest(
@@ -214,16 +218,16 @@ def _write_execution_data_manifest(
     config: config_module.RunConfig,
     *,
     rows: list[dict[str, Any]],
-    strategy_input_rows_jsonl_sha256: str | None,
     normalized_rows_hash: str,
+    row_summary: artifacts.RowSummary | None = None,
     evidence_quality: dict[str, object] | None,
 ) -> None:
     artifacts.write_data_manifest(
         result_dir,
         config,
         rows,
-        strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
         normalized_rows_hash=normalized_rows_hash,
+        row_summary=row_summary,
         evidence_quality_payload=evidence_quality,
     )
 
@@ -368,7 +372,7 @@ def _write_completion_artifacts(
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
-) -> tuple[bool, str, str]:
+) -> tuple[str, str]:
     if engine_run is None:
         raise ValueError("engine_run is required when no failure was returned")
     with event_emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage="completed"):
@@ -383,6 +387,7 @@ def _write_completion_artifacts(
                 decisions=execution.decisions,
                 engine=engine_summary,
                 normalized_rows_hash=execution.normalized_rows_sha256,
+                row_ranges=execution.row_summary.ranges_by_symbol,
             )
         notes = _completion_notes(config, engine_run)
         artifacts.write_notes(result_dir, notes)
@@ -392,22 +397,21 @@ def _write_completion_artifacts(
             evidence=runner_evidence_semantics(config.data.kind),
             artifact_profile=config.output.artifact_profile,
         )
-        success = _result_success(engine_run)
         assessment_status = _assessment_status(engine_run, evidence_quality=evidence_quality)
         artifacts.write_summary(
             result_dir,
             _summary_payload(
                 config,
-                success=success,
                 status=_result_status(engine_run),
                 stage="completed",
+                failure_stage=None,
                 message=notes.strip(),
                 engine=engine_summary,
                 assessment_status=assessment_status,
                 evidence_quality=evidence_quality,
             ),
         )
-    return success, assessment_status, notes.strip()
+    return assessment_status, notes.strip()
 
 
 def _check_causality(
@@ -434,7 +438,6 @@ def _audit_observation_dependencies(
     result_dir: Path,
     execution: StrategyExecutionResult,
     *,
-    strategy_input_rows_jsonl_sha256: str | None,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
 ) -> RunResult | None:
@@ -450,8 +453,8 @@ def _audit_observation_dependencies(
             result_dir,
             config,
             rows=execution.loaded_rows,
-            strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
             normalized_rows_hash=execution.normalized_rows_sha256,
+            row_summary=execution.row_summary,
             evidence_quality=execution.evidence_quality,
         )
         return _failure_result(
@@ -508,9 +511,9 @@ def _failure_result(
             result_dir,
             _summary_payload(
                 config,
-                success=False,
                 status="failed",
                 stage=stage,
+                failure_stage=stage,
                 message=message,
                 engine={"passed": None, "trade_count": None},
                 assessment_status="runner_failed",
@@ -518,11 +521,11 @@ def _failure_result(
             ),
         )
     return RunResult(
-        success=False,
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",
         message=notes.strip(),
         run_completed=True,
+        failure_stage=stage,
         assessment_status="runner_failed",
         promotion_eligible=False,
         artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
@@ -563,9 +566,9 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 def _summary_payload(
     config: config_module.RunConfig,
     *,
-    success: bool,
     status: str,
     stage: str,
+    failure_stage: str | None,
     message: str,
     engine: dict[str, object],
     assessment_status: str,
@@ -578,9 +581,9 @@ def _summary_payload(
         "mode": config.output.mode,
         "artifact_profile": config.output.artifact_profile,
         "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
-        "success": success,
         "status": status,
         "stage": stage,
+        "failure_stage": failure_stage,
         "message": message,
         "artifacts": [],
         "engine": engine_payload,
@@ -638,12 +641,6 @@ def _compact_engine_summary(engine_run: engine_runner.EngineRun) -> dict[str, ob
 
 def _failure_notes(stage: str, message: str) -> str:
     return f"# Run Failed\n\nstage: {stage}\nmessage: {message}\n"
-
-
-def _result_success(engine_run: engine_runner.EngineRun) -> bool:
-    if engine_run.mode == "screen":
-        return True
-    return bool(engine_run.passed)
 
 
 def _result_status(engine_run: engine_runner.EngineRun) -> str:

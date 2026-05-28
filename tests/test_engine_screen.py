@@ -162,6 +162,87 @@ def test_screen_applies_funding_cashflows_after_entry_through_exit():
     assert result.smoke_score.sum_signed_trade_activity_net == pytest.approx(0.0)
 
 
+def test_screen_counts_tiny_duplicate_funding_rate_differences_once():
+    bars = (
+        Bar(symbol="BTC-PERP", timestamp=DECISION, open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC-PERP", timestamp=DECISION.replace(minute=31), open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(
+            symbol="BTC-PERP",
+            timestamp=DECISION.replace(minute=32),
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            funding_timestamp=DECISION.replace(minute=32),
+            funding_rate=0.0002,
+            has_funding_event=True,
+        ),
+        Bar(
+            symbol="BTC-PERP",
+            timestamp=DECISION.replace(minute=33),
+            open=101.0,
+            high=101.0,
+            low=101.0,
+            close=101.0,
+            funding_timestamp=DECISION.replace(minute=32),
+            funding_rate=0.0002 + 5e-13,
+            has_funding_event=True,
+        ),
+    )
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="funding_duplicate",
+            decisions=(decision_for(symbol="BTC-PERP", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),),
+        ),
+        bars=bars,
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    result = screen(request)
+
+    assert result.trades[0].funding_return == pytest.approx(-0.0002)
+
+
+def test_screen_rejects_meaningful_duplicate_funding_rate_conflicts():
+    bars = (
+        Bar(symbol="BTC-PERP", timestamp=DECISION, open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC-PERP", timestamp=DECISION.replace(minute=31), open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(
+            symbol="BTC-PERP",
+            timestamp=DECISION.replace(minute=32),
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            funding_timestamp=DECISION.replace(minute=32),
+            funding_rate=0.0002,
+            has_funding_event=True,
+        ),
+        Bar(
+            symbol="BTC-PERP",
+            timestamp=DECISION.replace(minute=33),
+            open=101.0,
+            high=101.0,
+            low=101.0,
+            close=101.0,
+            funding_timestamp=DECISION.replace(minute=32),
+            funding_rate=0.0003,
+            has_funding_event=True,
+        ),
+    )
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="funding_conflict",
+            decisions=(decision_for(symbol="BTC-PERP", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),),
+        ),
+        bars=bars,
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    with pytest.raises(EvaluationError, match="conflicting funding rates"):
+        screen(request)
+
+
 def test_engine_bar_index_builds_positions_by_symbol():
     from quant_strategies.engine.evaluation import _index_bars
 

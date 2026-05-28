@@ -90,7 +90,7 @@ mode = "screen"
     return load_config(config_path, repo_root=repo_root)
 
 
-def test_execute_strategy_run_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     loaded_rows = rows()
     write_strategy(
         tmp_path,
@@ -165,6 +165,37 @@ def test_execute_strategy_run_maps_param_validation_failure(
         execute_strategy_run(config, repo_root=tmp_path)
 
     assert str(error.value) == "param validation failed: unknown weight"
+    assert error.value.stage == "param_validation"
+    assert error.value.loaded_rows is None
+    assert error.value.normalized_rows_sha256 is None
+    assert error.value.evidence_quality is None
+    assert load_calls == 0
+
+
+def test_execute_strategy_run_maps_param_validation_system_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(
+        tmp_path,
+        "def validate_params(params):\n"
+        "    raise SystemExit('params exited')\n"
+        "def generate_decisions(rows, params): return []\n",
+    )
+    config = write_config(tmp_path)
+    load_calls = 0
+
+    def load_data(config):
+        nonlocal load_calls
+        load_calls += 1
+        return LoadedData(rows=rows())
+
+    monkeypatch.setattr(execution, "load_data", load_data)
+
+    with pytest.raises(StrategyExecutionError) as error:
+        execute_strategy_run(config, repo_root=tmp_path)
+
+    assert str(error.value) == "param validation exited: params exited"
     assert error.value.stage == "param_validation"
     assert error.value.loaded_rows is None
     assert error.value.normalized_rows_sha256 is None

@@ -7,10 +7,12 @@ from pathlib import Path
 
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.artifact_profiles import (
+    canonical_rows_jsonl,
     normalized_rows_sha256,
     summary_profile_payload,
     write_summary_profile_artifact,
 )
+from quant_strategies.runner.artifacts import write_jsonl
 from quant_strategies.runner.config import load_config
 
 
@@ -115,6 +117,20 @@ def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
 
     assert first == second
     assert len(first) == 64
+
+
+def test_write_jsonl_uses_same_canonical_rows_as_normalized_hash(tmp_path: Path):
+    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    rows = [
+        {"symbol": "SPY", "timestamp": timestamp, "close": 100.0, "nested": {"b": 2, "a": 1}},
+        {"nested": {"a": 1, "b": 2}, "close": 101.0, "timestamp": timestamp, "symbol": "SPY"},
+    ]
+    path = tmp_path / "rows.jsonl"
+
+    written_hash = write_jsonl(path, rows)
+
+    assert written_hash == normalized_rows_sha256(rows)
+    assert path.read_text() == canonical_rows_jsonl(rows)
 
 
 def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Path):

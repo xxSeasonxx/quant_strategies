@@ -101,6 +101,13 @@ for stage start, completion, and failure events, with UTC timestamps and
 `quant-strategies run --events-jsonl ...`, which preserves stdout as the result
 directory and writes JSONL stage events to stderr.
 
+CLI exit codes are part of the public contract: `0` means structured usable
+evidence was produced, `1` means infrastructure or execution failed, `2` means
+validation completed with `hard_no`, and `3` means data readiness or audit
+failed. Programmatic callers should use `run_completed`, `failure_stage`,
+`assessment_status`, verdicts, trust tier, causality/data fields, row contract,
+and smoke metrics instead of any single completion flag.
+
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
 `causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay

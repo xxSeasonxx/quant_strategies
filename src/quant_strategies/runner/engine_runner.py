@@ -17,6 +17,7 @@ from quant_strategies.engine import (
     gate_screen,
     screen,
 )
+from quant_strategies.engine.bar_index import IndexedBars, attach_bar_index, build_bar_index
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.errors import EvaluationRunError, RequestBuildError
@@ -32,12 +33,6 @@ class EngineRun:
     validate_summary: dict[str, Any] | None
     evidence_json: str
     passed: bool | None
-
-
-@dataclass(frozen=True)
-class _BarIndex:
-    bars_by_symbol: dict[str, tuple[Bar, ...]]
-    positions_by_symbol: dict[str, dict[datetime, int]]
 
 
 def build_request(
@@ -168,6 +163,7 @@ def _as_datetime(value: object, field_name: str) -> datetime:
 
 def _assert_fillable(request: EvaluationRequest) -> None:
     indexed = _build_bar_index(request.bars)
+    attach_bar_index(request, indexed)
 
     for decision in request.spec.decisions:
         symbol = _decision_symbol(decision)
@@ -190,26 +186,11 @@ def _assert_fillable(request: EvaluationRequest) -> None:
                 _assert_quote_fill_bar(symbol_bars[exit_index], "exit")
 
 
-def _build_bar_index(bars: tuple[Bar, ...]) -> _BarIndex:
-    grouped: dict[str, list[Bar]] = {}
-    for bar in bars:
-        grouped.setdefault(bar.symbol, []).append(bar)
-
-    bars_by_symbol: dict[str, tuple[Bar, ...]] = {}
-    positions_by_symbol: dict[str, dict[datetime, int]] = {}
-    for symbol, symbol_bars in grouped.items():
-        ordered = sorted(symbol_bars, key=lambda bar: bar.timestamp)
-        positions: dict[datetime, int] = {}
-        for index, bar in enumerate(ordered):
-            if bar.timestamp in positions:
-                raise RequestBuildError(f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}")
-            positions[bar.timestamp] = index
-        bars_by_symbol[symbol] = tuple(ordered)
-        positions_by_symbol[symbol] = positions
-    return _BarIndex(bars_by_symbol=bars_by_symbol, positions_by_symbol=positions_by_symbol)
+def _build_bar_index(bars: tuple[Bar, ...]) -> IndexedBars:
+    return build_bar_index(bars, error_factory=RequestBuildError)
 
 
-def _decision_index(indexed: _BarIndex, decision: StrategyDecision) -> int:
+def _decision_index(indexed: IndexedBars, decision: StrategyDecision) -> int:
     symbol = _decision_symbol(decision)
     position = indexed.positions_by_symbol.get(symbol, {}).get(decision.decision_time)
     if position is not None:

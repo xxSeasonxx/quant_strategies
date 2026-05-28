@@ -136,7 +136,7 @@ def test_fx_triangle_synthetic_generator_uses_only_as_of_rows_and_typed_observat
     )
 
 
-def test_poisoning_future_rows_does_not_change_generated_decision_fingerprints():
+def test_poisoning_future_rows_does_not_change_generated_decision_ids():
     cross_section_rows = [
         row("BTC-PERP", AS_OF, 100.0),
         row("ETH-PERP", AS_OF, 105.0),

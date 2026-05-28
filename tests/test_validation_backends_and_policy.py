@@ -21,7 +21,7 @@ def test_policy_declares_paper_readiness_gates_in_order():
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "aggregate_realistic_net_positive",
+        "compounded_realistic_net_positive",
         "positive_window_fraction",
         "stressed_net_floor",
         "fill_lag_net_floor",
@@ -266,7 +266,7 @@ def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
     assert "min_windows" in decision.passed_gates
     assert "min_total_trades" in decision.passed_gates
     assert "no_zero_trade_windows" in decision.passed_gates
-    assert "aggregate_realistic_net_positive" in decision.passed_gates
+    assert "compounded_realistic_net_positive" in decision.passed_gates
     assert "positive_window_fraction" in decision.passed_gates
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
@@ -330,7 +330,7 @@ def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
 
     assert decision.decision == "mechanical_pass"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "aggregate_realistic_net_positive" in decision.failed_gates
+    assert "compounded_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -612,7 +612,7 @@ def test_policy_mechanical_pass_for_negative_realistic_cost_evidence():
 
     assert decision.decision == "mechanical_pass"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "aggregate_realistic_net_positive" in decision.failed_gates
+    assert "compounded_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -632,7 +632,22 @@ def test_policy_mechanical_pass_for_zero_realistic_cost_evidence():
 
     assert decision.decision == "mechanical_pass"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "aggregate_realistic_net_positive" in decision.failed_gates
+    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert_advisory_only(decision)
+
+
+def test_policy_uses_compounded_realistic_return_not_arithmetic_sum():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=paper_ready_scenarios(cost_returns=(1.0, -0.5)),
+        min_trades=10,
+        required_scenario_ids=tuple(item.scenario_id for item in paper_ready_scenarios()),
+    )
+
+    assert decision.decision == "mechanical_pass"
+    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert decision.gate_details["compounded_realistic_net_positive"] == "0.0 > 0.0"
     assert_advisory_only(decision)
 
 
@@ -775,7 +790,7 @@ def test_policy_marks_missing_paper_scenario_group_details_as_missing():
 
     assert decision.decision == "mechanical_pass"
     assert decision.gate_details["no_zero_trade_windows"] == "missing cost scenarios"
-    assert decision.gate_details["aggregate_realistic_net_positive"] == "missing cost scenarios"
+    assert decision.gate_details["compounded_realistic_net_positive"] == "missing cost scenarios"
     assert decision.gate_details["stressed_net_floor"] == "missing cost_stress scenarios"
     assert decision.gate_details["fill_lag_net_floor"] == "missing fill_lag scenarios"
     assert_advisory_only(decision)

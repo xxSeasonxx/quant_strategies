@@ -18,6 +18,7 @@ from quant_strategies.validation.lookahead import check_hidden_lookahead as lega
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+LATE_DECISION = datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc)
 
 
 def row(
@@ -224,5 +225,53 @@ def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
     )
 
     assert result.passed is True
-    assert len(replay_row_ids) == len(baseline)
-    assert len(set(replay_row_ids)) == 1
+    assert len(replay_row_ids) == 1
+
+
+def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(AS_OF, 101.0, available_at=LATE_DECISION),
+    ]
+    visible_closes_by_call: list[tuple[float, ...]] = []
+
+    def boundary_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        closes = tuple(float(item["close"]) for item in rows)
+        visible_closes_by_call.append(closes)
+        if 101.0 in closes:
+            return [
+                StrategyDecision(
+                    decision_id="demo:late",
+                    strategy_id="demo",
+                    instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+                    decision_time=LATE_DECISION,
+                    as_of_time=AS_OF,
+                    target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+                    exit_policy=ExitPolicy(max_hold_bars=1),
+                )
+            ]
+        return [decision()]
+
+    baseline = [
+        decision(),
+        StrategyDecision(
+            decision_id="demo:late",
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=LATE_DECISION,
+            as_of_time=AS_OF,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=1),
+        ),
+    ]
+
+    result = check_hidden_lookahead(
+        boundary_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+    )
+
+    assert result.passed is True
+    assert visible_closes_by_call == [(100.0,), (100.0, 101.0)]

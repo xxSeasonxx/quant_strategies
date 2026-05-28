@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-import math
 from typing import Any
 
 from quant_strategies.decisions import InstrumentRef, StrategyDecision
+from quant_strategies.engine.bar_index import (
+    IndexedBars,
+    attach_bar_index,
+    attached_bar_index,
+    build_bar_index,
+)
+from quant_strategies.funding import funding_rates_match
 from quant_strategies.engine.models import (
     Bar,
     EvaluationRequest,
@@ -34,14 +39,6 @@ class _ExitSelection:
 
 
 @dataclass(frozen=True)
-class _IndexedBars:
-    bars_by_symbol: dict[str, tuple[Bar, ...]]
-    positions_by_symbol: dict[str, dict[datetime, int]]
-    funding_events_by_symbol: dict[str, tuple[Bar, ...]]
-    has_funding_events: bool
-
-
-@dataclass(frozen=True)
 class _ExecutableDecision:
     decision: StrategyDecision
     symbol: str
@@ -51,7 +48,7 @@ class _ExecutableDecision:
 
 
 def screen(request: EvaluationRequest) -> ScreeningResult:
-    indexed = _index_bars(request.bars)
+    indexed = _request_bar_index(request)
     if not indexed.bars_by_symbol:
         raise EvaluationError("bars are required")
 
@@ -181,38 +178,20 @@ def gate_screen(
     )
 
 
-def _index_bars(bars: tuple[Bar, ...]) -> _IndexedBars:
-    grouped: dict[str, list[Bar]] = defaultdict(list)
-    for bar in bars:
-        grouped[bar.symbol].append(bar)
-
-    bars_by_symbol: dict[str, tuple[Bar, ...]] = {}
-    positions_by_symbol: dict[str, dict[datetime, int]] = {}
-    funding_events_by_symbol: dict[str, tuple[Bar, ...]] = {}
-    has_funding_events = False
-    for symbol, symbol_bars in grouped.items():
-        ordered = sorted(symbol_bars, key=lambda bar: bar.timestamp)
-        positions: dict[datetime, int] = {}
-        funding_events: list[Bar] = []
-        for index, bar in enumerate(ordered):
-            if bar.timestamp in positions:
-                raise EvaluationError(f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}")
-            positions[bar.timestamp] = index
-            if bar.has_funding_event:
-                funding_events.append(bar)
-                has_funding_events = True
-        bars_by_symbol[symbol] = tuple(ordered)
-        positions_by_symbol[symbol] = positions
-        funding_events_by_symbol[symbol] = tuple(funding_events)
-    return _IndexedBars(
-        bars_by_symbol=bars_by_symbol,
-        positions_by_symbol=positions_by_symbol,
-        funding_events_by_symbol=funding_events_by_symbol,
-        has_funding_events=has_funding_events,
-    )
+def _index_bars(bars: tuple[Bar, ...]) -> IndexedBars:
+    return build_bar_index(bars, error_factory=EvaluationError)
 
 
-def _decision_index(indexed: _IndexedBars, symbol: str, decision_time: datetime) -> int:
+def _request_bar_index(request: EvaluationRequest) -> IndexedBars:
+    indexed = attached_bar_index(request)
+    if indexed is not None:
+        return indexed
+    indexed = _index_bars(request.bars)
+    attach_bar_index(request, indexed)
+    return indexed
+
+
+def _decision_index(indexed: IndexedBars, symbol: str, decision_time: datetime) -> int:
     position = indexed.positions_by_symbol.get(symbol, {}).get(decision_time)
     if position is not None:
         return position
@@ -316,7 +295,7 @@ def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:
 
 
 def _funding_return(
-    indexed: _IndexedBars,
+    indexed: IndexedBars,
     symbol: str,
     entry_time: datetime,
     exit_time: datetime,
@@ -333,7 +312,7 @@ def _funding_return(
         if not entry_time < bar.funding_timestamp <= exit_time:
             continue
         existing = rates_by_timestamp.get(bar.funding_timestamp)
-        if existing is not None and not math.isclose(existing, bar.funding_rate, rel_tol=0.0, abs_tol=1e-15):
+        if existing is not None and not funding_rates_match(existing, bar.funding_rate):
             raise EvaluationError(f"conflicting funding rates at {bar.funding_timestamp.isoformat()}")
         rates_by_timestamp[bar.funding_timestamp] = bar.funding_rate
 

@@ -19,9 +19,9 @@ from quant_strategies.runner.errors import DataLoadError, EvaluationRunError
 SUMMARY_KEYS = {
     "strategy_id",
     "mode",
-    "success",
     "status",
     "stage",
+    "failure_stage",
     "message",
     "artifacts",
     "engine",
@@ -176,6 +176,10 @@ def read_summary(result_dir: Path) -> dict[str, object]:
     summary = json.loads((result_dir / "summary.json").read_text())
     assert set(summary) == SUMMARY_KEYS
     assert all((result_dir / name).exists() for name in summary["artifacts"])
+    if summary["stage"] == "completed":
+        assert summary["failure_stage"] is None
+    else:
+        assert summary["failure_stage"] == summary["stage"]
     return summary
 
 
@@ -187,9 +191,11 @@ def assert_assessment(
     run_completed: bool = True,
     promotion_eligible: bool = False,
     artifact_profile: str = "full",
+    failure_stage: str | None = None,
 ) -> None:
     expected_trust = "audit_replayable" if artifact_profile == "full" else "search_only"
     assert result.run_completed is run_completed
+    assert result.failure_stage == failure_stage
     assert result.assessment_status == assessment_status
     assert result.promotion_eligible is promotion_eligible
     assert result.artifact_trust_tier == expected_trust
@@ -199,6 +205,7 @@ def assert_assessment(
     assert result.causality_verified is summary["causality_verified"]
     assert result.evidence_quality_warnings == tuple(summary["evidence_quality_warnings"])
     assert summary["run_completed"] is run_completed
+    assert summary["failure_stage"] == failure_stage
     assert summary["assessment_status"] == assessment_status
     assert summary["artifact_profile"] == artifact_profile
     assert summary["artifact_trust_tier"] == expected_trust
@@ -238,14 +245,15 @@ def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["asymmetry"]
 
 
-def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert not hasattr(result, "success")
+    assert result.run_completed is True
     assert result.result_dir is not None
     expected = {
         "config.toml",
@@ -267,8 +275,8 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert '": ' not in decision_records[0]
     assert json.loads(decision_records[0])["strategy_id"] == "demo"
     summary = read_summary(result.result_dir)
+    assert "success" not in summary
     assert summary["stage"] == "completed"
-    assert summary["success"] is True
     assert summary["status"] == "passed"
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
@@ -322,7 +330,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     names = {path.name for path in result.result_dir.iterdir() if path.is_file()}
     assert names == {
@@ -368,7 +376,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
     assert data_manifest["artifact_trust_tier"] == "search_only"
-    assert data_manifest["strategy_input_rows_jsonl_sha256"] is None
+    assert "strategy_input_rows_jsonl_sha256" not in data_manifest
     assert len(data_manifest["normalized_rows_sha256"]) == 64
     assert profile["rows"]["normalized_rows_sha256"] == data_manifest["normalized_rows_sha256"]
     assert_smoke_metric_semantics(data_manifest)
@@ -393,7 +401,7 @@ def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monke
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert not (result.result_dir / "evidence.json").exists()
 
@@ -405,7 +413,7 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["mode"] == "screen"
@@ -436,7 +444,7 @@ def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["mode"] == "screen"
@@ -486,7 +494,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     request = json.loads((result.result_dir / "engine_request.json").read_text())
     evidence = json.loads((result.result_dir / "evidence.json").read_text())
@@ -510,7 +518,7 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["mode"] == "validate"
@@ -537,7 +545,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["mode"] == "validate"
@@ -582,7 +590,7 @@ def test_run_config_writes_data_failure_summary(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert (result.result_dir / "config.toml").exists()
     assert (result.result_dir / "strategy_snapshot.py").exists()
@@ -602,9 +610,29 @@ def test_run_config_writes_data_failure_summary(
         "available_at_missing",
         "runner_causality_not_verified",
     ]
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
     assert (result.result_dir / "run_manifest.json").exists()
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
+
+
+def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+
+    def fail_data_load(config):
+        raise DataLoadError("strict data window failed")
+
+    monkeypatch.setattr(execution, "load_data", fail_data_load)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage == "data_load"
+    assert result.assessment_status == "runner_failed"
+    assert cli._run_exit_code(result) == 1
 
 
 def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -620,11 +648,11 @@ def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch:
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "strategy_import"
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
     assert (result.result_dir / "run_manifest.json").exists()
 
 
@@ -635,12 +663,12 @@ def test_strategy_path_directory_failure_writes_summary(tmp_path: Path):
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert not (result.result_dir / "strategy_snapshot.py").exists()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "strategy_import"
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
     assert (result.result_dir / "run_manifest.json").exists()
 
 
@@ -736,20 +764,20 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
         "load_data",
         lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
-    row_contract_calls = 0
-    original_row_contract_status = artifacts.row_contract_status
+    row_summary_calls = 0
+    original_from_rows = artifacts.RowSummary.from_rows
 
-    def counting_row_contract_status(config, loaded_rows):
-        nonlocal row_contract_calls
-        row_contract_calls += 1
-        return original_row_contract_status(config, loaded_rows)
+    def counting_from_rows(config, loaded_rows, **kwargs):
+        nonlocal row_summary_calls
+        row_summary_calls += 1
+        return original_from_rows(config, loaded_rows, **kwargs)
 
-    monkeypatch.setattr(artifacts, "row_contract_status", counting_row_contract_status)
+    monkeypatch.setattr(artifacts.RowSummary, "from_rows", staticmethod(counting_from_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
-    assert row_contract_calls == 1
+    assert result.run_completed is True
+    assert row_summary_calls == 1
 
 
 def test_run_config_marks_partial_available_at_coverage(
@@ -801,7 +829,7 @@ def test_run_config_rejects_invalid_available_at_for_causality_claim(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -857,7 +885,7 @@ def test_runner_catches_hidden_lookahead_before_request_build(
 
     result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -915,7 +943,7 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
 
     result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -947,7 +975,7 @@ def test_run_config_records_row_contract_feedback(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -1000,7 +1028,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -1042,7 +1070,8 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["min_timestamp"] == "2024-01-01T00:00:00+00:00"
     assert data_manifest["rows"]["by_symbol"]["SPY"]["max_timestamp"] == "2024-01-04T00:00:00+00:00"
-    assert data_manifest["strategy_input_rows_jsonl_sha256"] == run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
+    assert "strategy_input_rows_jsonl_sha256" not in data_manifest
+    assert "strategy_input_rows.jsonl" in run_manifest["artifacts"]
     assert len(data_manifest["normalized_rows_sha256"]) == 64
     summary = read_summary(result.result_dir)
     assert "run_manifest.json" in summary["artifacts"]
@@ -1062,7 +1091,7 @@ def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     jsonl_rows = [
         json.loads(line)
@@ -1083,13 +1112,13 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert (result.result_dir / "run_manifest.json").exists()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "smoke_score" not in summary["engine"]
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1106,13 +1135,13 @@ def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert loaded_rows[0]["close"] == 100.0
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "strategy execution failed" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1128,12 +1157,12 @@ def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pyte
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "strategy execution failed" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1157,14 +1186,14 @@ def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert load_calls == 0
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "param_validation"
     assert summary["message"] == "param validation failed: unknown params"
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_runner_rejects_non_mapping_validate_params_return(
@@ -1184,16 +1213,39 @@ def test_runner_rejects_non_mapping_validate_params_return(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "param_validation"
     assert summary["message"] == "param validation failed: validate_params must return a mapping"
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
-def test_runner_propagates_strategy_execution_system_exit(
+def test_runner_structures_validate_params_system_exit(tmp_path: Path):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "def validate_params(params):\n"
+        "    raise SystemExit('params exited')\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+    config_path = write_config(tmp_path)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage == "param_validation"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "param_validation"
+    assert summary["message"] == "param validation exited: params exited"
+    assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+
+
+def test_runner_structures_strategy_execution_system_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1206,18 +1258,30 @@ def test_runner_propagates_strategy_execution_system_exit(
     config_path = write_config(tmp_path)
     monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
-    with pytest.raises(SystemExit, match="strategy exited"):
-        run_config(config_path, repo_root=tmp_path)
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage == "decision_generation"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "decision_generation"
+    assert "strategy execution exited: strategy exited" in summary["message"]
 
 
-def test_runner_propagates_strategy_import_system_exit(tmp_path: Path):
+def test_runner_structures_strategy_import_system_exit(tmp_path: Path):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("raise SystemExit('import exited')\n")
     config_path = write_config(tmp_path)
 
-    with pytest.raises(SystemExit, match="import exited"):
-        run_config(config_path, repo_root=tmp_path)
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage == "strategy_import"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "strategy_import"
+    assert "strategy import exited: import exited" in summary["message"]
 
 
 @pytest.mark.parametrize("readiness_lag", [-timedelta(minutes=1), timedelta(0)])
@@ -1233,7 +1297,7 @@ def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "completed"
@@ -1253,7 +1317,7 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     for name in (
         "strategy_input_rows.jsonl",
@@ -1310,12 +1374,12 @@ def test_malformed_decision_time_remains_decision_generation_failure(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "decision_time" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_invalid_decision_output_fails_before_writing_decision_records(
@@ -1334,7 +1398,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
@@ -1343,7 +1407,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
     assert not (result.result_dir / "decision_records.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
@@ -1373,7 +1437,7 @@ def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "request_build"
@@ -1383,7 +1447,7 @@ def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
     assert (result.result_dir / "data_manifest.json").exists()
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert not (result.result_dir / "signals.csv").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
@@ -1413,13 +1477,13 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "decision_strategy_id_mismatch[0]: expected demo, got other" in summary["message"]
     assert not (result.result_dir / "decision_records.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
 def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1523,7 +1587,7 @@ def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, m
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     for name in (
         "strategy_input_rows.jsonl",
@@ -1554,7 +1618,7 @@ def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is False
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert (result.result_dir / "engine_request.json").exists()
     assert read_summary(result.result_dir)["stage"] == "engine_evaluation"
@@ -1573,7 +1637,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
 
     result = run_config("runs/demo.toml", repo_root=repo_root)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert (result.result_dir / "config.toml").read_text() == config_path.read_text()
 
@@ -1586,7 +1650,7 @@ def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: p
 
     result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert events
     assert all(event["event"] == "runner_stage" for event in events)
     assert all(isinstance(event["timestamp"], str) for event in events)
@@ -1681,16 +1745,43 @@ def test_cli_reports_failure_with_notes(tmp_path: Path, monkeypatch: pytest.Monk
         cli,
         "run_config",
         lambda path, *, repo_root=None: RunResult(
-            success=False,
             result_dir=notes.parent,
             notes_path=notes,
             message="failed",
+            run_completed=True,
+            failure_stage="request_build",
         ),
     )
 
     exit_code = cli.main(["run", "bad.toml"])
 
     assert exit_code == 1
+    assert str(notes) in capsys.readouterr().out
+
+
+def test_cli_returns_three_for_data_readiness_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    notes = tmp_path / "results" / "run" / "notes.md"
+    notes.parent.mkdir(parents=True)
+    notes.write_text("failed")
+    monkeypatch.setattr(
+        cli,
+        "run_config",
+        lambda path, *, repo_root=None: RunResult(
+            result_dir=notes.parent,
+            notes_path=notes,
+            message="failed",
+            run_completed=True,
+            failure_stage="data_readiness",
+        ),
+    )
+
+    exit_code = cli.main(["run", "bad.toml"])
+
+    assert exit_code == 3
     assert str(notes) in capsys.readouterr().out
 
 
@@ -1723,8 +1814,8 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
         "notes.md",
     }
 
-    assert first.success is True
-    assert second.success is True
+    assert first.run_completed is True
+    assert second.run_completed is True
     assert first.artifact_trust_tier == "audit_replayable"
     assert second.artifact_trust_tier == "audit_replayable"
     assert first.result_dir is not None

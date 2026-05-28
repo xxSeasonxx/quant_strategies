@@ -249,12 +249,12 @@ class StrategyDecision(DecisionModel):
             raise ValueError("as_of_time must be on or before decision_time")
         try:
             frozen_metadata = _freeze_metadata_value(self.metadata)
-            json.dumps(_jsonable_metadata_value(frozen_metadata), sort_keys=True, allow_nan=False)
+            generated_decision_id = _generated_decision_id(self, frozen_metadata)
         except (TypeError, ValueError) as exc:
             raise ValueError("metadata must be JSON-compatible") from exc
         object.__setattr__(self, "metadata", frozen_metadata)
         if self.decision_id is None:
-            object.__setattr__(self, "decision_id", _generated_decision_id(self, frozen_metadata))
+            object.__setattr__(self, "decision_id", generated_decision_id)
         return self
 
     @field_serializer("metadata")
@@ -265,15 +265,71 @@ class StrategyDecision(DecisionModel):
 def _generated_decision_id(decision: StrategyDecision, frozen_metadata: Mapping[str, Any]) -> str:
     payload = {
         "strategy_id": decision.strategy_id,
-        "instrument": decision.instrument.model_dump(mode="json"),
-        "intent": decision.intent.model_dump(mode="json"),
+        "instrument": _instrument_payload(decision.instrument),
+        "intent": {
+            "action": decision.intent.action,
+            "book_side": decision.intent.book_side,
+        },
         "decision_time": decision.decision_time.isoformat(),
         "as_of_time": decision.as_of_time.isoformat(),
-        "target": decision.target.model_dump(mode="json"),
-        "exit_policy": decision.exit_policy.model_dump(mode="json"),
-        "observations": [item.model_dump(mode="json") for item in decision.observations],
+        "target": {
+            "direction": decision.target.direction,
+            "sizing_kind": decision.target.sizing_kind,
+            "size": decision.target.size,
+        },
+        "exit_policy": {
+            "max_hold_bars": decision.exit_policy.max_hold_bars,
+            "stop_loss_bps": decision.exit_policy.stop_loss_bps,
+            "take_profit_bps": decision.exit_policy.take_profit_bps,
+            "trailing_stop_bps": decision.exit_policy.trailing_stop_bps,
+        },
+        "observations": [
+            {
+                "symbol": item.symbol,
+                "timestamp": item.timestamp.isoformat(),
+                "field": item.field,
+                "source": item.source,
+            }
+            for item in decision.observations
+        ],
         "metadata": _jsonable_metadata_value(frozen_metadata),
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
     digest = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"{decision.strategy_id}:{digest}"
+
+
+def _instrument_payload(instrument: DecisionInstrument) -> dict[str, Any]:
+    if isinstance(instrument, InstrumentRef):
+        return {"kind": instrument.kind, "symbol": instrument.symbol}
+    if isinstance(instrument, FutureRef):
+        return {
+            "kind": instrument.kind,
+            "symbol": instrument.symbol,
+            "expiry": instrument.expiry.isoformat(),
+            "multiplier": instrument.multiplier,
+            "settlement": instrument.settlement,
+        }
+    if isinstance(instrument, OptionRef):
+        return {
+            "kind": instrument.kind,
+            "symbol": instrument.symbol,
+            "underlying_symbol": instrument.underlying_symbol,
+            "option_type": instrument.option_type,
+            "strike": instrument.strike,
+            "expiry": instrument.expiry.isoformat(),
+            "multiplier": instrument.multiplier,
+            "settlement": instrument.settlement,
+        }
+    return {
+        "kind": instrument.kind,
+        "symbol": instrument.symbol,
+        "legs": [
+            {
+                "instrument": _instrument_payload(leg.instrument),
+                "direction": leg.direction,
+                "ratio": leg.ratio,
+            }
+            for leg in instrument.legs
+        ],
+    }

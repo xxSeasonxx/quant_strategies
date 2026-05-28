@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
 from quant_strategies.runner import execution, run_config
 from quant_strategies.runner.data_loader import LoadedData
@@ -164,7 +165,7 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.success is True
+    assert result.run_completed is True
     assert result.result_dir is not None
     assert artifact_bytes(result.result_dir) < 75_000
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
@@ -173,3 +174,49 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert not (result.result_dir / "engine_request.json").exists()
     assert not (result.result_dir / "evidence.json").exists()
+
+
+def test_hidden_lookahead_grouped_replay_completes_under_runtime_budget():
+    row_count = 50_000
+    decision_count = 5_000
+    start_time = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    as_of_time = start_time + timedelta(minutes=9)
+    rows = [
+        {
+            "symbol": f"SYM{row_index % decision_count:04d}",
+            "timestamp": start_time + timedelta(minutes=row_index % 10),
+            "available_at": start_time + timedelta(minutes=row_index % 10),
+            "close": 100.0 + row_index,
+        }
+        for row_index in range(row_count)
+    ]
+    baseline = [
+        decision_for(
+            symbol=f"SYM{decision_index:04d}",
+            decision_time=as_of_time,
+            side=Side.LONG,
+            max_hold_bars=1,
+            strategy_id="lookahead_perf",
+        )
+        for decision_index in range(decision_count)
+    ]
+    calls = 0
+
+    def grouped_strategy(strategy_rows, params):
+        nonlocal calls
+        calls += 1
+        return baseline
+
+    start = time.perf_counter()
+    result = check_hidden_lookahead(
+        grouped_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="lookahead_perf",
+    )
+    elapsed = time.perf_counter() - start
+
+    assert result.passed is True
+    assert calls == 1
+    assert elapsed < 1.0

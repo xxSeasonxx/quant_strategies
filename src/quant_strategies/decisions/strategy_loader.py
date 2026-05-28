@@ -65,6 +65,8 @@ def load_decision_strategy(
     module = importlib.util.module_from_spec(spec)
     try:
         spec.loader.exec_module(module)
+    except SystemExit as exc:
+        raise DecisionStrategyLoadError(f"strategy import exited: {exc}") from exc
     except Exception as exc:
         raise DecisionStrategyLoadError(f"strategy import failed: {exc}") from exc
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +12,6 @@ from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
-from quant_strategies.provenance import text_sha256
 from quant_strategies.runner.config import RunConfig
 
 
@@ -19,15 +19,29 @@ SUMMARY_SAMPLE_SIZE = 5
 
 
 def normalized_rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
-    return text_sha256(canonical_rows_jsonl(rows))
+    digest = hashlib.sha256()
+    for line in iter_canonical_row_lines(rows):
+        digest.update(line.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def canonical_rows_jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
-    lines = [
-        json.dumps(json_safe_value(row), sort_keys=True, separators=(",", ":"), allow_nan=False)
-        for row in rows
-    ]
+    lines = list(canonical_row_lines(rows))
     return "\n".join(lines) + ("\n" if lines else "")
+
+
+def canonical_row_lines(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    return tuple(iter_canonical_row_lines(rows))
+
+
+def iter_canonical_row_lines(rows: Iterable[Mapping[str, Any]]) -> Iterable[str]:
+    for row in rows:
+        yield canonical_row_line(row)
+
+
+def canonical_row_line(row: Mapping[str, Any]) -> str:
+    return json.dumps(json_safe_value(row), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def summary_profile_payload(
@@ -37,12 +51,18 @@ def summary_profile_payload(
     decisions: Sequence[StrategyDecision],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
+    row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "artifact_profile": "summary",
         "artifact_trust_tier": artifact_trust_tier_for_profile("summary"),
         "strategy_id": config.strategy_id,
-        "rows": _row_summary(config, rows, normalized_rows_hash=normalized_rows_hash),
+        "rows": _row_summary(
+            config,
+            rows,
+            normalized_rows_hash=normalized_rows_hash,
+            row_ranges=row_ranges,
+        ),
         "decisions": _decision_summary(decisions),
         "engine": json_safe_value(engine),
         "metric_semantics": smoke_score_metric_semantics(config.data.kind),
@@ -57,6 +77,7 @@ def write_summary_profile_artifact(
     decisions: Sequence[StrategyDecision],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
+    row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     path = result_dir / "artifact_profile_summary.json"
     payload = summary_profile_payload(
@@ -65,6 +86,7 @@ def write_summary_profile_artifact(
         decisions=decisions,
         engine=engine,
         normalized_rows_hash=normalized_rows_hash,
+        row_ranges=row_ranges,
     )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n")
     return path
@@ -122,6 +144,7 @@ def _row_summary(
     rows: Sequence[Mapping[str, Any]],
     *,
     normalized_rows_hash: str | None,
+    row_ranges: Mapping[str, Mapping[str, Any]] | None,
 ) -> dict[str, Any]:
     sample = [json_safe_value(row) for row in rows[:SUMMARY_SAMPLE_SIZE]]
     return {
@@ -134,7 +157,7 @@ def _row_summary(
         "sample_count": len(sample),
         "sample": sample,
         "normalized_rows_sha256": normalized_rows_hash or normalized_rows_sha256(rows),
-        "by_symbol": row_ranges_by_symbol(rows),
+        "by_symbol": dict(row_ranges) if row_ranges is not None else row_ranges_by_symbol(rows),
     }
 
 
