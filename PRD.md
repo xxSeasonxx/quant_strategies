@@ -100,7 +100,9 @@ Every numeric quantity emitted by the foundation MUST:
 
 - Carry a declared **unit** and **base** (e.g., "fraction of entry notional", "percentage
 points of signed trade activity", "NAV-path total return").
-- Be reproducible by reading the artifact set without re-running the code.
+- Be reproducible by reading the artifact set without re-running the code **when the
+consumer requested an `audit_replayable` run**. `search_only` runs MUST be explicitly
+marked as not reproducible from artifacts alone.
 - Match across backends within a declared tolerance, or declare the asymmetry explicitly.
 - Be **named in a way that does not overstate what it computes** (no "paper_candidate"
 without statistical evidence; no "return" for a sum-of-trade-activity figure).
@@ -128,8 +130,9 @@ reach into runner internals.
 - Misusing the surface (returning the wrong shape, importing private modules, etc.)
 produces a clear error, not a silent miscalculation.
 
-**G5. Trade-level auditability for every result.**
-For any reported metric, a reviewer MUST be able to trace it to:
+**G5. Trade-level auditability when the consumer asks for it.**
+For any reported metric in an `audit_replayable` run, a reviewer MUST be able to trace
+it to:
 
 - the strategy file snapshot,
 - the input row set (hashed and reproducible),
@@ -137,6 +140,26 @@ For any reported metric, a reviewer MUST be able to trace it to:
 - the fills and exits (with reason),
 - the funding/cost contributions,
 - the configuration that produced them.
+
+`search_only` runs intentionally omit the trade-level chain. Consumers that need to
+investigate a candidate rerun it under `audit_replayable`. The foundation never auto-
+promotes a run to `audit_replayable`; the consumer chooses the tier.
+
+**G6. Good performance code — decent, not microsecond-optimal.**
+The foundation is written with performance discipline. The code:
+
+- MUST NOT eagerly import dependencies a code path does not use.
+- MUST NOT do redundant work: deepcopying already-frozen data, hashing the same payload
+twice, reconnecting to the database per run when the engine can be cached, walking row
+lists more than once when one pass suffices.
+- MUST NOT serialize or write artifacts the consumer did not request — `search_only`
+runs do not produce audit-replay artifacts.
+- MUST use efficient formats for bulk per-row data (see C-9).
+
+A typical search-scale run (≤1M rows, single strategy, `search_only` tier) completes in
+seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vectorized-
+engine inner-loop tuning are explicitly out of scope (§8). The goal is good performance
+code, not benchmark-chasing.
 
 ### 4.2 Non-goals (explicit, durable)
 
@@ -194,13 +217,19 @@ A consumer should be able to say "yes" to all of these without qualification.
 - **Expressiveness.** A quant can express their intended strategy — across put/call,
   buy/sell, long/short/flat, single-leg and multi-leg — without monkey-patching the
   foundation.
-- **Math correctness.** Every emitted metric is unit-tagged, reproducible from artifacts,
-  named consistently with what it actually computes, and either agrees across backends
-  within a declared tolerance or has the asymmetry declared explicitly.
+- **Math correctness.** Every emitted metric is unit-tagged, named consistently with
+  what it actually computes, and either agrees across backends within a declared
+  tolerance or has the asymmetry declared explicitly. `audit_replayable` runs are fully
+  reproducible from artifacts; `search_only` runs are explicitly marked as not
+  reproducible.
 - **Consumer integration.** `quant_autoresearch` drives iteration end-to-end using only
   the public surface; misuse fails fast and clearly.
-- **Auditability.** Any reported number is back-traceable from artifacts alone to the
-  decisions, fills, and config that produced it.
+- **Auditability.** Any reported number in an `audit_replayable` run is back-traceable
+  from artifacts alone to the decisions, fills, and config that produced it.
+  `search_only` runs intentionally omit the trade-level chain.
+- **Performance.** Typical search-scale runs complete in seconds, not minutes. Overhead
+  the strategy did not request (eager imports, redundant deepcopies, per-run database
+  reconnects, unwanted artifact writes) does not dominate wall-clock time.
 - **Code quality.** A single ontology, a single execution-model contract, a single shared
   kernel between runner and validation, and no orchestrator god-functions.
 
@@ -224,6 +253,12 @@ A consumer should be able to say "yes" to all of these without qualification.
   loaders called from the runner.
 - **C-8.** No legacy compatibility shims. Contract changes require regenerating
   strategies and rerunning configs.
+- **C-9.** Artifact production is tiered and format-disciplined. The consumer requests
+  either `search_only` (statistics + manifest, default) or `audit_replayable` (full
+  audit chain) per run. Bulk per-row artifacts in `audit_replayable` runs (input rows,
+  trades, fills) use an efficient columnar format (parquet). Control-plane artifacts
+  (manifest, summary, config, evidence) stay sort-keys JSON. JSONL is reserved for
+  human-streaming debug, not for primary audit data.
 
 ---
 
@@ -238,36 +273,14 @@ A consumer should be able to say "yes" to all of these without qualification.
 - Data acquisition / repair / join. (Owned by `quant_data`.)
 - Promotion automation. (Human-led process.)
 - Statistical gating beyond advisory metrics.
-- Performance benchmarking and microsecond-latency optimization.
+- Micro-latency optimization (sub-100ms per run) and vectorized-engine inner-loop
+  tuning. Performance discipline (no eager imports, no redundant work, no unrequested
+  artifact writes) is in scope under G6; benchmark-chasing is not.
 - A web UI, dashboard, or notebook integration.
 
 ---
 
-## 9. Glossary
-
-| Term | Definition |
-|---|---|
-| **Strategy** | A pure Python module exposing `generate_decisions(rows, params)` and optional `validate_params(params)`. |
-| **Decision** | A `StrategyDecision` object emitted by a strategy. Carries instrument, intent, sizing, exit policy, observations, and timing. |
-| **Intent** | The action+side pair (`open buy`, `close sell`, etc.) — distinct from net direction. |
-| **Sizing** | Magnitude and kind (target weight, target notional, target contracts, target vol). |
-| **Observation** | A causal lineage record: `(symbol, timestamp, field, source)` for a row that contributed to a decision. |
-| **as_of_time** | The information-set cutoff a decision was made on. Must be ≤ `decision_time`. |
-| **decision_time** | The wall-clock moment the decision becomes actionable (i.e., would be sent to a broker). |
-| **Smoke engine** | The deterministic in-process screening engine. Linearized per-trade math; not a portfolio NAV. |
-| **vbt backend** | The vectorbtpro-based validation backend. |
-| **Kernel** | The shared execution primitives used by both runner and validation: strategy load, params validation, data load, freezing, decision execution, lookahead replay, observation audit. |
-| **Runner** | The top-level orchestrator for a single screening or validation-gate run from one config. |
-| **Validation harness** | The multi-window, multi-scenario advisory harness. |
-| **Backend** | A PnL implementation conforming to the execution-model contract. |
-| **Advisory** | Any output that does not authorize promotion, paper trading, or live trading. All foundation outputs are advisory. |
-| **Mechanical pass** | Met all mechanical gates (data audit, required scenarios, valid metrics, minimum trades). Not statistical evidence. |
-| **Search pressure** | Metadata about parameter search (candidate count, trial count, search space, selection rule, split ids). Consumed for deflation; not for blocking. |
-| **Row contract** | The expected schema of rows for a given `data.kind`. Violations are reported back to `quant_data` via `quant_data_feedback`. |
-
----
-
-## 10. Document Maintenance
+## 9. Document Maintenance
 
 - This PRD is updated when a Goal, Non-Goal, or Constraint changes.
 - `README.md` describes current behavior. When PRD and `README.md` diverge, PRD wins for
