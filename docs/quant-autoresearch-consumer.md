@@ -193,6 +193,11 @@ backend, return path model, comparability, tolerance, and asymmetry so ranking
 code does not compare smoke activity sums to NAV-path backend returns by name
 alone.
 
+A strategy may return `[]` when it finds no opportunity. In `screen` mode this
+is a completed zero-trade result with zero smoke scores. In `validate` mode it
+is a completed `smoke_failed` result because the `min_trades` gate fails. Treat
+that as search evidence about the candidate, not as a runner failure.
+
 ## What autoresearch Reads
 
 `RunResult` tells the search loop whether the runner completed and where

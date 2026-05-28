@@ -48,9 +48,6 @@ def build_request(
     fill_model: FillModelConfig,
     cost_model: CostModelConfig,
 ) -> EvaluationRequest:
-    if not decisions:
-        raise RequestBuildError("strategy generated no decisions")
-
     engine_bars = tuple(_bar_from_row(row) for row in rows)
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id=strategy_id, decisions=tuple(decisions)),

@@ -66,6 +66,23 @@ def funding_bars_for(symbol: str) -> tuple[Bar, ...]:
     )
 
 
+def test_screen_accepts_empty_decision_set_as_zero_trade_result():
+    request = EvaluationRequest(
+        spec=StrategySpec(strategy_id="no_op", decisions=()),
+        bars=bars_for("BTC", [100.0, 101.0, 102.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    result = screen(request)
+
+    assert result.trade_count == 0
+    assert result.trades == ()
+    assert result.smoke_score.sum_signed_trade_activity_gross == 0.0
+    assert result.smoke_score.sum_signed_trade_activity_funding == 0.0
+    assert result.smoke_score.sum_signed_trade_activity_cost == 0.0
+    assert result.smoke_score.sum_signed_trade_activity_net == 0.0
+
+
 def test_screen_uses_declared_fill_timing_without_decision_bar_lookahead():
     request = EvaluationRequest(
         spec=StrategySpec(

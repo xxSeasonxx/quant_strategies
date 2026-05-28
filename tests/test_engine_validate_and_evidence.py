@@ -53,6 +53,26 @@ def test_validate_passes_profitable_frozen_candidate():
     }
 
 
+def test_validate_empty_decision_set_fails_smoke_gates_not_inputs():
+    request = EvaluationRequest(
+        spec=StrategySpec(strategy_id="no_op", decisions=()),
+        bars=bars_for("BTC", [100.0, 101.0, 102.0]),
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    report = validate(request)
+
+    assert report.passed is False
+    assert report.screening_result is not None
+    assert report.screening_result.trade_count == 0
+    assert {gate.name: gate.passed for gate in report.gates} == {
+        "valid_inputs": True,
+        "min_trades": False,
+        "positive_gross": False,
+        "positive_net": False,
+    }
+
+
 def test_validate_fails_closed_when_required_bars_are_missing():
     request = EvaluationRequest(
         spec=StrategySpec(

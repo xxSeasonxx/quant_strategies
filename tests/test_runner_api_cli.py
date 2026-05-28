@@ -425,6 +425,40 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert "not validation pass" in notes
 
 
+def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
+    config_path = write_config(tmp_path, mode="screen")
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["mode"] == "screen"
+    assert summary["stage"] == "completed"
+    assert summary["status"] == "screened"
+    assert summary["engine"]["passed"] is None
+    assert summary["engine"]["trade_count"] == 0
+    assert summary["engine"]["smoke_score"] == {
+        "sum_signed_trade_activity_gross": 0.0,
+        "sum_signed_trade_activity_funding": 0.0,
+        "sum_signed_trade_activity_cost": 0.0,
+        "sum_signed_trade_activity_net": 0.0,
+    }
+    assert_assessment(result, summary, assessment_status="screened")
+    request = json.loads((result.result_dir / "engine_request.json").read_text())
+    evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    assert request["spec"]["decisions"] == []
+    assert evidence["screening_result"]["trade_count"] == 0
+    assert evidence["screening_result"]["trades"] == []
+
+
 def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -489,6 +523,49 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] < 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_failed")
+    assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
+
+
+def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
+    config_path = write_config(tmp_path, mode="validate")
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["mode"] == "validate"
+    assert summary["stage"] == "completed"
+    assert summary["status"] == "failed"
+    assert summary["engine"]["passed"] is False
+    assert summary["engine"]["trade_count"] == 0
+    assert summary["engine"]["smoke_score"] == {
+        "sum_signed_trade_activity_gross": 0.0,
+        "sum_signed_trade_activity_funding": 0.0,
+        "sum_signed_trade_activity_cost": 0.0,
+        "sum_signed_trade_activity_net": 0.0,
+    }
+    assert {gate["name"]: gate["passed"] for gate in summary["engine"]["gates"]} == {
+        "valid_inputs": True,
+        "min_trades": False,
+        "positive_gross": False,
+        "positive_net": False,
+    }
+    assert_assessment(result, summary, assessment_status="smoke_failed")
+
+    assert (result.result_dir / "decision_records.jsonl").read_text() == ""
+    request = json.loads((result.result_dir / "engine_request.json").read_text())
+    evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    assert request["spec"]["decisions"] == []
+    assert evidence["validation_report"]["screening_result"]["trade_count"] == 0
+    assert evidence["validation_report"]["screening_result"]["trades"] == []
     assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
 
 

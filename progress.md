@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 12: P2 typed RunResult evidence quality.
+Phase 13: P2 empty-decision screening.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-run-result-evidence-quality-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-run-result-evidence-quality.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-empty-decision-screening-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-empty-decision-screening.md`
 
 ## Finding Triage
 
@@ -42,6 +42,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-run-result-evidenc
 | Validation capability matrix hard-codes backend identity | Confirmed true, Phase 10 | Move static capability records onto backend implementations and keep observed-semantics extraction centralized. |
 | Duplicate `(symbol, decision_time)` decisions can double-count smoke PnL | Confirmed true, Phase 11 | Reject duplicate execution keys at shared decision-output validation. |
 | Typed `RunResult` lacks evidence-quality fields | Confirmed true, Phase 12 | Expose `data_availability_status`, `availability_coverage`, `row_contract`, `causality_verified`, and `evidence_quality_warnings` on the stable runner result. |
+| Empty-decision strategy is classified as `runner_failed` | Confirmed true, Phase 13 | Strategy tests treat `[]` as a normal no-op output; runner should classify it as completed zero-trade smoke evidence, not infrastructure failure. |
 
 ## Phase 1 Checklist
 
@@ -373,3 +374,34 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-run-result-evidenc
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: `RunResult.availability_coverage` and `RunResult.row_contract` preserve artifact-shaped mutable dict payloads as shallow copies.
 - 2026-05-28: Committed Phase 12.
+
+## Phase 13 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add engine no-op regressions.
+- [x] Add runner no-op regressions.
+- [x] Implement engine request contract fix.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 13 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_screen.py::test_screen_accepts_empty_decision_set_as_zero_trade_result tests/test_engine_validate_and_evidence.py::test_validate_empty_decision_set_fails_smoke_gates_not_inputs tests/test_runner_engine_runner.py::test_build_request_accepts_zero_decisions_as_no_op tests/test_runner_api_cli.py::test_run_config_treats_empty_decisions_as_zero_trade_smoke_result -q` -> failed as expected before implementation; `StrategySpec` and `build_request()` rejected empty decisions, and runner summary stage was `request_build`.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_screen.py::test_screen_accepts_empty_decision_set_as_zero_trade_result tests/test_engine_validate_and_evidence.py::test_validate_empty_decision_set_fails_smoke_gates_not_inputs tests/test_runner_engine_runner.py::test_build_request_accepts_zero_decisions_as_no_op tests/test_runner_api_cli.py::test_run_config_treats_empty_decisions_as_zero_trade_smoke_result -q` -> 4 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 94 passed before adding runner screen-mode empty-decision coverage.
+- 2026-05-28: `conda run -n quant pytest -q` -> 498 passed before adding runner screen-mode empty-decision coverage.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual note: runner-level screen-mode empty-decision coverage was missing; added a focused regression.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_screen_mode_empty_decisions_complete_as_zero_trade_result tests/test_runner_api_cli.py::test_run_config_treats_empty_decisions_as_zero_trade_smoke_result -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 95 passed after adding screen-mode empty-decision coverage.
+- 2026-05-28: `conda run -n quant pytest -q` -> 499 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found no blocking issues. The only finding was stale progress counts; fixed before commit.
+- 2026-05-28: Committed Phase 13.

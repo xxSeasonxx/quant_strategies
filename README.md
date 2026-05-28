@@ -72,7 +72,9 @@ the decisions, fill model, cost model, and exit policy. It reports
 `trade_count` plus `smoke_score.sum_signed_trade_activity_gross`,
 `sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
 `sum_signed_trade_activity_net`. A completed screen has
-`assessment_status = "screened"`.
+`assessment_status = "screened"`. If a strategy returns no decisions, the
+screen still completes with `trade_count = 0` and zero smoke scores; this is a
+zero-opportunity search signal, not a runner infrastructure failure.
 
 With `[output] mode = "validate"`, the engine runs the same screen and applies
 smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
@@ -82,6 +84,10 @@ gates with missing, partial, or invalid `available_at` produce
 `assessment_status = "smoke_unverified"`. These gates are mechanical checks
 only; they do not test statistical significance, regime robustness, capacity,
 or execution quality.
+
+A `mode = "validate"` run with no decisions also completes normally, but fails
+the smoke gates as `assessment_status = "smoke_failed"` because `min_trades`
+is not met.
 
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
@@ -218,8 +224,9 @@ reach data loading include `data_manifest.json` and, for
 generation later fails. Runner failures still write `run_manifest.json`,
 `summary.json`, and `notes.md`. Successful `artifact_profile = "summary"` runs
 also write `artifact_profile_summary.json` and declare
-`artifact_trust_tier = "search_only"`. Successful
-`artifact_profile = "full"` runs also write `decision_records.jsonl`,
+`artifact_trust_tier = "search_only"`. Completed
+`artifact_profile = "full"` runs that reach engine request construction also
+write `decision_records.jsonl`,
 `engine_request.json`, and `evidence.json`, and declare `artifact_trust_tier =
 "audit_replayable"`.
 

@@ -238,15 +238,28 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     assert run.screen_summary["trades"][0]["net_return"] == pytest.approx(0.099)
 
 
-def test_build_request_rejects_zero_decisions():
-    with pytest.raises(RequestBuildError, match="no decisions"):
-        build_request(
-            strategy_id="demo",
-            rows=bars(100.0, 101.0, 102.0),
-            decisions=[],
-            fill_model=close_fill(),
-            cost_model=zero_cost(),
-        )
+def test_build_request_accepts_zero_decisions_as_no_op():
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 101.0, 102.0),
+        decisions=[],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    assert request.spec.decisions == ()
+    screen_run = evaluate_request(request, mode="screen")
+    assert screen_run.screen_summary["trade_count"] == 0
+    assert screen_run.screen_summary["trades"] == []
+    assert screen_run.screen_summary["smoke_score"] == {
+        "sum_signed_trade_activity_gross": 0.0,
+        "sum_signed_trade_activity_funding": 0.0,
+        "sum_signed_trade_activity_cost": 0.0,
+        "sum_signed_trade_activity_net": 0.0,
+    }
+    validate_run = evaluate_request(request, mode="validate")
+    assert validate_run.passed is False
+    assert validate_run.validate_summary["screening_result"]["trade_count"] == 0
 
 
 def test_build_request_rejects_missing_decision_bar():

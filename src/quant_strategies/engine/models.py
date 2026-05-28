@@ -102,7 +102,7 @@ class CostModel(EngineModel):
 
 class StrategySpec(EngineModel):
     strategy_id: str = Field(min_length=1)
-    decisions: tuple[StrategyDecision, ...] = Field(min_length=1)
+    decisions: tuple[StrategyDecision, ...]
 
 
 class EvaluationRequest(EngineModel):
