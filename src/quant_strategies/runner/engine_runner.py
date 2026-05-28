@@ -14,8 +14,8 @@ from quant_strategies.engine import (
     StrategySpec,
     build_evidence_packet,
     evidence_json,
+    gate_screen,
     screen,
-    validate,
 )
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
@@ -77,7 +77,7 @@ def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_ev
                 passed=None,
             )
 
-        report = validate(request)
+        report = gate_screen(request)
         packet = (
             build_evidence_packet(
                 request,

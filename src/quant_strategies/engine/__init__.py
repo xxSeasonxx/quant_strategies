@@ -1,6 +1,6 @@
 """Deterministic quant screening and validation engine."""
 
-from quant_strategies.engine.evaluation import screen, validate
+from quant_strategies.engine.evaluation import gate_screen, screen
 from quant_strategies.engine.evidence import build_evidence_packet, evidence_json
 from quant_strategies.engine.models import (
     Bar,
@@ -10,14 +10,14 @@ from quant_strategies.engine.models import (
     EvidencePacket,
     ExitReason,
     FillModel,
+    GatingConfig,
+    GatingReport,
     GateResult,
     ScreeningResult,
     Side,
     SmokeScore,
     StrategySpec,
     Trade,
-    ValidationConfig,
-    ValidationReport,
 )
 
 __all__ = [
@@ -28,16 +28,16 @@ __all__ = [
     "EvidencePacket",
     "ExitReason",
     "FillModel",
+    "GatingConfig",
+    "GatingReport",
     "GateResult",
     "ScreeningResult",
     "Side",
     "SmokeScore",
     "StrategySpec",
     "Trade",
-    "ValidationConfig",
-    "ValidationReport",
     "build_evidence_packet",
     "evidence_json",
+    "gate_screen",
     "screen",
-    "validate",
 ]

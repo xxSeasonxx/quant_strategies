@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 34: P2 runner orchestration split.
+Phase 35: P2 engine gating names.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-runner-orchestration-split-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-runner-orchestration-split.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-engine-gating-names-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-engine-gating-names.md`
 
 ## Finding Triage
 
@@ -28,6 +28,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-runner-orchestrati
 | Smoke aggregate `return` names overstate units | Confirmed true, Phase 1 | Rename to activity-sum names. |
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
 | Engine parallel ontology | Confirmed true, Phase 6 | Collapse runner/engine signal path into direct `StrategyDecision` consumption. |
+| Engine smoke-gate API names collide with validation | Confirmed true, Phase 35 | Rename engine `validate` API/classes to gating names without compatibility aliases. |
 | Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
 | Runner orchestrator remains concentrated | Confirmed true, Phase 34 | Split `run_config()` into focused private stage helpers without changing public behavior. |
 | Public API re-export mismatch | Confirmed true, Phase 28 | Preserve `quant_strategies.runner.run_config` as the public surface and reconcile stale PRD top-level re-export wording. |
@@ -958,3 +959,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-runner-orchestrati
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues.
 - 2026-05-28: Committed Phase 34.
+
+## Phase 35 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add engine gating API regression.
+- [x] Rename engine gating API and call sites.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 35 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_validate_and_evidence.py::test_engine_public_api_uses_gating_names -q` -> failed as expected before implementation; `gate_screen` was not exported and old engine validation names remained.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_validate_and_evidence.py::test_engine_public_api_uses_gating_names tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts -q` -> 29 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_validate_and_evidence.py tests/test_engine_screen.py tests/test_runner_engine_runner.py tests/test_runner_api_cli.py -q` -> 99 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 521 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues.
+- 2026-05-28: Committed Phase 35.

@@ -145,7 +145,7 @@ class ScreeningResult(EngineModel):
     trades: tuple[Trade, ...]
 
 
-class ValidationConfig(EngineModel):
+class GatingConfig(EngineModel):
     min_trades: int = Field(default=1, ge=1)
     require_positive_net: bool = True
     require_positive_gross: bool = True
@@ -157,7 +157,7 @@ class GateResult(EngineModel):
     detail: str
 
 
-class ValidationReport(EngineModel):
+class GatingReport(EngineModel):
     mode: Literal["validate"] = "validate"
     strategy_id: str
     passed: bool
@@ -170,4 +170,4 @@ class EvidencePacket(EngineModel):
     mode: Literal["screen", "validate"]
     strategy_id: str
     screening_result: ScreeningResult | None = None
-    validation_report: ValidationReport | None = None
+    validation_report: GatingReport | None = None

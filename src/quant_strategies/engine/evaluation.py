@@ -13,13 +13,13 @@ from quant_strategies.engine.models import (
     EvaluationRequest,
     ExitReason,
     FillModel,
+    GatingConfig,
+    GatingReport,
     GateResult,
     ScreeningResult,
     Side,
     SmokeScore,
     Trade,
-    ValidationConfig,
-    ValidationReport,
 )
 
 
@@ -126,16 +126,16 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
     )
 
 
-def validate(
+def gate_screen(
     request: EvaluationRequest,
-    config: ValidationConfig | None = None,
-) -> ValidationReport:
-    validation_config = config or ValidationConfig()
+    config: GatingConfig | None = None,
+) -> GatingReport:
+    gating_config = config or GatingConfig()
     gates: list[GateResult] = []
     try:
         screening_result = screen(request)
     except EvaluationError as exc:
-        return ValidationReport(
+        return GatingReport(
             strategy_id=request.spec.strategy_id,
             passed=False,
             gates=(GateResult(name="valid_inputs", passed=False, detail=str(exc)),),
@@ -146,11 +146,11 @@ def validate(
     gates.append(
         GateResult(
             name="min_trades",
-            passed=screening_result.trade_count >= validation_config.min_trades,
-            detail=f"{screening_result.trade_count} >= {validation_config.min_trades}",
+            passed=screening_result.trade_count >= gating_config.min_trades,
+            detail=f"{screening_result.trade_count} >= {gating_config.min_trades}",
         )
     )
-    if validation_config.require_positive_gross:
+    if gating_config.require_positive_gross:
         gates.append(
             GateResult(
                 name="positive_gross",
@@ -161,7 +161,7 @@ def validate(
                 ),
             )
         )
-    if validation_config.require_positive_net:
+    if gating_config.require_positive_net:
         gates.append(
             GateResult(
                 name="positive_net",
@@ -173,7 +173,7 @@ def validate(
             )
         )
 
-    return ValidationReport(
+    return GatingReport(
         strategy_id=request.spec.strategy_id,
         passed=all(gate.passed for gate in gates),
         gates=tuple(gates),

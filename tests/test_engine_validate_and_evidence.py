@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
+import quant_strategies.engine as engine
 from quant_strategies.engine import (
     Bar,
     EvaluationRequest,
@@ -11,8 +12,8 @@ from quant_strategies.engine import (
     StrategySpec,
     build_evidence_packet,
     evidence_json,
+    gate_screen,
     screen,
-    validate,
 )
 
 from engine_helpers import bars_for, decision_for
@@ -41,8 +42,17 @@ def test_evidence_json_is_deterministic_for_screening_result():
     assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v3"
 
 
-def test_validate_passes_profitable_frozen_candidate():
-    report = validate(profitable_request())
+def test_engine_public_api_uses_gating_names():
+    assert hasattr(engine, "gate_screen")
+    assert hasattr(engine, "GatingConfig")
+    assert hasattr(engine, "GatingReport")
+    assert not hasattr(engine, "validate")
+    assert not hasattr(engine, "ValidationConfig")
+    assert not hasattr(engine, "ValidationReport")
+
+
+def test_gate_screen_passes_profitable_frozen_candidate():
+    report = gate_screen(profitable_request())
 
     assert report.passed is True
     assert {gate.name: gate.passed for gate in report.gates} == {
@@ -53,14 +63,14 @@ def test_validate_passes_profitable_frozen_candidate():
     }
 
 
-def test_validate_empty_decision_set_fails_smoke_gates_not_inputs():
+def test_gate_screen_empty_decision_set_fails_smoke_gates_not_inputs():
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id="no_op", decisions=()),
         bars=bars_for("BTC", [100.0, 101.0, 102.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
     )
 
-    report = validate(request)
+    report = gate_screen(request)
 
     assert report.passed is False
     assert report.screening_result is not None
@@ -73,7 +83,7 @@ def test_validate_empty_decision_set_fails_smoke_gates_not_inputs():
     }
 
 
-def test_validate_fails_closed_when_required_bars_are_missing():
+def test_gate_screen_fails_closed_when_required_bars_are_missing():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_inputs",
@@ -82,7 +92,7 @@ def test_validate_fails_closed_when_required_bars_are_missing():
         bars=(),
     )
 
-    report = validate(request)
+    report = gate_screen(request)
 
     assert report.passed is False
     assert report.screening_result is None
@@ -138,7 +148,7 @@ def quote_request() -> EvaluationRequest:
     )
 
 
-def test_validate_reports_missing_quote_fills_as_invalid_inputs():
+def test_gate_screen_reports_missing_quote_fills_as_invalid_inputs():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_quote_inputs",
@@ -148,7 +158,7 @@ def test_validate_reports_missing_quote_fills_as_invalid_inputs():
         fill_model=FillModel(price="quote", entry_lag_bars=1),
     )
 
-    report = validate(request)
+    report = gate_screen(request)
 
     assert report.passed is False
     assert report.screening_result is None

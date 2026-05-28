@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 
-from quant_strategies.engine.models import EvaluationRequest, EvidencePacket, ScreeningResult, ValidationReport
+from quant_strategies.engine.models import EvaluationRequest, EvidencePacket, GatingReport, ScreeningResult
 
 
 def build_evidence_packet(
     request: EvaluationRequest,
     *,
     screening_result: ScreeningResult | None = None,
-    validation_report: ValidationReport | None = None,
+    validation_report: GatingReport | None = None,
 ) -> EvidencePacket:
     mode = "validate" if validation_report is not None else "screen"
     return EvidencePacket(
