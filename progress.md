@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 7: P1 deterministic JSON artifact encoding.
+Phase 8: P2 lazy `quant_data` imports.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-deterministic-json-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-deterministic-json.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-lazy-quant-data-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lazy-quant-data.md`
 
 ## Finding Triage
 
@@ -37,6 +37,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-deterministic-json
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
+| `quant_data` eager import slows runner cold import | Confirmed true, Phase 8 | Lazy-import `quant_data` only when loading data or building a default engine. |
 
 ## Phase 1 Checklist
 
@@ -221,3 +222,30 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-deterministic-json
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.
 - 2026-05-28: Code review found no blocking issues. Non-blocking note: empty validation JSONL payloads still write a newline through `write_text_artifact`, preserving prior behavior.
+
+## Phase 8 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add lazy `quant_data` import helpers.
+- [x] Preserve data adapter behavior.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 8 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py -q` -> 8 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 50 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found one valid robustness issue: partial monkeypatches of the lazy loader proxy did not fall back to real `quant_data.loader` methods for unpatched attributes. Fixed by resolving unset proxy attributes through the real loader at call time and adding a focused regression test.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 51 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 487 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review confirmed the partial-monkeypatch fallback finding is closed and found no blocking issues. Its only new note claimed the Phase 8 plan Step 3 was unchecked; local inspection showed Step 3 is checked, so this was treated as stale-read noise.

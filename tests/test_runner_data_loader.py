@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,6 +12,8 @@ import pytest
 from quant_strategies.runner import data_loader
 from quant_strategies.runner.config import load_config
 from quant_strategies.runner.errors import DataLoadError
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def row(symbol: str, close: float = 100.0, **extra: object) -> dict[str, object]:
@@ -66,6 +71,24 @@ mode = "screen"
     return load_config(config_path, repo_root=tmp_path)
 
 
+def test_importing_data_loader_does_not_import_quant_data():
+    env = os.environ.copy()
+    src_path = str(REPO_ROOT / "src")
+    pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = src_path if not pythonpath else os.pathsep.join((src_path, pythonpath))
+    code = (
+        "import sys\n"
+        "import quant_strategies.runner.data_loader\n"
+        "loaded = [\n"
+        "    name for name in sys.modules\n"
+        "    if name == 'quant_data' or name.startswith('quant_data.')\n"
+        "]\n"
+        "assert not loaded, loaded\n"
+    )
+
+    subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=env, check=True)
+
+
 def test_bars_adapter_loads_one_symbol(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = make_config(tmp_path)
     engine = object()
@@ -97,6 +120,21 @@ def test_bars_adapter_loads_multiple_symbols(tmp_path: Path, monkeypatch: pytest
 
     assert calls == [(["SPY", "QQQ"], "equity_1min")]
     assert [item["symbol"] for item in loaded.rows] == ["QQQ", "SPY"]
+
+
+def test_loader_proxy_partial_patch_falls_back_to_real_loader(monkeypatch: pytest.MonkeyPatch):
+    proxy = data_loader._LazyLoaderProxy()
+
+    def fake_load_bars():
+        return "patched"
+
+    real_loader = SimpleNamespace(load_universe_bars=lambda: "real")
+
+    monkeypatch.setattr(proxy, "load_bars", fake_load_bars)
+    monkeypatch.setattr(data_loader, "_import_quant_data_loader", lambda: real_loader)
+
+    assert data_loader._loader_attribute(proxy, "load_bars")() == "patched"
+    assert data_loader._loader_attribute(proxy, "load_universe_bars")() == "real"
 
 
 def test_crypto_perp_funding_adapter_loads_funding_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

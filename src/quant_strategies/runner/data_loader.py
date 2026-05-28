@@ -4,12 +4,42 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from quant_data.config import DataConfig
-from quant_data.db import get_engine
-from quant_data import loader
-
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.errors import DataLoadError
+
+_UNSET = object()
+
+
+class _LazyLoaderProxy:
+    _loader_attributes = (
+        "__file__",
+        "load_bars",
+        "load_universe_bars",
+        "load_crypto_perp_bars_with_funding",
+        "load_fx_bars_with_quotes",
+    )
+
+    def __init__(self) -> None:
+        object.__setattr__(self, "_overrides", set())
+        for name in self._loader_attributes:
+            object.__setattr__(self, name, _UNSET)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        object.__setattr__(self, name, value)
+        if name in self._loader_attributes:
+            overrides = self._overrides
+            if value is _UNSET:
+                overrides.discard(name)
+            else:
+                overrides.add(name)
+
+    def has_overrides(self) -> bool:
+        return bool(self._overrides)
+
+
+DataConfig: Any | None = None
+get_engine: Any | None = None
+loader: Any = _LazyLoaderProxy()
 
 
 @dataclass(frozen=True)
@@ -33,11 +63,12 @@ def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
 
 def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:
     data = config.data
+    quant_data_loader = _loader()
     if data.kind == "bars":
         if data.dataset is None:
             raise DataLoadError("data.dataset is required for bars")
         if len(data.symbols) == 1:
-            frame = loader.load_bars(
+            frame = _loader_attribute(quant_data_loader, "load_bars")(
                 engine,
                 data.symbols[0],
                 data.dataset,
@@ -47,7 +78,7 @@ def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:
                 strict=data.strict,
             )
             return _rows_from_frame(frame)
-        universe = loader.load_universe_bars(
+        universe = _loader_attribute(quant_data_loader, "load_universe_bars")(
             engine,
             list(data.symbols),
             data.dataset,
@@ -61,7 +92,7 @@ def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:
     if data.kind == "crypto_perp_funding":
         rows: list[dict[str, Any]] = []
         for symbol in data.symbols:
-            frame = loader.load_crypto_perp_bars_with_funding(
+            frame = _loader_attribute(quant_data_loader, "load_crypto_perp_bars_with_funding")(
                 engine,
                 symbol,
                 data.start,
@@ -76,7 +107,7 @@ def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:
         rows = []
         require_quotes = config.fill_model.price == "quote"
         for symbol in data.symbols:
-            frame = loader.load_fx_bars_with_quotes(
+            frame = _loader_attribute(quant_data_loader, "load_fx_bars_with_quotes")(
                 engine,
                 symbol,
                 data.start,
@@ -120,15 +151,55 @@ def _rows_from_frame(frame: object) -> list[dict[str, Any]]:
 
 def _default_engine() -> object:
     env_file = _quant_data_env_file()
+    engine_factory = _get_engine()
     if env_file is not None:
-        return get_engine(DataConfig(_env_file=env_file))
-    return get_engine()
+        config_type = _data_config_type()
+        return engine_factory(config_type(_env_file=env_file))
+    return engine_factory()
 
 
 def _quant_data_env_file() -> Path | None:
-    package_file = getattr(loader, "__file__", None)
-    if package_file is None:
+    package_file = _loader_attribute(_loader(), "__file__")
+    if package_file is None or package_file is _UNSET:
         return None
     root = Path(package_file).resolve().parents[2]
     env_file = root / ".env"
     return env_file if env_file.exists() else None
+
+
+def _loader() -> Any:
+    global loader
+    if isinstance(loader, _LazyLoaderProxy) and not loader.has_overrides():
+        loader = _import_quant_data_loader()
+    return loader
+
+
+def _loader_attribute(quant_data_loader: Any, name: str) -> Any:
+    value = getattr(quant_data_loader, name, _UNSET)
+    if value is _UNSET and isinstance(quant_data_loader, _LazyLoaderProxy):
+        return getattr(_import_quant_data_loader(), name)
+    return value
+
+
+def _import_quant_data_loader() -> Any:
+    from quant_data import loader as quant_data_loader
+
+    return quant_data_loader
+
+
+def _data_config_type() -> Any:
+    global DataConfig
+    if DataConfig is None:
+        from quant_data.config import DataConfig as QuantDataConfig
+
+        DataConfig = QuantDataConfig
+    return DataConfig
+
+
+def _get_engine() -> Any:
+    global get_engine
+    if get_engine is None:
+        from quant_data.db import get_engine as quant_data_get_engine
+
+        get_engine = quant_data_get_engine
+    return get_engine
