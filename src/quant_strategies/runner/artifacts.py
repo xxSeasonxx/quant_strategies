@@ -252,12 +252,12 @@ def write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> str:
     import hashlib
 
     digest = hashlib.sha256()
-    with path.open("w") as handle:
+    with path.open("wb") as handle:
         for row in rows:
             line = canonical_row_line(row)
-            handle.write(line + "\n")
-            digest.update(line.encode("utf-8"))
-            digest.update(b"\n")
+            payload = f"{line}\n".encode("utf-8")
+            handle.write(payload)
+            digest.update(payload)
     return digest.hexdigest()
 
 

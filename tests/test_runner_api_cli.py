@@ -851,8 +851,16 @@ def test_run_config_rejects_invalid_available_at_for_causality_claim(
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert result.assessment_status == "smoke_unverified"
-    assert summary["assessment_status"] == "smoke_unverified"
+    assert result.failure_stage == "request_build"
+    assert result.assessment_status == "runner_failed"
+    assert summary["stage"] == "request_build"
+    assert summary["assessment_status"] == "runner_failed"
+    assert "row_contract_failed: row_invalid_available_at:available_at:1" in summary["message"]
+    assert summary["row_contract"]["status"] == "failed"
+    assert summary["row_contract"]["quant_data_feedback"] == [
+        "row_invalid_available_at:available_at:1"
+    ]
+    assert not (result.result_dir / "engine_request.json").exists()
 
 
 def test_runner_catches_hidden_lookahead_before_request_build(
@@ -1051,6 +1059,47 @@ def test_run_config_requires_crypto_funding_event_indicator(
     assert row_contract["quant_data_feedback"] == [
         "row_missing_required_field:has_funding_event:4"
     ]
+
+
+def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbol="BTC-PERP",
+        dataset=None,
+    )
+    contract_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+    for row in contract_rows:
+        row["symbol"] = "BTC-PERP"
+    contract_rows[0]["has_funding_event"] = "yes"
+    contract_rows[0]["funding_timestamp"] = contract_rows[0]["timestamp"]
+    contract_rows[0]["funding_rate"] = Decimal("0.0001")
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage == "request_build"
+    assert result.assessment_status == "runner_failed"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    row_contract = summary["row_contract"]
+    assert summary["stage"] == "request_build"
+    assert summary["assessment_status"] != "smoke_passed"
+    assert "row_contract_failed: row_invalid_funding_fields:has_funding_event:1" in summary["message"]
+    assert row_contract["status"] == "failed"
+    assert row_contract["issue_reasons"] == {"row_invalid_funding_fields": 1}
+    assert row_contract["funding_event_missing_fields"] == {"has_funding_event": 1}
+    assert row_contract["quant_data_feedback"] == [
+        "row_invalid_funding_fields:has_funding_event:1"
+    ]
+    assert data_manifest["row_contract"] == row_contract
+    assert not (result.result_dir / "engine_request.json").exists()
 
 
 def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

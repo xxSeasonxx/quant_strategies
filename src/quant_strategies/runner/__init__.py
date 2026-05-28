@@ -271,6 +271,7 @@ def _prepare_engine_request(
             strategy_id=config.strategy_id,
             decision_count=len(execution.decisions),
         ):
+            _assert_row_contract_allows_engine_request(evidence_quality)
             engine_runner.assert_supported_decisions(execution.decisions)
     except RunnerError as exc:
         return None, _failure_result(
@@ -328,6 +329,32 @@ def _prepare_engine_request(
             event_emitter=event_emitter,
         )
     return request, None
+
+
+def _assert_row_contract_allows_engine_request(evidence_quality: dict[str, object]) -> None:
+    row_contract = evidence_quality.get("row_contract")
+    if not isinstance(row_contract, Mapping) or row_contract.get("status") != "failed":
+        return
+    raise RunnerError(_row_contract_failure_message(row_contract))
+
+
+def _row_contract_failure_message(row_contract: Mapping[str, object]) -> str:
+    feedback = row_contract.get("quant_data_feedback")
+    if isinstance(feedback, Sequence) and not isinstance(feedback, str):
+        reasons = [str(item) for item in feedback if item]
+        if reasons:
+            return f"row_contract_failed: {'; '.join(reasons)}"
+
+    issue_reasons = row_contract.get("issue_reasons")
+    if isinstance(issue_reasons, Mapping):
+        reasons = [
+            f"{reason}:{count}"
+            for reason, count in sorted(issue_reasons.items(), key=lambda item: str(item[0]))
+        ]
+        if reasons:
+            return f"row_contract_failed: {'; '.join(reasons)}"
+
+    return "row_contract_failed"
 
 
 def _evaluate_engine_request(

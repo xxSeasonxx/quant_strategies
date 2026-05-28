@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 from datetime import datetime, timezone
@@ -219,6 +220,7 @@ def test_write_jsonl_uses_same_canonical_rows_as_normalized_hash(tmp_path: Path)
     written_hash = write_jsonl(path, rows)
 
     assert written_hash == normalized_rows_sha256(rows)
+    assert written_hash == hashlib.sha256(path.read_bytes()).hexdigest()
     assert path.read_text() == canonical_rows_jsonl(rows)
 
 
