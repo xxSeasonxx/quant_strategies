@@ -194,12 +194,18 @@ scenarios, runs the configured backend, and classifies the candidate as
 `hard_no`, `mechanical_pass`, `watchlist`, or `mechanical_review_candidate`. A
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
-`watchlist` captures unsupported required backend semantics, or positive
+required backend scenario with unsupported execution semantics is a `hard_no`
+because the mechanical check did not execute. A `watchlist` captures positive
 evidence that misses paper-readiness gates. A `mechanical_review_candidate`
 requires mechanical validation plus paper-readiness gates such as multiple
 windows, enough realistic-cost trades, no zero-trade windows, positive
 realistic-cost evidence, sufficient positive-window fraction, and stressed-cost
 and fill-lag loss floors. Eligibility flags still remain false.
+
+Validation backend summaries include `metric_semantics` for required policy
+metrics such as `net_return` and `trade_count`. The metric payloads stay flat
+for artifact readability, while policy reads them through a typed backend metric
+schema with declared unit, base, comparability, tolerance, and asymmetry.
 
 ## Artifacts
 

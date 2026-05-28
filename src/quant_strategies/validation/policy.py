@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.evidence_semantics import validation_evidence_semantics
-from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
+from quant_strategies.validation.backends import BackendMetrics, BackendRunResult, ScenarioBackendRunResult
 
 
 ValidationDecision = Literal["hard_no", "mechanical_pass", "watchlist", "mechanical_review_candidate"]
@@ -56,28 +55,10 @@ class ValidationPolicyDecision(BaseModel):
         return self
 
 
-def _metric_number(metrics: dict[str, float | int | str | bool | None], name: str) -> float | None:
-    if name not in metrics:
-        return None
-    value = metrics[name]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    number = float(value)
-    if not math.isfinite(number):
-        return None
-    return number
-
-
 def _validated_backend_metrics(
     metrics: dict[str, float | int | str | bool | None],
-) -> tuple[float, int] | None:
-    net_return = _metric_number(metrics, "net_return")
-    trade_count = _metric_number(metrics, "trade_count")
-    if net_return is None or trade_count is None:
-        return None
-    if trade_count < 0 or not trade_count.is_integer():
-        return None
-    return net_return, int(trade_count)
+) -> BackendMetrics | None:
+    return BackendMetrics.from_mapping(metrics)
 
 
 def classify_validation(
@@ -267,7 +248,7 @@ def _backend_execution_gate(
         if metrics is None:
             invalid_metrics = True
             continue
-        _, trade_count = metrics
+        trade_count = metrics.trade_count
         total_required_trades += trade_count
         if trade_count < min_trades:
             insufficient_trades = True
@@ -303,7 +284,7 @@ def _backend_execution_gate(
     ]
     if unsupported:
         return _decision(
-            "watchlist",
+            "hard_no",
             reasons=("unsupported_semantics",),
             failed=("required_backend_semantics",),
             details={"required_backend_semantics": f"{len(unsupported)} unsupported"},
@@ -381,7 +362,7 @@ def _paper_readiness_decision(
         else _missing_scenario_detail("cost")
     )
 
-    realistic_total_trades = sum(trade_count for _, trade_count in realistic_metrics)
+    realistic_total_trades = sum(metrics.trade_count for metrics in realistic_metrics)
     if realistic_total_trades >= min_total_trades:
         passed_gates.append("min_total_trades")
     else:
@@ -395,7 +376,7 @@ def _paper_readiness_decision(
     zero_trade_windows = [
         item.window_id
         for item in realistic
-        if complete_metrics[item.scenario_id][1] == 0
+        if complete_metrics[item.scenario_id].trade_count == 0
     ]
     if not zero_trade_windows and has_realistic:
         passed_gates.append("no_zero_trade_windows")
@@ -408,7 +389,7 @@ def _paper_readiness_decision(
     else:
         gate_details["no_zero_trade_windows"] = "passed"
 
-    realistic_net = sum(net_return for net_return, _ in realistic_metrics)
+    realistic_net = sum(metrics.net_return for metrics in realistic_metrics)
     positive_realistic_evidence = realistic_net > 0.0
     if positive_realistic_evidence:
         passed_gates.append("aggregate_realistic_net_positive")
@@ -421,7 +402,7 @@ def _paper_readiness_decision(
     )
 
     positive_windows = sum(
-        1 for item in realistic if complete_metrics[item.scenario_id][0] > 0.0
+        1 for item in realistic if complete_metrics[item.scenario_id].net_return > 0.0
     )
     positive_fraction = positive_windows / window_count if window_count else 0.0
     if positive_fraction >= min_positive_window_fraction:
@@ -436,7 +417,7 @@ def _paper_readiness_decision(
     if not has_realistic:
         gate_details["positive_window_fraction"] = _missing_scenario_detail("cost")
 
-    worst_stressed_net = min((net_return for net_return, _ in stressed_metrics), default=0.0)
+    worst_stressed_net = min((metrics.net_return for metrics in stressed_metrics), default=0.0)
     if has_stressed and worst_stressed_net >= max_stressed_net_loss:
         passed_gates.append("stressed_net_floor")
     else:
@@ -447,7 +428,7 @@ def _paper_readiness_decision(
         else _missing_scenario_detail("cost_stress")
     )
 
-    worst_fill_lag_net = min((net_return for net_return, _ in fill_lag_metrics), default=0.0)
+    worst_fill_lag_net = min((metrics.net_return for metrics in fill_lag_metrics), default=0.0)
     if has_fill_lag and worst_fill_lag_net >= max_fill_lag_net_loss:
         passed_gates.append("fill_lag_net_floor")
     else:

@@ -3,9 +3,11 @@ from __future__ import annotations
 import pytest
 
 from quant_strategies.validation.backends import (
+    BackendMetrics,
     BackendRunResult,
     FakeBackend,
     ScenarioBackendRunResult,
+    backend_metric_semantics,
     get_backend,
 )
 from quant_strategies.validation.config import PaperReadinessConfig
@@ -41,6 +43,18 @@ def completed_backend_result(net_return: float, trade_count: int) -> BackendRunR
         warnings=(),
         unsupported_semantics=(),
     )
+
+
+def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
+    assert set(payload) == {"net_return", "trade_count"}
+    net_return = payload["net_return"]
+    assert net_return["unit"] == "decimal_fraction"
+    assert net_return["base"] == "backend-declared portfolio or execution return path"
+    assert net_return["tolerance"] == 1e-9
+    assert "runner smoke" in net_return["asymmetry"]
+    trade_count = payload["trade_count"]
+    assert trade_count["unit"] == "count"
+    assert trade_count["tolerance"] == 0.0
 
 
 def completed_scenario(
@@ -111,6 +125,35 @@ def test_fake_backend_returns_configured_result():
     assert result.metrics["trade_count"] == 25
 
 
+def test_backend_metrics_parses_required_metrics_and_preserves_extras():
+    metrics = BackendMetrics.from_mapping(
+        {
+            "net_return": 0.02,
+            "trade_count": 25,
+            "max_drawdown": -0.12,
+            "funding_model": "linear_additive_adjustment",
+        }
+    )
+
+    assert metrics is not None
+    assert metrics.net_return == 0.02
+    assert metrics.trade_count == 25
+    assert metrics.extras == {
+        "max_drawdown": -0.12,
+        "funding_model": "linear_additive_adjustment",
+    }
+
+
+def test_backend_metrics_rejects_invalid_required_metrics():
+    assert BackendMetrics.from_mapping({"net_return": float("nan"), "trade_count": 25}) is None
+    assert BackendMetrics.from_mapping({"net_return": 0.02, "trade_count": 1.5}) is None
+    assert BackendMetrics.from_mapping({"net_return": 0.02, "trade_count": True}) is None
+
+
+def test_backend_metric_semantics_declares_tolerance_and_asymmetry():
+    assert_backend_metric_semantics(backend_metric_semantics())
+
+
 def test_get_backend_rejects_unknown_backend_name():
     try:
         get_backend("missing")
@@ -132,7 +175,7 @@ def test_policy_hard_no_for_data_failure():
     assert_advisory_only(decision)
 
 
-def test_policy_watchlist_for_unsupported_semantics():
+def test_policy_hard_no_for_required_unsupported_semantics():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -147,7 +190,7 @@ def test_policy_watchlist_for_unsupported_semantics():
         min_trades=10,
     )
 
-    assert decision.decision == "watchlist"
+    assert decision.decision == "hard_no"
     assert "unsupported_semantics" in decision.reasons
     assert_advisory_only(decision)
 

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.config import ScenarioRunConfig
@@ -12,6 +13,95 @@ from quant_strategies.validation.config import ScenarioRunConfig
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
 DecisionGenerationStatus = Literal["base_reused", "regenerated", "failed"]
+MetricValue = float | int | str | bool | None
+
+
+class BackendMetricSemantics(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    base: str = Field(min_length=1)
+    aggregation: str = Field(min_length=1)
+    backend: str = Field(min_length=1)
+    comparability: str = Field(min_length=1)
+    tolerance: float | None = None
+    asymmetry: str | None = None
+
+
+class BackendMetrics(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    net_return: float
+    trade_count: int
+    extras: dict[str, MetricValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_required_metrics(self) -> BackendMetrics:
+        if not math.isfinite(self.net_return):
+            raise ValueError("net_return must be finite")
+        if self.trade_count < 0:
+            raise ValueError("trade_count must be non-negative")
+        return self
+
+    @classmethod
+    def from_mapping(cls, metrics: Mapping[str, MetricValue]) -> BackendMetrics | None:
+        net_return = _metric_number(metrics, "net_return")
+        trade_count = _metric_number(metrics, "trade_count")
+        if net_return is None or trade_count is None:
+            return None
+        if trade_count < 0 or not trade_count.is_integer():
+            return None
+        try:
+            return cls(
+                net_return=net_return,
+                trade_count=int(trade_count),
+                extras={
+                    str(key): value
+                    for key, value in metrics.items()
+                    if key not in {"net_return", "trade_count"}
+                },
+            )
+        except ValueError:
+            return None
+
+
+def backend_metric_semantics() -> dict[str, dict[str, object]]:
+    semantics = (
+        BackendMetricSemantics(
+            name="net_return",
+            unit="decimal_fraction",
+            base="backend-declared portfolio or execution return path",
+            aggregation="scenario total over backend-executed decisions",
+            backend="validation_backend",
+            comparability="backend-specific; compare only within declared tolerance and matching execution assumptions",
+            tolerance=1e-9,
+            asymmetry="may differ from runner smoke signed trade-activity sums and from other backend return paths",
+        ),
+        BackendMetricSemantics(
+            name="trade_count",
+            unit="count",
+            base="backend-executed closed trades",
+            aggregation="scenario total",
+            backend="validation_backend",
+            comparability="exact integer agreement expected for equivalent execution assumptions",
+            tolerance=0.0,
+            asymmetry="backend trade grouping may differ when execution semantics are not equivalent",
+        ),
+    )
+    return {item.name: item.model_dump(mode="json") for item in semantics}
+
+
+def _metric_number(metrics: Mapping[str, MetricValue], name: str) -> float | None:
+    if name not in metrics:
+        return None
+    value = metrics[name]
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    if not math.isfinite(number):
+        return None
+    return number
 
 
 class BackendRunResult(BaseModel):
@@ -19,7 +109,7 @@ class BackendRunResult(BaseModel):
 
     backend: str
     status: BackendStatus
-    metrics: dict[str, float | int | str | bool | None]
+    metrics: dict[str, MetricValue]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
 

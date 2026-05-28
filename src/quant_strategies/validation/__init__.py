@@ -27,6 +27,7 @@ from quant_strategies.validation.backends import (
     DecisionGenerationStatus,
     ScenarioBackendRunResult,
     ValidationBackend,
+    backend_metric_semantics,
     get_backend,
 )
 from quant_strategies.validation.capabilities import backend_capability_matrix
@@ -740,6 +741,7 @@ def _write_validation_artifacts(
         result_dir,
         "backend_runs/summary.json",
         {
+            "metric_semantics": backend_metric_semantics(),
             "results": [
                 {
                     "window_id": item.window_id,

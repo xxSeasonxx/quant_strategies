@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 4: P1 validation orchestrator split.
+Phase 5: P1 validation backend metric contract.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-validation-orchestrator-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-validation-orchestrator.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-backend-metrics-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-backend-metrics.md`
 
 ## Finding Triage
 
@@ -34,6 +34,8 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-validation-orchest
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
 | Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
 | Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
+| Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
+| Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
 
 ## Phase 1 Checklist
 
@@ -147,3 +149,25 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-validation-orchest
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Follow-up code review found the public-name finding closed and no new Critical/Important Phase 4 issues. One remaining minor progress-log placement issue was fixed before commit.
+
+## Phase 5 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add typed backend metric contract.
+- [x] Use typed metrics in policy.
+- [x] Harden required unsupported semantics to hard_no.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 5 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py tests/test_validation_runner.py tests/test_validation_capabilities.py tests/test_vectorbtpro_backend.py tests/test_readme_contract.py -q` -> 141 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 489 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical/Important issues. One P3 docs/progress issue was fixed by marking the Phase 5 plan checklist complete.

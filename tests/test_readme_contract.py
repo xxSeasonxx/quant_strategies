@@ -28,6 +28,8 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "mechanical_pass" in text
     assert "watchlist" in text
     assert "mechanical_review_candidate" in text
+    assert "unsupported execution semantics is a `hard_no`" in text
+    assert "Validation backend summaries include `metric_semantics`" in text
     assert "[paper_readiness]" in text
     assert "min_windows = 2" in text
     assert "min_total_trades = 30" in text

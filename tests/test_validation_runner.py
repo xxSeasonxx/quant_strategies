@@ -158,6 +158,8 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert decision_payload["requires_manual_approval"] is True
     assert decision_payload["failure_details"] == []
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert set(backend_summary["metric_semantics"]) == {"net_return", "trade_count"}
+    assert backend_summary["metric_semantics"]["net_return"]["tolerance"] == 1e-9
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
     base_decision_path = "backend_runs/decision_records/validation_2026_h1/base.jsonl"
@@ -766,7 +768,7 @@ def test_run_validation_passes_valid_flat_decisions_to_backend(tmp_path: Path, m
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "hard_no"
     assert result.decision.reasons == ("unsupported_semantics",)
     assert "strategy_generation_failed" not in result.decision.reasons
     assert result.result_dir is not None
