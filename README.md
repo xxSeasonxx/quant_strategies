@@ -92,6 +92,13 @@ A `mode = "validate"` run with no decisions also completes normally, but fails
 the smoke gates as `assessment_status = "smoke_failed"` because `min_trades`
 is not met.
 
+Runner callers that need live progress can pass an `event_sink` callback to
+`run_config()`. The callback receives structured `runner_stage` dictionaries
+for stage start, completion, and failure events, with UTC timestamps and
+`duration_ms` on terminal events. The CLI equivalent is
+`quant-strategies run --events-jsonl ...`, which preserves stdout as the result
+directory and writes JSONL stage events to stderr.
+
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
 `causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay

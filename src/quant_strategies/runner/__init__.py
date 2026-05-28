@@ -14,6 +14,7 @@ from quant_strategies.runner import (
 )
 from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 from quant_strategies.runner.errors import RunnerError
+from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 from quant_strategies.runner.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
@@ -38,19 +39,32 @@ class RunResult:
     evidence_quality_warnings: tuple[str, ...] = ()
 
 
-def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> RunResult:
+def run_config(
+    config_path: str | Path,
+    *,
+    repo_root: Path | None = None,
+    event_sink: RunnerEventSink | None = None,
+) -> RunResult:
     effective_repo_root = Path(repo_root).resolve() if repo_root is not None else config_module.default_repo_root()
+    events = RunnerStageEmitter(event_sink)
     try:
-        config_file = config_module.resolve_config_path(config_path, repo_root=effective_repo_root)
-        config = config_module.load_config(config_file, repo_root=effective_repo_root)
+        with events.stage(
+            "config_load",
+            config_path=str(config_path),
+            repo_root=str(effective_repo_root),
+        ):
+            config_file = config_module.resolve_config_path(config_path, repo_root=effective_repo_root)
+            config = config_module.load_config(config_file, repo_root=effective_repo_root)
     except RunnerError as exc:
         return RunResult(success=False, result_dir=None, notes_path=None, message=str(exc))
 
-    result_dir = artifacts.create_result_dir(config)
-    artifacts.initialize_run_artifacts(config_file, config, result_dir)
+    with events.stage("artifact_initialization", strategy_id=config.strategy_id):
+        result_dir = artifacts.create_result_dir(config)
+        artifacts.initialize_run_artifacts(config_file, config, result_dir)
 
     try:
-        execution = execute_strategy_run(config, repo_root=effective_repo_root)
+        with events.stage("strategy_execution", strategy_id=config.strategy_id):
+            execution = execute_strategy_run(config, repo_root=effective_repo_root)
     except StrategyExecutionError as exc:
         if (
             exc.stage == "decision_generation"
@@ -78,6 +92,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             str(exc),
             repo_root=effective_repo_root,
             evidence_quality=exc.evidence_quality,
+            event_emitter=events,
         )
 
     strategy_input_rows_jsonl_sha256 = None
@@ -86,7 +101,14 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             result_dir,
             execution.loaded_rows,
         )
-    causality = _check_causality(config, execution)
+    with events.stage(
+        "causality_check",
+        strategy_id=config.strategy_id,
+        decision_count=len(execution.decisions),
+    ) as causality_event:
+        causality = _check_causality(config, execution)
+        if not causality.passed:
+            causality_event.fail(_causality_message(causality))
     causality_verified = causality.passed
     evidence_quality = artifacts.evidence_quality(
         config,
@@ -109,12 +131,18 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             _causality_message(causality),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
+            event_emitter=events,
         )
     if config.output.artifact_profile == "full":
         artifacts.write_decision_records(result_dir, execution.decisions)
 
     try:
-        engine_runner.assert_supported_decisions(execution.decisions)
+        with events.stage(
+            "request_build",
+            strategy_id=config.strategy_id,
+            decision_count=len(execution.decisions),
+        ):
+            engine_runner.assert_supported_decisions(execution.decisions)
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -123,10 +151,16 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             str(exc),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
+            event_emitter=events,
         )
 
     try:
-        data_readiness.assert_decision_rows_ready(execution.loaded_rows, execution.decisions)
+        with events.stage(
+            "data_readiness",
+            strategy_id=config.strategy_id,
+            decision_count=len(execution.decisions),
+        ):
+            data_readiness.assert_decision_rows_ready(execution.loaded_rows, execution.decisions)
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -135,18 +169,25 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             str(exc),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
+            event_emitter=events,
         )
 
     try:
-        request = engine_runner.build_request(
+        with events.stage(
+            "request_build",
             strategy_id=config.strategy_id,
-            rows=execution.loaded_rows,
-            decisions=execution.decisions,
-            fill_model=config.fill_model,
-            cost_model=config.cost_model,
-        )
-        if config.output.artifact_profile == "full":
-            artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
+            row_count=len(execution.loaded_rows),
+            decision_count=len(execution.decisions),
+        ):
+            request = engine_runner.build_request(
+                strategy_id=config.strategy_id,
+                rows=execution.loaded_rows,
+                decisions=execution.decisions,
+                fill_model=config.fill_model,
+                cost_model=config.cost_model,
+            )
+            if config.output.artifact_profile == "full":
+                artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -155,14 +196,20 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             str(exc),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
+            event_emitter=events,
         )
 
     try:
-        engine_run = engine_runner.evaluate_request(
-            request,
+        with events.stage(
+            "engine_evaluation",
+            strategy_id=config.strategy_id,
             mode=config.output.mode,
-            include_evidence=config.output.artifact_profile == "full",
-        )
+        ):
+            engine_run = engine_runner.evaluate_request(
+                request,
+                mode=config.output.mode,
+                include_evidence=config.output.artifact_profile == "full",
+            )
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -171,43 +218,45 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             str(exc),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
+            event_emitter=events,
         )
 
-    engine_summary = _compact_engine_summary(engine_run)
-    if config.output.artifact_profile == "full" and engine_run.evidence_json:
-        artifacts.write_evidence(result_dir, engine_run.evidence_json)
-    if config.output.artifact_profile == "summary":
-        write_summary_profile_artifact(
+    with events.stage("artifact_writes", strategy_id=config.strategy_id, status_stage="completed"):
+        engine_summary = _compact_engine_summary(engine_run)
+        if config.output.artifact_profile == "full" and engine_run.evidence_json:
+            artifacts.write_evidence(result_dir, engine_run.evidence_json)
+        if config.output.artifact_profile == "summary":
+            write_summary_profile_artifact(
+                result_dir,
+                config=config,
+                rows=execution.loaded_rows,
+                decisions=execution.decisions,
+                engine=engine_summary,
+                normalized_rows_hash=execution.normalized_rows_sha256,
+            )
+        notes = _completion_notes(config, engine_run)
+        artifacts.write_notes(result_dir, notes)
+        artifacts.write_run_manifest(
             result_dir,
-            config=config,
-            rows=execution.loaded_rows,
-            decisions=execution.decisions,
-            engine=engine_summary,
-            normalized_rows_hash=execution.normalized_rows_sha256,
+            repo_root=effective_repo_root,
+            evidence=runner_evidence_semantics(config.data.kind),
+            artifact_profile=config.output.artifact_profile,
         )
-    notes = _completion_notes(config, engine_run)
-    artifacts.write_notes(result_dir, notes)
-    artifacts.write_run_manifest(
-        result_dir,
-        repo_root=effective_repo_root,
-        evidence=runner_evidence_semantics(config.data.kind),
-        artifact_profile=config.output.artifact_profile,
-    )
-    success = _result_success(engine_run)
-    assessment_status = _assessment_status(engine_run, evidence_quality=evidence_quality)
-    artifacts.write_summary(
-        result_dir,
-        _summary_payload(
-            config,
-            success=success,
-            status=_result_status(engine_run),
-            stage="completed",
-            message=notes.strip(),
-            engine=engine_summary,
-            assessment_status=assessment_status,
-            evidence_quality=evidence_quality,
-        ),
-    )
+        success = _result_success(engine_run)
+        assessment_status = _assessment_status(engine_run, evidence_quality=evidence_quality)
+        artifacts.write_summary(
+            result_dir,
+            _summary_payload(
+                config,
+                success=success,
+                status=_result_status(engine_run),
+                stage="completed",
+                message=notes.strip(),
+                engine=engine_summary,
+                assessment_status=assessment_status,
+                evidence_quality=evidence_quality,
+            ),
+        )
     return RunResult(
         success=success,
         result_dir=result_dir,
@@ -252,29 +301,32 @@ def _failure_result(
     *,
     repo_root: Path,
     evidence_quality: dict[str, object] | None = None,
+    event_emitter: RunnerStageEmitter | None = None,
 ) -> RunResult:
     notes = _failure_notes(stage, message)
     quality = evidence_quality or artifacts.evidence_quality(config, [])
-    artifacts.write_notes(result_dir, notes)
-    artifacts.write_run_manifest(
-        result_dir,
-        repo_root=repo_root,
-        evidence=runner_evidence_semantics(config.data.kind),
-        artifact_profile=config.output.artifact_profile,
-    )
-    artifacts.write_summary(
-        result_dir,
-        _summary_payload(
-            config,
-            success=False,
-            status="failed",
-            stage=stage,
-            message=message,
-            engine={"passed": None, "trade_count": None},
-            assessment_status="runner_failed",
-            evidence_quality=quality,
-        ),
-    )
+    emitter = event_emitter or RunnerStageEmitter()
+    with emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage=stage):
+        artifacts.write_notes(result_dir, notes)
+        artifacts.write_run_manifest(
+            result_dir,
+            repo_root=repo_root,
+            evidence=runner_evidence_semantics(config.data.kind),
+            artifact_profile=config.output.artifact_profile,
+        )
+        artifacts.write_summary(
+            result_dir,
+            _summary_payload(
+                config,
+                success=False,
+                status="failed",
+                stage=stage,
+                message=message,
+                engine={"passed": None, "trade_count": None},
+                assessment_status="runner_failed",
+                evidence_quality=quality,
+            ),
+        )
     return RunResult(
         success=False,
         result_dir=result_dir,

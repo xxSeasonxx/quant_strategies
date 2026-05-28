@@ -55,6 +55,16 @@ workspace = Path("/path/to/candidate_workspace").resolve()
 result = run_config("experiment.toml", repo_root=workspace)
 ```
 
+For live sweep observability, pass an event sink:
+
+```python
+events = []
+result = run_config("experiment.toml", repo_root=workspace, event_sink=events.append)
+```
+
+Each event is a structured `runner_stage` dictionary with `stage`, `status`,
+`timestamp`, and `duration_ms` on completed or failed stages.
+
 `quant_strategies.runner.run_config` and `quant_strategies.runner.RunResult`
 are the stable Python API for downstream execution. The package root does not
 re-export them; import from the `runner` subpackage deliberately.
@@ -68,6 +78,9 @@ conda run -n quant quant-strategies run \
   --repo-root /path/to/candidate_workspace \
   experiment.toml
 ```
+
+Use `--events-jsonl` to write the same stage events to stderr while keeping
+stdout as the result directory for scripts.
 
 Relative paths in `experiment.toml` resolve inside `repo_root`, so
 `strategy_path = "strategy.py"` points at the candidate workspace file.

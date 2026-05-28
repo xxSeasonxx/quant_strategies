@@ -824,8 +824,9 @@ def test_runner_catches_hidden_lookahead_before_request_build(
         "load_data",
         lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
     )
+    events: list[dict[str, object]] = []
 
-    result = run_config(config_path, repo_root=tmp_path)
+    result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
 
     assert result.success is False
     assert result.result_dir is not None
@@ -843,6 +844,16 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     assert not (result.result_dir / "engine_request.json").exists()
     assert result.assessment_status == "runner_failed"
     assert summary["assessment_status"] == "runner_failed"
+    assert any(
+        event["stage"] == "causality_check"
+        and event["status"] == "failed"
+        and "hidden_lookahead_detected" in str(event["error"])
+        for event in events
+    )
+    assert not any(
+        event["stage"] == "causality_check" and event["status"] == "completed"
+        for event in events
+    )
 
 
 def test_run_config_records_row_contract_feedback(
@@ -1462,6 +1473,38 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     assert (result.result_dir / "config.toml").read_text() == config_path.read_text()
 
 
+def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    events: list[dict[str, object]] = []
+
+    result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
+
+    assert result.success is True
+    assert events
+    assert all(event["event"] == "runner_stage" for event in events)
+    assert all(isinstance(event["timestamp"], str) for event in events)
+    completed_stages = {
+        str(event["stage"])
+        for event in events
+        if event["status"] == "completed"
+    }
+    assert {
+        "config_load",
+        "artifact_initialization",
+        "strategy_execution",
+        "causality_check",
+        "request_build",
+        "data_readiness",
+        "engine_evaluation",
+        "artifact_writes",
+    }.issubset(completed_stages)
+    completed_events = [event for event in events if event["status"] == "completed"]
+    assert all(isinstance(event["duration_ms"], int | float) for event in completed_events)
+    assert all(event["duration_ms"] >= 0 for event in completed_events)
+
+
 def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1479,6 +1522,32 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
 
     assert exit_code == 0, output
     assert Path(output).exists()
+
+
+def test_cli_run_events_jsonl_writes_events_to_stderr(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    exit_code = cli.main(["run", "--events-jsonl", str(config_path)])
+    captured = capsys.readouterr()
+    stdout = captured.out.strip()
+    stderr_lines = [line for line in captured.err.splitlines() if line.strip()]
+    events = [json.loads(line) for line in stderr_lines]
+
+    assert exit_code == 0, stdout
+    assert Path(stdout).exists()
+    assert events
+    assert all(event["event"] == "runner_stage" for event in events)
+    assert any(
+        event["stage"] == "engine_evaluation" and event["status"] == "completed"
+        for event in events
+    )
 
 
 def test_cli_smoke_uses_runner_and_prints_result_dir(

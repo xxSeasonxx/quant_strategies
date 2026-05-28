@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 24: P2 separate linear funding adjustment from backend net return.
+Phase 25: P3 add runner structured stage events.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-funding-return-semantics-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-funding-return-semantics.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-runner-stage-events-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-runner-stage-events.md`
 
 ## Finding Triage
 
@@ -54,6 +54,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-funding-return-sem
 | Runner defaults to full artifact profile | Confirmed true, Phase 22 | Default omitted `artifact_profile` to `summary`; keep explicit `full` for retained/debug runs. |
 | Strategy purity is not enforced for arbitrary candidate workspaces | Confirmed true, Phase 23 | Add default-on AST purity check in the canonical strategy loader and reuse it in committed-strategy tests. |
 | Crypto perp funding is added as a linear adjustment to generic backend `net_return` | Confirmed true, Phase 24 | Keep `net_return` as backend price/cost return; expose `linear_funding_adjusted_return` and keep policy gates off the linear add-on. |
+| Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -690,3 +691,35 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-funding-return-sem
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: backend metric semantics advertise optional funding metrics globally even when a backend result does not emit them, matching the Phase 24 design.
 - 2026-05-28: Committed Phase 24.
+
+## Phase 25 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add runner event regressions.
+- [x] Implement runner event surface.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 25 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_runner_api_cli.py::test_cli_run_events_jsonl_writes_events_to_stderr -q` -> failed as expected before implementation; `run_config` did not accept `event_sink` and CLI rejected `--events-jsonl`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_runner_api_cli.py::test_cli_run_events_jsonl_writes_events_to_stderr -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> failed; CLI passed `event_sink=None` to a test monkeypatch with the old `run_config` signature.
+- 2026-05-28: Preserved CLI monkeypatch/backward compatibility by passing `event_sink` only when `--events-jsonl` is set.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 46 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 511 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found the causality event issue closed and no new blocking issues.
+- 2026-05-28: Committed Phase 25.
+- 2026-05-28: Code review found a valid issue: causality failures returned by `_check_causality()` emitted a completed `causality_check` event because they did not raise. Fixed by letting stage contexts emit explicit semantic failures and adding a hidden-lookahead event regression.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_runner_api_cli.py::test_cli_run_events_jsonl_writes_events_to_stderr tests/test_runner_api_cli.py::test_runner_catches_hidden_lookahead_before_request_build -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 46 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 511 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
