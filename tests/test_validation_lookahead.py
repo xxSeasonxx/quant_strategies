@@ -4,6 +4,7 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
+import quant_strategies.causality as causality
 from quant_strategies.decisions import (
     ExitPolicy,
     InstrumentRef,
@@ -37,6 +38,7 @@ def row(
 
 def decision(size: float = 1.0) -> StrategyDecision:
     return StrategyDecision(
+        decision_id=f"demo:{size}",
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
         decision_time=DECISION,
@@ -143,3 +145,84 @@ def test_hidden_lookahead_check_reports_replay_exceptions():
 
     assert result.passed is False
     assert result.violations == ("hidden_lookahead_check_failed: RuntimeError: replay cannot run",)
+
+
+def test_hidden_lookahead_parses_row_visibility_once_per_check(monkeypatch):
+    source_rows = [
+        row(AS_OF, 100.0 + index, available_at=AS_OF)
+        for index in range(12)
+    ]
+
+    def multi_decision_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        return [
+            StrategyDecision(
+                decision_id=f"demo:{index}",
+                strategy_id="demo",
+                instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
+                decision_time=DECISION,
+                as_of_time=AS_OF,
+                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+                exit_policy=ExitPolicy(max_hold_bars=1),
+            )
+            for index in range(5)
+        ]
+
+    baseline = multi_decision_strategy(source_rows, {})
+    original_parse = causality.parse_aware_datetime
+    parse_calls = 0
+
+    def counting_parse(value: object):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(value)
+
+    monkeypatch.setattr(causality, "parse_aware_datetime", counting_parse)
+
+    result = check_hidden_lookahead(
+        multi_decision_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+    )
+
+    assert result.passed is True
+    assert parse_calls == len(source_rows) * 2
+
+
+def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
+    source_rows = [
+        row(AS_OF, 100.0 + index, available_at=AS_OF)
+        for index in range(4)
+    ]
+    replay_row_ids: list[int] = []
+
+    def recording_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        replay_row_ids.append(id(rows))
+        return [
+            StrategyDecision(
+                decision_id=f"demo:{index}",
+                strategy_id="demo",
+                instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
+                decision_time=DECISION,
+                as_of_time=AS_OF,
+                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+                exit_policy=ExitPolicy(max_hold_bars=1),
+            )
+            for index in range(3)
+        ]
+
+    baseline = recording_strategy(source_rows, {})
+    replay_row_ids.clear()
+
+    result = check_hidden_lookahead(
+        recording_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+    )
+
+    assert result.passed is True
+    assert len(replay_row_ids) == len(baseline)
+    assert len(set(replay_row_ids)) == 1

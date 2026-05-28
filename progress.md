@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 25: P3 add runner structured stage events.
+Phase 26: P2 cache lookahead row visibility.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-runner-stage-events-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-runner-stage-events.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-lookahead-visibility-cache-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lookahead-visibility-cache.md`
 
 ## Finding Triage
 
@@ -55,6 +55,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-runner-stage-event
 | Strategy purity is not enforced for arbitrary candidate workspaces | Confirmed true, Phase 23 | Add default-on AST purity check in the canonical strategy loader and reuse it in committed-strategy tests. |
 | Crypto perp funding is added as a linear adjustment to generic backend `net_return` | Confirmed true, Phase 24 | Keep `net_return` as backend price/cost return; expose `linear_funding_adjusted_return` and keep policy gates off the linear add-on. |
 | Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
+| Validation lookahead replay reparses row visibility per decision | Confirmed true, Phase 26 | Cache parsed row visibility metadata and visible frozen row slices in the shared causality checker. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -715,11 +716,35 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-runner-stage-event
 - 2026-05-28: `conda run -n quant pytest -q` -> 511 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
-- 2026-05-28: Follow-up code review found the causality event issue closed and no new blocking issues.
-- 2026-05-28: Committed Phase 25.
 - 2026-05-28: Code review found a valid issue: causality failures returned by `_check_causality()` emitted a completed `causality_check` event because they did not raise. Fixed by letting stage contexts emit explicit semantic failures and adding a hidden-lookahead event regression.
 - 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events tests/test_runner_api_cli.py::test_cli_run_events_jsonl_writes_events_to_stderr tests/test_runner_api_cli.py::test_runner_catches_hidden_lookahead_before_request_build -q` -> 3 passed.
 - 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 46 passed.
 - 2026-05-28: `conda run -n quant pytest -q` -> 511 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found the causality event issue closed and no new blocking issues.
+- 2026-05-28: Committed Phase 25.
+
+## Phase 26 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add lookahead scaling regressions.
+- [x] Implement visibility cache.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 26 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py::test_hidden_lookahead_parses_row_visibility_once_per_check tests/test_validation_lookahead.py::test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary -q` -> failed as expected before implementation; row visibility datetimes were parsed per decision and shared decision boundaries got distinct visible row tuples.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_runner_api_cli.py::test_runner_catches_hidden_lookahead_before_request_build -q` -> 8 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 84 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 513 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no causality correctness issues. Valid bookkeeping finding: Phase 25 verification entries were misplaced under Phase 26; fixed before commit.
+- 2026-05-28: Committed Phase 26.
