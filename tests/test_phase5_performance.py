@@ -7,20 +7,22 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, Signal, StrategySpec, screen
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
 from quant_strategies.runner import execution, run_config
 from quant_strategies.runner.data_loader import LoadedData
+from engine_helpers import decision_for
 
 
 def large_engine_request(
     *,
     symbol_count: int = 80,
     bars_per_symbol: int = 2_000,
-    signals_per_symbol: int = 100,
+    decisions_per_symbol: int = 100,
 ) -> EvaluationRequest:
     start = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
     bars: list[Bar] = []
-    signals: list[Signal] = []
+    decisions: list[StrategyDecision] = []
     for symbol_index in range(symbol_count):
         symbol = f"SYM{symbol_index:03d}"
         for bar_index in range(bars_per_symbol):
@@ -36,19 +38,19 @@ def large_engine_request(
                     close=close,
                 )
             )
-        first_decision_bar_index = bars_per_symbol - signals_per_symbol - 5
-        for signal_index in range(signals_per_symbol):
-            decision_bar_index = first_decision_bar_index + signal_index
-            signals.append(
-                Signal(
+        first_decision_bar_index = bars_per_symbol - decisions_per_symbol - 5
+        for decision_index in range(decisions_per_symbol):
+            decision_bar_index = first_decision_bar_index + decision_index
+            decisions.append(
+                decision_for(
                     symbol=symbol,
                     decision_time=start + timedelta(minutes=decision_bar_index),
-                    side=Side.LONG if signal_index % 2 == 0 else Side.SHORT,
+                    side=Side.LONG if decision_index % 2 == 0 else Side.SHORT,
                     max_hold_bars=2,
                 )
             )
     return EvaluationRequest(
-        spec=StrategySpec(strategy_id="phase5_perf", signals=tuple(signals)),
+        spec=StrategySpec(strategy_id="phase5_perf", decisions=tuple(decisions)),
         bars=tuple(bars),
         fill_model=FillModel(price="close", entry_lag_bars=1),
     )

@@ -194,7 +194,8 @@ def test_generate_decisions_maps_synthetic_leg_reversion_side():
 
 def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
     rows = engine_rows(direct_residual_rows([0.0, 0.001, 0.002, 0.0, 0.0, 0.0]))
-    signals = generate_payloads(rows, params(max_hold_bars=1))
+    decisions = generate_decisions(rows, params(max_hold_bars=1))
+    signals = [decision_payload(decision) for decision in decisions]
 
     assert signals[0]["as_of_time"] == START + timedelta(minutes=2)
     assert signals[0]["decision_time"] == START + timedelta(minutes=3)
@@ -202,7 +203,7 @@ def test_quote_fill_timing_uses_configured_lag_only_after_residual_decision():
     request = build_request(
         strategy_id="fx_timing",
         rows=rows,
-        signals=signals,
+        decisions=decisions,
         fill_model=FillModelConfig(price="quote", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
     )

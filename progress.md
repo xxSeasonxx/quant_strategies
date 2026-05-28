@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 5: P1 validation backend metric contract.
+Phase 6: P0 engine strategy ontology collapse.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-backend-metrics-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-backend-metrics.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p0-engine-ontology-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0-engine-ontology.md`
 
 ## Finding Triage
 
@@ -27,7 +27,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-backend-metrics.md
 | `paper_candidate` overstates mechanical evidence | Confirmed true, Phase 1 | Rename to `mechanical_review_candidate`. |
 | Smoke aggregate `return` names overstate units | Confirmed true, Phase 1 | Rename to activity-sum names. |
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
-| Engine parallel ontology | Confirmed true, deferred | Larger refactor; not needed to fix P0 labels/causality. |
+| Engine parallel ontology | Confirmed true, Phase 6 | Collapse runner/engine signal path into direct `StrategyDecision` consumption. |
 | Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
 | Public API re-export mismatch | Partly true, deferred | `AGENTS.md` chooses `quant_strategies.runner.run_config`; treat as PRD/docs reconciliation, not immediate code change. |
 | Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
@@ -171,3 +171,29 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-backend-metrics.md
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no Critical/Important issues. One P3 docs/progress issue was fixed by marking the Phase 5 plan checklist complete.
+
+## Phase 6 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Replace engine `Signal` with direct `StrategyDecision` consumption.
+- [x] Remove runner signal-row execution boundary and artifacts.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 6 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_models.py tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_data_readiness.py tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_krohn_mueller_whelan_fix_reversal.py tests/test_fx_triangular_residual_reversion.py tests/test_phase5_performance.py tests/test_readme_contract.py -q` -> 146 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found one valid issue: evidence payload fields changed from `signal_metadata` to `decision_metadata` while the engine evidence schema remained v2. Fixed by bumping the evidence schema to `quant_strategies.engine.evidence/v3` and updating manifest/test expectations.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_validate_and_evidence.py tests/test_runner_api_cli.py tests/test_runner_engine_runner.py tests/test_engine_screen.py -q` -> 90 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_engine_models.py tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_data_readiness.py tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_krohn_mueller_whelan_fix_reversal.py tests/test_fx_triangular_residual_reversion.py tests/test_phase5_performance.py tests/test_readme_contract.py -q` -> 146 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.

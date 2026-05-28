@@ -18,11 +18,11 @@ class DataLoadError(RunnerError):
 
 
 class DataReadinessError(RunnerError):
-    """Raised when loaded rows are not ready by a signal decision time."""
+    """Raised when loaded rows are not ready by a decision time."""
 
 
 class RequestBuildError(RunnerError):
-    """Raised when loaded rows and signals cannot form an engine request."""
+    """Raised when loaded rows and decisions cannot form an engine request."""
 
 
 class EvaluationRunError(RunnerError):

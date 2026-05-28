@@ -181,7 +181,7 @@ Use `artifact_profile = "summary"` for large search sweeps; it still writes
 `summary.json` plus `artifact_profile_summary.json`, and marks the result
 `artifact_trust_tier = "search_only"`. Use
 `artifact_profile = "full"` for retained or debug runs when you need input
-rows, decision records, signal rows, engine request JSON, and full evidence
+rows, decision records, engine request JSON, and full evidence
 artifacts; those runs are marked `artifact_trust_tier = "audit_replayable"`.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them

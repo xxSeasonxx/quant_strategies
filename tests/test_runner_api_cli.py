@@ -248,7 +248,6 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
-        "signals.csv",
         "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",
@@ -351,7 +350,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert profile["rows"]["row_count"] == 6
     assert profile["rows"]["sample_count"] == 5
     assert profile["decisions"]["count"] == 1
-    assert profile["signals"]["count"] == 1
+    assert "signals" not in profile
     assert profile["engine"]["passed"] is True
     assert profile["engine"]["trade_count"] == 1
     assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
@@ -418,7 +417,7 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert "not validation pass" in notes
 
 
-def test_run_artifacts_preserve_exit_reason_and_signal_metadata(
+def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -448,22 +447,19 @@ def test_run_artifacts_preserve_exit_reason_and_signal_metadata(
 
     assert result.success is True
     assert result.result_dir is not None
-    with (result.result_dir / "signals.csv").open() as handle:
-        signal_rows = list(csv.DictReader(handle))
     request = json.loads((result.result_dir / "engine_request.json").read_text())
     evidence = json.loads((result.result_dir / "evidence.json").read_text())
-    signal_payload = request["spec"]["signals"][0]
+    decision_payload = request["spec"]["decisions"][0]
     trade = evidence["screening_result"]["trades"][0]
 
-    assert signal_rows[0]["max_hold_bars"] == "2"
-    assert signal_rows[0]["take_profit_bps"] == "50.0"
-    assert json.loads(signal_rows[0]["metadata"])["funding_pressure_bps"] == 3.25
-    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v2"
-    assert signal_payload["metadata"]["funding_pressure_bps"] == 3.25
-    assert signal_payload["metadata"]["entry_return_extension_bps"] == 42.0
-    assert signal_payload["metadata"]["signal_family"] == "demo"
+    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v3"
+    assert decision_payload["exit_policy"]["max_hold_bars"] == 2
+    assert decision_payload["exit_policy"]["take_profit_bps"] == 50.0
+    assert decision_payload["metadata"]["funding_pressure_bps"] == 3.25
+    assert decision_payload["metadata"]["entry_return_extension_bps"] == 42.0
+    assert decision_payload["metadata"]["signal_family"] == "demo"
     assert trade["exit_reason"] == "take_profit"
-    assert trade["signal_metadata"]["funding_pressure_bps"] == 3.25
+    assert trade["decision_metadata"]["funding_pressure_bps"] == 3.25
 
 
 def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -722,7 +718,7 @@ def test_run_config_rejects_invalid_available_at_for_causality_claim(
     assert summary["assessment_status"] == "smoke_unverified"
 
 
-def test_runner_catches_hidden_lookahead_before_decision_adapter(
+def test_runner_catches_hidden_lookahead_before_request_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -843,7 +839,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["python"]["version"]
     assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
     assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
-    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v2"}
+    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v3"}
     assert run_manifest["artifact_profile"] == "full"
     assert run_manifest["artifact_trust_tier"] == "audit_replayable"
     assert run_manifest["evidence"] == {
@@ -862,7 +858,6 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
     assert run_manifest["artifacts"]["decision_records.jsonl"]["sha256"]
-    assert run_manifest["artifacts"]["signals.csv"]["sha256"]
     assert run_manifest["artifacts"]["engine_request.json"]["sha256"]
     assert data_manifest["data"] == {
         "kind": "bars",
@@ -1182,7 +1177,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
-def test_signal_adapter_failure_keeps_loaded_data_artifacts(
+def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1212,12 +1207,12 @@ def test_signal_adapter_failure_keeps_loaded_data_artifacts(
     assert result.success is False
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["stage"] == "decision_generation"
+    assert summary["stage"] == "request_build"
     assert "smoke engine cannot represent flat target for SPY" in summary["message"]
     assert (result.result_dir / "strategy_input_rows.csv").exists()
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
-    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert (result.result_dir / "decision_records.jsonl").exists()
     assert not (result.result_dir / "signals.csv").exists()
     assert_assessment(result, summary, assessment_status="runner_failed")
 
@@ -1339,7 +1334,6 @@ def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, m
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
-        "signals.csv",
         "summary.json",
         "notes.md",
     ):
@@ -1468,7 +1462,6 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
-        "signals.csv",
         "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",

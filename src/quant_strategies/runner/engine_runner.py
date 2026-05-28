@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
+from quant_strategies.decisions import InstrumentRef, StrategyDecision
 from quant_strategies.engine import (
     Bar,
     CostModel,
     EvaluationRequest,
     FillModel,
-    Signal,
     StrategySpec,
     build_evidence_packet,
     evidence_json,
@@ -23,21 +23,6 @@ from quant_strategies.runner.errors import EvaluationRunError, RequestBuildError
 
 
 EngineMode = Literal["screen", "validate"]
-
-
-_RESERVED_SIGNAL_FIELDS = {
-    "symbol",
-    "decision_id",
-    "decision_time",
-    "as_of_time",
-    "side",
-    "weight",
-    "max_hold_bars",
-    "take_profit_bps",
-    "stop_loss_bps",
-    "trailing_stop_bps",
-    "metadata",
-}
 
 
 @dataclass(frozen=True)
@@ -59,23 +44,27 @@ def build_request(
     *,
     strategy_id: str,
     rows: list[dict[str, Any]],
-    signals: list[dict[str, Any]],
+    decisions: list[StrategyDecision],
     fill_model: FillModelConfig,
     cost_model: CostModelConfig,
 ) -> EvaluationRequest:
-    if not signals:
-        raise RequestBuildError("strategy generated no signals")
+    if not decisions:
+        raise RequestBuildError("strategy generated no decisions")
 
     engine_bars = tuple(_bar_from_row(row) for row in rows)
-    engine_signals = tuple(_signal_from_row(signal) for signal in signals)
     request = EvaluationRequest(
-        spec=StrategySpec(strategy_id=strategy_id, signals=engine_signals),
+        spec=StrategySpec(strategy_id=strategy_id, decisions=tuple(decisions)),
         bars=engine_bars,
         fill_model=FillModel(**fill_model.model_dump(exclude={"allow_same_bar_close_fill"})),
         cost_model=CostModel(**cost_model.model_dump()),
     )
     _assert_fillable(request)
     return request
+
+
+def assert_supported_decisions(decisions: list[StrategyDecision]) -> None:
+    for decision in decisions:
+        _decision_symbol(decision)
 
 
 def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_evidence: bool = True) -> EngineRun:
@@ -165,46 +154,6 @@ def _bar_from_row(row: dict[str, Any]) -> Bar:
         raise RequestBuildError(f"invalid engine bar for {row.get('symbol')}: {exc}") from exc
 
 
-def _signal_from_row(row: dict[str, Any]) -> Signal:
-    try:
-        payload = {
-            "decision_id": row.get("decision_id"),
-            "symbol": row["symbol"],
-            "decision_time": _as_datetime(row["decision_time"], "decision_time"),
-            "side": row["side"],
-            "weight": row.get("weight", 1.0),
-            "max_hold_bars": row["max_hold_bars"],
-            "metadata": _signal_metadata(row),
-        }
-        for field in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
-            if field in row and row[field] is not None:
-                payload[field] = row[field]
-        return Signal(**payload)
-    except KeyError as exc:
-        field = str(exc.args[0])
-        raise RequestBuildError(f"missing required signal field '{field}' for {row.get('symbol', '<unknown>')}") from exc
-    except RequestBuildError:
-        raise
-    except Exception as exc:
-        raise RequestBuildError(f"invalid signal for {row.get('symbol')}: {exc}") from exc
-
-
-def _signal_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    raw_metadata = row.get("metadata", {})
-    if raw_metadata is None:
-        metadata: dict[str, Any] = {}
-    elif isinstance(raw_metadata, dict):
-        metadata = dict(raw_metadata)
-    else:
-        raise RequestBuildError(f"signal metadata must be a mapping for {row.get('symbol', '<unknown>')}")
-
-    for key in sorted(set(row).difference(_RESERVED_SIGNAL_FIELDS)):
-        if key in metadata:
-            raise RequestBuildError(f"duplicate signal metadata key '{key}' for {row.get('symbol', '<unknown>')}")
-        metadata[key] = row[key]
-    return metadata
-
-
 def _as_datetime(value: object, field_name: str) -> datetime:
     if isinstance(value, datetime):
         parsed = value
@@ -223,18 +172,19 @@ def _as_datetime(value: object, field_name: str) -> datetime:
 def _assert_fillable(request: EvaluationRequest) -> None:
     indexed = _build_bar_index(request.bars)
 
-    for signal in request.spec.signals:
-        symbol_bars = indexed.bars_by_symbol.get(signal.symbol)
+    for decision in request.spec.decisions:
+        symbol = _decision_symbol(decision)
+        symbol_bars = indexed.bars_by_symbol.get(symbol)
         if not symbol_bars:
-            raise RequestBuildError(f"missing bars for signal symbol: {signal.symbol}")
-        decision_index = _decision_index(indexed, signal)
+            raise RequestBuildError(f"missing bars for decision symbol: {symbol}")
+        decision_index = _decision_index(indexed, decision)
         entry_index = decision_index + request.fill_model.entry_lag_bars
-        last_trigger_index = entry_index + signal.max_hold_bars
+        last_trigger_index = entry_index + decision.exit_policy.max_hold_bars
         last_exit_index = last_trigger_index + request.fill_model.exit_lag_bars
         if entry_index >= len(symbol_bars):
-            raise RequestBuildError(f"entry fill is outside available bars: {signal.symbol}")
+            raise RequestBuildError(f"entry fill is outside available bars: {symbol}")
         if last_exit_index >= len(symbol_bars):
-            raise RequestBuildError(f"exit fill is outside available bars: {signal.symbol}")
+            raise RequestBuildError(f"exit fill is outside available bars: {symbol}")
         if request.fill_model.price == "quote":
             _assert_quote_fill_bar(symbol_bars[entry_index], "entry")
             for trigger_index in range(entry_index + 1, last_trigger_index + 1):
@@ -262,11 +212,25 @@ def _build_bar_index(bars: tuple[Bar, ...]) -> _BarIndex:
     return _BarIndex(bars_by_symbol=bars_by_symbol, positions_by_symbol=positions_by_symbol)
 
 
-def _decision_index(indexed: _BarIndex, signal: Signal) -> int:
-    position = indexed.positions_by_symbol.get(signal.symbol, {}).get(signal.decision_time)
+def _decision_index(indexed: _BarIndex, decision: StrategyDecision) -> int:
+    symbol = _decision_symbol(decision)
+    position = indexed.positions_by_symbol.get(symbol, {}).get(decision.decision_time)
     if position is not None:
         return position
-    raise RequestBuildError(f"decision_time does not match a bar timestamp: {signal.decision_time.isoformat()}")
+    raise RequestBuildError(f"decision_time does not match a bar timestamp: {decision.decision_time.isoformat()}")
+
+
+def _decision_symbol(decision: StrategyDecision) -> str:
+    symbol = decision.instrument.symbol
+    if decision.intent.action != "open":
+        raise RequestBuildError(f"smoke engine supports open intent only: {symbol}")
+    if not isinstance(decision.instrument, InstrumentRef):
+        raise RequestBuildError(f"smoke engine cannot represent {decision.instrument.kind} instrument: {symbol}")
+    if decision.target.direction == "flat":
+        raise RequestBuildError(f"smoke engine cannot represent flat target for {symbol}")
+    if decision.target.sizing_kind != "target_weight":
+        raise RequestBuildError(f"smoke engine requires target_weight sizing: {symbol}")
+    return symbol
 
 
 def _assert_quote_fill_bar(bar: Bar, fill_name: str) -> None:

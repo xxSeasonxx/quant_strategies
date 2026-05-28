@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
@@ -221,12 +220,11 @@ def test_quote_fill_timing_enters_before_and_exits_after_fix():
         quote_row("EURUSD", fix_time + timedelta(minutes=1), 1.1010),
     ]
     decisions = generate_decisions(rows, {"max_hold_bars": 2})
-    signals = decisions_to_signal_rows(decisions)
 
     request = build_request(
         strategy_id="krohn_mueller_whelan_fix_reversal_smoke",
         rows=rows,
-        signals=signals,
+        decisions=decisions,
         fill_model=FillModelConfig(price="quote", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
     )

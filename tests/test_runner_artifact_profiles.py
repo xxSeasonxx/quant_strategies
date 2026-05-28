@@ -117,7 +117,7 @@ def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
     assert len(first) == 64
 
 
-def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_path: Path):
+def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Path):
     timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
     run_config = config(tmp_path)
     rows = [
@@ -129,16 +129,11 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
         decision("SPY", timestamp, "long"),
         decision("QQQ", timestamp, "short"),
     ]
-    signals = [
-        {"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2},
-        {"symbol": "QQQ", "decision_time": timestamp, "side": "short", "weight": 0.5, "max_hold_bars": 2},
-    ]
 
     payload = summary_profile_payload(
         config=run_config,
         rows=rows,
         decisions=decisions,
-        signals=signals,
         engine={
             "passed": True,
             "trade_count": 2,
@@ -158,8 +153,7 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
     assert payload["rows"]["by_symbol"]["SPY"]["count"] == 2
     assert payload["decisions"]["count"] == 2
     assert payload["decisions"]["by_direction"] == {"long": 1, "short": 1}
-    assert payload["signals"]["count"] == 2
-    assert payload["signals"]["by_side"] == {"long": 1, "short": 1}
+    assert "signals" not in payload
     assert payload["engine"] == {
         "passed": True,
         "trade_count": 2,
@@ -179,7 +173,6 @@ def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
         config=config(tmp_path),
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={"passed": True, "trade_count": 1},
         normalized_rows_hash="a" * 64,
     )
@@ -194,7 +187,6 @@ def test_summary_profile_payload_normalizes_common_non_json_row_values(tmp_path:
         config=config(tmp_path),
         rows=[{**row("SPY", timestamp, 100.0), "research_nan": float("nan"), "research_decimal": Decimal("1.25")}],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={"passed": True, "trade_count": 1},
     )
 
@@ -215,7 +207,6 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
         config=run_config,
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
-        signals=[{"symbol": "SPY", "decision_time": timestamp, "side": "long", "weight": 0.5, "max_hold_bars": 2}],
         engine={
             "passed": True,
             "trade_count": 1,

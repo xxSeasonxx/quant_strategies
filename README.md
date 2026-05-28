@@ -42,7 +42,7 @@ ignored artifacts under `results/`.
 Runner and validation share one internal execution boundary for strategy import,
 parameter validation, data loading, frozen strategy execution, decision
 validation, row hashing, and evidence-quality context. Runner remains the owner
-of smoke-engine signal conversion and engine artifacts.
+of smoke-engine request construction and engine artifacts.
 
 `engine` performs deterministic smoke screening and validation gates on supplied
 bars and decisions. Aggregate smoke activity sums live under
@@ -64,8 +64,8 @@ Data materialization, refresh, backfill, repair, and source joining belong in
 `quant-strategies run path/to/config.toml` executes one TOML experiment config.
 The runner loads rows, calls pure `generate_decisions(rows, params)`, validates
 the `StrategyDecision` contract, runs hidden-lookahead replay keyed by
-`decision_id`, checks decision row availability, converts supported decisions to
-engine signals, builds an engine request, and writes result artifacts.
+`decision_id`, checks decision row availability, builds an engine request from
+supported decisions, and writes result artifacts.
 
 With `[output] mode = "screen"`, the engine simulates entries and exits from
 the decisions, fill model, cost model, and exit policy. It reports
@@ -220,8 +220,8 @@ generation later fails. Runner failures still write `run_manifest.json`,
 also write `artifact_profile_summary.json` and declare
 `artifact_trust_tier = "search_only"`. Successful
 `artifact_profile = "full"` runs also write `decision_records.jsonl`,
-`signals.csv`, `engine_request.json`, and `evidence.json`, and declare
-`artifact_trust_tier = "audit_replayable"`.
+`engine_request.json`, and `evidence.json`, and declare `artifact_trust_tier =
+"audit_replayable"`.
 
 Validation artifacts include:
 

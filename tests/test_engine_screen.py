@@ -4,10 +4,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from quant_strategies.engine import Bar, CostModel, EvaluationRequest, FillModel, Side, Signal, StrategySpec, screen
+from quant_strategies.engine import Bar, CostModel, EvaluationRequest, FillModel, Side, StrategySpec, screen
 from quant_strategies.engine.evaluation import EvaluationError
 
-from engine_helpers import bars_for
+from engine_helpers import bars_for, decision_for
 
 
 DECISION = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
@@ -70,7 +70,7 @@ def test_screen_uses_declared_fill_timing_without_decision_bar_lookahead():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="timing_check",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=bars_for("BTC", [999.0, 100.0, 110.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -88,9 +88,9 @@ def test_screen_long_and_short_pnl_signs_are_correct():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="sign_check",
-            signals=(
-                Signal(symbol="LONG", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),
-                Signal(symbol="SHORT", decision_time=DECISION, side=Side.SHORT, max_hold_bars=1),
+            decisions=(
+                decision_for(symbol="LONG", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),
+                decision_for(symbol="SHORT", decision_time=DECISION, side=Side.SHORT, max_hold_bars=1),
             ),
         ),
         bars=bars_for("LONG", [100.0, 100.0, 110.0]) + bars_for("SHORT", [100.0, 100.0, 90.0]),
@@ -108,7 +108,7 @@ def test_screen_costs_reduce_net_returns():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="cost_check",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=bars_for("BTC", [100.0, 100.0, 110.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -126,9 +126,9 @@ def test_screen_applies_funding_cashflows_after_entry_through_exit():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="funding_check",
-            signals=(
-                Signal(symbol="BTC-PERP", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),
-                Signal(symbol="ETH-PERP", decision_time=DECISION, side=Side.SHORT, max_hold_bars=2),
+            decisions=(
+                decision_for(symbol="BTC-PERP", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),
+                decision_for(symbol="ETH-PERP", decision_time=DECISION, side=Side.SHORT, max_hold_bars=2),
             ),
         ),
         bars=funding_bars_for("BTC-PERP") + funding_bars_for("ETH-PERP"),
@@ -179,7 +179,7 @@ def test_screen_weight_scales_return_exposure():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="weight_check",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, weight=0.5, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, weight=0.5, max_hold_bars=1),),
         ),
         bars=bars_for("BTC", [100.0, 100.0, 110.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -195,7 +195,7 @@ def test_screen_quote_long_uses_ask_entry_and_bid_exit():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="quote_long",
-            signals=(Signal(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=quote_bars_for("EURUSD", [(99.9, 100.0), (100.0, 100.1), (110.0, 110.1)]),
         fill_model=FillModel(price="quote", entry_lag_bars=1),
@@ -212,7 +212,7 @@ def test_screen_quote_short_uses_bid_entry_and_ask_exit():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="quote_short",
-            signals=(Signal(symbol="EURUSD", decision_time=DECISION, side=Side.SHORT, max_hold_bars=1),),
+            decisions=(decision_for(symbol="EURUSD", decision_time=DECISION, side=Side.SHORT, max_hold_bars=1),),
         ),
         bars=quote_bars_for("EURUSD", [(99.9, 100.0), (100.0, 100.1), (90.0, 90.1)]),
         fill_model=FillModel(price="quote", entry_lag_bars=1),
@@ -229,7 +229,7 @@ def test_screen_quote_fill_fails_closed_without_selected_quotes():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_quotes",
-            signals=(Signal(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=bars_for("EURUSD", [100.0, 101.0, 102.0]),
         fill_model=FillModel(price="quote", entry_lag_bars=1),
@@ -243,7 +243,7 @@ def test_screen_max_hold_bars_exits_with_max_hold_reason():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="old_hold",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=2),),
         ),
         bars=bars_for("BTC", [100.0, 100.0, 101.0, 103.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -261,8 +261,8 @@ def test_screen_uses_configured_max_hold_bars():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="max_hold",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -285,8 +285,8 @@ def test_screen_exits_on_take_profit_before_max_hold():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="take_profit",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -310,8 +310,8 @@ def test_screen_exits_on_stop_loss_before_max_hold():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="stop_loss",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -335,8 +335,8 @@ def test_screen_exits_on_trailing_stop_after_favorable_move():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="trailing_stop",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -360,8 +360,8 @@ def test_screen_short_take_profit_uses_falling_price():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="short_take_profit",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.SHORT,
@@ -385,8 +385,8 @@ def test_screen_short_take_profit_uses_simple_return_threshold():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="short_take_profit_threshold",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.SHORT,
@@ -410,8 +410,8 @@ def test_screen_short_stop_loss_uses_simple_return_threshold():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="short_stop_loss_threshold",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.SHORT,
@@ -435,8 +435,8 @@ def test_screen_prioritizes_stop_loss_over_trailing_stop_on_same_trigger_bar():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="priority_stop_loss",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -460,8 +460,8 @@ def test_screen_short_stop_loss_over_trailing_stop_on_same_trigger_bar():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="short_priority_stop_loss",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.SHORT,
@@ -485,8 +485,8 @@ def test_screen_exit_lag_fills_after_trigger_bar():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="exit_lag",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC",
                     decision_time=DECISION,
                     side=Side.LONG,
@@ -510,8 +510,8 @@ def test_screen_early_exit_shortens_funding_exposure():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="funding_shortened",
-            signals=(
-                Signal(
+            decisions=(
+                decision_for(
                     symbol="BTC-PERP",
                     decision_time=DECISION,
                     side=Side.LONG,

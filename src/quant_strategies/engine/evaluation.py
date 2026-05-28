@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 import math
+from typing import Any
 
+from quant_strategies.decisions import InstrumentRef, StrategyDecision
 from quant_strategies.engine.models import (
     Bar,
     EvaluationRequest,
@@ -14,7 +17,6 @@ from quant_strategies.engine.models import (
     ScreeningResult,
     Side,
     SmokeScore,
-    Signal,
     Trade,
     ValidationConfig,
     ValidationReport,
@@ -39,61 +41,71 @@ class _IndexedBars:
     has_funding_events: bool
 
 
+@dataclass(frozen=True)
+class _ExecutableDecision:
+    decision: StrategyDecision
+    symbol: str
+    side: Side
+    weight: float
+    metadata: dict[str, Any]
+
+
 def screen(request: EvaluationRequest) -> ScreeningResult:
     indexed = _index_bars(request.bars)
     if not indexed.bars_by_symbol:
         raise EvaluationError("bars are required")
 
     trades: list[Trade] = []
-    for signal in request.spec.signals:
-        symbol_bars = indexed.bars_by_symbol.get(signal.symbol)
+    for decision in request.spec.decisions:
+        executable = _executable_decision(decision)
+        symbol_bars = indexed.bars_by_symbol.get(executable.symbol)
         if not symbol_bars:
-            raise EvaluationError(f"missing bars for signal symbol: {signal.symbol}")
-        decision_index = _decision_index(indexed, signal.symbol, signal.decision_time)
+            raise EvaluationError(f"missing bars for decision symbol: {executable.symbol}")
+        decision_index = _decision_index(indexed, executable.symbol, decision.decision_time)
         entry_index = decision_index + request.fill_model.entry_lag_bars
         if entry_index >= len(symbol_bars):
-            raise EvaluationError(f"entry fill is outside available bars: {signal.symbol}")
+            raise EvaluationError(f"entry fill is outside available bars: {executable.symbol}")
 
         entry_bar = symbol_bars[entry_index]
-        entry_price = _fill_price(entry_bar, request.fill_model.price, signal.side, is_entry=True)
+        entry_price = _fill_price(entry_bar, request.fill_model.price, executable.side, is_entry=True)
         exit_selection = _select_exit(
             symbol_bars,
-            signal,
+            executable,
             entry_index,
             entry_price,
             request.fill_model,
         )
         exit_bar = exit_selection.exit_bar
-        exit_price = _fill_price(exit_bar, request.fill_model.price, signal.side, is_entry=False)
-        direction = 1.0 if signal.side is Side.LONG else -1.0
-        gross_return = direction * ((exit_price - entry_price) / entry_price) * signal.weight
+        exit_price = _fill_price(exit_bar, request.fill_model.price, executable.side, is_entry=False)
+        direction = 1.0 if executable.side is Side.LONG else -1.0
+        gross_return = direction * ((exit_price - entry_price) / entry_price) * executable.weight
         funding_return = _funding_return(
             indexed,
-            signal.symbol,
+            executable.symbol,
             entry_bar.timestamp,
             exit_bar.timestamp,
-            signal.side,
-            signal.weight,
+            executable.side,
+            executable.weight,
         )
-        cost_return = (request.cost_model.round_trip_bps / 10_000.0) * signal.weight
+        cost_return = (request.cost_model.round_trip_bps / 10_000.0) * executable.weight
         net_return = gross_return + funding_return - cost_return
         trades.append(
             Trade(
-                decision_id=signal.decision_id,
-                symbol=signal.symbol,
-                side=signal.side,
-                decision_time=signal.decision_time,
+                decision_id=decision.decision_id,
+                symbol=executable.symbol,
+                side=executable.side,
+                decision_time=decision.decision_time,
                 entry_time=entry_bar.timestamp,
                 exit_time=exit_bar.timestamp,
                 entry_price=entry_price,
                 exit_price=exit_price,
                 exit_reason=exit_selection.reason,
-                weight=signal.weight,
+                weight=executable.weight,
                 gross_return=gross_return,
                 funding_return=funding_return,
                 cost_return=cost_return,
                 net_return=net_return,
-                signal_metadata=signal.metadata,
+                decision_metadata=executable.metadata,
             )
         )
 
@@ -209,25 +221,25 @@ def _decision_index(indexed: _IndexedBars, symbol: str, decision_time: datetime)
 
 def _select_exit(
     bars: tuple[Bar, ...],
-    signal: Signal,
+    executable: _ExecutableDecision,
     entry_index: int,
     entry_price: float,
     fill_model: FillModel,
 ) -> _ExitSelection:
-    last_trigger_index = entry_index + signal.max_hold_bars
+    last_trigger_index = entry_index + executable.decision.exit_policy.max_hold_bars
     last_exit_index = last_trigger_index + fill_model.exit_lag_bars
     if last_exit_index >= len(bars):
-        raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")
+        raise EvaluationError(f"exit fill is outside available bars: {executable.symbol}")
 
     best_return_bps = 0.0
     for trigger_index in range(entry_index + 1, last_trigger_index + 1):
         trigger_bar = bars[trigger_index]
-        trigger_price = _fill_price(trigger_bar, fill_model.price, signal.side, is_entry=False)
-        side_return_bps = _side_return_bps(entry_price, trigger_price, signal.side)
+        trigger_price = _fill_price(trigger_bar, fill_model.price, executable.side, is_entry=False)
+        side_return_bps = _side_return_bps(entry_price, trigger_price, executable.side)
         if side_return_bps > best_return_bps:
             best_return_bps = side_return_bps
 
-        reason = _exit_reason(signal, side_return_bps, best_return_bps)
+        reason = _exit_reason(executable.decision, side_return_bps, best_return_bps)
         if reason is None and trigger_index == last_trigger_index:
             reason = "max_hold"
         if reason is None:
@@ -239,7 +251,7 @@ def _select_exit(
             reason=reason,
         )
 
-    raise EvaluationError(f"exit fill is outside available bars: {signal.symbol}")
+    raise EvaluationError(f"exit fill is outside available bars: {executable.symbol}")
 
 
 def _side_return_bps(entry_price: float, current_price: float, side: Side) -> float:
@@ -247,18 +259,47 @@ def _side_return_bps(entry_price: float, current_price: float, side: Side) -> fl
     return direction * ((current_price - entry_price) / entry_price) * 10_000.0
 
 
-def _exit_reason(signal: Signal, side_return_bps: float, best_return_bps: float) -> ExitReason | None:
-    if signal.stop_loss_bps is not None and side_return_bps <= -signal.stop_loss_bps:
+def _exit_reason(decision: StrategyDecision, side_return_bps: float, best_return_bps: float) -> ExitReason | None:
+    exit_policy = decision.exit_policy
+    if exit_policy.stop_loss_bps is not None and side_return_bps <= -exit_policy.stop_loss_bps:
         return "stop_loss"
-    if signal.take_profit_bps is not None and side_return_bps >= signal.take_profit_bps:
+    if exit_policy.take_profit_bps is not None and side_return_bps >= exit_policy.take_profit_bps:
         return "take_profit"
     if (
-        signal.trailing_stop_bps is not None
+        exit_policy.trailing_stop_bps is not None
         and best_return_bps > 0.0
-        and best_return_bps - side_return_bps >= signal.trailing_stop_bps
+        and best_return_bps - side_return_bps >= exit_policy.trailing_stop_bps
     ):
         return "trailing_stop"
     return None
+
+
+def _executable_decision(decision: StrategyDecision) -> _ExecutableDecision:
+    symbol = decision.instrument.symbol
+    if decision.intent.action != "open":
+        raise EvaluationError(f"smoke engine supports open intent only: {symbol}")
+    if not isinstance(decision.instrument, InstrumentRef):
+        raise EvaluationError(f"smoke engine cannot represent {decision.instrument.kind} instrument: {symbol}")
+    if decision.target.direction == "flat":
+        raise EvaluationError(f"smoke engine cannot represent flat target for {symbol}")
+    if decision.target.sizing_kind != "target_weight":
+        raise EvaluationError(f"smoke engine requires target_weight sizing: {symbol}")
+    side = Side.LONG if decision.target.direction == "long" else Side.SHORT
+    return _ExecutableDecision(
+        decision=decision,
+        symbol=symbol,
+        side=side,
+        weight=decision.target.size,
+        metadata=_jsonable_metadata_value(decision.metadata),
+    )
+
+
+def _jsonable_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _jsonable_metadata_value(item) for key, item in value.items()}
+    if isinstance(value, tuple | list):
+        return [_jsonable_metadata_value(item) for item in value]
+    return value
 
 
 def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:

@@ -12,7 +12,6 @@ from quant_strategies.runner import (
     engine_runner,
 )
 from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
-from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
 from quant_strategies.runner.execution import (
     StrategyExecutionError,
@@ -105,23 +104,23 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
         )
+    if config.output.artifact_profile == "full":
+        artifacts.write_decision_records(result_dir, execution.decisions)
+
     try:
-        signals = decisions_to_signal_rows(execution.decisions)
+        engine_runner.assert_supported_decisions(execution.decisions)
     except RunnerError as exc:
         return _failure_result(
             config,
             result_dir,
-            "decision_generation",
-            f"strategy execution failed: {exc}",
+            "request_build",
+            str(exc),
             repo_root=effective_repo_root,
             evidence_quality=evidence_quality,
         )
-    if config.output.artifact_profile == "full":
-        artifacts.write_decision_records(result_dir, execution.decisions)
-        artifacts.write_signals(result_dir, signals)
 
     try:
-        data_readiness.assert_decision_rows_ready(execution.loaded_rows, signals)
+        data_readiness.assert_decision_rows_ready(execution.loaded_rows, execution.decisions)
     except RunnerError as exc:
         return _failure_result(
             config,
@@ -136,7 +135,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         request = engine_runner.build_request(
             strategy_id=config.strategy_id,
             rows=execution.loaded_rows,
-            signals=signals,
+            decisions=execution.decisions,
             fill_model=config.fill_model,
             cost_model=config.cost_model,
         )
@@ -177,7 +176,6 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             config=config,
             rows=execution.loaded_rows,
             decisions=execution.decisions,
-            signals=signals,
             engine=engine_summary,
             normalized_rows_hash=execution.normalized_rows_sha256,
         )

@@ -71,30 +71,6 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> s
     return _file_sha256(jsonl_path)
 
 
-def write_signals(result_dir: Path, signals: list[dict[str, Any]]) -> None:
-    write_csv(
-        result_dir / "signals.csv",
-        signals,
-        preferred_fields=[
-            "symbol",
-            "decision_time",
-            "as_of_time",
-            "side",
-            "weight",
-            "max_hold_bars",
-            "take_profit_bps",
-            "stop_loss_bps",
-            "trailing_stop_bps",
-            "funding_pressure_bps",
-            "entry_return_extension_bps",
-            "residual_zscore",
-            "residual_bps",
-            "attribution_score",
-            "signal_family",
-        ],
-    )
-
-
 def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
     lines = [
         decision.model_dump_json()

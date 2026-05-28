@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 from datetime import datetime
 from enum import Enum
@@ -8,8 +7,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from quant_strategies.decisions import StrategyDecision
 
-EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v2"
+
+EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v3"
 
 
 class EngineModel(BaseModel):
@@ -78,47 +79,6 @@ class Bar(EngineModel):
         return self
 
 
-class Signal(EngineModel):
-    decision_id: str | None = None
-    symbol: str = Field(min_length=1)
-    decision_time: datetime
-    side: Side
-    weight: float = Field(default=1.0, gt=0)
-    max_hold_bars: int = Field(ge=1)
-    take_profit_bps: float | None = None
-    stop_loss_bps: float | None = None
-    trailing_stop_bps: float | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("decision_time")
-    @classmethod
-    def validate_decision_time(cls, value: datetime) -> datetime:
-        return _timezone_aware(value, "decision_time")
-
-    @field_validator("decision_id")
-    @classmethod
-    def validate_decision_id(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("decision_id must be non-empty")
-        return stripped
-
-    @model_validator(mode="after")
-    def validate_signal(self) -> Signal:
-        if not math.isfinite(self.weight):
-            raise ValueError("weight must be finite")
-        exit_bps_values = (self.take_profit_bps, self.stop_loss_bps, self.trailing_stop_bps)
-        if any(value is not None and (not math.isfinite(value) or value <= 0.0) for value in exit_bps_values):
-            raise ValueError("exit bps values must be finite and positive")
-        try:
-            json.dumps(self.metadata, sort_keys=True, allow_nan=False)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("metadata must be JSON-compatible") from exc
-        return self
-
-
 class FillModel(EngineModel):
     price: Literal["open", "close", "quote"] = "close"
     entry_lag_bars: int = Field(default=1, ge=0)
@@ -142,7 +102,7 @@ class CostModel(EngineModel):
 
 class StrategySpec(EngineModel):
     strategy_id: str = Field(min_length=1)
-    signals: tuple[Signal, ...] = Field(min_length=1)
+    decisions: tuple[StrategyDecision, ...] = Field(min_length=1)
 
 
 class EvaluationRequest(EngineModel):
@@ -167,7 +127,7 @@ class Trade(EngineModel):
     funding_return: float = 0.0
     cost_return: float
     net_return: float
-    signal_metadata: dict[str, Any] = Field(default_factory=dict)
+    decision_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class SmokeScore(EngineModel):
@@ -206,7 +166,7 @@ class ValidationReport(EngineModel):
 
 
 class EvidencePacket(EngineModel):
-    schema_version: Literal["quant_strategies.engine.evidence/v2"] = "quant_strategies.engine.evidence/v2"
+    schema_version: Literal["quant_strategies.engine.evidence/v3"] = EVIDENCE_SCHEMA_VERSION
     mode: Literal["screen", "validate"]
     strategy_id: str
     screening_result: ScreeningResult | None = None

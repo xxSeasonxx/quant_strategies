@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -16,18 +17,19 @@ from quant_strategies.decisions import (
     StrategyDecision,
 )
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
 from quant_strategies.runner.errors import RequestBuildError
 
 
+START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
 def bars(*closes: float, quotes: bool = False) -> list[dict[str, object]]:
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
     rows: list[dict[str, object]] = []
     for index, close in enumerate(closes):
         row = {
             "symbol": "SPY",
-            "timestamp": start + timedelta(days=index),
+            "timestamp": START + timedelta(days=index),
             "open": close,
             "high": close,
             "low": close,
@@ -39,26 +41,24 @@ def bars(*closes: float, quotes: bool = False) -> list[dict[str, object]]:
     return rows
 
 
-def signal(index: int = 1, *, max_hold_bars: int = 1) -> dict[str, object]:
-    return {
-        "symbol": "SPY",
-        "decision_time": datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(days=index),
-        "side": "long",
-        "weight": 1.0,
-        "max_hold_bars": max_hold_bars,
-    }
-
-
 def decision(
+    index: int = 1,
     *,
     direction: str = "long",
     sizing_kind: str = "target_weight",
-    size: float = 0.5,
+    size: float = 1.0,
+    max_hold_bars: int = 1,
     instrument=None,
     intent=None,
+    decision_id: str | None = None,
+    metadata: dict[str, object] | None = None,
+    take_profit_bps: float | None = None,
+    stop_loss_bps: float | None = None,
+    trailing_stop_bps: float | None = None,
 ) -> StrategyDecision:
-    timestamp = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    timestamp = START + timedelta(days=index)
     return StrategyDecision(
+        decision_id=decision_id,
         strategy_id="demo",
         instrument=instrument or InstrumentRef(kind="equity_or_etf", symbol="SPY"),
         intent=intent or DecisionIntent(action="open"),
@@ -66,11 +66,12 @@ def decision(
         as_of_time=timestamp,
         target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
         exit_policy=ExitPolicy(
-            max_hold_bars=3,
-            stop_loss_bps=100.0,
-            take_profit_bps=200.0,
+            max_hold_bars=max_hold_bars,
+            stop_loss_bps=stop_loss_bps,
+            take_profit_bps=take_profit_bps,
+            trailing_stop_bps=trailing_stop_bps,
         ),
-        metadata={"source": "test"},
+        metadata=metadata or {"source": "test"},
     )
 
 
@@ -82,11 +83,12 @@ def zero_cost() -> CostModelConfig:
     return CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0)
 
 
-def test_build_request_converts_rows_to_engine_ohlc_bars_and_signals():
+def test_build_request_converts_rows_to_engine_ohlc_bars_and_decisions():
+    source_decision = decision()
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 101.0, 102.0, 104.0),
-        signals=[signal()],
+        decisions=[source_decision],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -95,78 +97,61 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_signals():
     assert request.bars[0].symbol == "SPY"
     assert request.bars[0].close == 100.0
     assert request.bars[0].funding_rate is None
-    assert request.spec.signals[0].decision_time == signal()["decision_time"]
+    assert request.spec.decisions == (source_decision,)
 
 
-def test_decisions_to_signal_rows_preserves_engine_fields():
-    source = decision()
-    rows = decisions_to_signal_rows([decision()])
-
-    assert rows == [
-        {
-            "decision_id": source.decision_id,
-            "symbol": "SPY",
-            "decision_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
-            "as_of_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
-            "side": "long",
-            "weight": 0.5,
-            "max_hold_bars": 3,
-            "stop_loss_bps": 100.0,
-            "take_profit_bps": 200.0,
-            "metadata": {"source": "test"},
-        }
-    ]
-
-
-def test_decisions_to_signal_rows_converts_nested_metadata_for_engine_request():
-    timestamp = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-    nested_decision = StrategyDecision(
-        strategy_id="demo",
-        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
-        decision_time=timestamp,
-        as_of_time=timestamp,
-        target=PositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
-        exit_policy=ExitPolicy(max_hold_bars=3),
+def test_build_request_serializes_decision_metadata_without_signal_rows():
+    nested_decision = decision(
+        index=0,
+        max_hold_bars=3,
         metadata={"outer": {"items": [{"x": 1}]}},
     )
-    rows = [
-        {
-            "symbol": "SPY",
-            "timestamp": timestamp + timedelta(days=index),
-            "open": 100.0,
-            "high": 100.0,
-            "low": 100.0,
-            "close": 100.0,
-        }
-        for index in range(5)
-    ]
+    rows = bars(100.0, 100.0, 100.0, 100.0, 100.0)
 
-    signal_rows = decisions_to_signal_rows([nested_decision])
     request = build_request(
         strategy_id="demo",
         rows=rows,
-        signals=signal_rows,
+        decisions=[nested_decision],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
+    payload = json.loads(request_json(request))
 
-    assert signal_rows[0]["metadata"] == {"outer": {"items": [{"x": 1}]}}
-    assert request.spec.signals[0].metadata == {"outer": {"items": [{"x": 1}]}}
+    assert payload["spec"]["decisions"][0]["metadata"] == {"outer": {"items": [{"x": 1}]}}
+    assert "signals" not in payload["spec"]
 
 
-def test_decisions_to_signal_rows_rejects_flat_targets():
+def test_build_request_rejects_flat_targets():
     with pytest.raises(RequestBuildError, match="flat target"):
-        decisions_to_signal_rows([decision(direction="flat", size=0.0)])
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 104.0),
+            decisions=[decision(direction="flat", size=0.0)],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
 
 
-def test_decisions_to_signal_rows_rejects_non_target_weight():
+def test_build_request_rejects_non_target_weight():
     with pytest.raises(RequestBuildError, match="target_weight"):
-        decisions_to_signal_rows([decision(sizing_kind="target_notional")])
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 104.0),
+            decisions=[decision(sizing_kind="target_notional")],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
 
 
-def test_decisions_to_signal_rows_rejects_non_open_intent():
+def test_build_request_rejects_non_open_intent():
     with pytest.raises(RequestBuildError, match="open intent"):
-        decisions_to_signal_rows([decision(intent=DecisionIntent(action="close", book_side="sell"))])
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 104.0),
+            decisions=[decision(intent=DecisionIntent(action="close", book_side="sell"))],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
 
 
 @pytest.mark.parametrize(
@@ -216,9 +201,15 @@ def test_decisions_to_signal_rows_rejects_non_open_intent():
         ),
     ],
 )
-def test_decisions_to_signal_rows_rejects_unsupported_instrument_shapes(instrument, message):
+def test_build_request_rejects_unsupported_instrument_shapes(instrument, message):
     with pytest.raises(RequestBuildError, match=message):
-        decisions_to_signal_rows([decision(instrument=instrument)])
+        build_request(
+            strategy_id="demo",
+            rows=bars(100.0, 101.0, 102.0, 104.0),
+            decisions=[decision(instrument=instrument)],
+            fill_model=close_fill(),
+            cost_model=zero_cost(),
+        )
 
 
 def test_build_request_preserves_funding_fields_for_engine_accounting():
@@ -234,7 +225,7 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     request = build_request(
         strategy_id="demo",
         rows=rows,
-        signals=[signal(index=0, max_hold_bars=2)],
+        decisions=[decision(index=0, max_hold_bars=2)],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -247,25 +238,23 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     assert run.screen_summary["trades"][0]["net_return"] == pytest.approx(0.099)
 
 
-def test_build_request_rejects_zero_signals():
-    with pytest.raises(RequestBuildError, match="no signals"):
+def test_build_request_rejects_zero_decisions():
+    with pytest.raises(RequestBuildError, match="no decisions"):
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 101.0, 102.0),
-            signals=[],
+            decisions=[],
             fill_model=close_fill(),
             cost_model=zero_cost(),
         )
 
 
 def test_build_request_rejects_missing_decision_bar():
-    missing = signal(index=9)
-
     with pytest.raises(RequestBuildError, match="decision_time"):
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 101.0, 102.0, 104.0),
-            signals=[missing],
+            decisions=[decision(index=9)],
             fill_model=close_fill(),
             cost_model=zero_cost(),
         )
@@ -277,7 +266,7 @@ def test_runner_bar_index_builds_positions_by_symbol():
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 101.0, 102.0, 104.0),
-        signals=[signal()],
+        decisions=[decision()],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -294,7 +283,7 @@ def test_runner_bar_index_rejects_duplicate_symbol_timestamp():
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 101.0, 102.0, 104.0),
-        signals=[signal()],
+        decisions=[decision()],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -312,21 +301,7 @@ def test_build_request_translates_missing_required_bar_field():
         build_request(
             strategy_id="demo",
             rows=bad_rows,
-            signals=[signal()],
-            fill_model=close_fill(),
-            cost_model=zero_cost(),
-        )
-
-
-def test_build_request_translates_missing_required_signal_field():
-    bad_signal = signal()
-    del bad_signal["side"]
-
-    with pytest.raises(RequestBuildError, match="missing required signal field 'side'"):
-        build_request(
-            strategy_id="demo",
-            rows=bars(100.0, 101.0, 102.0, 104.0),
-            signals=[bad_signal],
+            decisions=[decision()],
             fill_model=close_fill(),
             cost_model=zero_cost(),
         )
@@ -337,7 +312,7 @@ def test_build_request_rejects_insufficient_entry_or_exit_bars():
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 101.0, 102.0),
-            signals=[signal()],
+            decisions=[decision()],
             fill_model=close_fill(),
             cost_model=zero_cost(),
         )
@@ -348,42 +323,42 @@ def test_build_request_rejects_quote_fill_without_bid_ask_fields():
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 101.0, 102.0, 104.0),
-            signals=[signal()],
+            decisions=[decision()],
             fill_model=FillModelConfig(price="quote", entry_lag_bars=1),
             cost_model=zero_cost(),
         )
 
 
-def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
-    raw_signal = signal(index=0, max_hold_bars=5)
-    raw_signal.update(
-        {
-            "decision_id": "decision-001",
-            "max_hold_bars": 2,
-            "take_profit_bps": 150.0,
-            "stop_loss_bps": 75.0,
-            "trailing_stop_bps": 50.0,
-            "metadata": {"source": "explicit"},
+def test_build_request_preserves_exit_controls_and_decision_metadata():
+    source_decision = decision(
+        index=0,
+        decision_id="decision-001",
+        max_hold_bars=2,
+        take_profit_bps=150.0,
+        stop_loss_bps=75.0,
+        trailing_stop_bps=50.0,
+        metadata={
+            "source": "explicit",
             "funding_pressure_bps": 3.25,
             "entry_return_extension_bps": 42.0,
-        }
+        },
     )
 
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 100.0, 102.0, 101.0),
-        signals=[raw_signal],
+        decisions=[source_decision],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
 
-    engine_signal = request.spec.signals[0]
-    assert engine_signal.decision_id == "decision-001"
-    assert engine_signal.max_hold_bars == 2
-    assert engine_signal.take_profit_bps == 150.0
-    assert engine_signal.stop_loss_bps == 75.0
-    assert engine_signal.trailing_stop_bps == 50.0
-    assert engine_signal.metadata == {
+    engine_decision = request.spec.decisions[0]
+    assert engine_decision.decision_id == "decision-001"
+    assert engine_decision.exit_policy.max_hold_bars == 2
+    assert engine_decision.exit_policy.take_profit_bps == 150.0
+    assert engine_decision.exit_policy.stop_loss_bps == 75.0
+    assert engine_decision.exit_policy.trailing_stop_bps == 50.0
+    assert dict(engine_decision.metadata) == {
         "entry_return_extension_bps": 42.0,
         "funding_pressure_bps": 3.25,
         "source": "explicit",
@@ -392,11 +367,10 @@ def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
 
 
 def test_engine_trades_preserve_decision_id():
-    raw_signal = {**signal(index=0, max_hold_bars=1), "decision_id": "decision-join-001"}
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 100.0, 102.0),
-        signals=[raw_signal],
+        decisions=[decision(index=0, max_hold_bars=1, decision_id="decision-join-001")],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -406,26 +380,12 @@ def test_engine_trades_preserve_decision_id():
     assert run.screen_summary["trades"][0]["decision_id"] == "decision-join-001"
 
 
-def test_build_request_rejects_duplicate_flat_and_nested_metadata_keys():
-    raw_signal = signal()
-    raw_signal.update({"metadata": {"funding_pressure_bps": 1.0}, "funding_pressure_bps": 2.0})
-
-    with pytest.raises(RequestBuildError, match="duplicate signal metadata key"):
-        build_request(
-            strategy_id="demo",
-            rows=bars(100.0, 101.0, 102.0, 103.0),
-            signals=[raw_signal],
-            fill_model=close_fill(),
-            cost_model=zero_cost(),
-        )
-
-
 def test_build_request_uses_max_hold_and_exit_lag_for_fillability():
     with pytest.raises(RequestBuildError, match="exit fill is outside"):
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 100.0, 101.0),
-            signals=[{**signal(index=0, max_hold_bars=1), "max_hold_bars": 2}],
+            decisions=[decision(index=0, max_hold_bars=2)],
             fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=1),
             cost_model=zero_cost(),
         )
@@ -435,7 +395,7 @@ def test_evaluate_request_runs_screen_and_validate_apis():
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 101.0, 102.0, 104.0),
-        signals=[signal()],
+        decisions=[decision()],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )
@@ -453,7 +413,7 @@ def test_evaluate_request_can_skip_evidence_and_trade_serialization():
     request = build_request(
         strategy_id="demo",
         rows=bars(100.0, 101.0, 102.0, 104.0),
-        signals=[signal()],
+        decisions=[decision()],
         fill_model=close_fill(),
         cost_model=zero_cost(),
     )

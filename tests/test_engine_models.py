@@ -5,79 +5,67 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from quant_strategies.engine import Bar, CostModel, FillModel, Side, Signal
+from quant_strategies.engine import Bar, CostModel, FillModel, Side, StrategySpec, Trade
+
+from engine_helpers import decision_for
 
 
-def test_bars_and_signals_require_timezone_aware_timestamps():
+def test_bars_require_timezone_aware_timestamps():
     with pytest.raises(ValidationError, match="timestamp must be timezone-aware"):
         Bar(symbol="BTC", timestamp=datetime(2024, 1, 1), open=1.0, high=1.0, low=1.0, close=1.0)
 
-    with pytest.raises(ValidationError, match="decision_time must be timezone-aware"):
-        Signal(symbol="BTC", decision_time=datetime(2024, 1, 1), side=Side.LONG, max_hold_bars=1)
 
-
-def test_signal_weight_and_costs_must_be_finite():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
-
-    with pytest.raises(ValidationError, match="weight must be finite"):
-        Signal(symbol="BTC", decision_time=aware_time, side=Side.LONG, weight=float("inf"), max_hold_bars=1)
-
-    with pytest.raises(ValidationError, match="cost values must be finite"):
-        CostModel(fee_bps_per_side=float("inf"))
-
-
-def test_signal_rejects_legacy_quantity_field():
-    with pytest.raises(ValidationError):
-        Signal.model_validate(
+def test_strategy_spec_rejects_legacy_signal_shape():
+    with pytest.raises(ValidationError, match="decisions"):
+        StrategySpec.model_validate(
             {
-                "symbol": "BTC",
-                "decision_time": "2024-01-01T00:00:00Z",
-                "side": "long",
-                "quantity": 1.0,
+                "strategy_id": "demo",
+                "signals": [
+                    {
+                        "symbol": "BTC",
+                        "decision_time": "2024-01-01T00:00:00Z",
+                        "side": "long",
+                        "max_hold_bars": 1,
+                    }
+                ],
             }
         )
 
 
-def test_signal_accepts_exit_controls_and_metadata():
+def test_strategy_spec_accepts_strategy_decisions():
+    decision = decision_for("BTC")
+
+    spec = StrategySpec(strategy_id="demo", decisions=(decision,))
+
+    assert spec.decisions == (decision,)
+
+
+def test_costs_must_be_finite():
+    with pytest.raises(ValidationError, match="cost values must be finite"):
+        CostModel(fee_bps_per_side=float("inf"))
+
+
+def test_trade_accepts_decision_metadata():
     aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
 
-    signal = Signal(
+    trade = Trade(
+        decision_id="decision-1",
         symbol="BTC",
-        decision_time=aware_time,
         side=Side.LONG,
-        max_hold_bars=3,
-        take_profit_bps=125.0,
-        stop_loss_bps=50.0,
-        trailing_stop_bps=25.0,
-        metadata={"funding_pressure_bps": 3.5, "signal_family": "demo"},
+        decision_time=aware_time,
+        entry_time=aware_time,
+        exit_time=aware_time,
+        entry_price=100.0,
+        exit_price=101.0,
+        exit_reason="max_hold",
+        weight=0.5,
+        gross_return=0.005,
+        cost_return=0.0,
+        net_return=0.005,
+        decision_metadata={"funding_pressure_bps": 3.5},
     )
 
-    assert signal.max_hold_bars == 3
-    assert signal.take_profit_bps == 125.0
-    assert signal.stop_loss_bps == 50.0
-    assert signal.trailing_stop_bps == 25.0
-    assert signal.metadata == {"funding_pressure_bps": 3.5, "signal_family": "demo"}
-
-
-def test_signal_rejects_invalid_exit_controls_and_metadata():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    base = {"symbol": "BTC", "decision_time": aware_time, "side": Side.LONG}
-    valid_base = {**base, "max_hold_bars": 1}
-
-    with pytest.raises(ValidationError, match="max_hold_bars"):
-        Signal(**{**base, "max_hold_bars": 0})
-
-    with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
-        Signal(**valid_base, take_profit_bps=float("inf"))
-
-    with pytest.raises(ValidationError, match="exit bps values must be finite and positive"):
-        Signal(**valid_base, stop_loss_bps=0.0)
-
-    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
-        Signal(**valid_base, metadata={"timestamp": aware_time})
-
-    with pytest.raises(ValidationError, match="metadata must be JSON-compatible"):
-        Signal(**valid_base, metadata={"bad": float("nan")})
+    assert trade.decision_metadata == {"funding_pressure_bps": 3.5}
 
 
 def test_bar_accepts_valid_optional_quotes():

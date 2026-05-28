@@ -8,7 +8,6 @@ from quant_strategies.engine import (
     EvaluationRequest,
     FillModel,
     Side,
-    Signal,
     StrategySpec,
     build_evidence_packet,
     evidence_json,
@@ -16,7 +15,7 @@ from quant_strategies.engine import (
     validate,
 )
 
-from engine_helpers import bars_for
+from engine_helpers import bars_for, decision_for
 
 
 DECISION = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
@@ -26,7 +25,7 @@ def profitable_request() -> EvaluationRequest:
     return EvaluationRequest(
         spec=StrategySpec(
             strategy_id="deterministic_check",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=bars_for("BTC", [100.0, 100.0, 110.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -39,7 +38,7 @@ def test_evidence_json_is_deterministic_for_screening_result():
     second = evidence_json(build_evidence_packet(request, screening_result=screen(request)))
 
     assert first == second
-    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v2"
+    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v3"
 
 
 def test_validate_passes_profitable_frozen_candidate():
@@ -58,7 +57,7 @@ def test_validate_fails_closed_when_required_bars_are_missing():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_inputs",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=(),
     )
@@ -112,7 +111,7 @@ def quote_request() -> EvaluationRequest:
     return EvaluationRequest(
         spec=StrategySpec(
             strategy_id="quote_evidence",
-            signals=(Signal(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=quote_bars(),
         fill_model=FillModel(price="quote", entry_lag_bars=1),
@@ -123,7 +122,7 @@ def test_validate_reports_missing_quote_fills_as_invalid_inputs():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_quote_inputs",
-            signals=(Signal(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
         ),
         bars=bars_for("BTC", [100.0, 101.0, 102.0]),
         fill_model=FillModel(price="quote", entry_lag_bars=1),

@@ -31,7 +31,6 @@ def summary_profile_payload(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]],
     decisions: Sequence[StrategyDecision],
-    signals: Sequence[Mapping[str, Any]],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
 ) -> dict[str, Any]:
@@ -41,7 +40,6 @@ def summary_profile_payload(
         "strategy_id": config.strategy_id,
         "rows": _row_summary(config, rows, normalized_rows_hash=normalized_rows_hash),
         "decisions": _decision_summary(decisions),
-        "signals": _signal_summary(signals),
         "engine": json_safe_value(engine),
         "metric_semantics": smoke_score_metric_semantics(config.data.kind),
     }
@@ -53,7 +51,6 @@ def write_summary_profile_artifact(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]],
     decisions: Sequence[StrategyDecision],
-    signals: Sequence[Mapping[str, Any]],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
 ) -> Path:
@@ -62,7 +59,6 @@ def write_summary_profile_artifact(
         config=config,
         rows=rows,
         decisions=decisions,
-        signals=signals,
         engine=engine,
         normalized_rows_hash=normalized_rows_hash,
     )
@@ -154,16 +150,6 @@ def _decision_summary(decisions: Sequence[StrategyDecision]) -> dict[str, Any]:
         "by_sizing_kind": dict(sorted(sizing_kinds.items())),
         "min_decision_time": _iso_or_none(min(decision_times) if decision_times else None),
         "max_decision_time": _iso_or_none(max(decision_times) if decision_times else None),
-    }
-
-
-def _signal_summary(signals: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    symbols = Counter(str(item.get("symbol", "")) for item in signals)
-    sides = Counter(str(item.get("side", "")) for item in signals)
-    return {
-        "count": len(signals),
-        "by_symbol": dict(sorted(symbols.items())),
-        "by_side": dict(sorted(sides.items())),
     }
 
 
