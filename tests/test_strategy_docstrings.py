@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 
@@ -12,6 +13,10 @@ REQUIRED_HEADINGS = (
     "Falsifier:",
 )
 RULE_HEADINGS = ("Decision rule:", "Signal rule:")
+PROVENANCE_ANCHOR_PATTERN = re.compile(
+    r"https?://|\binternal_note\s*:|\bdoi\b|\bssrn\b",
+    re.IGNORECASE,
+)
 BANNED_IMPORT_ROOTS = {
     "quant_data",
     "quant_strategies.engine",
@@ -90,6 +95,17 @@ def test_strategy_docstrings_include_required_rationale_headings():
         assert missing == [], f"{path} missing headings: {missing}"
 
 
+def test_strategy_docstrings_include_auditable_provenance_anchor():
+    offenders: list[str] = []
+    for path in all_strategy_files_for_contract():
+        docstring = ast.get_docstring(ast.parse(path.read_text())) or ""
+        source_section = _docstring_section(docstring, "Source / provenance:")
+        if not PROVENANCE_ANCHOR_PATTERN.search(source_section):
+            offenders.append(f"{path}: Source / provenance lacks DOI, SSRN, URL, or internal_note:")
+
+    assert offenders == []
+
+
 def test_strategy_layout_is_flat():
     offenders = [
         path
@@ -134,6 +150,22 @@ def test_strategy_modules_do_not_call_common_side_effect_primitives():
 
 def _is_banned_import(module: str) -> bool:
     return any(module == banned or module.startswith(f"{banned}.") for banned in BANNED_IMPORT_ROOTS)
+
+
+def _docstring_section(docstring: str, heading: str) -> str:
+    headings = set(REQUIRED_HEADINGS) | set(RULE_HEADINGS)
+    lines = docstring.splitlines()
+    try:
+        start = next(index + 1 for index, line in enumerate(lines) if line.strip() == heading)
+    except StopIteration:
+        return ""
+
+    body: list[str] = []
+    for line in lines[start:]:
+        if line.strip() in headings:
+            break
+        body.append(line)
+    return "\n".join(body).strip()
 
 
 def _call_name(node: ast.expr) -> str:

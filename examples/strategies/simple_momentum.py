@@ -1,8 +1,9 @@
 """Strategy: simple_momentum
 
 Source / provenance:
-Internal runner smoke strategy for this repository. It is a deterministic test
-fixture, not an external paper or production alpha source.
+internal_note: examples/strategies/simple_momentum.py documents this internal
+runner smoke strategy. It is a deterministic test fixture, not an external
+paper or production alpha source.
 
 Market rationale:
 A one-bar positive close-to-close move can be used as a minimal causal long
