@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 10: P2 backend-owned validation capabilities.
+Phase 11: P1 duplicate decision execution keys.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-backend-owned-capabilities-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-backend-owned-capabilities.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-duplicate-decision-key-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-duplicate-decision-key.md`
 
 ## Finding Triage
 
@@ -40,6 +40,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-backend-owned-capa
 | `quant_data` eager import slows runner cold import | Confirmed true, Phase 8 | Lazy-import `quant_data` only when loading data or building a default engine. |
 | Duplicate freezing idioms and repeated row deepcopy | Confirmed true, Phase 9 | Use `boundary` as the single recursive freeze helper and reuse frozen execution inputs. |
 | Validation capability matrix hard-codes backend identity | Confirmed true, Phase 10 | Move static capability records onto backend implementations and keep observed-semantics extraction centralized. |
+| Duplicate `(symbol, decision_time)` decisions can double-count smoke PnL | Confirmed true, Phase 11 | Reject duplicate execution keys at shared decision-output validation. |
 
 ## Phase 1 Checklist
 
@@ -320,3 +321,30 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-backend-owned-capa
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: capability records remain plain dictionaries, so malformed future custom backend records are not schema-validated before artifact writing.
+
+## Phase 11 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add duplicate execution-key regression.
+- [x] Implement shared output validation.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 11 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py::test_validate_decision_output_rejects_duplicate_symbol_decision_time -q` -> failed as expected before implementation; duplicate same-symbol same-time decisions were both accepted.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py::test_validate_decision_output_rejects_duplicate_symbol_decision_time tests/test_decision_models.py::test_validate_decision_output_rejects_duplicate_decision_id -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 108 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 494 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual note: allowed edge cases were documented but not directly tested. Added positive coverage for same symbol at different decision times and different symbols at the same decision time.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 109 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 495 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.

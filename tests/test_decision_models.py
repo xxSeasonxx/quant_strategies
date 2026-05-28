@@ -129,6 +129,72 @@ def test_validate_decision_output_rejects_duplicate_decision_id():
     assert violations == ("duplicate_decision_id[1]: duplicate",)
 
 
+def test_validate_decision_output_rejects_duplicate_symbol_decision_time():
+    first = StrategyDecision(
+        decision_id="decision-1",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+    second = StrategyDecision(
+        decision_id="decision-2",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+
+    decisions, violations = validate_decision_output([first, second], strategy_id="demo")
+
+    assert decisions == [first]
+    assert violations == (
+        f"duplicate_decision_execution_key[1]: BTC-PERP@{DECISION_TIME.isoformat()}",
+    )
+
+
+def test_validate_decision_output_allows_distinct_execution_keys():
+    same_symbol_later = StrategyDecision(
+        decision_id="decision-2",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=datetime(2026, 1, 2, 12, 2, tzinfo=timezone.utc),
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+    different_symbol_same_time = StrategyDecision(
+        decision_id="decision-3",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="ETH-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+    baseline = StrategyDecision(
+        decision_id="decision-1",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+
+    decisions, violations = validate_decision_output(
+        [baseline, same_symbol_later, different_symbol_same_time],
+        strategy_id="demo",
+    )
+
+    assert decisions == [baseline, same_symbol_later, different_symbol_same_time]
+    assert violations == ()
+
+
 def test_strategy_generator_protocol_is_publicly_importable():
     def generate_decisions(rows, params):
         return []

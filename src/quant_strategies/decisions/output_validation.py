@@ -20,6 +20,7 @@ def validate_decision_output(
     decisions: list[StrategyDecision] = []
     violations: list[str] = []
     seen_decision_ids: set[str] = set()
+    seen_execution_keys: set[tuple[str, object]] = set()
     for index, item in enumerate(output):
         if not isinstance(item, StrategyDecision):
             violations.append(f"invalid_decision_output[{index}]")
@@ -33,6 +34,14 @@ def validate_decision_output(
             violations.append(f"duplicate_decision_id[{index}]: {item.decision_id}")
             continue
         seen_decision_ids.add(item.decision_id)
+        execution_key = (item.instrument.symbol, item.decision_time)
+        if execution_key in seen_execution_keys:
+            violations.append(
+                "duplicate_decision_execution_key"
+                f"[{index}]: {item.instrument.symbol}@{item.decision_time.isoformat()}"
+            )
+            continue
+        seen_execution_keys.add(execution_key)
         decisions.append(item)
 
     return decisions, tuple(violations)
