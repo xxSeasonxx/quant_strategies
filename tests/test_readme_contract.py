@@ -34,6 +34,10 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "max_stressed_net_loss = -0.02" in text
     assert "max_fill_lag_net_loss = -0.02" in text
     assert "smoke_score.sum_signed_trade_activity_*" in text
+    assert "metric_semantics" in text
+    assert "artifact_trust_tier" in text
+    assert "search_only" in text
+    assert "audit_replayable" in text
     assert "smoke_unverified" in text
     assert "causality_verified" in text
     assert "decision_id" in text

@@ -178,15 +178,20 @@ artifact_profile = "summary"
 ```
 
 Use `artifact_profile = "summary"` for large search sweeps; it still writes
-`summary.json` plus `artifact_profile_summary.json`. Use
+`summary.json` plus `artifact_profile_summary.json`, and marks the result
+`artifact_trust_tier = "search_only"`. Use
 `artifact_profile = "full"` for retained or debug runs when you need input
 rows, decision records, signal rows, engine request JSON, and full evidence
-artifacts.
+artifacts; those runs are marked `artifact_trust_tier = "audit_replayable"`.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them
 under `smoke_score.sum_signed_trade_activity_gross`,
 `sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
-`sum_signed_trade_activity_net`.
+`sum_signed_trade_activity_net`. Runner artifacts include `metric_semantics` for
+each smoke score field. These records declare the unit, base, aggregation,
+backend, return path model, comparability, tolerance, and asymmetry so ranking
+code does not compare smoke activity sums to NAV-path backend returns by name
+alone.
 
 ## What autoresearch Reads
 
@@ -199,6 +204,7 @@ result.result_dir
 result.message
 result.run_completed
 result.assessment_status
+result.artifact_trust_tier
 ```
 
 For ranking, read structured artifacts from `result.result_dir`, especially
@@ -208,11 +214,13 @@ machine interface.
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
 Use `assessment_status`, `causality_verified`, `data_availability_status`,
-`availability_coverage`, `row_contract`, and `evidence_quality_warnings` as
-ranking filters before comparing smoke scores. Treat `smoke_passed` as stronger
-mechanical evidence than `smoke_unverified`; `smoke_unverified` means the smoke
-gates passed but row availability coverage was missing, partial, or invalid, so
-the runner could not claim causality verification.
+`availability_coverage`, `row_contract`, `artifact_trust_tier`, and
+`evidence_quality_warnings` as ranking filters before comparing smoke scores.
+Treat `smoke_passed` as stronger mechanical evidence than `smoke_unverified`;
+`smoke_unverified` means the smoke gates passed but row availability coverage
+was missing, partial, or invalid, so the runner could not claim causality
+verification. Treat `search_only` artifacts as ranking evidence only; rerun
+retained candidates with `artifact_profile = "full"` before audit handoff.
 `row_contract.quant_data_feedback` is the handoff channel for missing fields,
 duplicate keys, timestamp issues, and other upstream `quant_data` contract gaps.
 
@@ -262,4 +270,6 @@ A downstream setup is correctly aligned when:
 - ranking reads structured artifacts under `results/`,
 - ranking treats `causality_verified` and `assessment_status` as evidence
   quality filters before comparing smoke activity scores,
+- retained candidates are rerun with `artifact_profile = "full"` before audit
+  handoff,
 - no autoresearch code imports engine or validation internals.

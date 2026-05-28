@@ -75,6 +75,34 @@ artifact_profile = "summary"
     return load_config(config_path, repo_root=tmp_path)
 
 
+def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
+    metric_semantics = payload["metric_semantics"]
+    assert set(metric_semantics) == {
+        "smoke_score.sum_signed_trade_activity_gross",
+        "smoke_score.sum_signed_trade_activity_funding",
+        "smoke_score.sum_signed_trade_activity_cost",
+        "smoke_score.sum_signed_trade_activity_net",
+    }
+    net = metric_semantics["smoke_score.sum_signed_trade_activity_net"]
+    assert set(net) == {
+        "name",
+        "unit",
+        "base",
+        "aggregation",
+        "backend",
+        "return_path_model",
+        "comparability",
+        "tolerance",
+        "asymmetry",
+    }
+    assert net["unit"] == "decimal_fraction"
+    assert net["base"] == "signed target-weighted trade activity; not portfolio NAV"
+    assert net["backend"] == "smoke_engine"
+    assert net["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+    assert net["tolerance"] is None
+    assert "not comparable to NAV-path total return" in net["asymmetry"]
+
+
 def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
     timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
     rows = [
@@ -124,6 +152,7 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
     )
 
     assert payload["artifact_profile"] == "summary"
+    assert payload["artifact_trust_tier"] == "search_only"
     assert payload["rows"]["row_count"] == 3
     assert payload["rows"]["sample_count"] == 3
     assert payload["rows"]["by_symbol"]["SPY"]["count"] == 2
@@ -141,6 +170,7 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
             "sum_signed_trade_activity_net": 0.03,
         },
     }
+    assert_smoke_metric_semantics(payload)
 
 
 def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
@@ -200,5 +230,7 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
 
     parsed = json.loads(path.read_text())
     assert path == result_dir / "artifact_profile_summary.json"
+    assert parsed["artifact_trust_tier"] == "search_only"
     assert parsed["rows"]["row_count"] == 1
     assert parsed["rows"]["normalized_rows_sha256"] == normalized_rows_sha256([row("SPY", timestamp, 100.0)])
+    assert_smoke_metric_semantics(parsed)

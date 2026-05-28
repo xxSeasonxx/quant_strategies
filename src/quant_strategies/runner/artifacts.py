@@ -11,6 +11,7 @@ from typing import Any
 
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
+from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.provenance import (
     artifact_hashes,
     file_sha256,
@@ -217,6 +218,7 @@ def write_data_manifest(
     quality = evidence_quality_payload or evidence_quality(config, rows)
     payload = {
         "artifact_profile": config.output.artifact_profile,
+        "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
         "data": {
             "kind": config.data.kind,
             "dataset": config.data.dataset,
@@ -231,6 +233,7 @@ def write_data_manifest(
         },
         "strategy_input_rows_jsonl_sha256": strategy_input_rows_jsonl_sha256,
         "normalized_rows_sha256": normalized_rows_hash,
+        "metric_semantics": smoke_score_metric_semantics(config.data.kind),
         "metadata_field_coverage": _metadata_field_coverage(rows),
         **quality,
     }
@@ -250,6 +253,7 @@ def write_run_manifest(
         "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
         "artifact_profile": artifact_profile,
+        "artifact_trust_tier": artifact_trust_tier_for_profile(artifact_profile),
         "evidence": evidence,
         "artifacts": _artifact_hashes(result_dir),
     }

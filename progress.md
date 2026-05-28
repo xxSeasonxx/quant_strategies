@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 2: P1 decision ontology.
+Phase 3: P1 metric semantics and artifact trust.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-ontology-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-ontology.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-metric-trust-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-metric-trust.md`
 
 ## Finding Triage
 
@@ -31,6 +31,9 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-ontology.md`
 | Validation orchestrator god-function | Confirmed true, deferred | Split after semantic blockers. |
 | Public API re-export mismatch | Partly true, deferred | `AGENTS.md` chooses `quant_strategies.runner.run_config`; treat as PRD/docs reconciliation, not immediate code change. |
 | Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
+| Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
+| Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
+| Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
 
 ## Phase 1 Checklist
 
@@ -89,3 +92,31 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-ontology.md`
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risks: summary profile remains aggregate-only, richer exit ontology remains PRD debt, and engine parallel ontology cleanup remains deferred.
+
+## Phase 3 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add artifact trust tier contract.
+- [x] Add smoke metric semantics contract.
+- [x] Thread trust and semantics through runner artifacts and result object.
+- [x] Add deterministic artifact regression.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 3 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 47 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found the three prior findings closed and no new Critical/Important Phase 3 issues.
+- 2026-05-28: Code review found three valid issues: semantics keys drifted from `comparability`/`tolerance`, the deterministic artifact test did not prove a successful full-profile run, and the Phase 3 plan checklist was stale. Fixed all three.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 47 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.

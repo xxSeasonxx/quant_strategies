@@ -28,10 +28,12 @@ SUMMARY_KEYS = {
     "run_completed",
     "assessment_status",
     "artifact_profile",
+    "artifact_trust_tier",
     "evidence_class",
     "strategy_contract",
     "return_model",
     "funding_model",
+    "metric_semantics",
     "promotion_eligible",
     "paper_trade_eligible",
     "live_eligible",
@@ -41,6 +43,12 @@ SUMMARY_KEYS = {
     "row_contract",
     "causality_verified",
     "evidence_quality_warnings",
+}
+SMOKE_SCORE_KEYS = {
+    "smoke_score.sum_signed_trade_activity_gross",
+    "smoke_score.sum_signed_trade_activity_funding",
+    "smoke_score.sum_signed_trade_activity_cost",
+    "smoke_score.sum_signed_trade_activity_net",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
 
@@ -180,20 +188,49 @@ def assert_assessment(
     promotion_eligible: bool = False,
     artifact_profile: str = "full",
 ) -> None:
+    expected_trust = "audit_replayable" if artifact_profile == "full" else "search_only"
     assert result.run_completed is run_completed
     assert result.assessment_status == assessment_status
     assert result.promotion_eligible is promotion_eligible
+    assert result.artifact_trust_tier == expected_trust
     assert summary["run_completed"] is run_completed
     assert summary["assessment_status"] == assessment_status
     assert summary["artifact_profile"] == artifact_profile
+    assert summary["artifact_trust_tier"] == expected_trust
     assert summary["evidence_class"] == "runner_smoke"
     assert summary["strategy_contract"] == "decision"
     assert summary["return_model"] == "smoke_score.sum_signed_trade_activity_net"
     assert summary["funding_model"] == "none"
+    assert_smoke_metric_semantics(summary)
     assert summary["promotion_eligible"] is promotion_eligible
     assert summary["paper_trade_eligible"] is False
     assert summary["live_eligible"] is False
     assert summary["requires_manual_approval"] is True
+
+
+def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
+    metric_semantics = payload["metric_semantics"]
+    assert set(metric_semantics) == SMOKE_SCORE_KEYS
+    for name in SMOKE_SCORE_KEYS:
+        semantics = metric_semantics[name]
+        assert set(semantics) == {
+            "name",
+            "unit",
+            "base",
+            "aggregation",
+            "backend",
+            "return_path_model",
+            "comparability",
+            "tolerance",
+            "asymmetry",
+        }
+        assert semantics["name"] == name
+        assert semantics["unit"] == "decimal_fraction"
+        assert semantics["base"] == "signed target-weighted trade activity; not portfolio NAV"
+        assert semantics["backend"] == "smoke_engine"
+        assert semantics["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+        assert semantics["tolerance"] is None
+        assert semantics["asymmetry"]
 
 
 def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -257,6 +294,8 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
         "runner_causality_not_verified",
     ]
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["artifact_trust_tier"] == "audit_replayable"
+    assert_smoke_metric_semantics(data_manifest)
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["row_contract"] == summary["row_contract"]
@@ -308,6 +347,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
     assert profile["artifact_profile"] == "summary"
+    assert profile["artifact_trust_tier"] == "search_only"
     assert profile["rows"]["row_count"] == 6
     assert profile["rows"]["sample_count"] == 5
     assert profile["decisions"]["count"] == 1
@@ -317,15 +357,20 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
     assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] is not None
     assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_net"] is not None
+    assert_smoke_metric_semantics(profile)
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
+    assert data_manifest["artifact_trust_tier"] == "search_only"
     assert data_manifest["strategy_input_rows_jsonl_sha256"] is None
     assert len(data_manifest["normalized_rows_sha256"]) == 64
     assert profile["rows"]["normalized_rows_sha256"] == data_manifest["normalized_rows_sha256"]
+    assert_smoke_metric_semantics(data_manifest)
 
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["artifact_profile"] == "summary"
+    assert run_manifest["artifact_trust_tier"] == "search_only"
+    assert run_manifest["evidence"]["metric_semantics"] == profile["metric_semantics"]
     assert "artifact_profile_summary.json" in run_manifest["artifacts"]
     assert "engine_request.json" not in run_manifest["artifacts"]
 
@@ -800,16 +845,19 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
     assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v2"}
     assert run_manifest["artifact_profile"] == "full"
+    assert run_manifest["artifact_trust_tier"] == "audit_replayable"
     assert run_manifest["evidence"] == {
         "evidence_class": "runner_smoke",
         "strategy_contract": "decision",
         "return_model": "smoke_score.sum_signed_trade_activity_net",
         "funding_model": "none",
+        "metric_semantics": run_manifest["evidence"]["metric_semantics"],
         "promotion_eligible": False,
         "paper_trade_eligible": False,
         "live_eligible": False,
         "requires_manual_approval": True,
     }
+    assert_smoke_metric_semantics(run_manifest["evidence"])
     assert run_manifest["artifacts"]["config.toml"]["sha256"]
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
@@ -825,6 +873,8 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
         "strict": True,
     }
     assert data_manifest["artifact_profile"] == "full"
+    assert data_manifest["artifact_trust_tier"] == "audit_replayable"
+    assert_smoke_metric_semantics(data_manifest)
     assert data_manifest["rows"]["total"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["min_timestamp"] == "2024-01-01T00:00:00+00:00"
@@ -1269,6 +1319,8 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     assert summary["funding_model"] == "linear_additive_adjustment"
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["evidence"]["funding_model"] == "linear_additive_adjustment"
+    funding = run_manifest["evidence"]["metric_semantics"]["smoke_score.sum_signed_trade_activity_funding"]
+    assert funding["return_path_model"] == "linear_additive_adjustment"
     notes = (result.result_dir / "notes.md").read_text()
     assert "return_scope: price-and-funding" in notes
     assert "supplied funding events are included" in notes
@@ -1392,3 +1444,54 @@ def test_cli_reports_failure_with_notes(tmp_path: Path, monkeypatch: pytest.Monk
 
     assert exit_code == 1
     assert str(notes) in capsys.readouterr().out
+
+
+def test_repeated_runner_artifacts_are_byte_deterministic(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+
+    def load_data(config):
+        return LoadedData(rows=[dict(row) for row in loaded_rows])
+
+    monkeypatch.setattr(execution, "load_data", load_data)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    second = run_config(config_path, repo_root=tmp_path)
+
+    expected_artifacts = {
+        "config.toml",
+        "strategy_snapshot.py",
+        "strategy_input_rows.csv",
+        "strategy_input_rows.jsonl",
+        "decision_records.jsonl",
+        "signals.csv",
+        "engine_request.json",
+        "data_manifest.json",
+        "run_manifest.json",
+        "summary.json",
+        "evidence.json",
+        "notes.md",
+    }
+
+    assert first.success is True
+    assert second.success is True
+    assert first.artifact_trust_tier == "audit_replayable"
+    assert second.artifact_trust_tier == "audit_replayable"
+    assert first.result_dir is not None
+    assert second.result_dir is not None
+    assert first.result_dir != second.result_dir
+    assert {path.name for path in first.result_dir.iterdir() if path.is_file()} == expected_artifacts
+    assert {path.name for path in second.result_dir.iterdir() if path.is_file()} == expected_artifacts
+    assert {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in first.result_dir.iterdir()
+        if path.is_file()
+    } == {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in second.result_dir.iterdir()
+        if path.is_file()
+    }

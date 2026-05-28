@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
-from quant_strategies.evidence_semantics import runner_evidence_semantics
+from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
     config as config_module,
@@ -30,6 +30,7 @@ class RunResult:
     run_completed: bool = False
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
+    artifact_trust_tier: str | None = None
 
 
 def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> RunResult:
@@ -211,6 +212,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         run_completed=True,
         assessment_status=assessment_status,
         promotion_eligible=False,
+        artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
     )
 
 
@@ -275,6 +277,7 @@ def _failure_result(
         run_completed=True,
         assessment_status="runner_failed",
         promotion_eligible=False,
+        artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
     )
 
 
@@ -304,6 +307,7 @@ def _summary_payload(
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,
         "artifact_profile": config.output.artifact_profile,
+        "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
         "success": success,
         "status": status,
         "stage": stage,

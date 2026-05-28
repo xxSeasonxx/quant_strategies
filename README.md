@@ -47,7 +47,9 @@ of smoke-engine signal conversion and engine artifacts.
 `engine` performs deterministic smoke screening and validation gates on supplied
 bars and decisions. Aggregate smoke activity sums live under
 `smoke_score.sum_signed_trade_activity_*`; they are not portfolio or NAV-path
-returns.
+returns. Runner artifacts include `metric_semantics` for each smoke score field,
+including unit, base, aggregation, backend, return path model, comparability,
+and declared asymmetry.
 
 `validation` runs advisory checks from an explicit `validation.toml` plus the
 referenced `strategy.py`. Advisory outcomes are
@@ -90,6 +92,12 @@ or invalid availability non-fatal for search, but it records that uncertainty as
 reports the loaded row schema status for the configured `data.kind`, including
 missing required fields, timestamp awareness, duplicate symbol/timestamp keys,
 and `quant_data_feedback` strings for upstream data fixes.
+
+Runner artifacts also declare `artifact_trust_tier`. Summary-profile runs are
+`search_only`: useful for fast ranking but not enough to replay every reported
+number from artifacts alone. Full-profile runs are `audit_replayable`: they
+include the row, decision, signal, engine-request, and evidence artifacts needed
+for audit replay of runner smoke metrics.
 
 ## Validation Configs
 
@@ -203,9 +211,11 @@ reach data loading include `data_manifest.json` and, for
 `artifact_profile = "full"`, strategy input row artifacts even if decision
 generation later fails. Runner failures still write `run_manifest.json`,
 `summary.json`, and `notes.md`. Successful `artifact_profile = "summary"` runs
-also write `artifact_profile_summary.json`. Successful
+also write `artifact_profile_summary.json` and declare
+`artifact_trust_tier = "search_only"`. Successful
 `artifact_profile = "full"` runs also write `decision_records.jsonl`,
-`signals.csv`, `engine_request.json`, and `evidence.json`.
+`signals.csv`, `engine_request.json`, and `evidence.json`, and declare
+`artifact_trust_tier = "audit_replayable"`.
 
 Validation artifacts include:
 

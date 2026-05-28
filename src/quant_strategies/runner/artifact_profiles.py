@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.provenance import text_sha256
 from quant_strategies.runner.config import RunConfig
 
@@ -36,11 +37,13 @@ def summary_profile_payload(
 ) -> dict[str, Any]:
     return {
         "artifact_profile": "summary",
+        "artifact_trust_tier": artifact_trust_tier_for_profile("summary"),
         "strategy_id": config.strategy_id,
         "rows": _row_summary(config, rows, normalized_rows_hash=normalized_rows_hash),
         "decisions": _decision_summary(decisions),
         "signals": _signal_summary(signals),
         "engine": json_safe_value(engine),
+        "metric_semantics": smoke_score_metric_semantics(config.data.kind),
     }
 
 
