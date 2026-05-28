@@ -46,15 +46,27 @@ def completed_backend_result(net_return: float, trade_count: int) -> BackendRunR
 
 
 def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
-    assert set(payload) == {"net_return", "trade_count"}
+    assert set(payload) == {
+        "net_return",
+        "trade_count",
+        "funding_return",
+        "linear_funding_adjusted_return",
+    }
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
-    assert net_return["base"] == "backend-declared portfolio or execution return path"
+    assert net_return["base"] == "backend portfolio price/cost return path"
     assert net_return["tolerance"] == 1e-9
     assert "runner smoke" in net_return["asymmetry"]
     trade_count = payload["trade_count"]
     assert trade_count["unit"] == "count"
     assert trade_count["tolerance"] == 0.0
+    funding_return = payload["funding_return"]
+    assert funding_return["unit"] == "decimal_fraction"
+    assert funding_return["base"] == "linear funding cashflow approximation"
+    adjusted = payload["linear_funding_adjusted_return"]
+    assert adjusted["unit"] == "decimal_fraction"
+    assert adjusted["base"] == "backend net_return plus linear funding_return"
+    assert "not a NAV-path funding return" in adjusted["asymmetry"]
 
 
 def completed_scenario(
@@ -63,13 +75,23 @@ def completed_scenario(
     *,
     net_return: float,
     trade_count: int,
+    extra_metrics: dict[str, object] | None = None,
 ) -> ScenarioBackendRunResult:
+    metrics = {"net_return": net_return, "trade_count": trade_count}
+    if extra_metrics:
+        metrics.update(extra_metrics)
     return ScenarioBackendRunResult(
         window_id=window_id,
         scenario_id=f"{window_id}/{scenario_kind}",
         scenario_kind=scenario_kind,
         required=True,
-        result=completed_backend_result(net_return, trade_count),
+        result=BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics=metrics,
+            warnings=(),
+            unsupported_semantics=(),
+        ),
     )
 
 
@@ -233,6 +255,67 @@ def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
     assert "positive_window_fraction" in decision.passed_gates
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
+    assert_advisory_only(decision)
+
+
+def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
+    funding_extras = {
+        "funding_return": 0.04,
+        "linear_funding_adjusted_return": 0.03,
+        "funding_model": "linear_additive_adjustment",
+    }
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=(
+            completed_scenario(
+                "validation_2026_h1",
+                "cost",
+                net_return=-0.01,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+            completed_scenario(
+                "validation_2026_h1",
+                "cost_stress",
+                net_return=-0.005,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+            completed_scenario(
+                "validation_2026_h1",
+                "fill_lag",
+                net_return=-0.004,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+            completed_scenario(
+                "validation_2026_h2",
+                "cost",
+                net_return=-0.01,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+            completed_scenario(
+                "validation_2026_h2",
+                "cost_stress",
+                net_return=-0.005,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+            completed_scenario(
+                "validation_2026_h2",
+                "fill_lag",
+                net_return=-0.004,
+                trade_count=20,
+                extra_metrics=funding_extras,
+            ),
+        ),
+        min_trades=10,
+    )
+
+    assert decision.decision == "mechanical_pass"
+    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert "aggregate_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 

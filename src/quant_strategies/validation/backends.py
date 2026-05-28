@@ -87,12 +87,15 @@ def backend_metric_semantics() -> dict[str, dict[str, object]]:
         BackendMetricSemantics(
             name="net_return",
             unit="decimal_fraction",
-            base="backend-declared portfolio or execution return path",
+            base="backend portfolio price/cost return path",
             aggregation="scenario total over backend-executed decisions",
             backend="validation_backend",
             comparability="backend-specific; compare only within declared tolerance and matching execution assumptions",
             tolerance=1e-9,
-            asymmetry="may differ from runner smoke signed trade-activity sums and from other backend return paths",
+            asymmetry=(
+                "may differ from runner smoke signed trade-activity sums, "
+                "other backend return paths, and linear funding adjustments"
+            ),
         ),
         BackendMetricSemantics(
             name="trade_count",
@@ -103,6 +106,26 @@ def backend_metric_semantics() -> dict[str, dict[str, object]]:
             comparability="exact integer agreement expected for equivalent execution assumptions",
             tolerance=0.0,
             asymmetry="backend trade grouping may differ when execution semantics are not equivalent",
+        ),
+        BackendMetricSemantics(
+            name="funding_return",
+            unit="decimal_fraction",
+            base="linear funding cashflow approximation",
+            aggregation="scenario total over backend-executed decision windows",
+            backend="validation_backend",
+            comparability="compare only across matching funding event models and execution windows",
+            tolerance=1e-9,
+            asymmetry="linear cashflow approximation outside the backend NAV path",
+        ),
+        BackendMetricSemantics(
+            name="linear_funding_adjusted_return",
+            unit="decimal_fraction",
+            base="backend net_return plus linear funding_return",
+            aggregation="scenario total over backend-executed decisions",
+            backend="validation_backend",
+            comparability="diagnostic only unless the funding model is explicitly accepted",
+            tolerance=1e-9,
+            asymmetry="not a NAV-path funding return; policy gates use backend net_return",
         ),
     )
     return {item.name: item.model_dump(mode="json") for item in semantics}

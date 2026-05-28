@@ -282,6 +282,14 @@ metadata, not statistical proof. A `mechanical_review_candidate` with non-empty
 search pressure carries `deflation_not_evaluated` in its reasons so reviewers do
 not mistake the metadata for deflated or Monte Carlo evidence.
 
+Validation backend metrics are flat but semantically typed in
+`backend_runs/summary.json`. For crypto-perp funding, the VectorBT Pro backend
+keeps required policy `net_return` scoped to the backend price/cost return path
+and reports the linear funding approximation separately as
+`funding_return` and `linear_funding_adjusted_return`. Do not rank or promote a
+candidate on `linear_funding_adjusted_return` unless a later review explicitly
+accepts that diagnostic model.
+
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.
 

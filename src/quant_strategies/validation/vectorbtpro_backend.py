@@ -519,10 +519,9 @@ def _funding_adjusted_metrics(
     price_cost_return = float(metrics["net_return"])
     return {
         **metrics,
-        "price_cost_return": price_cost_return,
         "funding_return": funding_return,
         "funding_model": "linear_additive_adjustment",
-        "net_return": price_cost_return + funding_return,
+        "linear_funding_adjusted_return": price_cost_return + funding_return,
     }
 
 

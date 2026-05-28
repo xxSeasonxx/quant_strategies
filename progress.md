@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 23: P2 enforce candidate strategy purity at load.
+Phase 24: P2 separate linear funding adjustment from backend net return.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-candidate-strategy-purity-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-candidate-strategy-purity.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-funding-return-semantics-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-funding-return-semantics.md`
 
 ## Finding Triage
 
@@ -53,6 +53,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-candidate-strategy
 | Full-profile runner duplicates input rows as CSV and JSONL | Confirmed true, Phase 21 | Keep `strategy_input_rows.jsonl` only; leave default artifact profile as a separate remaining finding. |
 | Runner defaults to full artifact profile | Confirmed true, Phase 22 | Default omitted `artifact_profile` to `summary`; keep explicit `full` for retained/debug runs. |
 | Strategy purity is not enforced for arbitrary candidate workspaces | Confirmed true, Phase 23 | Add default-on AST purity check in the canonical strategy loader and reuse it in committed-strategy tests. |
+| Crypto perp funding is added as a linear adjustment to generic backend `net_return` | Confirmed true, Phase 24 | Keep `net_return` as backend price/cost return; expose `linear_funding_adjusted_return` and keep policy gates off the linear add-on. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -664,3 +665,28 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-candidate-strategy
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Committed Phase 23.
+
+## Phase 24 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add funding metric regressions.
+- [x] Implement semantic metric separation.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 24 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_vectorbtpro_backend.py::test_vectorbtpro_backend_adds_funding_return_for_crypto_perp_rows -q` -> failed as expected before implementation; `net_return` was overwritten with the linear funding adjustment.
+- 2026-05-28: `conda run -n quant pytest tests/test_vectorbtpro_backend.py tests/test_validation_backends_and_policy.py tests/test_validation_runner.py -q` -> failed; policy regression expected `watchlist`, but current policy correctly stops at `mechanical_pass` with `no_positive_realistic_cost_evidence` when required net evidence is not positive.
+- 2026-05-28: Fixed the policy test expectation to assert the actual no-positive-net gate behavior.
+- 2026-05-28: `conda run -n quant pytest tests/test_vectorbtpro_backend.py tests/test_validation_backends_and_policy.py tests/test_validation_runner.py -q` -> 137 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 509 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: backend metric semantics advertise optional funding metrics globally even when a backend result does not emit them, matching the Phase 24 design.
+- 2026-05-28: Committed Phase 24.

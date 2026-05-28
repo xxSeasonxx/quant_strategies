@@ -158,7 +158,12 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert decision_payload["requires_manual_approval"] is True
     assert decision_payload["failure_details"] == []
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert set(backend_summary["metric_semantics"]) == {"net_return", "trade_count"}
+    assert set(backend_summary["metric_semantics"]) == {
+        "net_return",
+        "trade_count",
+        "funding_return",
+        "linear_funding_adjusted_return",
+    }
     assert backend_summary["metric_semantics"]["net_return"]["tolerance"] == 1e-9
     assert len(backend_summary["results"]) == 6
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4

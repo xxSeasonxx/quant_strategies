@@ -214,9 +214,14 @@ realistic-cost evidence, sufficient positive-window fraction, and stressed-cost
 and fill-lag loss floors. Eligibility flags still remain false.
 
 Validation backend summaries include `metric_semantics` for required policy
-metrics such as `net_return` and `trade_count`. The metric payloads stay flat
-for artifact readability, while policy reads them through a typed backend metric
-schema with declared unit, base, comparability, tolerance, and asymmetry.
+metrics such as `net_return` and `trade_count`, plus optional funding metrics
+such as `funding_return` and `linear_funding_adjusted_return`. The metric
+payloads stay flat for artifact readability, while policy reads them through a
+typed backend metric schema with declared unit, base, comparability, tolerance,
+and asymmetry. Crypto-perp funding in the VectorBT Pro backend is a linear
+additive diagnostic adjustment: it is reported as
+`linear_funding_adjusted_return`, while policy gates continue to use the
+backend price/cost `net_return`.
 
 ## Artifacts
 
