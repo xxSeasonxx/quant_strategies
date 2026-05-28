@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 21: P3 keep one input row artifact.
+Phase 22: P3 default runner artifacts to summary.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-jsonl-only-input-rows-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-jsonl-only-input-rows.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-default-summary-artifact-profile-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-default-summary-artifact-profile.md`
 
 ## Finding Triage
 
@@ -51,6 +51,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-jsonl-only-input-r
 | Strategy provenance docstring test under-enforces source specificity | Confirmed true, Phase 19 | Require DOI, SSRN, URL, or `internal_note:` in `Source / provenance:` blocks. |
 | Empty docs scaffolds | Partly true, Phase 20 | `docs/superpowers/{plans,specs}` are now populated; add `docs/reviews/README.md` instead of moving active root review inputs. |
 | Full-profile runner duplicates input rows as CSV and JSONL | Confirmed true, Phase 21 | Keep `strategy_input_rows.jsonl` only; leave default artifact profile as a separate remaining finding. |
+| Runner defaults to full artifact profile | Confirmed true, Phase 22 | Default omitted `artifact_profile` to `summary`; keep explicit `full` for retained/debug runs. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -604,3 +605,27 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-jsonl-only-input-r
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: frozen historical researched artifacts may still include old CSV row outputs, but current runner output no longer writes them.
 - 2026-05-28: Committed Phase 21.
+
+## Phase 22 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Update config default expectations.
+- [x] Flip runner default to summary.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 22 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_config.py::test_valid_run_config_is_accepted tests/test_runner_config.py::test_committed_run_configs_default_to_summary_profile -q` -> failed as expected before implementation; omitted `artifact_profile` still resolved to `full`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_config.py tests/test_readme_contract.py -q` -> 20 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_artifact_profiles.py tests/test_phase5_performance.py tests/test_runner_config.py tests/test_readme_contract.py -q` -> 70 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 504 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: validation `to_run_config()` also inherits summary, but validation uses `execute_strategy_run()` rather than runner artifact writing.
+- 2026-05-28: Committed Phase 22.

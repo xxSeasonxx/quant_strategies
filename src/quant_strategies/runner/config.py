@@ -95,7 +95,7 @@ class CostModelConfig(RunnerConfigModel):
 class OutputConfig(RunnerConfigModel):
     results_dir: Path
     mode: RunMode
-    artifact_profile: ArtifactProfile = "full"
+    artifact_profile: ArtifactProfile = "summary"
 
     @field_validator("results_dir")
     @classmethod

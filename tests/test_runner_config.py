@@ -30,9 +30,11 @@ def write_config(
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
+    artifact_profile: str | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
+    artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
     config_path = repo_root / "run.toml"
     config_path.write_text(
         f'''
@@ -62,6 +64,7 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "{results_dir}"
 mode = "{output_mode}"
+{artifact_profile_line}
 '''.lstrip()
     )
     return config_path
@@ -75,7 +78,7 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.strategy_id == "demo"
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
-    assert config.output.artifact_profile == "full"
+    assert config.output.artifact_profile == "summary"
     assert config.params == {"weight": 1.0}
 
 
@@ -86,6 +89,18 @@ def test_committed_run_configs_parse_without_live_data_access():
 
     for path in paths:
         load_config(path, repo_root=repo_root)
+
+
+def test_committed_run_configs_default_to_summary_profile():
+    repo_root = REPO_ROOT
+    paths = sorted((repo_root / "runs").glob("*.toml"))
+    assert paths, "expected at least one committed run config"
+
+    for path in paths:
+        text = path.read_text()
+        config = load_config(path, repo_root=repo_root)
+        if "artifact_profile" not in text:
+            assert config.output.artifact_profile == "summary"
 
 
 def test_committed_run_configs_use_decision_strategy_contract():
@@ -135,6 +150,13 @@ def test_summary_artifact_profile_is_accepted(tmp_path: Path):
     config = load_config(path, repo_root=tmp_path)
 
     assert config.output.artifact_profile == "summary"
+
+
+def test_full_artifact_profile_is_accepted_with_explicit_opt_in(tmp_path: Path):
+    write_strategy(tmp_path)
+    config = load_config(write_config(tmp_path, artifact_profile="full"), repo_root=tmp_path)
+
+    assert config.output.artifact_profile == "full"
 
 
 def test_unknown_artifact_profile_is_rejected(tmp_path: Path):

@@ -103,10 +103,10 @@ missing required fields, timestamp awareness, duplicate symbol/timestamp keys,
 and `quant_data_feedback` strings for upstream data fixes.
 
 Runner artifacts also declare `artifact_trust_tier`. Summary-profile runs are
-`search_only`: useful for fast ranking but not enough to replay every reported
-number from artifacts alone. Full-profile runs are `audit_replayable`: they
-include the row, decision, engine-request, and evidence artifacts needed
-for audit replay of runner smoke metrics.
+the default and are `search_only`: useful for fast ranking but not enough to
+replay every reported number from artifacts alone. Full-profile runs are
+`audit_replayable`: they include the row, decision, engine-request, and evidence
+artifacts needed for audit replay of runner smoke metrics.
 
 ## Validation Configs
 
@@ -227,8 +227,8 @@ After config loading succeeds, runner result dirs include `config.toml`;
 reach data loading include `data_manifest.json` and, for
 `artifact_profile = "full"`, `strategy_input_rows.jsonl` even if decision
 generation later fails. Runner failures still write `run_manifest.json`,
-`summary.json`, and `notes.md`. Successful `artifact_profile = "summary"` runs
-also write `artifact_profile_summary.json` and declare
+`summary.json`, and `notes.md`. Successful default `artifact_profile = "summary"`
+runs also write `artifact_profile_summary.json` and declare
 `artifact_trust_tier = "search_only"`. Completed
 `artifact_profile = "full"` runs that reach engine request construction also
 write `decision_records.jsonl`,

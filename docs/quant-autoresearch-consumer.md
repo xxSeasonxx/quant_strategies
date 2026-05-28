@@ -181,8 +181,9 @@ mode = "screen"
 artifact_profile = "summary"
 ```
 
-Use `artifact_profile = "summary"` for large search sweeps; it still writes
-`summary.json` plus `artifact_profile_summary.json`, and marks the result
+`artifact_profile = "summary"` is the default and should be used for large
+search sweeps; it still writes `summary.json` plus
+`artifact_profile_summary.json`, and marks the result
 `artifact_trust_tier = "search_only"`. Use
 `artifact_profile = "full"` for retained or debug runs when you need input
 rows, decision records, engine request JSON, and full evidence
