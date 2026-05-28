@@ -36,3 +36,8 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "smoke_score.sum_signed_trade_activity_*" in text
     assert "smoke_unverified" in text
     assert "causality_verified" in text
+    assert "decision_id" in text
+    assert "target_notional" in text
+    assert "target_contracts" in text
+    assert "target_vol" in text
+    assert "unsupported smoke" in text

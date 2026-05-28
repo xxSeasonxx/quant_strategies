@@ -79,6 +79,7 @@ class Bar(EngineModel):
 
 
 class Signal(EngineModel):
+    decision_id: str | None = None
     symbol: str = Field(min_length=1)
     decision_time: datetime
     side: Side
@@ -93,6 +94,16 @@ class Signal(EngineModel):
     @classmethod
     def validate_decision_time(cls, value: datetime) -> datetime:
         return _timezone_aware(value, "decision_time")
+
+    @field_validator("decision_id")
+    @classmethod
+    def validate_decision_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("decision_id must be non-empty")
+        return stripped
 
     @model_validator(mode="after")
     def validate_signal(self) -> Signal:
@@ -142,6 +153,7 @@ class EvaluationRequest(EngineModel):
 
 
 class Trade(EngineModel):
+    decision_id: str | None = None
     symbol: str
     side: Side
     decision_time: datetime

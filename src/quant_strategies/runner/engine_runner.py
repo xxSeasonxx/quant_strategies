@@ -27,6 +27,7 @@ EngineMode = Literal["screen", "validate"]
 
 _RESERVED_SIGNAL_FIELDS = {
     "symbol",
+    "decision_id",
     "decision_time",
     "as_of_time",
     "side",
@@ -167,6 +168,7 @@ def _bar_from_row(row: dict[str, Any]) -> Bar:
 def _signal_from_row(row: dict[str, Any]) -> Signal:
     try:
         payload = {
+            "decision_id": row.get("decision_id"),
             "symbol": row["symbol"],
             "decision_time": _as_datetime(row["decision_time"], "decision_time"),
             "side": row["side"],

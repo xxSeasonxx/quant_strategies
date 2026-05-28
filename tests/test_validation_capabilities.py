@@ -45,6 +45,10 @@ def test_vectorbtpro_matrix_marks_portfolio_target_weights_conditional():
     assert semantics["portfolio_target_weight"]["status"] == "conditional"
     assert "gross active target weight" in semantics["portfolio_target_weight"]["details"]
     assert semantics["crypto_perp_funding_linear_additive_adjustment"]["status"] == "conditional"
+    assert semantics["non_open_intent"]["status"] == "unsupported"
+    assert semantics["future_instrument"]["status"] == "unsupported"
+    assert semantics["option_instrument"]["status"] == "unsupported"
+    assert semantics["multi_leg_decision"]["status"] == "unsupported"
 
 
 def test_observed_unsupported_semantic_codes_are_flagged():
@@ -53,16 +57,19 @@ def test_observed_unsupported_semantic_codes_are_flagged():
         [
             scenario_result("threshold_exit_policy"),
             scenario_result("non_close_fill_price"),
+            scenario_result("future_instrument"),
         ],
     )
     semantics = {item["semantic"]: item for item in matrix["semantics"]}
 
     assert matrix["observed_unsupported_semantics"] == [
+        "future_instrument",
         "non_close_fill_price",
         "threshold_exit_policy",
     ]
     assert semantics["threshold_exit_policy"]["observed_unsupported"] is True
     assert semantics["non_close_fill_price"]["observed_unsupported"] is True
+    assert semantics["future_instrument"]["observed_unsupported"] is True
     assert semantics["portfolio_target_weight"]["observed_unsupported"] is False
 
 

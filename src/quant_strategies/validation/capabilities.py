@@ -12,6 +12,10 @@ _OBSERVED_UNSUPPORTED_SEMANTIC_MAP = {
     "non_target_weight_sizing": "non_target_weight_sizing",
     "flat_target": "flat_target",
     "leveraged_target_weight": "leveraged_target_weight",
+    "non_open_intent": "non_open_intent",
+    "future_instrument": "future_instrument",
+    "option_instrument": "option_instrument",
+    "multi_leg_decision": "multi_leg_decision",
     "overlapping_decision_window": "same_symbol_overlap",
     "portfolio_target_weight_exceeds_one": "portfolio_target_weight",
 }
@@ -128,6 +132,30 @@ def _vectorbtpro_records(observed_unsupported: set[str]) -> list[dict[str, Any]]
             "same_symbol_overlap",
             "unsupported",
             "Overlapping active decision windows for the same symbol are unsupported.",
+            observed_unsupported=observed_unsupported,
+        ),
+        _record(
+            "non_open_intent",
+            "unsupported",
+            "Close, adjust, and roll intents are unsupported.",
+            observed_unsupported=observed_unsupported,
+        ),
+        _record(
+            "future_instrument",
+            "unsupported",
+            "Futures are representable in StrategyDecision but unsupported by this backend.",
+            observed_unsupported=observed_unsupported,
+        ),
+        _record(
+            "option_instrument",
+            "unsupported",
+            "Options are representable in StrategyDecision but unsupported by this backend.",
+            observed_unsupported=observed_unsupported,
+        ),
+        _record(
+            "multi_leg_decision",
+            "unsupported",
+            "Multi-leg decisions are representable in StrategyDecision but unsupported by this backend.",
             observed_unsupported=observed_unsupported,
         ),
     ]

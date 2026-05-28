@@ -139,12 +139,16 @@ def _decision_summary(decisions: Sequence[StrategyDecision]) -> dict[str, Any]:
     symbols = Counter(item.instrument.symbol for item in decisions)
     directions = Counter(item.target.direction for item in decisions)
     instrument_kinds = Counter(item.instrument.kind for item in decisions)
+    intents = Counter(item.intent.action for item in decisions)
+    sizing_kinds = Counter(item.target.sizing_kind for item in decisions)
     decision_times = [item.decision_time for item in decisions]
     return {
         "count": len(decisions),
         "by_symbol": dict(sorted(symbols.items())),
         "by_direction": dict(sorted(directions.items())),
         "by_instrument_kind": dict(sorted(instrument_kinds.items())),
+        "by_intent": dict(sorted(intents.items())),
+        "by_sizing_kind": dict(sorted(sizing_kinds.items())),
         "min_decision_time": _iso_or_none(min(decision_times) if decision_times else None),
         "max_decision_time": _iso_or_none(max(decision_times) if decision_times else None),
     }

@@ -6,7 +6,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    DecisionIntent,
+    ExitPolicy,
+    FutureRef,
+    InstrumentLeg,
+    InstrumentRef,
+    MultiLegInstrumentRef,
+    OptionRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
 
 
@@ -92,11 +102,14 @@ def decision(
     direction: str = "long",
     sizing_kind: str = "target_weight",
     size: float = 1.0,
+    instrument=None,
+    intent=None,
     **exit_kwargs,
 ):
     return StrategyDecision(
         strategy_id="demo",
-        instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
+        instrument=instrument or InstrumentRef(kind="crypto_perp", symbol=symbol),
+        intent=intent or DecisionIntent(action="open"),
         decision_time=decision_time,
         as_of_time=AS_OF,
         target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
@@ -468,7 +481,7 @@ def test_vectorbtpro_backend_prioritizes_unfillable_exit_before_unsupported_fill
 
 def test_vectorbtpro_backend_reports_unsupported_non_target_weight_sizing():
     result = VectorBTProBackend().run(
-        decisions=[decision(sizing_kind="notional")],
+        decisions=[decision(sizing_kind="target_notional")],
         rows=rows(),
         config=None,
     )
@@ -511,6 +524,75 @@ def test_vectorbtpro_backend_reports_unsupported_flat_target():
 
     assert result.status == "unsupported"
     assert "flat_target" in result.unsupported_semantics
+
+
+def test_vectorbtpro_backend_reports_unsupported_non_open_intent():
+    result = VectorBTProBackend().run(
+        decisions=[decision(intent=DecisionIntent(action="roll", book_side="buy"))],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert "non_open_intent" in result.unsupported_semantics
+
+
+@pytest.mark.parametrize(
+    ("instrument", "semantic"),
+    [
+        (
+            FutureRef(
+                kind="future",
+                symbol="ESM26",
+                expiry=DECISION,
+                multiplier=1.0,
+                settlement="cash",
+            ),
+            "future_instrument",
+        ),
+        (
+            OptionRef(
+                kind="option",
+                symbol="SPY260116C00450000",
+                underlying_symbol="BTC",
+                option_type="call",
+                strike=100.0,
+                expiry=DECISION,
+                multiplier=1.0,
+                settlement="cash",
+            ),
+            "option_instrument",
+        ),
+        (
+            MultiLegInstrumentRef(
+                kind="multi_leg",
+                symbol="BTC_ETH_SPREAD",
+                legs=(
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+                        direction="long",
+                        ratio=1.0,
+                    ),
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="crypto_perp", symbol="ETH-PERP"),
+                        direction="short",
+                        ratio=1.0,
+                    ),
+                ),
+            ),
+            "multi_leg_decision",
+        ),
+    ],
+)
+def test_vectorbtpro_backend_reports_unsupported_instrument_shapes(instrument, semantic):
+    result = VectorBTProBackend().run(
+        decisions=[decision(instrument=instrument)],
+        rows=rows(),
+        config=None,
+    )
+
+    assert result.status == "unsupported"
+    assert semantic in result.unsupported_semantics
 
 
 def test_vectorbtpro_backend_runs_conservative_multi_asset_target_weights(monkeypatch):

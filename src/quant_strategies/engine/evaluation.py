@@ -79,6 +79,7 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
         net_return = gross_return + funding_return - cost_return
         trades.append(
             Trade(
+                decision_id=signal.decision_id,
                 symbol=signal.symbol,
                 side=signal.side,
                 decision_time=signal.decision_time,

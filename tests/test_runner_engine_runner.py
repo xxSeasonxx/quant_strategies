@@ -4,7 +4,17 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    DecisionIntent,
+    ExitPolicy,
+    FutureRef,
+    InstrumentLeg,
+    InstrumentRef,
+    MultiLegInstrumentRef,
+    OptionRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
@@ -44,11 +54,14 @@ def decision(
     direction: str = "long",
     sizing_kind: str = "target_weight",
     size: float = 0.5,
+    instrument=None,
+    intent=None,
 ) -> StrategyDecision:
     timestamp = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
     return StrategyDecision(
         strategy_id="demo",
-        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        instrument=instrument or InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        intent=intent or DecisionIntent(action="open"),
         decision_time=timestamp,
         as_of_time=timestamp,
         target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
@@ -86,10 +99,12 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_signals():
 
 
 def test_decisions_to_signal_rows_preserves_engine_fields():
+    source = decision()
     rows = decisions_to_signal_rows([decision()])
 
     assert rows == [
         {
+            "decision_id": source.decision_id,
             "symbol": "SPY",
             "decision_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
             "as_of_time": datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc),
@@ -146,7 +161,64 @@ def test_decisions_to_signal_rows_rejects_flat_targets():
 
 def test_decisions_to_signal_rows_rejects_non_target_weight():
     with pytest.raises(RequestBuildError, match="target_weight"):
-        decisions_to_signal_rows([decision(sizing_kind="notional")])
+        decisions_to_signal_rows([decision(sizing_kind="target_notional")])
+
+
+def test_decisions_to_signal_rows_rejects_non_open_intent():
+    with pytest.raises(RequestBuildError, match="open intent"):
+        decisions_to_signal_rows([decision(intent=DecisionIntent(action="close", book_side="sell"))])
+
+
+@pytest.mark.parametrize(
+    ("instrument", "message"),
+    [
+        (
+            FutureRef(
+                kind="future",
+                symbol="ESM26",
+                expiry=datetime(2026, 6, 19, tzinfo=timezone.utc),
+                multiplier=50.0,
+                settlement="cash",
+            ),
+            "future instrument",
+        ),
+        (
+            OptionRef(
+                kind="option",
+                symbol="SPY260116C00450000",
+                underlying_symbol="SPY",
+                option_type="call",
+                strike=450.0,
+                expiry=datetime(2026, 1, 16, tzinfo=timezone.utc),
+                multiplier=100.0,
+                settlement="physical",
+            ),
+            "option instrument",
+        ),
+        (
+            MultiLegInstrumentRef(
+                kind="multi_leg",
+                symbol="SPY_QQQ_PAIR",
+                legs=(
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+                        direction="long",
+                        ratio=1.0,
+                    ),
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"),
+                        direction="short",
+                        ratio=1.0,
+                    ),
+                ),
+            ),
+            "multi_leg instrument",
+        ),
+    ],
+)
+def test_decisions_to_signal_rows_rejects_unsupported_instrument_shapes(instrument, message):
+    with pytest.raises(RequestBuildError, match=message):
+        decisions_to_signal_rows([decision(instrument=instrument)])
 
 
 def test_build_request_preserves_funding_fields_for_engine_accounting():
@@ -286,6 +358,7 @@ def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
     raw_signal = signal(index=0, max_hold_bars=5)
     raw_signal.update(
         {
+            "decision_id": "decision-001",
             "max_hold_bars": 2,
             "take_profit_bps": 150.0,
             "stop_loss_bps": 75.0,
@@ -305,6 +378,7 @@ def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
     )
 
     engine_signal = request.spec.signals[0]
+    assert engine_signal.decision_id == "decision-001"
     assert engine_signal.max_hold_bars == 2
     assert engine_signal.take_profit_bps == 150.0
     assert engine_signal.stop_loss_bps == 75.0
@@ -315,6 +389,21 @@ def test_build_request_preserves_exit_controls_and_flat_signal_metadata():
         "source": "explicit",
     }
     assert '"funding_pressure_bps": 3.25' in request_json(request)
+
+
+def test_engine_trades_preserve_decision_id():
+    raw_signal = {**signal(index=0, max_hold_bars=1), "decision_id": "decision-join-001"}
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 100.0, 102.0),
+        signals=[raw_signal],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    run = evaluate_request(request, mode="screen")
+
+    assert run.screen_summary["trades"][0]["decision_id"] == "decision-join-001"
 
 
 def test_build_request_rejects_duplicate_flat_and_nested_metadata_keys():

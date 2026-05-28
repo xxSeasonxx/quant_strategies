@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 1: P0 semantic blockers.
+Phase 2: P1 decision ontology.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p0-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-ontology-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-ontology.md`
 
 ## Finding Triage
 
@@ -30,7 +30,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0.md`
 | Engine parallel ontology | Confirmed true, deferred | Larger refactor; not needed to fix P0 labels/causality. |
 | Validation orchestrator god-function | Confirmed true, deferred | Split after semantic blockers. |
 | Public API re-export mismatch | Partly true, deferred | `AGENTS.md` chooses `quant_strategies.runner.run_config`; treat as PRD/docs reconciliation, not immediate code change. |
-| Full G1 ontology support missing | Confirmed true, deferred | Define ontology/capability gates before executing all asset classes. |
+| Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
 
 ## Phase 1 Checklist
 
@@ -64,3 +64,28 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0.md`
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Follow-up review of the `data_readiness` fix found no blocking issues.
+
+## Phase 2 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Implement decision ontology expression.
+- [x] Gate unsupported runner smoke semantics.
+- [x] Propagate `decision_id` through engine artifacts.
+- [x] Update validation unsupported semantics.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 2 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py tests/test_runner_engine_runner.py tests/test_vectorbtpro_backend.py tests/test_validation_capabilities.py tests/test_engine_validate_and_evidence.py -q` -> 135 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_execution.py tests/test_validation_lookahead.py tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_runner_artifact_profiles.py tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py -q` -> 151 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py tests/test_runner_engine_runner.py tests/test_runner_api_cli.py tests/test_vectorbtpro_backend.py tests/test_validation_capabilities.py tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_readme_contract.py -q` -> 199 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risks: summary profile remains aggregate-only, richer exit ontology remains PRD debt, and engine parallel ontology cleanup remains deferred.

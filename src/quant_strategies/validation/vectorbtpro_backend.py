@@ -36,6 +36,16 @@ class VectorBTProBackend:
                 unsupported_semantics=(),
             )
 
+        structural_unsupported = _structural_unsupported_semantics(decisions)
+        if structural_unsupported:
+            return BackendRunResult(
+                backend=self.name,
+                status="unsupported",
+                metrics={},
+                warnings=(),
+                unsupported_semantics=structural_unsupported,
+            )
+
         try:
             close = _close_frame(pd, rows)
             windows = _validate_decision_windows(pd, close, decisions, config)
@@ -44,7 +54,7 @@ class VectorBTProBackend:
         except ValueError as exc:
             return _failed(self.name, str(exc))
 
-        unsupported = _unsupported_semantics(decisions, rows, config)
+        unsupported = _unsupported_semantics(decisions, config)
         if unsupported:
             return BackendRunResult(
                 backend=self.name,
@@ -140,9 +150,28 @@ class VectorBTProBackend:
         )
 
 
+def _structural_unsupported_semantics(decisions: list[StrategyDecision]) -> tuple[str, ...]:
+    unsupported: list[str] = []
+    for item in decisions:
+        if item.intent.action != "open":
+            unsupported.append("non_open_intent")
+        if item.instrument.kind == "future":
+            unsupported.append("future_instrument")
+        elif item.instrument.kind == "option":
+            unsupported.append("option_instrument")
+        elif item.instrument.kind == "multi_leg":
+            unsupported.append("multi_leg_decision")
+        if item.target.sizing_kind != "target_weight":
+            unsupported.append("non_target_weight_sizing")
+        elif item.target.size > 1.0:
+            unsupported.append("leveraged_target_weight")
+        if item.target.direction == "flat":
+            unsupported.append("flat_target")
+    return tuple(dict.fromkeys(unsupported))
+
+
 def _unsupported_semantics(
     decisions: list[StrategyDecision],
-    rows: Sequence[Mapping[str, Any]],
     config: Any,
 ) -> tuple[str, ...]:
     unsupported: list[str] = []
@@ -156,12 +185,6 @@ def _unsupported_semantics(
             or exit_policy.trailing_stop_bps is not None
         ):
             unsupported.append("threshold_exit_policy")
-        if item.target.sizing_kind != "target_weight":
-            unsupported.append("non_target_weight_sizing")
-        elif item.target.size > 1.0:
-            unsupported.append("leveraged_target_weight")
-        if item.target.direction == "flat":
-            unsupported.append("flat_target")
     return tuple(dict.fromkeys(unsupported))
 
 

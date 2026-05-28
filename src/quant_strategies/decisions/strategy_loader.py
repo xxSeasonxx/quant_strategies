@@ -2,16 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Protocol
 
 from quant_strategies.decisions.models import StrategyDecision
 
 
-DecisionStrategyCallable = Callable[
-    [Sequence[Mapping[str, object]], Mapping[str, object]],
-    list[StrategyDecision],
-]
+class StrategyGenerator(Protocol):
+    def __call__(
+        self,
+        rows: Sequence[Mapping[str, object]],
+        params: Mapping[str, object],
+    ) -> Sequence[StrategyDecision]:
+        ...
+
+
+DecisionStrategyCallable = StrategyGenerator
 
 
 class DecisionStrategyLoadError(Exception):

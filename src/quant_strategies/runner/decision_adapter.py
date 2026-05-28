@@ -2,13 +2,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import InstrumentRef, StrategyDecision
 from quant_strategies.runner.errors import RequestBuildError
 
 
 def decisions_to_signal_rows(decisions: list[StrategyDecision]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for decision in decisions:
+        if decision.intent.action != "open":
+            raise RequestBuildError(
+                "smoke engine decision adapter supports open intent only: "
+                f"{decision.instrument.symbol}"
+            )
+        if not isinstance(decision.instrument, InstrumentRef):
+            raise RequestBuildError(
+                f"smoke engine cannot represent {decision.instrument.kind} instrument: "
+                f"{decision.instrument.symbol}"
+            )
         if decision.target.direction == "flat":
             raise RequestBuildError(
                 f"smoke engine cannot represent flat target for {decision.instrument.symbol}"
@@ -21,6 +31,7 @@ def decisions_to_signal_rows(decisions: list[StrategyDecision]) -> list[dict[str
 
         metadata = decision.model_dump(mode="json")["metadata"]
         row: dict[str, Any] = {
+            "decision_id": decision.decision_id,
             "symbol": decision.instrument.symbol,
             "decision_time": decision.decision_time,
             "as_of_time": decision.as_of_time,

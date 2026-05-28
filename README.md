@@ -17,9 +17,19 @@ to them, but they must not load data, call engines, write artifacts, run loops,
 or mutate their inputs. Each strategy module documents thesis, observables,
 rule, assumptions, provenance, and falsifier in its module docstring.
 
-The canonical output is `StrategyDecision`. Decisions carry instrument,
-decision time, as-of time, target, `ExitPolicy(max_hold_bars=...)`, optional
-exit controls, metadata, and `ObservationRef` lineage for consumed rows.
+The canonical output is `StrategyDecision`. Decisions carry a stable
+`decision_id`, instrument, intent, optional buy/sell book side, decision time,
+as-of time, target, `ExitPolicy(max_hold_bars=...)`, optional exit controls,
+metadata, and `ObservationRef` lineage for consumed rows.
+
+The decision ontology can express equities/ETFs, FX pairs, crypto perps,
+futures, options, multi-leg instruments, and sizing modes
+`target_weight`, `target_notional`, `target_contracts`, and `target_vol`.
+Runner smoke execution is intentionally narrower: it supports only single-leg
+equity/ETF, FX, and crypto-perp `open` decisions with non-flat
+`target_weight` sizing. Richer futures, options, multi-leg, close/adjust/roll,
+and non-weight decisions are valid strategy outputs, but unsupported smoke or
+backend paths reject them explicitly instead of approximating their PnL.
 
 ## Boundaries
 
@@ -51,9 +61,9 @@ Data materialization, refresh, backfill, repair, and source joining belong in
 
 `quant-strategies run path/to/config.toml` executes one TOML experiment config.
 The runner loads rows, calls pure `generate_decisions(rows, params)`, validates
-the `StrategyDecision` contract, runs hidden-lookahead replay, checks decision
-row availability, converts decisions to engine signals, builds an engine
-request, and writes result artifacts.
+the `StrategyDecision` contract, runs hidden-lookahead replay keyed by
+`decision_id`, checks decision row availability, converts supported decisions to
+engine signals, builds an engine request, and writes result artifacts.
 
 With `[output] mode = "screen"`, the engine simulates entries and exits from
 the decisions, fill model, cost model, and exit policy. It reports

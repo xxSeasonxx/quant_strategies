@@ -6,11 +6,18 @@ import pytest
 from pydantic import ValidationError
 
 from quant_strategies.decisions import (
+    DecisionIntent,
     ExitPolicy,
+    FutureRef,
+    InstrumentLeg,
     InstrumentRef,
+    MultiLegInstrumentRef,
     ObservationRef,
+    OptionRef,
     PositionTarget,
+    StrategyGenerator,
     StrategyDecision,
+    validate_decision_output,
 )
 
 
@@ -32,6 +39,8 @@ def test_strategy_decision_accepts_explicit_position_target():
     assert decision.instrument.symbol == "BTC-PERP"
     assert decision.target.direction == "short"
     assert decision.exit_policy.max_hold_bars == 480
+    assert decision.intent.action == "open"
+    assert decision.decision_id.startswith("crypto_perp_funding_crowding_reversal:")
 
 
 def test_strategy_decision_accepts_multiple_typed_observations():
@@ -65,6 +74,156 @@ def test_strategy_decision_defaults_observations_to_empty_tuple():
     )
 
     assert decision.observations == ()
+
+
+def test_strategy_decision_accepts_explicit_intent_and_decision_id():
+    decision = StrategyDecision(
+        decision_id="manual-001",
+        strategy_id="demo",
+        intent=DecisionIntent(action="close", book_side="sell"),
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="flat", sizing_kind="target_weight", size=0.0),
+        exit_policy=ExitPolicy(max_hold_bars=1),
+    )
+
+    assert decision.decision_id == "manual-001"
+    assert decision.intent.action == "close"
+    assert decision.intent.book_side == "sell"
+
+
+def test_strategy_decision_generates_deterministic_decision_id():
+    kwargs = {
+        "strategy_id": "demo",
+        "instrument": InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        "decision_time": DECISION_TIME,
+        "as_of_time": AS_OF_TIME,
+        "target": PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        "exit_policy": ExitPolicy(max_hold_bars=5),
+        "metadata": {"reason": "same"},
+    }
+
+    first = StrategyDecision(**kwargs)
+    second = StrategyDecision(**kwargs)
+    changed = StrategyDecision(**{**kwargs, "metadata": {"reason": "different"}})
+
+    assert first.decision_id == second.decision_id
+    assert first.decision_id != changed.decision_id
+
+
+def test_validate_decision_output_rejects_duplicate_decision_id():
+    decision = StrategyDecision(
+        decision_id="duplicate",
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+
+    decisions, violations = validate_decision_output([decision, decision], strategy_id="demo")
+
+    assert decisions == [decision]
+    assert violations == ("duplicate_decision_id[1]: duplicate",)
+
+
+def test_strategy_generator_protocol_is_publicly_importable():
+    def generate_decisions(rows, params):
+        return []
+
+    strategy: StrategyGenerator = generate_decisions
+
+    assert strategy([], {}) == []
+
+
+def test_strategy_decision_accepts_future_option_and_multi_leg_instruments():
+    future = FutureRef(
+        kind="future",
+        symbol="ESM26",
+        expiry=DECISION_TIME,
+        multiplier=50.0,
+        settlement="cash",
+    )
+    option = OptionRef(
+        kind="option",
+        symbol="SPY260116C00450000",
+        underlying_symbol="SPY",
+        option_type="call",
+        strike=450.0,
+        expiry=DECISION_TIME,
+        multiplier=100.0,
+        settlement="physical",
+    )
+    multi_leg = MultiLegInstrumentRef(
+        kind="multi_leg",
+        symbol="SPY_QQQ_PAIR",
+        legs=(
+            InstrumentLeg(instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"), direction="long", ratio=1.0),
+            InstrumentLeg(instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"), direction="short", ratio=0.8),
+        ),
+    )
+
+    for instrument in (future, option, multi_leg):
+        decision = StrategyDecision(
+            strategy_id="demo",
+            instrument=instrument,
+            decision_time=DECISION_TIME,
+            as_of_time=AS_OF_TIME,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
+            exit_policy=ExitPolicy(max_hold_bars=5),
+        )
+        assert decision.instrument == instrument
+
+
+def test_instrument_models_reject_invalid_contract_fields():
+    with pytest.raises(ValidationError, match="expiry must be timezone-aware"):
+        FutureRef(
+            kind="future",
+            symbol="ESM26",
+            expiry=datetime(2026, 6, 19),
+            multiplier=50.0,
+            settlement="cash",
+        )
+    with pytest.raises(ValidationError):
+        OptionRef(
+            kind="option",
+            symbol="SPY_BAD",
+            underlying_symbol="SPY",
+            option_type="put",
+            strike=0.0,
+            expiry=DECISION_TIME,
+            multiplier=100.0,
+            settlement="cash",
+        )
+    with pytest.raises(ValidationError):
+        MultiLegInstrumentRef(
+            kind="multi_leg",
+            symbol="ONE_LEG",
+            legs=(
+                InstrumentLeg(
+                    instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+                    direction="long",
+                    ratio=1.0,
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "sizing_kind",
+    ["target_weight", "target_notional", "target_contracts", "target_vol"],
+)
+def test_position_target_accepts_declared_sizing_modes(sizing_kind: str):
+    target = PositionTarget(direction="long", sizing_kind=sizing_kind, size=1.0)
+
+    assert target.sizing_kind == sizing_kind
+
+
+def test_position_target_rejects_legacy_notional_sizing_name():
+    with pytest.raises(ValidationError):
+        PositionTarget(direction="long", sizing_kind="notional", size=1.0)
 
 
 def test_observation_ref_rejects_naive_timestamp():
@@ -102,6 +261,8 @@ def test_strategy_decision_schema_includes_observations():
     schema = StrategyDecision.model_json_schema()
 
     assert "observations" in schema["properties"]
+    assert "decision_id" in schema["properties"]
+    assert "intent" in schema["properties"]
     observation_schema = schema["$defs"]["ObservationRef"]
     assert set(observation_schema["properties"]) == {"symbol", "timestamp", "field", "source"}
 

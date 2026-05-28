@@ -78,7 +78,8 @@ def generate_decisions(rows, params):
     return decisions
 ```
 
-The return value must be a list of `StrategyDecision` objects.
+The return value must be a list of `StrategyDecision` objects. The public
+strategy callable type is `StrategyGenerator`.
 
 ```python
 from quant_strategies.decisions import (
@@ -121,6 +122,13 @@ def generate_decisions(rows, params):
         )
     ]
 ```
+
+`StrategyDecision` can express futures, options, multi-leg instruments, intent,
+book side, and `target_weight`, `target_notional`, `target_contracts`, and
+`target_vol` sizing. The runner smoke engine currently executes only single-leg
+equity/ETF, FX, or crypto-perp `open` decisions with non-flat `target_weight`
+sizing. Other valid ontology shapes are useful for downstream review, but smoke
+runs reject them explicitly as unsupported execution semantics.
 
 Strategy code must stay pure:
 

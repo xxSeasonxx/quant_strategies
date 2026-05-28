@@ -91,10 +91,7 @@ def _row_visible_for_decision(row: Mapping[str, Any], decision: StrategyDecision
 def _decision_key(decision: StrategyDecision) -> str:
     return json.dumps(
         {
-            "strategy_id": decision.strategy_id,
-            "instrument": decision.instrument.model_dump(mode="json"),
-            "decision_time": decision.decision_time.isoformat(),
-            "as_of_time": decision.as_of_time.isoformat(),
+            "decision_id": decision.decision_id,
         },
         sort_keys=True,
         separators=(",", ":"),
