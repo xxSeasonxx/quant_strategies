@@ -113,7 +113,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         invalid_available_at = 0
         metadata_present = {field_name: 0 for field_name in _METADATA_COVERAGE_FIELDS}
         metadata_seen: set[str] = set()
-        seen_keys: set[tuple[str, datetime]] = set()
+        seen_keys: set[tuple[str, Any]] = set()
         duplicate_key_count = 0
 
         for raw_row in rows:
@@ -224,8 +224,12 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                     if normalized.get(field_name) is not None:
                         metadata_present[field_name] += 1
 
-            if symbol is not None and parsed_timestamp is not None:
-                key = (symbol, parsed_timestamp)
+            if symbol is not None and "timestamp" in normalized:
+                key_timestamp = _duplicate_timestamp_key(
+                    parsed_timestamp=parsed_timestamp,
+                    raw_timestamp=raw_timestamp,
+                )
+                key = (symbol, key_timestamp)
                 if key in seen_keys:
                     duplicate_key_count += 1
                     issues.append(
@@ -233,7 +237,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                             reason="row_duplicate_symbol_timestamp",
                             field=None,
                             symbol=symbol,
-                            timestamp=parsed_timestamp,
+                            timestamp=key_timestamp,
                             severity="error",
                             message="row duplicates an existing symbol/timestamp key",
                         )
@@ -363,7 +367,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             "duplicate_key_count": self.duplicate_key_count,
             "funding_event_missing_fields": funding_event_missing_fields,
             "freshness_status": "not_evaluated",
-            "quant_data_feedback": self._quant_data_feedback(issue_counts),
+            "quant_data_feedback": self._quant_data_feedback(),
             "issues": [issue.to_jsonable() for issue in self.issues],
             "issue_reasons": dict(sorted(issue_counts.items())),
         }
@@ -397,19 +401,21 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             return "invalid_or_naive"
         return "mixed"
 
-    def _quant_data_feedback(self, issue_counts: Counter[str]) -> list[str]:
+    def _quant_data_feedback(self) -> list[str]:
         if len(self) == 0:
             return ["row_contract_not_evaluated:no_rows"]
+        error_issues = [issue for issue in self.issues if issue.severity == "error"]
+        error_issue_counts = Counter(issue.reason for issue in error_issues)
         feedback: list[str] = []
         field_counts: Counter[tuple[str, str | None]] = Counter(
-            (issue.reason, issue.field) for issue in self.issues
+            (issue.reason, issue.field) for issue in error_issues
         )
         for (reason, field_name), count in sorted(field_counts.items()):
             if field_name is None:
                 feedback.append(f"{reason}:{count}")
             else:
                 feedback.append(f"{reason}:{field_name}:{count}")
-        for reason, count in sorted(issue_counts.items()):
+        for reason, count in sorted(error_issue_counts.items()):
             if not any(item.startswith(f"{reason}:") for item in feedback):
                 feedback.append(f"{reason}:{count}")
         return feedback
@@ -646,6 +652,28 @@ def _finite_float(value: Any) -> float | None:
 
 def _is_aware_datetime(value: Any) -> bool:
     return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _duplicate_timestamp_key(
+    *,
+    parsed_timestamp: datetime | None,
+    raw_timestamp: Any,
+) -> datetime | tuple[str, Any]:
+    if parsed_timestamp is not None:
+        return parsed_timestamp
+    return ("invalid_timestamp", _hashable_json_safe_value(raw_timestamp))
+
+
+def _hashable_json_safe_value(value: Any) -> Any:
+    safe_value = json_safe_value(value)
+    if isinstance(safe_value, Mapping):
+        return tuple(
+            (str(key), _hashable_json_safe_value(item))
+            for key, item in sorted(safe_value.items())
+        )
+    if isinstance(safe_value, list | tuple):
+        return tuple(_hashable_json_safe_value(item) for item in safe_value)
+    return safe_value
 
 
 def _availability_status(*, total: int, valid: int, invalid: int) -> str:

@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 
 
@@ -97,6 +99,23 @@ def test_duplicate_symbol_timestamp_emits_duplicate_issue_and_index_keeps_first_
     assert normalized.by_symbol_timestamp[("SPY", TIMESTAMP)]["close"] == 100.5
 
 
+def test_duplicate_invalid_timestamp_strings_still_emit_duplicate_issue():
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [
+            valid_row(timestamp="not-a-datetime"),
+            valid_row(timestamp="not-a-datetime"),
+        ],
+        mode="validation",
+    )
+
+    assert issue_reasons(normalized).count("row_invalid_timestamp") == 2
+    assert "row_duplicate_symbol_timestamp" in issue_reasons(normalized)
+    assert normalized.duplicate_key_count == 1
+    assert normalized.duplicate_keys == ()
+    assert normalized.by_symbol_timestamp == {}
+
+
 def test_search_missing_available_at_warns_without_failing_validation_mode_errors():
     search_row = valid_row()
     del search_row["available_at"]
@@ -106,6 +125,7 @@ def test_search_missing_available_at_warns_without_failing_validation_mode_error
     assert [(issue.reason, issue.severity) for issue in search_rows.issues] == [
         ("row_missing_available_at", "warning")
     ]
+    assert search_rows.row_contract_summary()["quant_data_feedback"] == []
     assert search_rows.evidence_quality(causality_verified=True)["causality_verified"] is False
 
     validation_row = valid_row()
@@ -120,6 +140,35 @@ def test_search_missing_available_at_warns_without_failing_validation_mode_error
     assert validation_rows.row_contract_summary()["missing_required_fields"] == {
         "available_at": 1
     }
+
+
+@pytest.mark.parametrize("mode", [RowContractMode.VALIDATION, RowContractMode.RETAINED])
+def test_missing_and_invalid_available_at_error_in_validation_and_retained_modes(
+    mode: RowContractMode,
+):
+    missing_row = valid_row()
+    del missing_row["available_at"]
+    missing_rows = NormalizedRows.from_rows(config(), [missing_row], mode=mode)
+
+    assert [(issue.reason, issue.severity) for issue in missing_rows.issues] == [
+        ("row_missing_available_at", "error")
+    ]
+    assert missing_rows.row_contract_summary()["status"] == "failed"
+    assert missing_rows.row_contract_summary()["missing_required_fields"] == {
+        "available_at": 1
+    }
+
+    invalid_rows = NormalizedRows.from_rows(
+        config(),
+        [valid_row(available_at="not-a-datetime")],
+        mode=mode,
+    )
+
+    assert [(issue.reason, issue.severity) for issue in invalid_rows.issues] == [
+        ("row_invalid_available_at", "error")
+    ]
+    assert invalid_rows.data_availability_status == "invalid"
+    assert invalid_rows.row_contract_summary()["status"] == "failed"
 
 
 def test_invalid_available_at_is_error_in_search_mode():
@@ -196,9 +245,13 @@ def test_projection_rows_are_mapping_compatible_and_hash_ordering_is_stable():
 
     first = NormalizedRows.from_rows(config(), [row_one], mode="validation")
     second = NormalizedRows.from_rows(config(), [row_two], mode="validation")
+    row_one["close"] = Decimal("999.0")
     projected = first.projection_rows()
 
     assert isinstance(projected[0], Mapping)
+    with pytest.raises(TypeError):
+        projected[0]["close"] = 1.0
+    assert first.projection_rows() is projected
     assert list(projected[0]) == sorted(projected[0])
     assert projected[0]["close"] == 100.5
     assert first.normalized_rows_sha256 == second.normalized_rows_sha256
