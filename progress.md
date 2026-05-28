@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 33: P2 default engine cache.
+Phase 34: P2 runner orchestration split.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-default-engine-cache-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-default-engine-cache.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-runner-orchestration-split-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-runner-orchestration-split.md`
 
 ## Finding Triage
 
@@ -29,6 +29,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-default-engine-cac
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
 | Engine parallel ontology | Confirmed true, Phase 6 | Collapse runner/engine signal path into direct `StrategyDecision` consumption. |
 | Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
+| Runner orchestrator remains concentrated | Confirmed true, Phase 34 | Split `run_config()` into focused private stage helpers without changing public behavior. |
 | Public API re-export mismatch | Confirmed true, Phase 28 | Preserve `quant_strategies.runner.run_config` as the public surface and reconcile stale PRD top-level re-export wording. |
 | Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
@@ -935,3 +936,25 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-default-engine-cac
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues.
 - 2026-05-28: Committed Phase 33.
+
+## Phase 34 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Extract execution artifact helpers.
+- [x] Extract success-stage helpers.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 34 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_decision_generation_failure_writes_run_manifest tests/test_runner_api_cli.py::test_request_build_failure_preserves_prior_stage_artifacts tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts tests/test_runner_api_cli.py::test_runner_catches_hidden_lookahead_before_request_build tests/test_runner_api_cli.py::test_engine_failure_preserves_engine_request_and_writes_stage_summary tests/test_runner_api_cli.py::test_run_config_emits_structured_stage_events -q` -> 6 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_execution.py tests/test_runner_artifact_profiles.py tests/test_runner_data_loader.py -q` -> 70 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 520 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues.
+- 2026-05-28: Committed Phase 34.
