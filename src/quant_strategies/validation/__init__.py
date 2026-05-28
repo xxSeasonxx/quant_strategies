@@ -386,12 +386,13 @@ def _run_scenario_backend(
                 f"backend_exception: {exc}",
             )
         else:
-            try:
-                backend_result = BackendRunResult.model_validate(raw_backend_result)
-            except Exception as exc:
+            if isinstance(raw_backend_result, BackendRunResult):
+                backend_result = raw_backend_result
+            else:
                 backend_result = _failed_backend_result(
                     context.backend_name,
-                    f"invalid_backend_result: {exc}",
+                    "invalid_backend_result: expected BackendRunResult, "
+                    f"got {type(raw_backend_result).__name__}",
                 )
     return ScenarioBackendRunResult(
         window_id=window.id,

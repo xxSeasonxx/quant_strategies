@@ -1099,6 +1099,34 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
     assert summary["results"][0]["result"]["warnings"] == ["backend_exception: backend crashed"]
 
 
+def test_run_validation_trusts_backend_run_result_without_pydantic_revalidation(
+    tmp_path: Path, monkeypatch
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+
+    def reject_revalidation(*args: object, **kwargs: object) -> None:
+        raise AssertionError("BackendRunResult.model_validate should not be called")
+
+    monkeypatch.setattr(BackendRunResult, "model_validate", reject_revalidation)
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.01, "trade_count": 10},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.result_dir is not None
+    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert summary["results"][0]["result"]["status"] == "completed"
+    assert summary["results"][0]["result"]["warnings"] == []
+
+
 def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     tmp_path: Path, monkeypatch
 ):
@@ -1133,7 +1161,7 @@ def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypat
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     assert summary["results"][0]["result"]["status"] == "failed"
     assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]
-    assert "status" in summary["results"][0]["result"]["warnings"][0]
+    assert "expected BackendRunResult, got dict" in summary["results"][0]["result"]["warnings"][0]
 
 
 def test_run_validation_propagates_backend_system_exit(tmp_path: Path, monkeypatch):

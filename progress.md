@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 17: P3 retire unused validation error classes.
+Phase 18: P4 drop backend result revalidation.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-retire-unused-validation-errors-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-unused-validation-errors.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-drop-backend-result-revalidation-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-drop-backend-result-revalidation.md`
 
 ## Finding Triage
 
@@ -47,6 +47,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-unused-vali
 | Search pressure is copied but no deflation is evaluated | Confirmed true, Phase 15 | Add explicit `deflation_not_evaluated` reason to search-pressure-backed `mechanical_review_candidate` outputs. |
 | `runner/strategy_loader.py` is a pass-through wrapper | Confirmed true, Phase 16 | Retire the wrapper and inline runner-specific exception translation at the execution boundary. |
 | `ValidationBackendError` and `ValidationDataError` are unused | Confirmed true, Phase 17 | Retire the unused subclasses and keep only raised validation error classes. |
+| Internal Pydantic revalidation across boundaries | Partly true, Phase 18 | Drop `BackendRunResult.model_validate()` for typed backend returns; keep runner config-to-engine `FillModel`/`CostModel` construction as required adaptation. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -508,3 +509,27 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-unused-vali
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: direct external imports of retired `ValidationBackendError` or `ValidationDataError` now fail by design.
 - 2026-05-28: Committed Phase 17.
+
+## Phase 18 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add no-revalidation regression.
+- [x] Replace Pydantic revalidation with Protocol-type handling.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 18 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_trusts_backend_run_result_without_pydantic_revalidation -q` -> failed as expected before implementation; conforming backend results were still revalidated into `invalid_backend_result` when `BackendRunResult.model_validate` was monkeypatched to raise.
+- 2026-05-28: `rg -n "BackendRunResult\\.model_validate" src` -> no matches.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_trusts_backend_run_result_without_pydantic_revalidation tests/test_validation_runner.py::test_run_validation_writes_failure_artifacts_for_malformed_backend_result tests/test_validation_runner.py::test_run_validation_rejects_invalid_backend_status -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_validation_capabilities.py -q` -> 76 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 501 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: nonconforming injected backends that return dicts are no longer parsed for field-specific diagnostics; they now fail the Protocol type guard.
+- 2026-05-28: Committed Phase 18.
