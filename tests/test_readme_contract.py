@@ -89,6 +89,7 @@ def test_docs_describe_runner_normalized_row_contract():
     assert re.search(r"file hash matches\s+`normalized_rows_sha256`", consumer)
     assert "Missing `available_at` in search mode is warning evidence" in readme
     assert "Missing `available_at` in search mode is warning evidence" in consumer
+    assert re.search(r"Invalid `available_at` is a\s+row contract failure", readme)
     assert re.search(r"Invalid `available_at` is a\s+row contract failure", consumer)
     assert "`row_contract.issues`" in readme
     assert "`row_contract.issues`" in consumer

@@ -91,10 +91,10 @@ With `[output] mode = "validate"`, the engine runs the same screen and applies
 smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
 `positive_net`. Passing gates produce `assessment_status = "smoke_passed"` only
 when hidden-lookahead replay passes and all rows carry `available_at`. Passing
-gates with missing, partial, or invalid `available_at` produce
-`assessment_status = "smoke_unverified"`. These gates are mechanical checks
-only; they do not test statistical significance, regime robustness, capacity,
-or execution quality.
+gates with missing or partial `available_at` produce `assessment_status =
+"smoke_unverified"`. Invalid `available_at` is a row contract failure. These
+gates are mechanical checks only; they do not test statistical significance,
+regime robustness, capacity, or execution quality.
 
 A `mode = "validate"` run with no decisions also completes normally, but fails
 the smoke gates as `assessment_status = "smoke_failed"` because `min_trades`
@@ -117,9 +117,9 @@ and smoke metrics instead of any single completion flag.
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
 `causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay
-failures stop the run as `runner_failed`. Runner smoke records missing,
-partial, or invalid availability as uncertainty with `smoke_unverified` and
-does not set `causality_verified`.
+failures stop the run as `runner_failed`. Runner smoke records missing or
+partial availability as uncertainty with `smoke_unverified` and does not set
+`causality_verified`.
 Missing `available_at` in search mode is warning evidence; invalid
 `available_at` is a row contract failure.
 

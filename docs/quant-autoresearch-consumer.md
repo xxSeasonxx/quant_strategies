@@ -275,12 +275,12 @@ Use `assessment_status`, `causality_verified`, `data_availability_status`,
 never rank from `run_completed` alone.
 Treat `smoke_passed` as stronger mechanical evidence than `smoke_unverified`;
 `smoke_unverified` means the smoke gates passed but row availability coverage
-was missing, partial, or invalid, so the runner could not claim causality
-verification. Missing `available_at` in search mode is warning evidence:
-non-fatal, but `causality_verified` remains false and the assessment stays
-`smoke_unverified` when smoke gates otherwise pass. Invalid `available_at` is a
-row contract failure. Treat `search_only` artifacts as ranking evidence only;
-rerun retained candidates with `artifact_profile = "full"` before audit handoff.
+was missing or partial, so the runner could not claim causality verification.
+Missing `available_at` in search mode is warning evidence: non-fatal, but
+`causality_verified` remains false and the assessment stays `smoke_unverified`
+when smoke gates otherwise pass. Invalid `available_at` is a row contract failure.
+Treat `search_only` artifacts as ranking evidence only; rerun retained candidates
+with `artifact_profile = "full"` before audit handoff.
 
 Route from stable row issue reasons and counts, not free-form issue messages.
 Runner `summary.json` and `data_manifest.json` expose reasons such as
