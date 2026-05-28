@@ -383,15 +383,6 @@ def _summary_payload(
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
-    engine_payload.setdefault(
-        "smoke_score",
-        {
-            "sum_signed_trade_activity_gross": None,
-            "sum_signed_trade_activity_funding": None,
-            "sum_signed_trade_activity_cost": None,
-            "sum_signed_trade_activity_net": None,
-        },
-    )
     return {
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,

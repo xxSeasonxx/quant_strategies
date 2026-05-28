@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 29: P3 tracked git identity.
+Phase 30: P3 failure smoke score artifacts.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-tracked-git-identity-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-tracked-git-identity.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-failure-smoke-score-artifact-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-failure-smoke-score-artifact.md`
 
 ## Finding Triage
 
@@ -35,6 +35,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-tracked-git-identi
 | Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
 | Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
 | Repository identity hashes untracked detritus | Confirmed true, Phase 29 | Use tracked-only git status for repository identity while preserving tracked diff hashes and input snapshots. |
+| Failure summaries include null smoke score objects | Confirmed true, Phase 30 | Omit `engine.smoke_score` when smoke was not computed; keep real zero-valued scores for completed no-trade runs. |
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
@@ -838,3 +839,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-tracked-git-identi
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no Critical/Important issues.
 - 2026-05-28: Committed Phase 29.
+
+## Phase 30 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add failure summary artifact regressions.
+- [x] Implement uncomputed smoke score omission.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 30 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_data_failure_summary -q` -> failed as expected before implementation; data-load failure summaries included a null-valued `engine.smoke_score`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_data_failure_summary tests/test_runner_api_cli.py::test_decision_generation_failure_writes_run_manifest tests/test_runner_api_cli.py::test_run_config_treats_empty_decisions_as_zero_trade_smoke_result -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_artifact_profiles.py tests/test_readme_contract.py -q` -> 53 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 516 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical/Important issues.
+- 2026-05-28: Committed Phase 30.

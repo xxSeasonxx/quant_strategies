@@ -588,6 +588,7 @@ def test_run_config_writes_data_failure_summary(
     assert "strict data window failed" in (result.result_dir / "notes.md").read_text()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "data_load"
+    assert "smoke_score" not in summary["engine"]
     assert summary["data_availability_status"] == "missing"
     assert summary["availability_coverage"] == {
         "field": "available_at",
@@ -1010,6 +1011,7 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     assert (result.result_dir / "run_manifest.json").exists()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
+    assert "smoke_score" not in summary["engine"]
     assert_assessment(result, summary, assessment_status="runner_failed")
 
 
