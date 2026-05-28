@@ -89,7 +89,7 @@ def run_config(
     _write_strategy_input_rows_if_full(
         result_dir,
         config,
-        execution.loaded_rows,
+        execution.normalized_rows,
     )
     observation_failure = _audit_observation_dependencies(
         config,
@@ -182,7 +182,7 @@ def _execution_failure_result(
         _write_strategy_input_rows_if_full(
             result_dir,
             config,
-            exc.loaded_rows,
+            exc.normalized_rows,
         )
         _write_execution_data_manifest(
             result_dir,
@@ -205,11 +205,18 @@ def _execution_failure_result(
 def _write_strategy_input_rows_if_full(
     result_dir: Path,
     config: config_module.RunConfig,
-    rows: Sequence[Mapping[str, Any]],
+    normalized_rows: NormalizedRows,
 ) -> None:
     if config.output.artifact_profile != "full":
         return
-    artifacts.write_strategy_input_rows(result_dir, rows)
+    written_hash = artifacts.write_strategy_input_rows(
+        result_dir,
+        normalized_rows.projection_rows(),
+    )
+    if written_hash != normalized_rows.normalized_rows_sha256:
+        raise RunnerError(
+            "strategy_input_rows.jsonl hash does not match normalized_rows_sha256"
+        )
 
 
 def _write_execution_data_manifest(
@@ -466,7 +473,7 @@ def _audit_observation_dependencies(
 
 
 def _assert_declared_observations_causal(
-    rows: list[dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
 ) -> None:
     row_index, timestamp_violations = observation_row_index(rows)

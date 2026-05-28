@@ -14,7 +14,7 @@ import quant_strategies.runner.artifacts as artifacts
 import quant_strategies.runner.execution as execution
 from quant_strategies.runner import RunResult, cli, config as config_module, engine_runner, run_config
 from quant_strategies.runner.data_loader import LoadedData
-from quant_strategies.runner.errors import DataLoadError, EvaluationRunError
+from quant_strategies.runner.errors import DataLoadError, EvaluationRunError, RunnerError
 
 
 SUMMARY_KEYS = {
@@ -1139,6 +1139,29 @@ def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
     assert jsonl_rows[0]["timestamp"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["available_at"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["open"] == 100.0
+
+
+def test_full_profile_strategy_input_rows_hash_mismatch_fails_artifact_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    original_write = artifacts.write_strategy_input_rows
+
+    def write_wrong_hash(result_dir: Path, row_payload) -> str:
+        original_write(result_dir, row_payload)
+        return "0" * 64
+
+    monkeypatch.setattr(artifacts, "write_strategy_input_rows", write_wrong_hash)
+
+    with pytest.raises(RunnerError, match="strategy_input_rows.jsonl hash"):
+        run_config(config_path, repo_root=tmp_path)
 
 
 def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -116,10 +116,41 @@ def _compact_row_contract(row_contract: Mapping[str, Any]) -> dict[str, Any]:
         payload["issues_truncated"] = issue_count > len(issues)
         return payload
 
-    payload["issues"] = issues[:ROW_CONTRACT_ISSUE_SAMPLE_SIZE]
+    payload["issues"] = _stratified_issue_sample(issues, ROW_CONTRACT_ISSUE_SAMPLE_SIZE)
     payload["issue_sample_count"] = ROW_CONTRACT_ISSUE_SAMPLE_SIZE
     payload["issues_truncated"] = True
     return payload
+
+
+def _stratified_issue_sample(issues: Sequence[Any], sample_size: int) -> list[Any]:
+    selected: set[int] = set()
+    seen_keys: set[tuple[object, object, object]] = set()
+    for index, issue in enumerate(issues):
+        key = _issue_sample_key(issue)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        selected.add(index)
+        if len(selected) == sample_size:
+            return [issues[item] for item in sorted(selected)]
+
+    for index in range(len(issues)):
+        if index in selected:
+            continue
+        selected.add(index)
+        if len(selected) == sample_size:
+            break
+    return [issues[item] for item in sorted(selected)]
+
+
+def _issue_sample_key(issue: object) -> tuple[object, object, object]:
+    if isinstance(issue, Mapping):
+        return (
+            issue.get("severity"),
+            issue.get("reason"),
+            issue.get("field"),
+        )
+    return (None, None, None)
 
 
 def _causality_evidence(

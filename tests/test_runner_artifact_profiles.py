@@ -21,6 +21,84 @@ def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
     assert not hasattr(artifacts, "RowSummary")
 
 
+def test_row_contract_issue_compaction_samples_each_failure_class():
+    issues = [
+        {
+            "severity": "warning",
+            "reason": "row_missing_available_at",
+            "field": "available_at",
+            "symbol": "SPY",
+            "timestamp": f"2024-01-{index + 1:02d}T00:00:00+00:00",
+            "message": "row is missing available_at",
+        }
+        for index in range(27)
+    ]
+    issues.extend(
+        [
+            {
+                "severity": "error",
+                "reason": "row_missing_required_field",
+                "field": "high",
+                "symbol": "SPY",
+                "timestamp": "2024-02-01T00:00:00+00:00",
+                "message": "row is missing required field 'high'",
+            },
+            {
+                "severity": "error",
+                "reason": "row_invalid_numeric_field",
+                "field": "close",
+                "symbol": "SPY",
+                "timestamp": "2024-02-02T00:00:00+00:00",
+                "message": "close must be a finite numeric value",
+            },
+            {
+                "severity": "error",
+                "reason": "row_invalid_funding_fields",
+                "field": "funding_rate",
+                "symbol": "BTC-PERP",
+                "timestamp": "2024-02-03T00:00:00+00:00",
+                "message": "funding_rate must be finite",
+            },
+        ]
+    )
+    evidence = {
+        "data_availability_status": "invalid",
+        "row_contract": {
+            "issues": issues,
+            "issue_reasons": {
+                "row_invalid_funding_fields": 1,
+                "row_invalid_numeric_field": 1,
+                "row_missing_available_at": 27,
+                "row_missing_required_field": 1,
+            },
+            "quant_data_feedback": [
+                "row_invalid_funding_fields:funding_rate:1",
+                "row_invalid_numeric_field:close:1",
+                "row_missing_required_field:high:1",
+            ],
+        },
+    }
+
+    compacted = artifacts.compact_evidence_quality(evidence)
+    row_contract = compacted["row_contract"]
+    sampled_keys = {
+        (issue["severity"], issue["reason"], issue["field"])
+        for issue in row_contract["issues"]
+    }
+
+    assert row_contract["issue_count"] == 30
+    assert row_contract["issue_sample_count"] == 25
+    assert row_contract["issues_truncated"] is True
+    assert row_contract["issue_reasons"] == evidence["row_contract"]["issue_reasons"]
+    assert row_contract["quant_data_feedback"] == evidence["row_contract"]["quant_data_feedback"]
+    assert sampled_keys >= {
+        ("warning", "row_missing_available_at", "available_at"),
+        ("error", "row_missing_required_field", "high"),
+        ("error", "row_invalid_numeric_field", "close"),
+        ("error", "row_invalid_funding_fields", "funding_rate"),
+    }
+
+
 def row(symbol: str, timestamp: datetime, close: float) -> dict[str, object]:
     return {
         "symbol": symbol,
