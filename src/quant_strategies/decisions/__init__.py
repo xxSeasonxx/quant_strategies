@@ -25,6 +25,7 @@ from quant_strategies.decisions.models import (
 )
 from quant_strategies.decisions.output_validation import validate_decision_output
 from quant_strategies.decisions.params import validate_strategy_params
+from quant_strategies.decisions.purity import strategy_purity_violations
 from quant_strategies.decisions.strategy_loader import (
     DecisionStrategyCallable,
     DecisionStrategyLoadError,
@@ -58,6 +59,7 @@ __all__ = [
     "StrategyGenerator",
     "StrategyDecision",
     "load_decision_strategy",
+    "strategy_purity_violations",
     "validate_strategy_params",
     "validate_decision_output",
 ]

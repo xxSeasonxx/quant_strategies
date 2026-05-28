@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 22: P3 default runner artifacts to summary.
+Phase 23: P2 enforce candidate strategy purity at load.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-default-summary-artifact-profile-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-default-summary-artifact-profile.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-candidate-strategy-purity-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-candidate-strategy-purity.md`
 
 ## Finding Triage
 
@@ -52,6 +52,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-default-summary-ar
 | Empty docs scaffolds | Partly true, Phase 20 | `docs/superpowers/{plans,specs}` are now populated; add `docs/reviews/README.md` instead of moving active root review inputs. |
 | Full-profile runner duplicates input rows as CSV and JSONL | Confirmed true, Phase 21 | Keep `strategy_input_rows.jsonl` only; leave default artifact profile as a separate remaining finding. |
 | Runner defaults to full artifact profile | Confirmed true, Phase 22 | Default omitted `artifact_profile` to `summary`; keep explicit `full` for retained/debug runs. |
+| Strategy purity is not enforced for arbitrary candidate workspaces | Confirmed true, Phase 23 | Add default-on AST purity check in the canonical strategy loader and reuse it in committed-strategy tests. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -629,3 +630,37 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-default-summary-ar
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: validation `to_run_config()` also inherits summary, but validation uses `execute_strategy_run()` rather than runner artifact writing.
 - 2026-05-28: Committed Phase 22.
+
+## Phase 23 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add loader purity regressions.
+- [x] Implement shared purity checker.
+- [x] Reuse checker in committed strategy tests.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 23 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py::test_load_decision_strategy_rejects_side_effect_calls_before_import tests/test_decision_strategy_loader.py::test_load_decision_strategy_rejects_banned_imports_before_import -q` -> failed as expected before implementation; impure strategies imported without `DecisionStrategyLoadError`.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py tests/test_strategy_docstrings.py -q` -> 9 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_execution.py tests/test_validation_runner.py tests/test_decision_strategy_loader.py tests/test_strategy_docstrings.py tests/test_readme_contract.py -q` -> 49 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> failed; `test_strategy_path_directory_failure_writes_summary` exposed a directory path escaping loader error translation after the new pre-import read.
+- 2026-05-28: Fixed the directory-path regression with an explicit loader file check and added a focused loader regression.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py tests/test_runner_api_cli.py::test_strategy_path_directory_failure_writes_summary -q` -> 7 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_execution.py tests/test_validation_runner.py tests/test_decision_strategy_loader.py tests/test_strategy_docstrings.py tests/test_readme_contract.py -q` -> 50 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 507 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no loader/checker correctness issues. Valid bookkeeping finding: Phase 23 progress was stale; fixed before commit.
+- 2026-05-28: Added the explicit `quant_data` banned-import regression to align tests with the Phase 23 plan.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py tests/test_strategy_docstrings.py -q` -> 11 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 508 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Committed Phase 23.

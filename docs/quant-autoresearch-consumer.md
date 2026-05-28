@@ -143,6 +143,15 @@ Strategy code must stay pure:
 - no mutation of `rows` or `params`,
 - no hidden dependency on process-global state.
 
+The canonical strategy loader enforces a static AST purity check before module
+import by default. It rejects generated candidates that import `quant_data`,
+runner, or engine packages, and candidates that call obvious filesystem,
+network, subprocess, or dynamic-code primitives such as `open`, `.write()`,
+`requests.get()`, `subprocess.run()`, or `eval()`. The explicit
+`enforce_purity=False` loader option is only for trusted local tests or
+deliberate manual inspection; autoresearch and normal runner/validation flows
+should leave the default enforcement on.
+
 Optional `validate_params(params)` may normalize and reject params before each
 run. It must return a mapping.
 

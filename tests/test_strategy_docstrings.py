@@ -4,6 +4,8 @@ import ast
 import re
 from pathlib import Path
 
+from quant_strategies.decisions import strategy_purity_violations
+
 
 REQUIRED_HEADINGS = (
     "Source / provenance:",
@@ -17,40 +19,6 @@ PROVENANCE_ANCHOR_PATTERN = re.compile(
     r"https?://|\binternal_note\s*:|\bdoi\b|\bssrn\b",
     re.IGNORECASE,
 )
-BANNED_IMPORT_ROOTS = {
-    "quant_data",
-    "quant_strategies.engine",
-    "quant_strategies.runner",
-}
-BANNED_CALL_NAMES = {
-    "open",
-    "exec",
-    "eval",
-    "compile",
-}
-BANNED_CALL_ATTRIBUTES = {
-    "mkdir",
-    "open",
-    "write",
-    "write_text",
-    "write_bytes",
-    "unlink",
-    "remove",
-    "rmdir",
-}
-BANNED_MODULE_CALLS = {
-    ("os", "remove"),
-    ("os", "rmdir"),
-    ("os", "unlink"),
-    ("requests", "delete"),
-    ("requests", "get"),
-    ("requests", "post"),
-    ("socket", "socket"),
-    ("subprocess", "call"),
-    ("subprocess", "check_call"),
-    ("subprocess", "check_output"),
-    ("subprocess", "run"),
-}
 
 
 def strategy_files() -> list[Path]:
@@ -116,40 +84,12 @@ def test_strategy_layout_is_flat():
     assert offenders == []
 
 
-def test_strategy_modules_do_not_import_data_runner_or_engine_packages():
+def test_strategy_modules_satisfy_static_purity_contract():
     offenders: list[str] = []
     for path in all_strategy_files_for_contract():
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if _is_banned_import(alias.name):
-                        offenders.append(f"{path}: import {alias.name}")
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                if _is_banned_import(module):
-                    offenders.append(f"{path}: from {module} import ...")
+        offenders.extend(strategy_purity_violations(path))
 
     assert offenders == []
-
-
-def test_strategy_modules_do_not_call_common_side_effect_primitives():
-    offenders: list[str] = []
-    for path in all_strategy_files_for_contract():
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                call_name = _call_name(node.func)
-                if call_name in BANNED_CALL_NAMES or _is_banned_module_call(call_name):
-                    offenders.append(f"{path}: {call_name}()")
-                elif isinstance(node.func, ast.Attribute) and node.func.attr in BANNED_CALL_ATTRIBUTES:
-                    offenders.append(f"{path}: .{node.func.attr}()")
-
-    assert offenders == []
-
-
-def _is_banned_import(module: str) -> bool:
-    return any(module == banned or module.startswith(f"{banned}.") for banned in BANNED_IMPORT_ROOTS)
 
 
 def _docstring_section(docstring: str, heading: str) -> str:
@@ -166,16 +106,3 @@ def _docstring_section(docstring: str, heading: str) -> str:
             break
         body.append(line)
     return "\n".join(body).strip()
-
-
-def _call_name(node: ast.expr) -> str:
-    if isinstance(node, ast.Name):
-        return node.id
-    if isinstance(node, ast.Attribute):
-        parent = _call_name(node.value)
-        return f"{parent}.{node.attr}" if parent else node.attr
-    return ""
-
-
-def _is_banned_module_call(call_name: str) -> bool:
-    return any(call_name == f"{module}.{name}" for module, name in BANNED_MODULE_CALLS)

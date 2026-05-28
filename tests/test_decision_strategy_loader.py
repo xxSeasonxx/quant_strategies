@@ -45,3 +45,68 @@ def test_load_decision_strategy_rejects_file_without_generate_decisions(tmp_path
 
     with pytest.raises(DecisionStrategyLoadError, match="generate_decisions"):
         load_decision_strategy(strategy, repo_root=tmp_path)
+
+
+def test_load_decision_strategy_rejects_directory_path(tmp_path: Path):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.mkdir(parents=True)
+
+    with pytest.raises(DecisionStrategyLoadError, match="must be a file"):
+        load_decision_strategy(strategy, repo_root=tmp_path)
+
+
+def test_load_decision_strategy_rejects_side_effect_calls_before_import(tmp_path: Path):
+    marker = tmp_path / "marker.txt"
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        f"open({str(marker)!r}, 'w').write('boom')\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+
+    with pytest.raises(DecisionStrategyLoadError, match=r"open\(\)|\.write\(\)"):
+        load_decision_strategy(strategy, repo_root=tmp_path)
+
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("import_line", "message"),
+    [
+        ("import quant_data", "quant_data"),
+        ("from quant_strategies.runner import run_config", "quant_strategies.runner"),
+    ],
+)
+def test_load_decision_strategy_rejects_banned_imports_before_import(
+    tmp_path: Path,
+    import_line: str,
+    message: str,
+):
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        f"{import_line}\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+
+    with pytest.raises(DecisionStrategyLoadError, match=message):
+        load_decision_strategy(strategy, repo_root=tmp_path)
+
+
+def test_load_decision_strategy_allows_explicit_purity_opt_out(tmp_path: Path):
+    marker = tmp_path / "marker.txt"
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        f"open({str(marker)!r}, 'w').write('boom')\n"
+        "def generate_decisions(rows, params):\n"
+        "    return []\n"
+    )
+
+    generate_decisions = load_decision_strategy(
+        strategy,
+        repo_root=tmp_path,
+        enforce_purity=False,
+    )
+
+    assert callable(generate_decisions)
+    assert marker.read_text() == "boom"

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Protocol
 
 from quant_strategies.decisions.models import StrategyDecision
+from quant_strategies.decisions.purity import strategy_purity_violations
 
 
 class StrategyGenerator(Protocol):
@@ -33,6 +34,7 @@ def load_decision_strategy(
     path: str | Path,
     *,
     repo_root: Path | None = None,
+    enforce_purity: bool = True,
 ) -> DecisionStrategyCallable:
     root = Path(repo_root).resolve() if repo_root is not None else _default_repo_root()
     strategy_path = Path(path).resolve()
@@ -44,8 +46,16 @@ def load_decision_strategy(
         ) from exc
     if not strategy_path.exists():
         raise DecisionStrategyLoadError(f"strategy file does not exist: {strategy_path}")
+    if not strategy_path.is_file():
+        raise DecisionStrategyLoadError(f"strategy path must be a file: {strategy_path}")
     if strategy_path.suffix != ".py":
         raise DecisionStrategyLoadError(f"strategy file must be a Python file: {strategy_path}")
+    if enforce_purity:
+        violations = strategy_purity_violations(strategy_path)
+        if violations:
+            raise DecisionStrategyLoadError(
+                f"strategy purity violations: {'; '.join(violations)}"
+            )
 
     module_name = f"_quant_decision_strategy_{hashlib.sha1(str(strategy_path).encode()).hexdigest()}"
     spec = importlib.util.spec_from_file_location(module_name, strategy_path)
