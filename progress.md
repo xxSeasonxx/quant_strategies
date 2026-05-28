@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 26: P2 cache lookahead row visibility.
+Phase 27: P2 validation row artifacts.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-lookahead-visibility-cache-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lookahead-visibility-cache.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-validation-row-artifacts-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-validation-row-artifacts.md`
 
 ## Finding Triage
 
@@ -54,6 +54,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lookahead-visibili
 | Runner defaults to full artifact profile | Confirmed true, Phase 22 | Default omitted `artifact_profile` to `summary`; keep explicit `full` for retained/debug runs. |
 | Strategy purity is not enforced for arbitrary candidate workspaces | Confirmed true, Phase 23 | Add default-on AST purity check in the canonical strategy loader and reuse it in committed-strategy tests. |
 | Crypto perp funding is added as a linear adjustment to generic backend `net_return` | Confirmed true, Phase 24 | Keep `net_return` as backend price/cost return; expose `linear_funding_adjusted_return` and keep policy gates off the linear add-on. |
+| Validation artifacts do not fully reproduce backend metrics | Partly true, Phase 27 | Snapshot validation input rows per loaded window and link them from manifest; per-backend fill/trade/funding/cost ledgers remain future work unless backend exposes them. |
 | Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
 | Validation lookahead replay reparses row visibility per decision | Confirmed true, Phase 26 | Cache parsed row visibility metadata and visible frozen row slices in the shared causality checker. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
@@ -748,3 +749,45 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lookahead-visibili
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no causality correctness issues. Valid bookkeeping finding: Phase 25 verification entries were misplaced under Phase 26; fixed before commit.
 - 2026-05-28: Committed Phase 26.
+
+## Phase 27 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add row artifact regressions.
+- [x] Implement validation row snapshots.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 27 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_validation_runner.py::test_run_validation_records_data_audit_failure tests/test_validation_runner.py::test_run_validation_rejects_non_decision_output -q` -> failed as expected before implementation; manifest data windows had no `rows_path`.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_validation_runner.py::test_run_validation_records_data_audit_failure tests/test_validation_runner.py::test_run_validation_rejects_non_decision_output -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_artifacts.py -q` -> 40 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 84 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 513 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window -q` -> failed as expected before manifest core-hash update; row snapshot existed in `artifacts` but not `core_hashes`.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_validation_runner.py::test_run_validation_records_data_audit_failure tests/test_validation_runner.py::test_run_validation_rejects_non_decision_output -q` -> 3 passed after manifest core-hash update.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_artifacts.py -q` -> 40 passed after manifest core-hash update.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 84 passed after manifest core-hash update.
+- 2026-05-28: `conda run -n quant pytest -q` -> 513 passed after manifest core-hash update.
+- 2026-05-28: `git diff --check` -> passed after manifest core-hash update.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed after manifest core-hash update.
+- 2026-05-28: Code review found a valid issue: validation row snapshot writing could fail on non-finite optional row values before manifest emission. Fixed by applying JSON-safe normalization in validation canonical artifacts and sharing that encoding for row hashes.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot -q` -> failed as expected before the review fix with `ValueError: Out of range float values are not JSON compliant: nan`.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_validation_runner.py::test_run_validation_records_data_audit_failure tests/test_validation_runner.py::test_run_validation_rejects_non_decision_output tests/test_validation_runner.py::test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot -q` -> 4 passed after review fix.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_artifacts.py -q` -> 41 passed after review fix.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_lookahead.py tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 85 passed after review fix.
+- 2026-05-28: `conda run -n quant pytest -q` -> 514 passed after review fix.
+- 2026-05-28: `git diff --check` -> passed after review fix.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed after review fix.
+- 2026-05-28: Follow-up code review found the non-finite row snapshot issue closed and no new Critical/Important issues.
+- 2026-05-28: Committed Phase 27.

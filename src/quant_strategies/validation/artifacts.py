@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -69,8 +71,22 @@ def _json_value(value: Any) -> Any:
         return str(value)
     if isinstance(value, datetime | date):
         return value.isoformat()
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, Decimal):
+        numeric = float(value)
+        return numeric if math.isfinite(numeric) else None
+    if hasattr(value, "item") and callable(value.item):
+        try:
+            return _json_value(value.item())
+        except (TypeError, ValueError):
+            pass
     if isinstance(value, Mapping):
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, list | tuple):
         return [_json_value(item) for item in value]
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError):
+        return str(value)
     return value

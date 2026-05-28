@@ -120,6 +120,28 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
+def expected_row_records() -> list[dict[str, Any]]:
+    return [
+        {
+            "available_at": AS_OF.isoformat(),
+            "close": 100.0,
+            "symbol": "BTC-PERP",
+            "timestamp": AS_OF.isoformat(),
+        },
+        {
+            "available_at": DECISION.isoformat(),
+            "close": 101.0,
+            "symbol": "BTC-PERP",
+            "timestamp": DECISION.isoformat(),
+        },
+        {
+            "close": 102.0,
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc).isoformat(),
+        },
+    ]
+
+
 def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     tmp_path: Path,
     monkeypatch,
@@ -224,7 +246,14 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert "research_manifest" not in manifest
     assert manifest["data"]["windows"][0]["status"] == "loaded"
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
-    assert manifest["data"]["windows"][0]["rows_sha256"]
+    row_path = "data_rows/validation_2026_h1.jsonl"
+    row_file = result.result_dir / row_path
+    assert manifest["data"]["windows"][0]["rows_path"] == row_path
+    assert manifest["data"]["windows"][0]["rows_sha256"] == file_sha256(row_file)
+    row_line = row_file.read_text().splitlines()[0]
+    assert row_line.startswith('{"available_at":')
+    assert '": ' not in row_line
+    assert read_jsonl(row_file) == expected_row_records()
     assert manifest["backend"]["status_counts"] == {"completed": 6}
     capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
     assert capability_matrix == {
@@ -253,9 +282,11 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert manifest["core_hashes"]["validation_decision.json"] == file_sha256(
         result.result_dir / "validation_decision.json"
     )
+    assert manifest["core_hashes"][row_path] == file_sha256(row_file)
     assert manifest["artifacts"]["backend_runs/summary.json"]["sha256"] == file_sha256(
         result.result_dir / "backend_runs" / "summary.json"
     )
+    assert manifest["artifacts"][row_path]["sha256"] == file_sha256(row_file)
     assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
         base_decision_file
     )
@@ -425,11 +456,39 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["data"]["windows"][0]["status"] == "failed"
     assert manifest["data"]["windows"][0]["row_count"] == 0
+    assert manifest["data"]["windows"][0]["rows_path"] is None
     assert manifest["data"]["windows"][0]["rows_sha256"] is None
+    assert not (result.result_dir / "data_rows").exists()
     assert manifest["backend"]["capability_matrix"] == capability_matrix
     assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
         result.result_dir / "backend_capability_matrix.json"
     )
+
+
+def test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    loaded_rows = rows()
+    loaded_rows[0]["research_nan"] = float("nan")
+    loaded_rows[1]["research_inf"] = float("inf")
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config: LoadedData(rows=loaded_rows),
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    row_path = manifest["data"]["windows"][0]["rows_path"]
+    row_file = result.result_dir / row_path
+    row_records = read_jsonl(row_file)
+    assert row_records[0]["research_nan"] is None
+    assert row_records[1]["research_inf"] is None
+    assert manifest["data"]["windows"][0]["rows_sha256"] == file_sha256(row_file)
+    assert manifest["core_hashes"][row_path] == file_sha256(row_file)
 
 
 def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
@@ -713,7 +772,11 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["data"]["windows"][0]["status"] == "loaded"
     assert manifest["data"]["windows"][0]["row_count"] == len(rows())
-    assert manifest["data"]["windows"][0]["rows_sha256"] is not None
+    row_path = "data_rows/validation_2026_h1.jsonl"
+    row_file = result.result_dir / row_path
+    assert manifest["data"]["windows"][0]["rows_path"] == row_path
+    assert manifest["data"]["windows"][0]["rows_sha256"] == file_sha256(row_file)
+    assert read_jsonl(row_file) == expected_row_records()
 
 
 def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):

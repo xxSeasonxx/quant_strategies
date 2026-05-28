@@ -250,6 +250,7 @@ write `decision_records.jsonl`,
 Validation artifacts include:
 
 - `decision_records.jsonl`
+- `data_rows/<window_id>.jsonl` for each window that successfully loaded rows
 - `data_audit.json`
 - `backend_runs/summary.json`
 - `backend_capability_matrix.json`
@@ -259,7 +260,14 @@ Validation artifacts include:
 - `validation_report.md`
 
 Manifests hash the core artifacts needed to audit what code, config, data, and
-decisions produced a run.
+decisions produced a run. Validation data provenance links each loaded window to
+its canonical JSON-safe row snapshot with `rows_path`, `row_count`, and
+`rows_sha256`, and row snapshots are included in manifest `core_hashes` and
+`artifacts`. Non-finite numeric or otherwise non-JSON ancillary row values are
+normalized to JSON-safe values in the snapshot; data-load failures leave row
+snapshot fields null. Backend summaries still report aggregate backend metrics
+and scenario decision records; per-backend fill, trade, funding, and cost ledgers
+require a backend artifact contract and are not emitted yet.
 `validation_decision.json` and `robustness_matrix.json` include
 `failure_details` for fatal setup failures that validation catches, while stable
 policy reason strings remain unchanged.

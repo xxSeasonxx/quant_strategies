@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,16 +12,12 @@ from quant_strategies.provenance import (
     python_identity,
     text_sha256,
 )
-from quant_strategies.validation.artifacts import write_json_artifact
+from quant_strategies.validation.artifacts import canonical_jsonl_lines, write_json_artifact
 from quant_strategies.validation.backends import ScenarioBackendRunResult
 
 
 def rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
-    lines = [
-        json.dumps(_json_value(row), sort_keys=True, separators=(",", ":"))
-        for row in rows
-    ]
-    return text_sha256("\n".join(lines) + ("\n" if lines else ""))
+    return text_sha256(canonical_jsonl_lines(list(rows)))
 
 
 def write_validation_manifest(
@@ -121,7 +115,14 @@ def _core_hashes(result_dir: Path) -> dict[str, str | None]:
         "validation_decision.json",
         "validation_report.md",
     )
-    return {name: _optional_hash(result_dir / name) for name in names}
+    hashes = {name: _optional_hash(result_dir / name) for name in names}
+    row_dir = result_dir / "data_rows"
+    if row_dir.exists():
+        for path in sorted(row_dir.rglob("*")):
+            if path.is_file():
+                name = path.relative_to(result_dir).as_posix()
+                hashes[name] = _optional_hash(path)
+    return hashes
 
 
 def _optional_hash(path: Path) -> str | None:
@@ -136,13 +137,3 @@ def _relative_path(path: Path, repo_root: Path) -> str:
         return path.resolve().relative_to(repo_root.resolve()).as_posix()
     except ValueError:
         return str(path)
-
-
-def _json_value(value: Any) -> Any:
-    if isinstance(value, datetime | date):
-        return value.isoformat()
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_json_value(item) for item in value]
-    return value

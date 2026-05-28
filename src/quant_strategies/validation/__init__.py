@@ -180,8 +180,20 @@ def _run_validation_window(
     except StrategyExecutionError as exc:
         return _handle_window_execution_error(context, state, window, run_config, exc)
 
+    rows_path, rows_hash = _write_window_rows(
+        result_dir=context.result_dir,
+        window_id=window.id,
+        rows=execution.loaded_rows,
+    )
     state.data_provenance.append(
-        _data_provenance(window.id, run_config, status="loaded", rows=execution.loaded_rows)
+        _data_provenance(
+            window.id,
+            run_config,
+            status="loaded",
+            rows=execution.loaded_rows,
+            rows_path=rows_path,
+            rows_hash=rows_hash,
+        )
     )
     state.all_decisions.extend(execution.decisions)
     audit_payload = _audit_window_execution(context, state, window, execution)
@@ -241,12 +253,19 @@ def _handle_window_execution_error(
         return None
     if exc.stage == "decision_generation":
         if exc.loaded_rows is not None:
+            rows_path, rows_hash = _write_window_rows(
+                result_dir=context.result_dir,
+                window_id=window.id,
+                rows=exc.loaded_rows,
+            )
             state.data_provenance.append(
                 _data_provenance(
                     window.id,
                     run_config,
                     status="loaded",
                     rows=exc.loaded_rows,
+                    rows_path=rows_path,
+                    rows_hash=rows_hash,
                 )
             )
         if exc.violations:
@@ -555,8 +574,11 @@ def _data_provenance(
     *,
     status: str,
     rows: Sequence[Mapping[str, Any]] | None,
+    rows_path: str | None = None,
+    rows_hash: str | None = None,
     message: str | None = None,
 ) -> dict[str, Any]:
+    row_count = 0 if rows is None else len(rows)
     payload = {
         "window_id": window_id,
         "status": status,
@@ -568,8 +590,9 @@ def _data_provenance(
             "end": run_config.data.end.isoformat(),
             "strict": run_config.data.strict,
         },
-        "row_count": 0 if rows is None else len(rows),
-        "rows_sha256": None if rows is None else rows_sha256(rows),
+        "row_count": row_count,
+        "rows_path": None if rows is None else rows_path,
+        "rows_sha256": None if rows is None else rows_hash or rows_sha256(rows),
     }
     if message is not None:
         payload["message"] = message
@@ -684,6 +707,17 @@ def _write_scenario_decision_records(
 ) -> tuple[str, str]:
     artifact_name = f"backend_runs/decision_records/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
     path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(decisions))
+    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+
+
+def _write_window_rows(
+    *,
+    result_dir: Path,
+    window_id: str,
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    artifact_name = f"data_rows/{_safe_scenario_artifact_path(window_id)}.jsonl"
+    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(rows)))
     return path.relative_to(result_dir).as_posix(), file_sha256(path)
 
 
