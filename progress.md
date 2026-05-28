@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 19: P4 enforce strategy provenance anchors.
+Phase 20: P4 document review archive directory.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-strategy-provenance-docstring-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-provenance-docstring.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-review-archive-docs-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-review-archive-docs.md`
 
 ## Finding Triage
 
@@ -49,6 +49,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-provenanc
 | `ValidationBackendError` and `ValidationDataError` are unused | Confirmed true, Phase 17 | Retire the unused subclasses and keep only raised validation error classes. |
 | Internal Pydantic revalidation across boundaries | Partly true, Phase 18 | Drop `BackendRunResult.model_validate()` for typed backend returns; keep runner config-to-engine `FillModel`/`CostModel` construction as required adaptation. |
 | Strategy provenance docstring test under-enforces source specificity | Confirmed true, Phase 19 | Require DOI, SSRN, URL, or `internal_note:` in `Source / provenance:` blocks. |
+| Empty docs scaffolds | Partly true, Phase 20 | `docs/superpowers/{plans,specs}` are now populated; add `docs/reviews/README.md` instead of moving active root review inputs. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -556,3 +557,23 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-provenanc
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: the provenance anchor check is syntactic and does not verify external citation reachability.
 - 2026-05-28: Committed Phase 19.
+
+## Phase 20 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add review archive README.
+- [x] Run focused checks.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 20 Verification Log
+
+- 2026-05-28: `test -s docs/reviews/README.md` -> passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 502 passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: root review inputs remain active files until the overall review workflow is archived.
+- 2026-05-28: Committed Phase 20.
