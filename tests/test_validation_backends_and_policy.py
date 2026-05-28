@@ -14,6 +14,21 @@ from quant_strategies.validation.config import PaperReadinessConfig
 from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
 
 
+def test_policy_declares_paper_readiness_gates_in_order():
+    from quant_strategies.validation import policy
+
+    assert policy._PAPER_READINESS_GATES == (
+        "min_windows",
+        "min_total_trades",
+        "no_zero_trade_windows",
+        "aggregate_realistic_net_positive",
+        "positive_window_fraction",
+        "stressed_net_floor",
+        "fill_lag_net_floor",
+    )
+    assert len(policy._PAPER_READINESS_GATES) == len(set(policy._PAPER_READINESS_GATES))
+
+
 def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
     assert decision.evidence_class == "validation_advisory"
     assert decision.advisory_decision == decision.decision

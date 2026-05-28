@@ -320,6 +320,17 @@ def _backend_execution_gate(
     )
 
 
+_PAPER_READINESS_GATES: tuple[str, ...] = (
+    "min_windows",
+    "min_total_trades",
+    "no_zero_trade_windows",
+    "aggregate_realistic_net_positive",
+    "positive_window_fraction",
+    "stressed_net_floor",
+    "fill_lag_net_floor",
+)
+
+
 def _paper_readiness_decision(
     required_results: tuple[ScenarioBackendRunResult, ...],
     *,
@@ -339,17 +350,13 @@ def _paper_readiness_decision(
         if metrics is not None
     }
 
-    passed_gates = list(base_passed_gates)
-    failed_gates: list[str] = []
-    gate_details = dict(base_gate_details)
-
     if not _paper_enabled(paper_readiness):
         return _decision(
             "mechanical_pass",
             reasons=("paper_readiness_disabled",),
-            passed=tuple(passed_gates),
+            passed=base_passed_gates,
             failed=("paper_readiness_enabled",),
-            details={**gate_details, "paper_readiness_enabled": "false"},
+            details={**base_gate_details, "paper_readiness_enabled": "false"},
         )
 
     min_windows = int(_settings_value(paper_readiness, "min_windows", 2))
@@ -372,112 +379,103 @@ def _paper_readiness_decision(
     fill_lag_metrics = [complete_metrics[item.scenario_id] for item in fill_lag]
 
     window_count = len(windows)
-    if window_count >= min_windows:
-        passed_gates.append("min_windows")
-    else:
-        failed_gates.append("min_windows")
-    gate_details["min_windows"] = (
-        _gate_detail(window_count, ">=", min_windows)
-        if has_realistic
-        else _missing_scenario_detail("cost")
-    )
-
     realistic_total_trades = sum(metrics.trade_count for metrics in realistic_metrics)
-    if realistic_total_trades >= min_total_trades:
-        passed_gates.append("min_total_trades")
-    else:
-        failed_gates.append("min_total_trades")
-    gate_details["min_total_trades"] = (
-        _gate_detail(realistic_total_trades, ">=", min_total_trades)
-        if has_realistic
-        else _missing_scenario_detail("cost")
-    )
-
     zero_trade_windows = [
         item.window_id
         for item in realistic
         if complete_metrics[item.scenario_id].trade_count == 0
     ]
-    if not zero_trade_windows and has_realistic:
-        passed_gates.append("no_zero_trade_windows")
-    else:
-        failed_gates.append("no_zero_trade_windows")
-    if not has_realistic:
-        gate_details["no_zero_trade_windows"] = _missing_scenario_detail("cost")
-    elif zero_trade_windows:
-        gate_details["no_zero_trade_windows"] = ",".join(zero_trade_windows)
-    else:
-        gate_details["no_zero_trade_windows"] = "passed"
-
     realistic_net = sum(metrics.net_return for metrics in realistic_metrics)
     positive_realistic_evidence = realistic_net > 0.0
-    if positive_realistic_evidence:
-        passed_gates.append("aggregate_realistic_net_positive")
-    else:
-        failed_gates.append("aggregate_realistic_net_positive")
-    gate_details["aggregate_realistic_net_positive"] = (
-        _gate_detail(realistic_net, ">", 0.0)
-        if has_realistic
-        else _missing_scenario_detail("cost")
-    )
-
     positive_windows = sum(
         1 for item in realistic if complete_metrics[item.scenario_id].net_return > 0.0
     )
     positive_fraction = positive_windows / window_count if window_count else 0.0
-    if positive_fraction >= min_positive_window_fraction:
-        passed_gates.append("positive_window_fraction")
-    else:
-        failed_gates.append("positive_window_fraction")
-    gate_details["positive_window_fraction"] = _gate_detail(
-        positive_fraction,
-        ">=",
-        min_positive_window_fraction,
-    )
-    if not has_realistic:
-        gate_details["positive_window_fraction"] = _missing_scenario_detail("cost")
-
     worst_stressed_net = min((metrics.net_return for metrics in stressed_metrics), default=0.0)
-    if has_stressed and worst_stressed_net >= max_stressed_net_loss:
-        passed_gates.append("stressed_net_floor")
-    else:
-        failed_gates.append("stressed_net_floor")
-    gate_details["stressed_net_floor"] = (
-        _gate_detail(worst_stressed_net, ">=", max_stressed_net_loss)
-        if has_stressed
-        else _missing_scenario_detail("cost_stress")
-    )
-
     worst_fill_lag_net = min((metrics.net_return for metrics in fill_lag_metrics), default=0.0)
-    if has_fill_lag and worst_fill_lag_net >= max_fill_lag_net_loss:
-        passed_gates.append("fill_lag_net_floor")
-    else:
-        failed_gates.append("fill_lag_net_floor")
-    gate_details["fill_lag_net_floor"] = (
-        _gate_detail(worst_fill_lag_net, ">=", max_fill_lag_net_loss)
-        if has_fill_lag
-        else _missing_scenario_detail("fill_lag")
-    )
 
-    if not failed_gates:
+    gate_results: dict[str, tuple[bool, str]] = {
+        "min_windows": (
+            window_count >= min_windows,
+            _gate_detail(window_count, ">=", min_windows)
+            if has_realistic
+            else _missing_scenario_detail("cost"),
+        ),
+        "min_total_trades": (
+            realistic_total_trades >= min_total_trades,
+            _gate_detail(realistic_total_trades, ">=", min_total_trades)
+            if has_realistic
+            else _missing_scenario_detail("cost"),
+        ),
+        "no_zero_trade_windows": (
+            not zero_trade_windows and has_realistic,
+            (
+                _missing_scenario_detail("cost")
+                if not has_realistic
+                else ",".join(zero_trade_windows)
+                if zero_trade_windows
+                else "passed"
+            ),
+        ),
+        "aggregate_realistic_net_positive": (
+            positive_realistic_evidence,
+            _gate_detail(realistic_net, ">", 0.0)
+            if has_realistic
+            else _missing_scenario_detail("cost"),
+        ),
+        "positive_window_fraction": (
+            positive_fraction >= min_positive_window_fraction,
+            _gate_detail(positive_fraction, ">=", min_positive_window_fraction)
+            if has_realistic
+            else _missing_scenario_detail("cost"),
+        ),
+        "stressed_net_floor": (
+            has_stressed and worst_stressed_net >= max_stressed_net_loss,
+            _gate_detail(worst_stressed_net, ">=", max_stressed_net_loss)
+            if has_stressed
+            else _missing_scenario_detail("cost_stress"),
+        ),
+        "fill_lag_net_floor": (
+            has_fill_lag and worst_fill_lag_net >= max_fill_lag_net_loss,
+            _gate_detail(worst_fill_lag_net, ">=", max_fill_lag_net_loss)
+            if has_fill_lag
+            else _missing_scenario_detail("fill_lag"),
+        ),
+    }
+
+    passed_gates = list(base_passed_gates)
+    failed_gates: list[str] = []
+    gate_details = dict(base_gate_details)
+    for gate_name in _PAPER_READINESS_GATES:
+        passed, detail = gate_results[gate_name]
+        if passed:
+            passed_gates.append(gate_name)
+        else:
+            failed_gates.append(gate_name)
+        gate_details[gate_name] = detail
+
+    passed = tuple(passed_gates)
+    failed = tuple(failed_gates)
+
+    if not failed:
         return _decision(
             "mechanical_review_candidate",
-            passed=tuple(passed_gates),
+            passed=passed,
             details=gate_details,
         )
     if positive_realistic_evidence:
         return _decision(
             "watchlist",
             reasons=("paper_readiness_gates_failed",),
-            passed=tuple(passed_gates),
-            failed=tuple(failed_gates),
+            passed=passed,
+            failed=failed,
             details=gate_details,
         )
     return _decision(
         "mechanical_pass",
         reasons=("no_positive_realistic_cost_evidence",),
-        passed=tuple(passed_gates),
-        failed=tuple(failed_gates),
+        passed=passed,
+        failed=failed,
         details=gate_details,
     )
 

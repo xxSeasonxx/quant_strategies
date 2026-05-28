@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 36: P4 shared config primitives.
+Phase 37: P4 paper-readiness gate table.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-shared-config-primitives-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-shared-config-primitives.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-paper-readiness-gate-table-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-paper-readiness-gate-table.md`
 
 ## Finding Triage
 
@@ -42,6 +42,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-shared-config-prim
 | Evidence quality walks rows twice on successful runs | Confirmed true, Phase 31 | Reuse execution evidence quality and update only causality fields after replay. |
 | Validation row hashing duplicates runner canonicalization | Confirmed true, Phase 32 | Share runner row JSONL canonicalization with validation row snapshots and hash the bytes written. |
 | Default `quant_data` engine is recreated per run | Confirmed true, Phase 33 | Cache the default engine per process while preserving explicit engine injection and factory replacement. |
+| Paper-readiness policy gates are hand-coded blocks | Confirmed true, Phase 37 | Replace repeated gate mutation blocks with an ordered private gate table while preserving policy behavior. |
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
@@ -1006,3 +1007,27 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-shared-config-prim
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no source-code correctness issues. One Important progress-log staleness finding was fixed before commit.
 - 2026-05-28: Committed Phase 36.
+
+## Phase 37 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add paper-readiness gate-table regression.
+- [x] Refactor paper-readiness gates to declarative table.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 37 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py::test_policy_declares_paper_readiness_gates_in_order -q` -> failed as expected before implementation; `_PAPER_READINESS_GATES` did not exist.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py::test_policy_declares_paper_readiness_gates_in_order -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py -q` -> 40 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py tests/test_validation_runner.py -q` -> 74 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 523 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical or Important issues. One Nice-to-have docs mismatch from the rejected helper-heavy refactor was fixed before commit.
+- 2026-05-28: Committed Phase 37.
