@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows, RowContractMode, json_safe_value
+from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.errors import DataLoadError
 
@@ -59,9 +61,30 @@ def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
         raise DataLoadError(f"data load failed: {exc}") from exc
     if not rows:
         raise DataLoadError("data load returned no rows")
-    rows.sort(key=lambda row: (str(row.get("symbol", "")), row.get("timestamp")))
+    rows.sort(key=_row_sort_key)
     normalized_rows = NormalizedRows.from_rows(config, rows, mode=RowContractMode.SEARCH)
     return LoadedData(rows=normalized_rows.projection_rows(), normalized_rows=normalized_rows)
+
+
+def _row_sort_key(row: Mapping[str, Any]) -> tuple[str, tuple[int, Any]]:
+    raw_timestamp = row.get("timestamp")
+    parsed_timestamp, _ = parse_aware_datetime(raw_timestamp)
+    if parsed_timestamp is not None:
+        timestamp_key = (0, parsed_timestamp)
+    elif raw_timestamp is None:
+        timestamp_key = (2, "")
+    else:
+        timestamp_key = (1, _json_sort_value(raw_timestamp))
+    return (str(row.get("symbol", "")), timestamp_key)
+
+
+def _json_sort_value(value: Any) -> str:
+    return json.dumps(
+        json_safe_value(value),
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:

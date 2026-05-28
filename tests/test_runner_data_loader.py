@@ -124,6 +124,39 @@ def test_bars_adapter_loads_multiple_symbols(tmp_path: Path, monkeypatch: pytest
     assert [item["symbol"] for item in loaded.rows] == ["QQQ", "SPY"]
 
 
+def test_load_data_returns_row_contract_issues_for_mixed_timestamp_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = make_config(tmp_path)
+    available_at = datetime(2024, 1, 1, 9, 31, tzinfo=timezone.utc)
+    missing_timestamp = row("SPY", close=101.0, available_at=available_at)
+    del missing_timestamp["timestamp"]
+
+    def fake_load_bars(engine, symbol, dataset, start, end, *, research, strict):
+        return [
+            row(
+                "SPY",
+                close=102.0,
+                timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc),
+                available_at=available_at,
+            ),
+            missing_timestamp,
+            row("SPY", close=103.0, timestamp="not-a-datetime", available_at=available_at),
+        ]
+
+    monkeypatch.setattr(data_loader.loader, "load_bars", fake_load_bars)
+
+    loaded = data_loader.load_data(config, engine=object())
+
+    assert loaded.normalized_rows is not None
+    assert loaded.rows == loaded.normalized_rows.projection_rows()
+    summary = loaded.normalized_rows.row_contract_summary()
+    assert summary["issue_reasons"]["row_missing_required_field"] == 1
+    assert summary["issue_reasons"]["row_invalid_timestamp"] == 1
+    assert summary["missing_required_fields"] == {"timestamp": 1}
+
+
 def test_loader_proxy_partial_patch_falls_back_to_real_loader(monkeypatch: pytest.MonkeyPatch):
     proxy = data_loader._LazyLoaderProxy()
 
