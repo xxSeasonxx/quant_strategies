@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 37: P4 paper-readiness gate table.
+Phase 38: P4 researched layout false-positive rejection.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-paper-readiness-gate-table-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-paper-readiness-gate-table.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-researched-layout-false-positive-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-researched-layout-false-positive.md`
 
 ## Finding Triage
 
@@ -66,6 +66,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-paper-readiness-ga
 | Validation artifacts do not fully reproduce backend metrics | Partly true, Phase 27 | Snapshot validation input rows per loaded window and link them from manifest; per-backend fill/trade/funding/cost ledgers remain future work unless backend exposes them. |
 | Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
 | Validation lookahead replay reparses row visibility per decision | Confirmed true, Phase 26 | Cache parsed row visibility metadata and visible frozen row slices in the shared causality checker. |
+| `researched/` folder convention is not enforced by runner/validation | Rejected false positive, Phase 38 | PRD C-4/C-6 and docs make validation layout-agnostic and promotion a separate human process; adding path special-casing would contradict the contract. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -1031,3 +1032,30 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-paper-readiness-ga
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no Critical or Important issues. One Nice-to-have docs mismatch from the rejected helper-heavy refactor was fixed before commit.
 - 2026-05-28: Committed Phase 37.
+
+## Phase 38 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add researched-layout docs-contract regression.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 38 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py::test_docs_keep_validation_layout_agnostic_and_promotion_human_controlled -q` -> failed initially because long documented contract strings wrapped across newlines; adjusted the regression to use whitespace-tolerant regex.
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py::test_docs_keep_validation_layout_agnostic_and_promotion_human_controlled -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 524 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review confirmed the Important lifecycle wording finding is resolved and found no new Critical or Important issues.
+- 2026-05-28: Committed Phase 38.
+- 2026-05-28: Code review found the new docs-contract test was freezing contradictory lifecycle wording between PRD C-6 and AGENTS/README. Fixed by reconciling PRD C-6 to say promotion into `tested/` from `untested/` or `researched/` is human-controlled, then reran verification.
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 524 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.

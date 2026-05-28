@@ -218,8 +218,8 @@ A consumer should be able to say "yes" to all of these without qualification.
   inside strategies.
 - **C-5.** Results are written under ignored `results/` directories (per config). No
   results land in `src/` or in version-controlled trees.
-- **C-6.** Promotion between `untested/` → `tested/` → `researched/` is a separate human
-  process. The foundation never auto-promotes.
+- **C-6.** Promotion into `tested/` from `untested/` or `researched/` is a separate
+  human process. The foundation never auto-promotes.
 - **C-7.** No network IO in the engine or kernel. All data comes from `quant_data`
   loaders called from the runner.
 - **C-8.** No legacy compatibility shims. Contract changes require regenerating

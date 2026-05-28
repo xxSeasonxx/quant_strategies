@@ -67,3 +67,33 @@ def test_prd_matches_runner_public_api_contract():
     import quant_strategies
 
     assert not hasattr(quant_strategies, "run_config")
+
+
+def test_docs_keep_validation_layout_agnostic_and_promotion_human_controlled():
+    readme = Path("README.md").read_text()
+    consumer = Path("docs/quant-autoresearch-consumer.md").read_text()
+    prd = Path("PRD.md").read_text()
+    agents = Path("AGENTS.md").read_text()
+
+    assert "validator does not special-case `researched/`" in readme
+    assert "validation does not treat it as special" in readme
+    assert re.search(
+        r"Moving a strategy to `tested/` requires the separate validation process\s+Season\s+approves",
+        readme,
+    )
+
+    assert "Validation is not based on `researched/`, package manifests, or family/variant" in consumer
+    assert re.search(
+        r"Old artifacts that need validation should be copied into a normal\s+candidate workspace",
+        consumer,
+    )
+
+    assert "candidate workspaces driven by consumers" in prd
+    assert "Promotion into `tested/` from `untested/` or `researched/`" in prd
+    assert "The foundation never auto-promotes" in prd
+
+    assert "Do not treat `researched/` as market validated" in agents
+    assert re.search(
+        r"Move from `researched/` to `tested/` only through the separate validation\s+process",
+        agents,
+    )
