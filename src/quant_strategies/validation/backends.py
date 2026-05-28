@@ -14,6 +14,22 @@ from quant_strategies.validation.config import ScenarioRunConfig
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
 DecisionGenerationStatus = Literal["base_reused", "regenerated", "failed"]
 MetricValue = float | int | str | bool | None
+CapabilityRecord = dict[str, Any]
+
+
+def capability_record(
+    semantic: str,
+    status: str,
+    details: str,
+    *,
+    observed_unsupported: set[str],
+) -> CapabilityRecord:
+    return {
+        "semantic": semantic,
+        "status": status,
+        "details": details,
+        "observed_unsupported": semantic in observed_unsupported,
+    }
 
 
 class BackendMetricSemantics(BaseModel):
@@ -132,6 +148,9 @@ class ScenarioBackendRunResult:
 class ValidationBackend(Protocol):
     name: str
 
+    def capability_records(self, observed_unsupported: set[str]) -> Sequence[CapabilityRecord]:
+        raise NotImplementedError
+
     def run(
         self,
         *,
@@ -152,6 +171,16 @@ class FakeBackend:
             metrics={"net_return": 0.0, "trade_count": 0},
             warnings=(),
             unsupported_semantics=(),
+        )
+
+    def capability_records(self, observed_unsupported: set[str]) -> Sequence[CapabilityRecord]:
+        return (
+            capability_record(
+                "test_double",
+                "supported",
+                "Deterministic validation test double.",
+                observed_unsupported=observed_unsupported,
+            ),
         )
 
     def run(

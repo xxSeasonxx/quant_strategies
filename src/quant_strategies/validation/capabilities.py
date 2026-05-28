@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from quant_strategies.validation.backends import ScenarioBackendRunResult
+from quant_strategies.validation.backends import (
+    CapabilityRecord,
+    ScenarioBackendRunResult,
+    ValidationBackend,
+    capability_record,
+)
 
 
 _OBSERVED_UNSUPPORTED_SEMANTIC_MAP = {
@@ -22,6 +27,18 @@ _OBSERVED_UNSUPPORTED_SEMANTIC_MAP = {
 
 
 def backend_capability_matrix(
+    backend: ValidationBackend,
+    backend_results: Iterable[ScenarioBackendRunResult],
+) -> dict[str, Any]:
+    observed_unsupported = _observed_unsupported_semantics(backend_results)
+    return {
+        "backend": backend.name,
+        "observed_unsupported_semantics": sorted(observed_unsupported),
+        "semantics": _backend_records(backend, observed_unsupported),
+    }
+
+
+def unknown_backend_capability_matrix(
     backend_name: str,
     backend_results: Iterable[ScenarioBackendRunResult],
 ) -> dict[str, Any]:
@@ -29,7 +46,7 @@ def backend_capability_matrix(
     return {
         "backend": backend_name,
         "observed_unsupported_semantics": sorted(observed_unsupported),
-        "semantics": _semantic_records(backend_name, observed_unsupported),
+        "semantics": _unknown_backend_records(observed_unsupported),
     }
 
 
@@ -50,121 +67,19 @@ def _observed_unsupported_semantics(
     return observed
 
 
-def _semantic_records(
-    backend_name: str,
+def _backend_records(
+    backend: ValidationBackend,
     observed_unsupported: set[str],
-) -> list[dict[str, Any]]:
-    if backend_name == "fake":
-        return [
-            _record(
-                "test_double",
-                "supported",
-                "Deterministic validation test double.",
-                observed_unsupported=observed_unsupported,
-            )
-        ]
-    if backend_name == "vectorbtpro":
-        return _vectorbtpro_records(observed_unsupported)
+) -> list[CapabilityRecord]:
+    capability_records = getattr(backend, "capability_records", None)
+    if callable(capability_records):
+        return list(capability_records(observed_unsupported))
     return _unknown_backend_records(observed_unsupported)
 
 
-def _vectorbtpro_records(observed_unsupported: set[str]) -> list[dict[str, Any]]:
-    rows = [
-        _record(
-            "close_fills",
-            "supported",
-            "Close-price fills are supported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "target_weight_sizing",
-            "supported",
-            "Target-weight sizing is supported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "portfolio_target_weight",
-            "conditional",
-            (
-                "Supported under close-fill execution with target-weight sizing, "
-                "no threshold exits, no same-symbol overlap, no leverage, and gross "
-                "active target weight less than or equal to 1.0."
-            ),
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "crypto_perp_funding_linear_additive_adjustment",
-            "conditional",
-            "Crypto perp funding is modeled as a linear additive return adjustment.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "non_close_fill_price",
-            "unsupported",
-            "Non-close fill prices are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "threshold_exit_policy",
-            "unsupported",
-            "Stop-loss, take-profit, and trailing-stop exits are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "non_target_weight_sizing",
-            "unsupported",
-            "Sizing kinds other than target_weight are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "flat_target",
-            "unsupported",
-            "Flat targets are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "leveraged_target_weight",
-            "unsupported",
-            "Leveraged target weights are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "same_symbol_overlap",
-            "unsupported",
-            "Overlapping active decision windows for the same symbol are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "non_open_intent",
-            "unsupported",
-            "Close, adjust, and roll intents are unsupported.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "future_instrument",
-            "unsupported",
-            "Futures are representable in StrategyDecision but unsupported by this backend.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "option_instrument",
-            "unsupported",
-            "Options are representable in StrategyDecision but unsupported by this backend.",
-            observed_unsupported=observed_unsupported,
-        ),
-        _record(
-            "multi_leg_decision",
-            "unsupported",
-            "Multi-leg decisions are representable in StrategyDecision but unsupported by this backend.",
-            observed_unsupported=observed_unsupported,
-        ),
-    ]
-    return rows
-
-
-def _unknown_backend_records(observed_unsupported: set[str]) -> list[dict[str, Any]]:
+def _unknown_backend_records(observed_unsupported: set[str]) -> list[CapabilityRecord]:
     return [
-        _record(
+        capability_record(
             semantic,
             "unsupported",
             "Observed as unsupported by backend execution.",
@@ -172,21 +87,6 @@ def _unknown_backend_records(observed_unsupported: set[str]) -> list[dict[str, A
         )
         for semantic in sorted(observed_unsupported)
     ]
-
-
-def _record(
-    semantic: str,
-    status: str,
-    details: str,
-    *,
-    observed_unsupported: set[str],
-) -> dict[str, Any]:
-    return {
-        "semantic": semantic,
-        "status": status,
-        "details": details,
-        "observed_unsupported": semantic in observed_unsupported,
-    }
 
 
 def _semantic_for_observed_code(code: str) -> str:

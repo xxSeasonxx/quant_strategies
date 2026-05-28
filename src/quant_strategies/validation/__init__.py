@@ -31,7 +31,10 @@ from quant_strategies.validation.backends import (
     backend_metric_semantics,
     get_backend,
 )
-from quant_strategies.validation.capabilities import backend_capability_matrix
+from quant_strategies.validation.capabilities import (
+    backend_capability_matrix,
+    unknown_backend_capability_matrix,
+)
 from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
@@ -121,6 +124,7 @@ def run_validation(
             config=config,
             config_path=resolved_config_path,
             backend_name=backend_name,
+            backend=None,
             decisions=state.all_decisions,
             data_audits=state.data_audits,
             data_provenance=state.data_provenance,
@@ -151,6 +155,7 @@ def run_validation(
         config=config,
         config_path=resolved_config_path,
         backend_name=backend_name,
+        backend=selected_backend,
         decisions=state.all_decisions,
         data_audits=state.data_audits,
         data_provenance=state.data_provenance,
@@ -437,6 +442,7 @@ def _failure_result_from_state(
         config=context.config,
         config_path=context.config_path,
         backend_name=context.backend_name,
+        backend=context.selected_backend,
         decisions=state.all_decisions,
         data_audits=state.data_audits,
         data_provenance=state.data_provenance,
@@ -496,6 +502,7 @@ def _failure_result(
     config: Any,
     config_path: Path,
     backend_name: str,
+    backend: ValidationBackend | None,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
@@ -514,6 +521,7 @@ def _failure_result(
         config=config,
         config_path=config_path,
         backend_name=backend_name,
+        backend=backend,
         decisions=decisions,
         data_audits=data_audits,
         data_provenance=data_provenance,
@@ -725,6 +733,7 @@ def _write_validation_artifacts(
     config: Any,
     config_path: Path,
     backend_name: str,
+    backend: ValidationBackend | None,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
@@ -733,7 +742,11 @@ def _write_validation_artifacts(
     failure_details: list[dict[str, str]] | None = None,
 ) -> None:
     failure_details = failure_details or []
-    capability_matrix = backend_capability_matrix(backend_name, backend_results)
+    capability_matrix = (
+        unknown_backend_capability_matrix(backend_name, backend_results)
+        if backend is None
+        else backend_capability_matrix(backend, backend_results)
+    )
     write_text_artifact(result_dir, "decision_records.jsonl", canonical_jsonl_lines(decisions))
     write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
     write_json_artifact(

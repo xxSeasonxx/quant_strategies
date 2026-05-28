@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.validation.backends import BackendRunResult
+from quant_strategies.validation.backends import BackendRunResult, CapabilityRecord, capability_record
 from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.funding import (
     FundingEventError,
@@ -17,6 +17,98 @@ from quant_strategies.validation.funding import (
 
 class VectorBTProBackend:
     name = "vectorbtpro"
+
+    def capability_records(self, observed_unsupported: set[str]) -> Sequence[CapabilityRecord]:
+        return (
+            capability_record(
+                "close_fills",
+                "supported",
+                "Close-price fills are supported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "target_weight_sizing",
+                "supported",
+                "Target-weight sizing is supported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "portfolio_target_weight",
+                "conditional",
+                (
+                    "Supported under close-fill execution with target-weight sizing, "
+                    "no threshold exits, no same-symbol overlap, no leverage, and gross "
+                    "active target weight less than or equal to 1.0."
+                ),
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "crypto_perp_funding_linear_additive_adjustment",
+                "conditional",
+                "Crypto perp funding is modeled as a linear additive return adjustment.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "non_close_fill_price",
+                "unsupported",
+                "Non-close fill prices are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "threshold_exit_policy",
+                "unsupported",
+                "Stop-loss, take-profit, and trailing-stop exits are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "non_target_weight_sizing",
+                "unsupported",
+                "Sizing kinds other than target_weight are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "flat_target",
+                "unsupported",
+                "Flat targets are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "leveraged_target_weight",
+                "unsupported",
+                "Leveraged target weights are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "same_symbol_overlap",
+                "unsupported",
+                "Overlapping active decision windows for the same symbol are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "non_open_intent",
+                "unsupported",
+                "Close, adjust, and roll intents are unsupported.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "future_instrument",
+                "unsupported",
+                "Futures are representable in StrategyDecision but unsupported by this backend.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "option_instrument",
+                "unsupported",
+                "Options are representable in StrategyDecision but unsupported by this backend.",
+                observed_unsupported=observed_unsupported,
+            ),
+            capability_record(
+                "multi_leg_decision",
+                "unsupported",
+                "Multi-leg decisions are representable in StrategyDecision but unsupported by this backend.",
+                observed_unsupported=observed_unsupported,
+            ),
+        )
 
     def run(
         self,

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from quant_strategies.validation.capabilities import backend_capability_matrix
-from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
+from quant_strategies.validation.backends import BackendRunResult, FakeBackend, ScenarioBackendRunResult
+from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
 
 
 def scenario_result(*unsupported_semantics: str) -> ScenarioBackendRunResult:
@@ -35,7 +36,7 @@ def failed_scenario_result(*warnings: str) -> ScenarioBackendRunResult:
 
 
 def test_vectorbtpro_matrix_marks_portfolio_target_weights_conditional():
-    matrix = backend_capability_matrix("vectorbtpro", [])
+    matrix = backend_capability_matrix(VectorBTProBackend(), [])
     semantics = {item["semantic"]: item for item in matrix["semantics"]}
 
     assert matrix["backend"] == "vectorbtpro"
@@ -53,7 +54,7 @@ def test_vectorbtpro_matrix_marks_portfolio_target_weights_conditional():
 
 def test_observed_unsupported_semantic_codes_are_flagged():
     matrix = backend_capability_matrix(
-        "vectorbtpro",
+        VectorBTProBackend(),
         [
             scenario_result("threshold_exit_policy"),
             scenario_result("non_close_fill_price"),
@@ -75,7 +76,7 @@ def test_observed_unsupported_semantic_codes_are_flagged():
 
 def test_warning_prefix_marks_same_symbol_overlap_observed():
     matrix = backend_capability_matrix(
-        "vectorbtpro",
+        VectorBTProBackend(),
         [failed_scenario_result("overlapping_decision_window:BTC-PERP:entry:exit")],
     )
     semantics = {item["semantic"]: item for item in matrix["semantics"]}
@@ -86,7 +87,7 @@ def test_warning_prefix_marks_same_symbol_overlap_observed():
 
 def test_warning_prefix_marks_portfolio_target_weight_observed():
     matrix = backend_capability_matrix(
-        "vectorbtpro",
+        VectorBTProBackend(),
         [failed_scenario_result("portfolio_target_weight_exceeds_one:2026-01-01T00:02:00Z:1.1")],
     )
     semantics = {item["semantic"]: item for item in matrix["semantics"]}
@@ -96,7 +97,7 @@ def test_warning_prefix_marks_portfolio_target_weight_observed():
 
 
 def test_fake_matrix_records_test_double_semantic():
-    matrix = backend_capability_matrix("fake", [])
+    matrix = backend_capability_matrix(FakeBackend(), [])
 
     assert matrix == {
         "backend": "fake",
@@ -107,6 +108,29 @@ def test_fake_matrix_records_test_double_semantic():
                 "status": "supported",
                 "details": "Deterministic validation test double.",
                 "observed_unsupported": False,
+            }
+        ],
+    }
+
+
+def test_custom_backend_without_capability_records_falls_back_to_observed_semantics():
+    class CustomBackend:
+        name = "custom"
+
+    matrix = backend_capability_matrix(
+        CustomBackend(),
+        [scenario_result("future_instrument")],
+    )
+
+    assert matrix == {
+        "backend": "custom",
+        "observed_unsupported_semantics": ["future_instrument"],
+        "semantics": [
+            {
+                "semantic": "future_instrument",
+                "status": "unsupported",
+                "details": "Observed as unsupported by backend execution.",
+                "observed_unsupported": True,
             }
         ],
     }

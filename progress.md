@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 9: P1 single freezing idiom and freeze-once execution inputs.
+Phase 10: P2 backend-owned validation capabilities.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-single-freezing-idiom-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-single-freezing-idiom.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-backend-owned-capabilities-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-backend-owned-capabilities.md`
 
 ## Finding Triage
 
@@ -39,6 +39,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-single-freezing-id
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
 | `quant_data` eager import slows runner cold import | Confirmed true, Phase 8 | Lazy-import `quant_data` only when loading data or building a default engine. |
 | Duplicate freezing idioms and repeated row deepcopy | Confirmed true, Phase 9 | Use `boundary` as the single recursive freeze helper and reuse frozen execution inputs. |
+| Validation capability matrix hard-codes backend identity | Confirmed true, Phase 10 | Move static capability records onto backend implementations and keep observed-semantics extraction centralized. |
 
 ## Phase 1 Checklist
 
@@ -289,3 +290,33 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-single-freezing-id
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Final follow-up code review confirmed the `_data` reassignment finding is closed and found no blocking issues. Residual risk is only Python introspection bypass via `object.__setattr__`, which is outside normal consumer behavior.
+
+## Phase 10 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add backend capability contract.
+- [x] Move VectorBT Pro capability records to backend.
+- [x] Reduce capability matrix assembly.
+- [x] Thread backend object through validation artifacts.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 10 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_capabilities.py -q` -> 5 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py -q` -> 31 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_capabilities.py tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_vectorbtpro_backend.py -q` -> 140 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 492 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Added fallback coverage for injected custom backends without `capability_records()`.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_capabilities.py tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_vectorbtpro_backend.py -q` -> 141 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 493 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: capability records remain plain dictionaries, so malformed future custom backend records are not schema-validated before artifact writing.
