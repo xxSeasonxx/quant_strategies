@@ -10,6 +10,25 @@ from quant_strategies.validation.config import load_validation_config, resolve_v
 from quant_strategies.validation.errors import ValidationConfigError
 
 
+def test_shared_config_primitives_are_neutral_not_runner_owned():
+    from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+    from quant_strategies.runner import config as runner_config
+    from quant_strategies.validation.config import ScenarioRunConfig, ValidationConfig
+
+    assert DataConfig.__module__ == "quant_strategies.core.config"
+    assert FillModelConfig.__module__ == "quant_strategies.core.config"
+    assert CostModelConfig.__module__ == "quant_strategies.core.config"
+    assert runner_config.DataConfig is DataConfig
+    assert runner_config.FillModelConfig is FillModelConfig
+    assert runner_config.CostModelConfig is CostModelConfig
+    assert ValidationConfig.model_fields["data"].annotation is DataConfig
+    assert ValidationConfig.model_fields["fill_model"].annotation is FillModelConfig
+    assert ValidationConfig.model_fields["cost_model"].annotation is CostModelConfig
+    assert ScenarioRunConfig.model_fields["data"].annotation is DataConfig
+    assert ScenarioRunConfig.model_fields["fill_model"].annotation is FillModelConfig
+    assert ScenarioRunConfig.model_fields["cost_model"].annotation is CostModelConfig
+
+
 def write_strategy(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("def generate_decisions(rows, params):\n    return []\n")

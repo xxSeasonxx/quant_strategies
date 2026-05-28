@@ -16,10 +16,8 @@ from pydantic import (
     model_validator,
 )
 
+from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
 from quant_strategies.runner.config import (
-    CostModelConfig,
-    DataConfig,
-    FillModelConfig,
     OutputConfig as RunnerOutputConfig,
     RunConfig,
 )

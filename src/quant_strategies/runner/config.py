@@ -1,22 +1,27 @@
 from __future__ import annotations
 
 import tomllib
-from datetime import date
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, ValidationInfo, field_validator, model_validator
+from pydantic import Field, ValidationError, ValidationInfo, field_validator
 
+from quant_strategies.core.config import (
+    CostModelConfig,
+    DataConfig,
+    DataKind,
+    FillModelConfig,
+    SharedConfigModel,
+)
 from quant_strategies.runner.errors import ConfigError
 
 
-DataKind = Literal["bars", "crypto_perp_funding", "forex_with_quotes"]
 RunMode = Literal["screen", "validate"]
 ArtifactProfile = Literal["full", "summary"]
 
 
-class RunnerConfigModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class RunnerConfigModel(SharedConfigModel):
+    pass
 
 
 def default_repo_root() -> Path:
@@ -44,52 +49,6 @@ def resolve_config_path(path: str | Path, *, repo_root: Path | None = None) -> P
     if config_path.is_absolute():
         return config_path.resolve()
     return (root / config_path).resolve()
-
-
-class DataConfig(RunnerConfigModel):
-    kind: DataKind
-    dataset: str | None = None
-    symbols: tuple[str, ...] = Field(min_length=1)
-    start: date
-    end: date
-    strict: bool = True
-
-    @field_validator("symbols")
-    @classmethod
-    def validate_symbols(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        symbols = tuple(symbol.strip() for symbol in value)
-        if any(not symbol for symbol in symbols):
-            raise ValueError("data.symbols cannot contain empty symbols")
-        return symbols
-
-    @model_validator(mode="after")
-    def validate_window(self) -> DataConfig:
-        if self.end < self.start:
-            raise ValueError("data.end must be on or after data.start")
-        if self.kind == "bars" and not self.dataset:
-            raise ValueError("data.dataset is required when data.kind = 'bars'")
-        return self
-
-
-class FillModelConfig(RunnerConfigModel):
-    price: Literal["open", "close", "quote"] = "close"
-    entry_lag_bars: int = Field(default=1, ge=0)
-    exit_lag_bars: int = Field(default=0, ge=0)
-    allow_same_bar_close_fill: bool = False
-
-    @model_validator(mode="after")
-    def validate_fill_model(self) -> FillModelConfig:
-        if self.price == "close" and self.entry_lag_bars == 0 and not self.allow_same_bar_close_fill:
-            raise ValueError(
-                'fill_model.price = "close" with entry_lag_bars = 0 requires '
-                "fill_model.allow_same_bar_close_fill = true"
-            )
-        return self
-
-
-class CostModelConfig(RunnerConfigModel):
-    fee_bps_per_side: float = Field(default=0.0, ge=0)
-    slippage_bps_per_side: float = Field(default=0.0, ge=0)
 
 
 class OutputConfig(RunnerConfigModel):

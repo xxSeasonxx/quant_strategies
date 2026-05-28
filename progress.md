@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 35: P2 engine gating names.
+Phase 36: P4 shared config primitives.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-engine-gating-names-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-engine-gating-names.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-shared-config-primitives-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-shared-config-primitives.md`
 
 ## Finding Triage
 
@@ -29,6 +29,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-engine-gating-name
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
 | Engine parallel ontology | Confirmed true, Phase 6 | Collapse runner/engine signal path into direct `StrategyDecision` consumption. |
 | Engine smoke-gate API names collide with validation | Confirmed true, Phase 35 | Rename engine `validate` API/classes to gating names without compatibility aliases. |
+| Shared config primitives are owned by runner | Confirmed true, Phase 36 | Move `DataConfig`, `FillModelConfig`, and `CostModelConfig` to neutral core config while preserving runner import compatibility. |
 | Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
 | Runner orchestrator remains concentrated | Confirmed true, Phase 34 | Split `run_config()` into focused private stage helpers without changing public behavior. |
 | Public API re-export mismatch | Confirmed true, Phase 28 | Preserve `quant_strategies.runner.run_config` as the public surface and reconcile stale PRD top-level re-export wording. |
@@ -982,3 +983,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-engine-gating-name
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues.
 - 2026-05-28: Committed Phase 35.
+
+## Phase 36 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add shared config ownership regression.
+- [x] Move shared config primitives to neutral core config.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 36 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_config.py::test_shared_config_primitives_are_neutral_not_runner_owned -q` -> failed as expected before implementation; `quant_strategies.core` did not exist.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_config.py::test_shared_config_primitives_are_neutral_not_runner_owned -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_config.py tests/test_runner_config.py tests/test_runner_engine_runner.py -q` -> 66 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 522 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no source-code correctness issues. One Important progress-log staleness finding was fixed before commit.
+- 2026-05-28: Committed Phase 36.
