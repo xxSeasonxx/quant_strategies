@@ -129,7 +129,7 @@ def test_execute_strategy_run_maps_strategy_import_failure(
     def fail_load_strategy(path: Path, *, repo_root: Path):
         raise StrategyLoadError("strategy file missing")
 
-    monkeypatch.setattr(execution, "load_strategy", fail_load_strategy)
+    monkeypatch.setattr(execution, "_load_strategy", fail_load_strategy)
 
     with pytest.raises(StrategyExecutionError) as error:
         execute_strategy_run(config, repo_root=tmp_path)
@@ -254,7 +254,7 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
 
     write_strategy(tmp_path, "def generate_decisions(rows, params): return []\n")
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_strategy", lambda path, repo_root: flat_decision_strategy)
+    monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: flat_decision_strategy)
     monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
 
     result = execute_strategy_run(config, repo_root=tmp_path)

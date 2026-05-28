@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from quant_strategies.decisions import load_decision_strategy
 from quant_strategies.runner.config import load_config
 from quant_strategies.runner.errors import ConfigError
-from quant_strategies.runner.strategy_loader import load_strategy
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -95,7 +95,7 @@ def test_committed_run_configs_use_decision_strategy_contract():
 
     for path in paths:
         config = load_config(path, repo_root=repo_root)
-        assert callable(load_strategy(config.strategy_path, repo_root=repo_root))
+        assert callable(load_decision_strategy(config.strategy_path, repo_root=repo_root))
 
 
 def test_readme_does_not_document_named_run_configs():

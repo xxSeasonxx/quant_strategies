@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 15: P2 deflation-not-evaluated disclosure.
+Phase 16: P3 retire runner strategy-loader wrapper.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-deflation-not-evaluated-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-deflation-not-evaluated.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-retire-runner-strategy-loader-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-runner-strategy-loader.md`
 
 ## Finding Triage
 
@@ -45,6 +45,8 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-deflation-not-eval
 | Empty-decision strategy is classified as `runner_failed` | Confirmed true, Phase 13 | Strategy tests treat `[]` as a normal no-op output; runner should classify it as completed zero-trade smoke evidence, not infrastructure failure. |
 | `quant_data` engine discovery has hidden local `.env` coupling | Confirmed true, Phase 14 | Remove runner-owned discovery of an upstream `quant-data/.env`; `quant_data` owns engine environment configuration. |
 | Search pressure is copied but no deflation is evaluated | Confirmed true, Phase 15 | Add explicit `deflation_not_evaluated` reason to search-pressure-backed `mechanical_review_candidate` outputs. |
+| `runner/strategy_loader.py` is a pass-through wrapper | Confirmed true, Phase 16 | Retire the wrapper and inline runner-specific exception translation at the execution boundary. |
+| `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
 
@@ -456,3 +458,29 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-deflation-not-eval
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual note: no artifact-level no-search-pressure `mechanical_review_candidate` test; policy-level regression preserves that core contract.
 - 2026-05-28: Committed Phase 15.
+
+## Phase 16 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Move loader tests to canonical decisions API.
+- [x] Inline runner exception translation.
+- [x] Retire wrapper imports and files.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 16 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py -q` -> 2 passed.
+- 2026-05-28: `rg "quant_strategies\\.runner\\.strategy_loader|from quant_strategies.runner.strategy_loader|execution\\.load_strategy|runner/strategy_loader\\.py" src tests docs README.md progress.md` -> no source/test matches; remaining matches were Phase 16 docs/progress.
+- 2026-05-28: `test ! -e src/quant_strategies/runner/strategy_loader.py && conda run -n quant pytest tests/test_decision_strategy_loader.py tests/test_runner_config.py tests/test_runner_execution.py tests/test_validation_runner.py::test_run_validation_records_strategy_import_failure_details -q` -> 27 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py -q` -> 31 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_strategy_loader.py tests/test_runner_config.py tests/test_runner_execution.py tests/test_validation_runner.py -q` -> 57 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 499 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: direct external imports of retired `quant_strategies.runner.strategy_loader` now fail by design.
+- 2026-05-28: Committed Phase 16.

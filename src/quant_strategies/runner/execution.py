@@ -6,14 +6,18 @@ from pathlib import Path
 from typing import Any, Literal
 
 from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
-from quant_strategies.decisions import validate_decision_output, validate_strategy_params
+from quant_strategies.decisions import (
+    DecisionStrategyLoadError,
+    load_decision_strategy,
+    validate_decision_output,
+    validate_strategy_params,
+)
 from quant_strategies.decisions.models import StrategyDecision
 from quant_strategies.runner.artifact_profiles import normalized_rows_sha256 as rows_sha256
 from quant_strategies.runner.artifacts import evidence_quality as assess_evidence_quality
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.data_loader import load_data
-from quant_strategies.runner.errors import RunnerError
-from quant_strategies.runner.strategy_loader import load_strategy
+from quant_strategies.runner.errors import RunnerError, StrategyLoadError
 
 
 ExecutionStage = Literal[
@@ -64,7 +68,7 @@ class StrategyExecutionError(RunnerError):
 
 def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecutionResult:
     try:
-        generate_decisions = load_strategy(config.strategy_path, repo_root=repo_root)
+        generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
     except RunnerError as exc:
         raise StrategyExecutionError("strategy_import", str(exc)) from exc
 
@@ -124,3 +128,10 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,
     )
+
+
+def _load_strategy(path: str | Path, *, repo_root: Path | None = None) -> GenerateDecisions:
+    try:
+        return load_decision_strategy(path, repo_root=repo_root)
+    except DecisionStrategyLoadError as exc:
+        raise StrategyLoadError(str(exc)) from exc

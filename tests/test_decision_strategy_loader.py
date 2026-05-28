@@ -5,12 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.runner.errors import StrategyLoadError
-from quant_strategies.runner.strategy_loader import load_strategy
+from quant_strategies.decisions import (
+    DecisionStrategyLoadError,
+    StrategyDecision,
+    load_decision_strategy,
+)
 
 
-def test_load_strategy_returns_generate_decisions_callable(tmp_path: Path):
+def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Path):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text(
@@ -26,7 +28,7 @@ def test_load_strategy_returns_generate_decisions_callable(tmp_path: Path):
         "    )]\n"
     )
 
-    generate_decisions = load_strategy(strategy, repo_root=tmp_path)
+    generate_decisions = load_decision_strategy(strategy, repo_root=tmp_path)
     rows = [{"symbol": "SPY", "timestamp": datetime(2024, 1, 1, tzinfo=timezone.utc)}]
 
     decisions = generate_decisions(rows, {})
@@ -36,10 +38,10 @@ def test_load_strategy_returns_generate_decisions_callable(tmp_path: Path):
     assert decisions[0].instrument.symbol == "SPY"
 
 
-def test_load_strategy_rejects_file_without_generate_decisions(tmp_path: Path):
+def test_load_decision_strategy_rejects_file_without_generate_decisions(tmp_path: Path):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text("def generate_signals(rows, params):\n    return []\n")
 
-    with pytest.raises(StrategyLoadError, match="generate_decisions"):
-        load_strategy(strategy, repo_root=tmp_path)
+    with pytest.raises(DecisionStrategyLoadError, match="generate_decisions"):
+        load_decision_strategy(strategy, repo_root=tmp_path)

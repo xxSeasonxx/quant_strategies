@@ -674,7 +674,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
     backend = RecordingBackend()
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_strategy",
+        "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: lambda loaded_rows, params: [decision("other")],
     )
 
@@ -694,7 +694,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
     backend = RecordingBackend()
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_strategy",
+        "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: lambda loaded_rows, params: "not decisions",
     )
 
@@ -1058,7 +1058,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
         raise RuntimeError("signal code failed")
 
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_strategy",
+        "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: raise_generation_error,
     )
 
@@ -1154,7 +1154,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
         raise SystemExit("signal code exited")
 
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_strategy",
+        "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: exit_generation,
     )
 
