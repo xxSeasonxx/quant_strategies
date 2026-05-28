@@ -9,10 +9,6 @@ class ValidationConfigError(ValidationError):
     """Raised when validation configuration cannot be parsed."""
 
 
-class ValidationStrategyLoadError(ValidationError):
-    """Raised when a validation strategy cannot be imported."""
-
-
 class ValidationDataError(ValidationError):
     """Raised when validation data or decision causality fails."""
 

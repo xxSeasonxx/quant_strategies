@@ -54,6 +54,8 @@ result = run_config("experiment.toml", repo_root=workspace)
 `quant_strategies.runner.run_config` and `quant_strategies.runner.RunResult`
 are the stable Python API for downstream execution. The package root does not
 re-export them; import from the `runner` subpackage deliberately.
+The shared strategy execution boundary used by runner and validation is
+internal; `quant_autoresearch` should not import it.
 
 The CLI equivalent is:
 
@@ -167,9 +169,11 @@ mode = "screen"
 artifact_profile = "summary"
 ```
 
-Use `artifact_profile = "summary"` for large search sweeps. Use
-`artifact_profile = "full"` for retained candidates when you need decision
-records, signal rows, engine request JSON, and full evidence artifacts.
+Use `artifact_profile = "summary"` for large search sweeps; it still writes
+`summary.json` plus `artifact_profile_summary.json`. Use
+`artifact_profile = "full"` for retained or debug runs when you need input
+rows, decision records, signal rows, engine request JSON, and full evidence
+artifacts.
 
 ## What autoresearch Reads
 

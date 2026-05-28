@@ -438,7 +438,6 @@ selection_rule = "manual shortlist"
     assert decision_payload["failure_details"][0]["stage"] == "strategy_import"
     assert decision_payload["failure_details"][0]["type"] == "StrategyLoadError"
     assert decision_payload["failure_details"][0]["type"] != "StrategyExecutionError"
-    assert decision_payload["failure_details"][0]["type"] != "ValidationStrategyLoadError"
     assert "missing.py" in decision_payload["failure_details"][0]["message"]
     assert decision_payload["overfit_controls"]["candidate_count"] == 20
     assert decision_payload["overfit_controls"]["trial_count"] == 5

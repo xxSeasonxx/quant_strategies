@@ -29,6 +29,11 @@ exit controls, metadata, and `ObservationRef` lineage for consumed rows.
 APIs, executes pure strategy functions, builds smoke-engine requests, and writes
 ignored artifacts under `results/`.
 
+Runner and validation share one internal execution boundary for strategy import,
+parameter validation, data loading, frozen strategy execution, decision
+validation, row hashing, and evidence-quality context. Runner remains the owner
+of smoke-engine signal conversion and engine artifacts.
+
 `engine` performs deterministic smoke screening and validation gates on supplied
 bars and decisions. Aggregate smoke totals live under
 `smoke_score.sum_weighted_trade_*`.
@@ -177,14 +182,15 @@ and fill-lag loss floors. Eligibility flags still remain false.
 
 Runner and validation artifacts are generated under ignored result directories.
 
-After config loading succeeds, runner result dirs include `config.toml`,
-`run_manifest.json`, `summary.json`, and `notes.md`; `strategy_snapshot.py` is
-copied when the strategy file is available. Data-loaded runs include
-`data_manifest.json`. Completed `artifact_profile = "summary"` runs also write
-`artifact_profile_summary.json`. Completed `artifact_profile = "full"` runs also
-write `strategy_input_rows.csv`, `strategy_input_rows.jsonl`,
-`decision_records.jsonl`, `signals.csv`, `engine_request.json`, and
-`evidence.json`.
+After config loading succeeds, runner result dirs include `config.toml`;
+`strategy_snapshot.py` is copied when the strategy file is available. Runs that
+reach data loading include `data_manifest.json` and, for
+`artifact_profile = "full"`, strategy input row artifacts even if decision
+generation later fails. Runner failures still write `run_manifest.json`,
+`summary.json`, and `notes.md`. Successful `artifact_profile = "summary"` runs
+also write `artifact_profile_summary.json`. Successful
+`artifact_profile = "full"` runs also write `decision_records.jsonl`,
+`signals.csv`, `engine_request.json`, and `evidence.json`.
 
 Validation artifacts include:
 

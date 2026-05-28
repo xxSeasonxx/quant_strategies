@@ -27,8 +27,7 @@ artifacts expose evidence-quality fields. Validation performs hidden-lookahead
 replay checks. Fatal validation setup failures include structured
 `failure_details`.
 
-The remaining work is mostly boundary tightening and evidence-context metadata,
-not a platform rewrite.
+The remaining work is evidence-context metadata, not a platform rewrite.
 
 ## Resolved Findings
 
@@ -66,6 +65,18 @@ but machine consumers can filter it explicitly.
 `validation_decision.json` and `robustness_matrix.json` now include structured
 `failure_details` for fatal setup failures caught by validation, including the
 stage, exception type, and message.
+
+### Resolved: Shared Runner/Validation Execution Boundary
+
+Runner and validation now share `runner.execution.execute_strategy_run` for
+strategy import, parameter validation, data loading, frozen strategy execution,
+decision validation, normalized row hashing, and evidence-quality context.
+Validation no longer imports or calls the runner data loader directly.
+Runner-only smoke-engine signal conversion remains in `runner.run_config`.
+
+The validation-specific strategy-loader wrapper was also retired. Active
+strategy loading now flows through the shared execution boundary instead of a
+parallel validation loader and validation-specific strategy-load error path.
 
 ## Addressed In This Cleanup
 
@@ -124,17 +135,6 @@ context, not active validation contracts or promotion evidence.
 
 ## Remaining Findings
 
-### Validation Still Imports Runner Data Loading Directly
-
-Validation still calls `runner.data_loader.load_data` through
-`config.to_run_config(...)`. This is acceptable for now because validation is a
-higher-level workflow over runner configs, but the boundary is still not as clean
-as it could be.
-
-Do not rewrite validation only for this. The next meaningful validation change
-should extract a small shared decision-generation/data-load boundary used by both
-runner and validation.
-
 ### Statistical Honesty Still Depends On Upstream Inputs
 
 Search-pressure metadata is now supported, but the repo still does not compute
@@ -174,8 +174,8 @@ on them.
 
 1. Keep validation TOML + `strategy.py` as the only active validation input.
 2. Keep `researched/` frozen as upstream archive context only.
-3. When validation is next changed materially, extract the shared runner/validation
-   execution boundary instead of growing `validation/__init__.py`.
+3. Keep the shared runner/validation execution boundary small and avoid growing
+   validation-specific loader or data-loading paths.
 4. Add heavier statistical controls only when upstream search-pressure data is
    complete enough to support them honestly.
 5. Push data freshness/backfill/source joining requirements upstream to
@@ -188,4 +188,5 @@ on them.
 - Confirmed active validation no longer has `research_manifest` logic.
 - Confirmed hidden-lookahead, evidence-quality, and failure-detail tests exist.
 - Confirmed public runner API is documented at `quant_strategies.runner`.
-- Confirmed remaining runner/validation internals before making the cleanup pass.
+- Confirmed runner and validation share the internal execution boundary.
+- Confirmed the validation-specific strategy-loader wrapper was removed.
