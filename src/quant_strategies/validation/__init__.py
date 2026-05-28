@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field as _field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
 
 from quant_strategies.boundary import frozen_params, frozen_rows
 from quant_strategies.decisions import (
@@ -13,7 +13,10 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.provenance import file_sha256
 from quant_strategies.runner.config import default_repo_root
-from quant_strategies.runner.execution import StrategyExecutionError, execute_strategy_run
+from quant_strategies.runner.execution import (
+    StrategyExecutionError,
+    execute_strategy_run,
+)
 from quant_strategies.validation.artifacts import (
     create_validation_result_dir,
     write_json_artifact,
@@ -41,6 +44,9 @@ from quant_strategies.validation.policy import (
 )
 from quant_strategies.validation.readiness import check_validation_readiness
 
+if _TYPE_CHECKING:
+    from quant_strategies.runner.execution import StrategyExecutionResult as _StrategyExecutionResult
+
 
 @dataclass(frozen=True)
 class ValidationRunResult:
@@ -56,6 +62,30 @@ class _ScenarioDecisionOutcome:
     decision_generation_status: DecisionGenerationStatus
     decisions_regenerated: bool
     failure: BackendRunResult | None = None
+
+
+@dataclass(frozen=True)
+class _ValidationContext:
+    repo_root: Path
+    path_base: Path
+    config: Any
+    config_path: Path
+    result_dir: Path
+    backend_name: str
+    selected_backend: ValidationBackend
+
+
+@dataclass
+class _ValidationState:
+    all_decisions: list[StrategyDecision] = _field(default_factory=list)
+    backend_results: list[ScenarioBackendRunResult] = _field(default_factory=list)
+    data_audits: list[dict[str, Any]] = _field(default_factory=list)
+    data_provenance: list[dict[str, Any]] = _field(default_factory=list)
+    failure_reasons: list[str] = _field(default_factory=list)
+    required_scenario_ids: list[str] = _field(default_factory=list)
+
+
+_MIN_VALIDATION_TRADES = 10
 
 
 def run_validation(
@@ -75,13 +105,7 @@ def run_validation(
         config_path=resolved_config_path,
     )
 
-    all_decisions: list[StrategyDecision] = []
-    backend_results: list[ScenarioBackendRunResult] = []
-    data_audits: list[dict[str, Any]] = []
-    data_provenance: list[dict[str, Any]] = []
-    min_trades = 10
-    failure_reasons: list[str] = []
-    required_scenario_ids: list[str] = []
+    state = _ValidationState()
     backend_name = config.backend
 
     try:
@@ -95,240 +119,29 @@ def run_validation(
             config=config,
             config_path=resolved_config_path,
             backend_name=backend_name,
-            decisions=all_decisions,
-            data_audits=data_audits,
-            data_provenance=data_provenance,
-            backend_results=backend_results,
+            decisions=state.all_decisions,
+            data_audits=state.data_audits,
+            data_provenance=state.data_provenance,
+            backend_results=state.backend_results,
             reason="backend_selection_failed",
             failure_details=[_failure_detail("backend_selection", exc)],
         )
 
+    context = _ValidationContext(
+        repo_root=root,
+        path_base=path_base,
+        config=config,
+        config_path=resolved_config_path,
+        result_dir=result_dir,
+        backend_name=backend_name,
+        selected_backend=selected_backend,
+    )
     for window in config.windows:
-        run_config = config.to_run_config(window, results_dir=result_dir / "runner_smoke" / window.id)
-        try:
-            execution = execute_strategy_run(run_config, repo_root=path_base)
-        except StrategyExecutionError as exc:
-            if exc.stage == "strategy_import":
-                return _failure_result(
-                    result_dir=result_dir,
-                    repo_root=root,
-                    path_base=path_base,
-                    config=config,
-                    config_path=resolved_config_path,
-                    backend_name=backend_name,
-                    decisions=all_decisions,
-                    data_audits=data_audits,
-                    data_provenance=data_provenance,
-                    backend_results=backend_results,
-                    reason="strategy_import_failed",
-                    failure_details=[_execution_failure_detail("strategy_import", exc)],
-                )
-            if exc.stage == "param_validation":
-                data_audits.append(
-                    _failed_data_audit(
-                        "config",
-                        row_count=0,
-                        decision_count=0,
-                        violations=(f"param_validation_failed: {_execution_failure_message(exc)}",),
-                    )
-                )
-                return _failure_result(
-                    result_dir=result_dir,
-                    repo_root=root,
-                    path_base=path_base,
-                    config=config,
-                    config_path=resolved_config_path,
-                    backend_name=backend_name,
-                    decisions=all_decisions,
-                    data_audits=data_audits,
-                    data_provenance=data_provenance,
-                    backend_results=backend_results,
-                    reason="param_validation_failed",
-                    failure_details=[_execution_failure_detail("param_validation", exc)],
-                )
-            if exc.stage == "data_load":
-                data_provenance.append(
-                    _data_provenance(
-                        window.id,
-                        run_config,
-                        status="failed",
-                        rows=None,
-                        message=str(exc),
-                    )
-                )
-                data_audits.append(
-                    _failed_data_audit(
-                        window.id,
-                        row_count=0,
-                        decision_count=0,
-                        violations=(f"data_load_failed: {exc}",),
-                    )
-                )
-                continue
-            if exc.stage == "decision_generation":
-                if exc.loaded_rows is not None:
-                    data_provenance.append(
-                        _data_provenance(
-                            window.id,
-                            run_config,
-                            status="loaded",
-                            rows=exc.loaded_rows,
-                        )
-                    )
-                if exc.violations:
-                    data_audits.append(
-                        _failed_data_audit(
-                            window.id,
-                            row_count=0 if exc.loaded_rows is None else len(exc.loaded_rows),
-                            decision_count=exc.decision_count or 0,
-                            violations=exc.violations,
-                        )
-                    )
-                    continue
-                failure_reasons.append("strategy_generation_failed")
-                data_audits.append(
-                    _failed_data_audit(
-                        window.id,
-                        row_count=0 if exc.loaded_rows is None else len(exc.loaded_rows),
-                        decision_count=exc.decision_count or 0,
-                        violations=(f"strategy_generation_failed: {_execution_failure_message(exc)}",),
-                    )
-                )
-                continue
-            raise
-        data_provenance.append(
-            _data_provenance(window.id, run_config, status="loaded", rows=execution.loaded_rows)
-        )
-        strategy_rows = frozen_rows(execution.loaded_rows)
-        decisions = execution.decisions
-        base_params = execution.validated_params
-        generate_decisions = execution.generate_decisions
-        all_decisions.extend(decisions)
+        terminal_result = _run_validation_window(context, state, window)
+        if terminal_result is not None:
+            return terminal_result
 
-        try:
-            audit = audit_decision_rows(strategy_rows, decisions)
-        except Exception as exc:
-            failure_reasons.append("data_audit_failed")
-            data_audits.append(
-                _failed_data_audit(
-                    window.id,
-                    row_count=len(execution.loaded_rows),
-                    decision_count=len(decisions),
-                    violations=(f"data_audit_failed: {exc}",),
-                )
-            )
-            continue
-        audit_payload = {"window_id": window.id, **audit.model_dump(mode="json")}
-        if audit.passed:
-            lookahead = check_hidden_lookahead(
-                generate_decisions,
-                rows=execution.loaded_rows,
-                params=base_params,
-                baseline_decisions=decisions,
-                strategy_id=config.strategy_id,
-            )
-            if not lookahead.passed:
-                reason = (
-                    "hidden_lookahead_check_failed"
-                    if any(
-                        item.startswith("hidden_lookahead_check_failed")
-                        for item in lookahead.violations
-                    )
-                    else "hidden_lookahead_detected"
-                )
-                failure_reasons.append(reason)
-                audit_payload["passed"] = False
-                audit_payload["violations"] = list(audit.violations) + list(lookahead.violations)
-
-        if audit_payload["passed"]:
-            readiness_violations = check_validation_readiness(decisions, config.readiness)
-            if readiness_violations:
-                failure_reasons.append("validation_readiness_failed")
-                audit_payload["passed"] = False
-                audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
-
-        data_audits.append(audit_payload)
-        if audit_payload["passed"]:
-            scenarios = expand_validation_matrix(
-                window_id=window.id,
-                base_params=_plain_mapping(base_params),
-                base_costs=_plain_mapping(config.cost_model),
-                base_fill=_plain_mapping(config.fill_model),
-            )
-            required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
-            for scenario in scenarios:
-                scenario_config = _scenario_config(
-                    config=config,
-                    scenario=scenario,
-                    base_params=base_params,
-                    data=run_config.data,
-                )
-                decision_outcome = _scenario_decision_outcome(
-                    scenario=scenario,
-                    generate_decisions=generate_decisions,
-                    base_decisions=decisions,
-                    rows=execution.loaded_rows,
-                    strategy_id=config.strategy_id,
-                    scenario_config=scenario_config,
-                    readiness=config.readiness,
-                    backend_name=backend_name,
-                )
-                backend_result = decision_outcome.failure
-                decision_records_path = None
-                decision_records_sha256 = None
-                if backend_result is None:
-                    decision_records_path, decision_records_sha256 = _write_scenario_decision_records(
-                        result_dir=result_dir,
-                        scenario_id=scenario.id,
-                        decisions=decision_outcome.decisions,
-                    )
-                    try:
-                        raw_backend_result = selected_backend.run(
-                            decisions=list(decision_outcome.decisions),
-                            rows=frozen_rows(execution.loaded_rows),
-                            config=scenario_config,
-                        )
-                    except Exception as exc:
-                        backend_result = _failed_backend_result(
-                            backend_name,
-                            f"backend_exception: {exc}",
-                        )
-                    else:
-                        try:
-                            backend_result = BackendRunResult.model_validate(raw_backend_result)
-                        except Exception as exc:
-                            backend_result = _failed_backend_result(
-                                backend_name,
-                                f"invalid_backend_result: {exc}",
-                            )
-                backend_results.append(
-                    ScenarioBackendRunResult(
-                        window_id=window.id,
-                        scenario_id=scenario.id,
-                        required=scenario.required,
-                        result=backend_result,
-                        scenario_kind=scenario.kind,
-                        decisions_regenerated=decision_outcome.decisions_regenerated,
-                        diagnostic_only=not scenario.required,
-                        decision_generation_status=decision_outcome.decision_generation_status,
-                        decision_count=len(decision_outcome.decisions),
-                        decision_records_path=decision_records_path,
-                        decision_records_sha256=decision_records_sha256,
-                    )
-                )
-
-    data_passed = all(audit["passed"] for audit in data_audits)
-    if failure_reasons:
-        decision = _hard_no_decision(failure_reasons, search_pressure=config.search_pressure)
-    else:
-        decision = classify_validation(
-            data_passed=data_passed,
-            backend_results=backend_results,
-            min_trades=min_trades,
-            required_scenario_ids=tuple(required_scenario_ids),
-            paper_readiness=config.paper_readiness,
-            search_pressure=config.search_pressure,
-        )
+    decision = _classify_validation_state(context, state)
     _write_validation_artifacts(
         result_dir=result_dir,
         repo_root=root,
@@ -336,14 +149,299 @@ def run_validation(
         config=config,
         config_path=resolved_config_path,
         backend_name=backend_name,
-        decisions=all_decisions,
-        data_audits=data_audits,
-        data_provenance=data_provenance,
-        backend_results=backend_results,
+        decisions=state.all_decisions,
+        data_audits=state.data_audits,
+        data_provenance=state.data_provenance,
+        backend_results=state.backend_results,
         decision=decision,
         failure_details=[],
     )
     return _validation_result(result_dir, decision)
+
+
+def _run_validation_window(
+    context: _ValidationContext,
+    state: _ValidationState,
+    window: Any,
+) -> ValidationRunResult | None:
+    run_config = context.config.to_run_config(
+        window,
+        results_dir=context.result_dir / "runner_smoke" / window.id,
+    )
+    try:
+        execution = execute_strategy_run(run_config, repo_root=context.path_base)
+    except StrategyExecutionError as exc:
+        return _handle_window_execution_error(context, state, window, run_config, exc)
+
+    state.data_provenance.append(
+        _data_provenance(window.id, run_config, status="loaded", rows=execution.loaded_rows)
+    )
+    state.all_decisions.extend(execution.decisions)
+    audit_payload = _audit_window_execution(context, state, window, execution)
+    state.data_audits.append(audit_payload)
+    if audit_payload["passed"]:
+        _run_window_scenarios(context, state, window, run_config, execution)
+    return None
+
+
+def _handle_window_execution_error(
+    context: _ValidationContext,
+    state: _ValidationState,
+    window: Any,
+    run_config: Any,
+    exc: StrategyExecutionError,
+) -> ValidationRunResult | None:
+    if exc.stage == "strategy_import":
+        return _failure_result_from_state(
+            context,
+            state,
+            reason="strategy_import_failed",
+            failure_details=[_execution_failure_detail("strategy_import", exc)],
+        )
+    if exc.stage == "param_validation":
+        state.data_audits.append(
+            _failed_data_audit(
+                "config",
+                row_count=0,
+                decision_count=0,
+                violations=(f"param_validation_failed: {_execution_failure_message(exc)}",),
+            )
+        )
+        return _failure_result_from_state(
+            context,
+            state,
+            reason="param_validation_failed",
+            failure_details=[_execution_failure_detail("param_validation", exc)],
+        )
+    if exc.stage == "data_load":
+        state.data_provenance.append(
+            _data_provenance(
+                window.id,
+                run_config,
+                status="failed",
+                rows=None,
+                message=str(exc),
+            )
+        )
+        state.data_audits.append(
+            _failed_data_audit(
+                window.id,
+                row_count=0,
+                decision_count=0,
+                violations=(f"data_load_failed: {exc}",),
+            )
+        )
+        return None
+    if exc.stage == "decision_generation":
+        if exc.loaded_rows is not None:
+            state.data_provenance.append(
+                _data_provenance(
+                    window.id,
+                    run_config,
+                    status="loaded",
+                    rows=exc.loaded_rows,
+                )
+            )
+        if exc.violations:
+            state.data_audits.append(
+                _failed_data_audit(
+                    window.id,
+                    row_count=0 if exc.loaded_rows is None else len(exc.loaded_rows),
+                    decision_count=exc.decision_count or 0,
+                    violations=exc.violations,
+                )
+            )
+            return None
+        state.failure_reasons.append("strategy_generation_failed")
+        state.data_audits.append(
+            _failed_data_audit(
+                window.id,
+                row_count=0 if exc.loaded_rows is None else len(exc.loaded_rows),
+                decision_count=exc.decision_count or 0,
+                violations=(f"strategy_generation_failed: {_execution_failure_message(exc)}",),
+            )
+        )
+        return None
+    raise exc
+
+
+def _audit_window_execution(
+    context: _ValidationContext,
+    state: _ValidationState,
+    window: Any,
+    execution: _StrategyExecutionResult,
+) -> dict[str, Any]:
+    strategy_rows = frozen_rows(execution.loaded_rows)
+    decisions = execution.decisions
+    try:
+        audit = audit_decision_rows(strategy_rows, decisions)
+    except Exception as exc:
+        state.failure_reasons.append("data_audit_failed")
+        return _failed_data_audit(
+            window.id,
+            row_count=len(execution.loaded_rows),
+            decision_count=len(decisions),
+            violations=(f"data_audit_failed: {exc}",),
+        )
+
+    audit_payload = {"window_id": window.id, **audit.model_dump(mode="json")}
+    if audit.passed:
+        lookahead = check_hidden_lookahead(
+            execution.generate_decisions,
+            rows=execution.loaded_rows,
+            params=execution.validated_params,
+            baseline_decisions=decisions,
+            strategy_id=context.config.strategy_id,
+        )
+        if not lookahead.passed:
+            reason = (
+                "hidden_lookahead_check_failed"
+                if any(
+                    item.startswith("hidden_lookahead_check_failed")
+                    for item in lookahead.violations
+                )
+                else "hidden_lookahead_detected"
+            )
+            state.failure_reasons.append(reason)
+            audit_payload["passed"] = False
+            audit_payload["violations"] = list(audit.violations) + list(lookahead.violations)
+
+    if audit_payload["passed"]:
+        readiness_violations = check_validation_readiness(decisions, context.config.readiness)
+        if readiness_violations:
+            state.failure_reasons.append("validation_readiness_failed")
+            audit_payload["passed"] = False
+            audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
+    return audit_payload
+
+
+def _run_window_scenarios(
+    context: _ValidationContext,
+    state: _ValidationState,
+    window: Any,
+    run_config: Any,
+    execution: _StrategyExecutionResult,
+) -> None:
+    scenarios = expand_validation_matrix(
+        window_id=window.id,
+        base_params=_plain_mapping(execution.validated_params),
+        base_costs=_plain_mapping(context.config.cost_model),
+        base_fill=_plain_mapping(context.config.fill_model),
+    )
+    state.required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
+    for scenario in scenarios:
+        state.backend_results.append(
+            _run_scenario_backend(context, window, run_config, execution, scenario)
+        )
+
+
+def _run_scenario_backend(
+    context: _ValidationContext,
+    window: Any,
+    run_config: Any,
+    execution: _StrategyExecutionResult,
+    scenario: MatrixScenario,
+) -> ScenarioBackendRunResult:
+    scenario_config = _scenario_config(
+        config=context.config,
+        scenario=scenario,
+        base_params=execution.validated_params,
+        data=run_config.data,
+    )
+    decision_outcome = _scenario_decision_outcome(
+        scenario=scenario,
+        generate_decisions=execution.generate_decisions,
+        base_decisions=execution.decisions,
+        rows=execution.loaded_rows,
+        strategy_id=context.config.strategy_id,
+        scenario_config=scenario_config,
+        readiness=context.config.readiness,
+        backend_name=context.backend_name,
+    )
+    backend_result = decision_outcome.failure
+    decision_records_path = None
+    decision_records_sha256 = None
+    if backend_result is None:
+        decision_records_path, decision_records_sha256 = _write_scenario_decision_records(
+            result_dir=context.result_dir,
+            scenario_id=scenario.id,
+            decisions=decision_outcome.decisions,
+        )
+        try:
+            raw_backend_result = context.selected_backend.run(
+                decisions=list(decision_outcome.decisions),
+                rows=frozen_rows(execution.loaded_rows),
+                config=scenario_config,
+            )
+        except Exception as exc:
+            backend_result = _failed_backend_result(
+                context.backend_name,
+                f"backend_exception: {exc}",
+            )
+        else:
+            try:
+                backend_result = BackendRunResult.model_validate(raw_backend_result)
+            except Exception as exc:
+                backend_result = _failed_backend_result(
+                    context.backend_name,
+                    f"invalid_backend_result: {exc}",
+                )
+    return ScenarioBackendRunResult(
+        window_id=window.id,
+        scenario_id=scenario.id,
+        required=scenario.required,
+        result=backend_result,
+        scenario_kind=scenario.kind,
+        decisions_regenerated=decision_outcome.decisions_regenerated,
+        diagnostic_only=not scenario.required,
+        decision_generation_status=decision_outcome.decision_generation_status,
+        decision_count=len(decision_outcome.decisions),
+        decision_records_path=decision_records_path,
+        decision_records_sha256=decision_records_sha256,
+    )
+
+
+def _classify_validation_state(
+    context: _ValidationContext,
+    state: _ValidationState,
+) -> ValidationPolicyDecision:
+    data_passed = all(audit["passed"] for audit in state.data_audits)
+    if state.failure_reasons:
+        return _hard_no_decision(
+            state.failure_reasons,
+            search_pressure=context.config.search_pressure,
+        )
+    return classify_validation(
+        data_passed=data_passed,
+        backend_results=state.backend_results,
+        min_trades=_MIN_VALIDATION_TRADES,
+        required_scenario_ids=tuple(state.required_scenario_ids),
+        paper_readiness=context.config.paper_readiness,
+        search_pressure=context.config.search_pressure,
+    )
+
+
+def _failure_result_from_state(
+    context: _ValidationContext,
+    state: _ValidationState,
+    *,
+    reason: str,
+    failure_details: list[dict[str, str]],
+) -> ValidationRunResult:
+    return _failure_result(
+        result_dir=context.result_dir,
+        repo_root=context.repo_root,
+        path_base=context.path_base,
+        config=context.config,
+        config_path=context.config_path,
+        backend_name=context.backend_name,
+        decisions=state.all_decisions,
+        data_audits=state.data_audits,
+        data_provenance=state.data_provenance,
+        backend_results=state.backend_results,
+        reason=reason,
+        failure_details=failure_details,
+    )
 
 
 def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> ValidationRunResult:

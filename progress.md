@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 3: P1 metric semantics and artifact trust.
+Phase 4: P1 validation orchestrator split.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-metric-trust-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-metric-trust.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-validation-orchestrator-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-validation-orchestrator.md`
 
 ## Finding Triage
 
@@ -28,7 +28,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-metric-trust.md`
 | Smoke aggregate `return` names overstate units | Confirmed true, Phase 1 | Rename to activity-sum names. |
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
 | Engine parallel ontology | Confirmed true, deferred | Larger refactor; not needed to fix P0 labels/causality. |
-| Validation orchestrator god-function | Confirmed true, deferred | Split after semantic blockers. |
+| Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
 | Public API re-export mismatch | Partly true, deferred | `AGENTS.md` chooses `quant_strategies.runner.run_config`; treat as PRD/docs reconciliation, not immediate code change. |
 | Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
@@ -114,9 +114,36 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-metric-trust.md`
 - 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
-- 2026-05-28: Follow-up code review found the three prior findings closed and no new Critical/Important Phase 3 issues.
 - 2026-05-28: Code review found three valid issues: semantics keys drifted from `comparability`/`tolerance`, the deterministic artifact test did not prove a successful full-profile run, and the Phase 3 plan checklist was stale. Fixed all three.
 - 2026-05-28: `conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 47 passed.
 - 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found the three prior findings closed and no new Critical/Important Phase 3 issues.
+
+## Phase 4 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add private context/state helpers.
+- [x] Extract window execution handling.
+- [x] Extract audit/readiness/scenario stages.
+- [x] Run focused validation tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 4 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_validation_artifacts.py tests/test_validation_lookahead.py tests/test_validation_capabilities.py -q` -> 84 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found accidental public-name drift (`StrategyExecutionResult`, `field`, `MIN_VALIDATION_TRADES`) and stale Phase 4 plan/progress entries. Fixed by using private aliases/type-check-only imports, renaming the constant, moving Phase 3 verification entries, and marking the plan steps complete.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_backends_and_policy.py tests/test_validation_artifacts.py tests/test_validation_lookahead.py tests/test_validation_capabilities.py -q` -> 84 passed.
+- 2026-05-28: `conda run -n quant python -c 'import quant_strategies.validation as v; leaked=[name for name in ("StrategyExecutionResult","field","MIN_VALIDATION_TRADES","TYPE_CHECKING") if hasattr(v,name)]; assert not leaked, leaked; print("public leak check passed")'` -> passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 486 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found the public-name finding closed and no new Critical/Important Phase 4 issues. One remaining minor progress-log placement issue was fixed before commit.
