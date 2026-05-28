@@ -38,6 +38,9 @@ backend paths reject them explicitly instead of approximating their PnL.
 `runner` loads TOML configs, fetches data through public `quant_data` loader
 APIs, executes pure strategy functions, builds smoke-engine requests, and writes
 ignored artifacts under `results/`.
+Database engine creation and environment configuration are owned by
+`quant_data`; the runner does not discover upstream `.env` files. Tests and
+specialized callers can inject an explicit engine at the data-loader boundary.
 
 Runner and validation share one internal execution boundary for strategy import,
 parameter validation, data loading, frozen strategy execution, decision

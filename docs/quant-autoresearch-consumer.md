@@ -40,6 +40,10 @@ Install this project into the same environment that runs `quant_autoresearch`:
 conda run -n quant python -m pip install -e /path/to/quant_strategies
 ```
 
+Configure `quant_data` in that environment before running candidates. The
+runner delegates database engine creation to `quant_data` and does not discover
+or load an upstream `quant-data/.env` file on its behalf.
+
 Then call the runner with the candidate workspace as `repo_root`:
 
 ```python

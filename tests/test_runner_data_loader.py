@@ -190,27 +190,28 @@ def test_strict_loader_failure_is_translated(tmp_path: Path, monkeypatch: pytest
         data_loader.load_data(config, engine=object())
 
 
-def test_default_engine_uses_quant_data_repo_env_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_default_engine_uses_public_quant_data_engine_factory_without_env_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     quant_data_root = tmp_path / "quant-data"
     package_dir = quant_data_root / "src" / "quant_data"
     package_dir.mkdir(parents=True)
-    env_file = quant_data_root / ".env"
-    env_file.write_text("TIMESCALE_PASSWORD=secret\n")
-    captured: list[object] = []
+    (quant_data_root / ".env").write_text("TIMESCALE_PASSWORD=secret\n")
+    captured: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
-    class FakeDataConfig:
+    class ForbiddenDataConfig:
         def __init__(self, **kwargs: object) -> None:
-            self.kwargs = kwargs
+            raise AssertionError(f"runner must not construct quant_data DataConfig: {kwargs}")
 
-    def fake_get_engine(config=None):
-        captured.append(config)
+    def fake_get_engine(*args: object, **kwargs: object):
+        captured.append((args, kwargs))
         return object()
 
     monkeypatch.setattr(data_loader, "loader", SimpleNamespace(__file__=str(package_dir / "loader.py")))
-    monkeypatch.setattr(data_loader, "DataConfig", FakeDataConfig)
+    monkeypatch.setattr(data_loader, "DataConfig", ForbiddenDataConfig, raising=False)
     monkeypatch.setattr(data_loader, "get_engine", fake_get_engine)
 
     data_loader._default_engine()
 
-    assert captured
-    assert captured[0].kwargs == {"_env_file": env_file}
+    assert captured == [((), {})]

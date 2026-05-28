@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 13: P2 empty-decision screening.
+Phase 14: P3 `quant_data` environment boundary.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-empty-decision-screening-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-empty-decision-screening.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-quant-data-env-boundary-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-quant-data-env-boundary.md`
 
 ## Finding Triage
 
@@ -43,6 +43,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-empty-decision-scr
 | Duplicate `(symbol, decision_time)` decisions can double-count smoke PnL | Confirmed true, Phase 11 | Reject duplicate execution keys at shared decision-output validation. |
 | Typed `RunResult` lacks evidence-quality fields | Confirmed true, Phase 12 | Expose `data_availability_status`, `availability_coverage`, `row_contract`, `causality_verified`, and `evidence_quality_warnings` on the stable runner result. |
 | Empty-decision strategy is classified as `runner_failed` | Confirmed true, Phase 13 | Strategy tests treat `[]` as a normal no-op output; runner should classify it as completed zero-trade smoke evidence, not infrastructure failure. |
+| `quant_data` engine discovery has hidden local `.env` coupling | Confirmed true, Phase 14 | Remove runner-owned discovery of an upstream `quant-data/.env`; `quant_data` owns engine environment configuration. |
 
 ## Phase 1 Checklist
 
@@ -405,3 +406,28 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-empty-decision-scr
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Follow-up code review found no blocking issues. The only finding was stale progress counts; fixed before commit.
 - 2026-05-28: Committed Phase 13.
+
+## Phase 14 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add `quant_data` environment-boundary regression.
+- [x] Remove hidden `.env` discovery.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 14 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py::test_default_engine_uses_public_quant_data_engine_factory_without_env_discovery -q` -> failed as expected before implementation; `_default_engine()` constructed `DataConfig(_env_file=...)`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py::test_default_engine_uses_public_quant_data_engine_factory_without_env_discovery tests/test_runner_data_loader.py::test_importing_data_loader_does_not_import_quant_data -q` -> 2 passed.
+- 2026-05-28: `rg "_env_file|_quant_data_env_file|_data_config_type|quant_data\\.config|DataConfig" src/quant_strategies/runner/data_loader.py tests/test_runner_data_loader.py` -> no runner source matches; remaining matches are the regression's forbidden `DataConfig` sentinel.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_data_loader.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q` -> 53 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 499 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk is the intentional contract shift that `quant_data` or explicit `engine=` injection owns environment configuration.
+- 2026-05-28: Committed Phase 14.
