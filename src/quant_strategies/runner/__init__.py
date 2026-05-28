@@ -221,8 +221,8 @@ def _check_causality(
     try:
         return check_hidden_lookahead(
             execution.generate_decisions,
-            rows=execution.loaded_rows,
-            params=execution.validated_params,
+            rows=execution.frozen_rows,
+            params=execution.frozen_params,
             baseline_decisions=execution.decisions,
             strategy_id=config.strategy_id,
         )

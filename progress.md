@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 8: P2 lazy `quant_data` imports.
+Phase 9: P1 single freezing idiom and freeze-once execution inputs.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-lazy-quant-data-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lazy-quant-data.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-single-freezing-idiom-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-single-freezing-idiom.md`
 
 ## Finding Triage
 
@@ -38,6 +38,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lazy-quant-data.md
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
 | `quant_data` eager import slows runner cold import | Confirmed true, Phase 8 | Lazy-import `quant_data` only when loading data or building a default engine. |
+| Duplicate freezing idioms and repeated row deepcopy | Confirmed true, Phase 9 | Use `boundary` as the single recursive freeze helper and reuse frozen execution inputs. |
 
 ## Phase 1 Checklist
 
@@ -249,3 +250,42 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-lazy-quant-data.md
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Follow-up code review confirmed the partial-monkeypatch fallback finding is closed and found no blocking issues. Its only new note claimed the Phase 8 plan Step 3 was unchecked; local inspection showed Step 3 is checked, so this was treated as stale-read noise.
+
+## Phase 9 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add boundary idempotence tests.
+- [x] Make boundary freezing idempotent.
+- [x] Freeze execution inputs once.
+- [x] Reuse frozen execution inputs in runner and validation.
+- [x] Collapse validation matrix freezing onto `boundary`.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 9 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py -q` -> failed as expected before implementation; idempotence regression failed under the old deep-copy implementation.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_validation_matrix.py tests/test_runner_api_cli.py::test_runner_blocks_strategy_row_mutation tests/test_runner_api_cli.py::test_runner_blocks_strategy_param_mutation tests/test_validation_runner.py::test_run_validation_blocks_strategy_row_mutation tests/test_validation_runner.py::test_run_validation_blocks_strategy_param_mutation -q` -> 16 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_runner_api_cli.py tests/test_validation_runner.py tests/test_validation_matrix.py -q` -> initially found one expected assertion drift: validation now reuses one frozen row tuple per window across scenarios. Updated the test to assert freeze-once reuse.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_runner_api_cli.py tests/test_validation_runner.py tests/test_validation_matrix.py -q` -> 84 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 490 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found one valid issue: treating any external `MappingProxyType` as already frozen could leak later mutations from its backing dict. Fixed by replacing the raw mapping-proxy alias with boundary-owned `FrozenMapping` and copying external proxies before freezing.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_validation_matrix.py tests/test_runner_api_cli.py::test_runner_blocks_strategy_row_mutation tests/test_runner_api_cli.py::test_runner_blocks_strategy_param_mutation tests/test_validation_runner.py::test_run_validation_blocks_strategy_row_mutation tests/test_validation_runner.py::test_run_validation_blocks_strategy_param_mutation -q` -> 17 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_runner_api_cli.py tests/test_validation_runner.py tests/test_validation_matrix.py -q` -> 85 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 491 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Follow-up code review found one valid issue: `FrozenMapping._data` could be reassigned after construction. Fixed by making `FrozenMapping` attribute-immutable and adding a regression test.
+- 2026-05-28: `conda run -n quant pytest tests/test_boundary.py tests/test_runner_api_cli.py tests/test_validation_runner.py tests/test_validation_matrix.py -q` -> 86 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 492 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Final follow-up code review confirmed the `_data` reassignment finding is closed and found no blocking issues. Residual risk is only Python introspection bypass via `object.__setattr__`, which is outside normal consumer behavior.

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from quant_strategies.boundary import frozen_params, frozen_rows
+from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
 from quant_strategies.decisions import validate_decision_output, validate_strategy_params
 from quant_strategies.decisions.models import StrategyDecision
 from quant_strategies.runner.artifact_profiles import normalized_rows_sha256 as rows_sha256
@@ -34,6 +34,8 @@ class StrategyExecutionResult:
     generate_decisions: GenerateDecisions
     validated_params: dict[str, Any]
     loaded_rows: list[dict[str, Any]]
+    frozen_rows: tuple[FrozenMapping, ...]
+    frozen_params: FrozenMapping
     decisions: list[StrategyDecision]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
@@ -82,10 +84,12 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
     rows = loaded.rows
     row_hash = rows_sha256(rows)
     evidence = assess_evidence_quality(config, rows)
+    strategy_rows = frozen_rows(rows)
+    strategy_params = frozen_params(validated_params)
 
     decision_count = 0
     try:
-        output = generate_decisions(frozen_rows(rows), frozen_params(validated_params))
+        output = generate_decisions(strategy_rows, strategy_params)
         decisions, violations = validate_decision_output(output, strategy_id=config.strategy_id)
         decision_count = len(decisions)
         if violations:
@@ -114,6 +118,8 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         generate_decisions=generate_decisions,
         validated_params=validated_params,
         loaded_rows=rows,
+        frozen_rows=strategy_rows,
+        frozen_params=strategy_params,
         decisions=decisions,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,

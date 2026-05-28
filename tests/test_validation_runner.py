@@ -842,8 +842,9 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
     }
     assert loaded_row_ids[0] not in h1_row_ids
     assert loaded_row_ids[1] not in h2_row_ids
-    assert len(h1_row_ids) == 6
-    assert len(h2_row_ids) == 6
+    assert len(h1_row_ids) == 1
+    assert len(h2_row_ids) == 1
+    assert h1_row_ids.isdisjoint(h2_row_ids)
     first_rows = backend.rows_by_scenario[0][1]
     with pytest.raises(TypeError):
         first_rows[0]["close"] = 999.0

@@ -273,7 +273,7 @@ def _audit_window_execution(
     window: Any,
     execution: _StrategyExecutionResult,
 ) -> dict[str, Any]:
-    strategy_rows = frozen_rows(execution.loaded_rows)
+    strategy_rows = execution.frozen_rows
     decisions = execution.decisions
     try:
         audit = audit_decision_rows(strategy_rows, decisions)
@@ -290,8 +290,8 @@ def _audit_window_execution(
     if audit.passed:
         lookahead = check_hidden_lookahead(
             execution.generate_decisions,
-            rows=execution.loaded_rows,
-            params=execution.validated_params,
+            rows=execution.frozen_rows,
+            params=execution.frozen_params,
             baseline_decisions=decisions,
             strategy_id=context.config.strategy_id,
         )
@@ -354,7 +354,7 @@ def _run_scenario_backend(
         scenario=scenario,
         generate_decisions=execution.generate_decisions,
         base_decisions=execution.decisions,
-        rows=execution.loaded_rows,
+        rows=execution.frozen_rows,
         strategy_id=context.config.strategy_id,
         scenario_config=scenario_config,
         readiness=context.config.readiness,
@@ -372,7 +372,7 @@ def _run_scenario_backend(
         try:
             raw_backend_result = context.selected_backend.run(
                 decisions=list(decision_outcome.decisions),
-                rows=frozen_rows(execution.loaded_rows),
+                rows=execution.frozen_rows,
                 config=scenario_config,
             )
         except Exception as exc:
