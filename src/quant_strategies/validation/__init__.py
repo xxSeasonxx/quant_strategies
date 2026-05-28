@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field as _field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
 
+from quant_strategies.causality import ReplayBoundary, check_hidden_lookahead
+from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
 from quant_strategies.runner.artifact_profiles import (
@@ -34,7 +37,7 @@ from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
-from quant_strategies.causality import check_hidden_lookahead
+from quant_strategies.validation.events import ValidationEventSink, ValidationStageEmitter
 from quant_strategies.validation.manifest import write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
 from quant_strategies.validation.policy import (
@@ -74,6 +77,9 @@ class _ValidationContext:
     result_dir: Path
     backend_name: str
     selected_backend: ValidationBackend
+    row_contract_mode: RowContractMode
+    strict_replay: bool
+    event_emitter: ValidationStageEmitter
 
 
 @dataclass
@@ -90,29 +96,46 @@ class _ValidationState:
 _MIN_VALIDATION_TRADES = 10
 
 
+def _validation_row_contract_mode(config: Any) -> RowContractMode:
+    paper_readiness = getattr(config, "paper_readiness", None)
+    if bool(getattr(paper_readiness, "enabled", False)):
+        return RowContractMode.RETAINED
+    return RowContractMode.VALIDATION
+
+
 def run_validation(
     config_path: str | Path,
     *,
     repo_root: Path | None = None,
     backend: ValidationBackend | None = None,
+    event_sink: ValidationEventSink | None = None,
 ) -> ValidationRunResult:
-    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
-    resolved_config_path = resolve_validation_config_path(config_path, repo_root=repo_root)
-    config = load_validation_config(resolved_config_path)
-    path_base = config.base_dir
-    result_dir = create_validation_result_dir(config.output.results_dir, config.strategy_id)
-    _write_static_validation_artifacts(
-        result_dir=result_dir,
-        config=config,
-        config_path=resolved_config_path,
-    )
+    events = ValidationStageEmitter(event_sink)
+    with events.stage(
+        "config_load",
+        config_path=str(config_path),
+        repo_root=str(repo_root) if repo_root is not None else None,
+    ):
+        root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+        resolved_config_path = resolve_validation_config_path(config_path, repo_root=repo_root)
+        config = load_validation_config(resolved_config_path)
+        path_base = config.base_dir
+
+    with events.stage("artifact_initialization", strategy_id=config.strategy_id):
+        result_dir = create_validation_result_dir(config.output.results_dir, config.strategy_id)
+        _write_static_validation_artifacts(
+            result_dir=result_dir,
+            config=config,
+            config_path=resolved_config_path,
+        )
 
     state = _ValidationState()
     backend_name = config.backend
 
     try:
-        selected_backend = backend or get_backend(config.backend)
-        backend_name = _backend_name(selected_backend, config.backend)
+        with events.stage("backend_selection", backend=config.backend):
+            selected_backend = backend or get_backend(config.backend)
+            backend_name = _backend_name(selected_backend, config.backend)
     except Exception as exc:
         return _failure_result(
             result_dir=result_dir,
@@ -128,8 +151,10 @@ def run_validation(
             reason="backend_selection_failed",
             failure_stage="backend_selection",
             failure_details=[_failure_detail("backend_selection", exc)],
+            event_emitter=events,
         )
 
+    row_contract_mode = _validation_row_contract_mode(config)
     context = _ValidationContext(
         repo_root=root,
         path_base=path_base,
@@ -138,13 +163,17 @@ def run_validation(
         result_dir=result_dir,
         backend_name=backend_name,
         selected_backend=selected_backend,
+        row_contract_mode=row_contract_mode,
+        strict_replay=row_contract_mode is RowContractMode.RETAINED,
+        event_emitter=events,
     )
     for window in config.windows:
         terminal_result = _run_validation_window(context, state, window)
         if terminal_result is not None:
             return terminal_result
 
-    decision = _classify_validation_state(context, state)
+    with events.stage("policy_classification", strategy_id=config.strategy_id):
+        decision = _classify_validation_state(context, state)
     _write_validation_artifacts(
         result_dir=result_dir,
         repo_root=root,
@@ -158,6 +187,7 @@ def run_validation(
         backend_results=state.backend_results,
         decision=decision,
         failure_details=[],
+        event_emitter=events,
     )
     return _validation_result(result_dir, decision, failure_stage=state.failure_stage)
 
@@ -172,7 +202,17 @@ def _run_validation_window(
         results_dir=context.result_dir / "runner_smoke" / window.id,
     )
     try:
-        execution = execute_strategy_run(run_config, repo_root=context.path_base)
+        with context.event_emitter.stage(
+            "window_execution",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            row_contract_mode=context.row_contract_mode.value,
+        ):
+            execution = execute_strategy_run(
+                run_config,
+                repo_root=context.path_base,
+                row_contract_mode=context.row_contract_mode,
+            )
     except StrategyExecutionError as exc:
         return _handle_window_execution_error(context, state, window, run_config, exc)
 
@@ -189,6 +229,7 @@ def _run_validation_window(
             rows=execution.loaded_rows,
             rows_path=rows_path,
             rows_hash=rows_hash,
+            normalized_rows=execution.normalized_rows,
         )
     )
     state.all_decisions.extend(execution.decisions)
@@ -268,6 +309,7 @@ def _handle_window_execution_error(
                     rows=exc.loaded_rows,
                     rows_path=rows_path,
                     rows_hash=rows_hash,
+                    normalized_rows=exc.normalized_rows,
                 )
             )
         if exc.violations:
@@ -299,10 +341,19 @@ def _audit_window_execution(
     window: Any,
     execution: _StrategyExecutionResult,
 ) -> dict[str, Any]:
-    strategy_rows = execution.frozen_rows
+    strategy_rows = execution.normalized_rows
     decisions = execution.decisions
     try:
-        audit = audit_decision_rows(strategy_rows, decisions)
+        with context.event_emitter.stage(
+            "data_audit",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            row_contract_mode=context.row_contract_mode.value,
+            decision_count=len(decisions),
+        ) as audit_event:
+            audit = audit_decision_rows(strategy_rows, decisions)
+            if not audit.passed:
+                audit_event.fail(_event_failure_message(audit.violations, "data_audit_failed"))
     except Exception as exc:
         state.failure_reasons.append("data_audit_failed")
         if state.failure_stage is None:
@@ -316,13 +367,30 @@ def _audit_window_execution(
 
     audit_payload = {"window_id": window.id, **audit.model_dump(mode="json")}
     if audit.passed:
-        lookahead = check_hidden_lookahead(
-            execution.generate_decisions,
-            rows=execution.frozen_rows,
-            params=execution.frozen_params,
-            baseline_decisions=decisions,
+        with context.event_emitter.stage(
+            "causality_check",
             strategy_id=context.config.strategy_id,
-        )
+            window_id=window.id,
+            mode="strict" if context.strict_replay else "emitted",
+            decision_count=len(decisions),
+        ) as causality_event:
+            lookahead = check_hidden_lookahead(
+                execution.generate_decisions,
+                rows=execution.normalized_rows,
+                params=execution.frozen_params,
+                baseline_decisions=decisions,
+                strategy_id=context.config.strategy_id,
+                mode="strict" if context.strict_replay else "emitted",
+                boundaries=(
+                    _strict_replay_boundaries(execution.normalized_rows, decisions)
+                    if context.strict_replay
+                    else None
+                ),
+            )
+            if not lookahead.passed:
+                causality_event.fail(
+                    _event_failure_message(lookahead.violations, "hidden_lookahead_check_failed")
+                )
         if not lookahead.passed:
             reason = (
                 "hidden_lookahead_check_failed"
@@ -330,7 +398,11 @@ def _audit_window_execution(
                     item.startswith("hidden_lookahead_check_failed")
                     for item in lookahead.violations
                 )
-                else "hidden_lookahead_detected"
+                else (
+                    "hidden_lookahead_suppression_detected"
+                    if "hidden_lookahead_suppression_detected" in lookahead.violations
+                    else "hidden_lookahead_detected"
+                )
             )
             state.failure_reasons.append(reason)
             if state.failure_stage is None:
@@ -395,11 +467,18 @@ def _run_scenario_backend(
             decisions=decision_outcome.decisions,
         )
         try:
-            raw_backend_result = context.selected_backend.run(
-                decisions=list(decision_outcome.decisions),
-                rows=execution.frozen_rows,
-                config=scenario_config,
-            )
+            with context.event_emitter.stage(
+                "scenario_backend",
+                strategy_id=context.config.strategy_id,
+                window_id=window.id,
+                scenario_id=scenario.id,
+                backend=context.backend_name,
+            ):
+                raw_backend_result = context.selected_backend.run(
+                    decisions=list(decision_outcome.decisions),
+                    rows=execution.normalized_rows.projection_rows(),
+                    config=scenario_config,
+                )
         except Exception as exc:
             backend_result = _failed_backend_result(
                 context.backend_name,
@@ -473,6 +552,7 @@ def _failure_result_from_state(
         reason=reason,
         failure_stage=failure_stage,
         failure_details=failure_details,
+        event_emitter=context.event_emitter,
     )
 
 
@@ -539,6 +619,7 @@ def _failure_result(
     reason: str,
     failure_stage: str,
     failure_details: list[dict[str, str]] | None = None,
+    event_emitter: ValidationStageEmitter | None = None,
 ) -> ValidationRunResult:
     decision = _hard_no_decision(
         reason,
@@ -557,6 +638,7 @@ def _failure_result(
         backend_results=backend_results,
         decision=decision,
         failure_details=failure_details or [],
+        event_emitter=event_emitter,
     )
     return _validation_result(result_dir, decision, failure_stage=failure_stage)
 
@@ -585,6 +667,7 @@ def _data_provenance(
     rows: Sequence[Mapping[str, Any]] | None,
     rows_path: str | None = None,
     rows_hash: str | None = None,
+    normalized_rows: NormalizedRows | None = None,
     message: str | None = None,
 ) -> dict[str, Any]:
     row_count = 0 if rows is None else len(rows)
@@ -601,7 +684,21 @@ def _data_provenance(
         },
         "row_count": row_count,
         "rows_path": None if rows is None else rows_path,
-        "rows_sha256": None if rows is None else rows_hash or normalized_rows_sha256(rows),
+        "rows_sha256": (
+            None
+            if rows is None
+            else rows_hash
+            or (
+                normalized_rows.normalized_rows_sha256
+                if normalized_rows is not None
+                else normalized_rows_sha256(rows)
+            )
+        ),
+        "row_contract": (
+            None
+            if normalized_rows is None
+            else normalized_rows.row_contract_summary()
+        ),
     }
     if message is not None:
         payload["message"] = message
@@ -643,6 +740,61 @@ def _scenario_decision_outcome(
         decision_generation_status="base_reused",
         decisions_regenerated=False,
     )
+
+
+def _strict_replay_boundaries(
+    rows: NormalizedRows,
+    decisions: list[StrategyDecision],
+) -> tuple[ReplayBoundary, ...]:
+    expected_by_key: dict[tuple[datetime, datetime], set[str | None]] = {}
+    expected_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
+    symbols_by_key: dict[tuple[datetime, datetime], set[str]] = {}
+    for decision in decisions:
+        key = (decision.as_of_time, decision.decision_time)
+        expected_by_key.setdefault(key, set()).add(decision.decision_id)
+        symbols_by_key.setdefault(key, set()).add(decision.instrument.symbol)
+        expected_by_asof_symbol.setdefault(
+            (decision.as_of_time, decision.instrument.symbol),
+            set(),
+        ).add(decision.decision_id)
+
+    timestamps_by_symbol: dict[str, list[datetime]] = {}
+    for row in rows.projection_rows():
+        symbol = row.get("symbol")
+        timestamp = row.get("timestamp")
+        if isinstance(symbol, str) and _is_aware_datetime(timestamp):
+            timestamps_by_symbol.setdefault(symbol, []).append(timestamp)
+
+    for symbol, timestamps in timestamps_by_symbol.items():
+        ordered = sorted(dict.fromkeys(timestamps))
+        for index, timestamp in enumerate(ordered):
+            decision_time = ordered[index + 1] if index + 1 < len(ordered) else timestamp
+            key = (timestamp, decision_time)
+            expected_by_key.setdefault(key, set())
+            symbols_by_key.setdefault(key, set()).add(symbol)
+
+    for (as_of_time, decision_time), symbols in symbols_by_key.items():
+        expected = expected_by_key.setdefault((as_of_time, decision_time), set())
+        for symbol in symbols:
+            expected.update(expected_by_asof_symbol.get((as_of_time, symbol), set()))
+
+    return tuple(
+        ReplayBoundary(
+            as_of_time=as_of_time,
+            decision_time=decision_time,
+            expected_decision_ids=frozenset(expected_by_key[(as_of_time, decision_time)]),
+            symbols=frozenset(symbols_by_key[(as_of_time, decision_time)]),
+        )
+        for as_of_time, decision_time in sorted(expected_by_key)
+    )
+
+
+def _is_aware_datetime(value: object) -> bool:
+    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+
+
+def _event_failure_message(violations: Sequence[str], fallback: str) -> str:
+    return "; ".join(violations) if violations else fallback
 
 
 def _write_scenario_decision_records(
@@ -722,95 +874,98 @@ def _write_validation_artifacts(
     backend_results: list[ScenarioBackendRunResult],
     decision: ValidationPolicyDecision,
     failure_details: list[dict[str, str]] | None = None,
+    event_emitter: ValidationStageEmitter | None = None,
 ) -> None:
-    failure_details = failure_details or []
-    write_text_artifact(result_dir, "decision_records.jsonl", canonical_jsonl_lines(decisions))
-    write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
-    write_json_artifact(
-        result_dir,
-        "backend_runs/summary.json",
-        {
-            "metric_semantics": backend_metric_semantics(),
-            "results": [
-                {
-                    "window_id": item.window_id,
-                    "scenario_id": item.scenario_id,
-                    "scenario_kind": item.scenario_kind,
-                    "required": item.required,
-                    "diagnostic_only": item.diagnostic_only,
-                    "decisions_regenerated": item.decisions_regenerated,
-                    "decision_generation_status": item.decision_generation_status,
-                    "decision_count": item.decision_count,
-                    "decision_records_path": item.decision_records_path,
-                    "decision_records_sha256": item.decision_records_sha256,
-                    "result": item.result.model_dump(mode="json"),
-                }
-                for item in backend_results
-            ]
-        },
-    )
-    write_json_artifact(
-        result_dir,
-        "robustness_matrix.json",
-        {
-            "decision": decision.model_dump(mode="json"),
-            "scenarios": [
-                {
-                    "window_id": item.window_id,
-                    "scenario_id": item.scenario_id,
-                    "scenario_kind": item.scenario_kind,
-                    "required": item.required,
-                    "diagnostic_only": item.diagnostic_only,
-                    "decisions_regenerated": item.decisions_regenerated,
-                    "decision_generation_status": item.decision_generation_status,
-                    "decision_count": item.decision_count,
-                    "decision_records_path": item.decision_records_path,
-                    "decision_records_sha256": item.decision_records_sha256,
-                    "backend": item.result.backend,
-                    "status": item.result.status,
-                    "metrics": item.result.metrics,
-                    "warnings": item.result.warnings,
-                    "unsupported_semantics": item.result.unsupported_semantics,
-                    "classification_reasons": _scenario_classification_reasons(item),
-                }
-                for item in backend_results
-            ],
-            "failure_details": failure_details,
-        },
-    )
-    decision_payload = decision.model_dump(mode="json")
-    decision_payload["failure_details"] = failure_details
-    write_json_artifact(result_dir, "validation_decision.json", decision_payload)
-    failed_gates = ", ".join(decision.failed_gates) or "none"
-    passed_gates = ", ".join(decision.passed_gates) or "none"
-    reasons = ", ".join(decision.reasons) or "none"
-    gate_details = "\n".join(
-        f"- {name}: {detail}" for name, detail in sorted(decision.gate_details.items())
-    )
-    if not gate_details:
-        gate_details = "- none"
-    write_text_artifact(
-        result_dir,
-        "validation_report.md",
-        (
-            "# Validation Report\n\n"
-            f"Decision: `{decision.decision}`\n\n"
-            f"Reasons: {reasons}\n\n"
-            f"Passed gates: {passed_gates}\n\n"
-            f"Failed gates: {failed_gates}\n\n"
-            f"Gate details:\n{gate_details}\n"
-        ),
-    )
-    write_validation_manifest(
-        result_dir,
-        repo_root=repo_root,
-        path_base=path_base,
-        config=config,
-        config_path=config_path,
-        backend_name=backend_name,
-        data_provenance=data_provenance,
-        backend_results=backend_results,
-    )
+    emitter = event_emitter or ValidationStageEmitter()
+    with emitter.stage("artifact_writes", strategy_id=config.strategy_id):
+        failure_details = failure_details or []
+        write_text_artifact(result_dir, "decision_records.jsonl", canonical_jsonl_lines(decisions))
+        write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
+        write_json_artifact(
+            result_dir,
+            "backend_runs/summary.json",
+            {
+                "metric_semantics": backend_metric_semantics(),
+                "results": [
+                    {
+                        "window_id": item.window_id,
+                        "scenario_id": item.scenario_id,
+                        "scenario_kind": item.scenario_kind,
+                        "required": item.required,
+                        "diagnostic_only": item.diagnostic_only,
+                        "decisions_regenerated": item.decisions_regenerated,
+                        "decision_generation_status": item.decision_generation_status,
+                        "decision_count": item.decision_count,
+                        "decision_records_path": item.decision_records_path,
+                        "decision_records_sha256": item.decision_records_sha256,
+                        "result": item.result.model_dump(mode="json"),
+                    }
+                    for item in backend_results
+                ]
+            },
+        )
+        write_json_artifact(
+            result_dir,
+            "robustness_matrix.json",
+            {
+                "decision": decision.model_dump(mode="json"),
+                "scenarios": [
+                    {
+                        "window_id": item.window_id,
+                        "scenario_id": item.scenario_id,
+                        "scenario_kind": item.scenario_kind,
+                        "required": item.required,
+                        "diagnostic_only": item.diagnostic_only,
+                        "decisions_regenerated": item.decisions_regenerated,
+                        "decision_generation_status": item.decision_generation_status,
+                        "decision_count": item.decision_count,
+                        "decision_records_path": item.decision_records_path,
+                        "decision_records_sha256": item.decision_records_sha256,
+                        "backend": item.result.backend,
+                        "status": item.result.status,
+                        "metrics": item.result.metrics,
+                        "warnings": item.result.warnings,
+                        "unsupported_semantics": item.result.unsupported_semantics,
+                        "classification_reasons": _scenario_classification_reasons(item),
+                    }
+                    for item in backend_results
+                ],
+                "failure_details": failure_details,
+            },
+        )
+        decision_payload = decision.model_dump(mode="json")
+        decision_payload["failure_details"] = failure_details
+        write_json_artifact(result_dir, "validation_decision.json", decision_payload)
+        failed_gates = ", ".join(decision.failed_gates) or "none"
+        passed_gates = ", ".join(decision.passed_gates) or "none"
+        reasons = ", ".join(decision.reasons) or "none"
+        gate_details = "\n".join(
+            f"- {name}: {detail}" for name, detail in sorted(decision.gate_details.items())
+        )
+        if not gate_details:
+            gate_details = "- none"
+        write_text_artifact(
+            result_dir,
+            "validation_report.md",
+            (
+                "# Validation Report\n\n"
+                f"Decision: `{decision.decision}`\n\n"
+                f"Reasons: {reasons}\n\n"
+                f"Passed gates: {passed_gates}\n\n"
+                f"Failed gates: {failed_gates}\n\n"
+                f"Gate details:\n{gate_details}\n"
+            ),
+        )
+        write_validation_manifest(
+            result_dir,
+            repo_root=repo_root,
+            path_base=path_base,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
+            data_provenance=data_provenance,
+            backend_results=backend_results,
+        )
 
 
 def _scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str, ...]:

@@ -106,6 +106,9 @@ for stage start, completion, and failure events, with UTC timestamps and
 `duration_ms` on terminal events. The CLI equivalent is
 `quant-strategies run --events-jsonl ...`, which preserves stdout as the result
 directory and writes JSONL stage events to stderr.
+Validation callers can pass the same shape of callback to `run_validation()`;
+those events use `event = "validation_stage"`. The CLI equivalent is
+`quant-strategies validate --events-jsonl ...`.
 
 CLI exit codes are part of the public contract: `0` means structured usable
 evidence was produced, `1` means infrastructure or execution failed, `2` means
@@ -234,6 +237,10 @@ The check compares baseline decisions against decisions generated from rows
 available within each decision's information set. A mismatch becomes
 `hidden_lookahead_detected`; replay errors become
 `hidden_lookahead_check_failed`.
+When `[paper_readiness] enabled = true`, validation uses retained row-contract
+mode and strict replay. Strict replay also checks no-emission row boundaries, so
+a strategy that suppresses an otherwise emitted decision by peeking at future
+rows fails with `hidden_lookahead_suppression_detected`.
 
 For each validation window, the validator expands required and diagnostic
 scenarios, runs the configured backend, and classifies the candidate as
@@ -259,7 +266,9 @@ typed backend metric schema with declared unit, base, comparability, tolerance,
 and asymmetry. Crypto-perp funding in the VectorBT Pro backend is a linear
 additive diagnostic adjustment: it is reported as
 `linear_funding_adjusted_return`, while policy gates continue to use the
-backend price/cost `net_return`.
+backend price/cost `net_return`. `net_return` currently declares no
+cross-backend tolerance until a second production backend or explicit agreement
+test exists.
 
 ## Artifacts
 
@@ -274,9 +283,9 @@ generation later fails. In full-profile runner runs,
 normalized projection used for strategy input; non-finite ancillary values are
 written as `null`, and its file hash matches `normalized_rows_sha256` in
 `data_manifest.json`. Runner failures still write `run_manifest.json`,
-`summary.json`, and `notes.md`. Successful default `artifact_profile = "summary"`
-runs also write `artifact_profile_summary.json` and declare
-`artifact_trust_tier = "search_only"`. Completed
+`environment.json`, `summary.json`, and `notes.md`. Successful default
+`artifact_profile = "summary"` runs also write `artifact_profile_summary.json`
+and declare `artifact_trust_tier = "search_only"`. Completed
 `artifact_profile = "full"` runs that reach engine request construction also
 write `decision_records.jsonl`,
 `engine_request.json`, and `evidence.json`, and declare `artifact_trust_tier =
@@ -291,6 +300,7 @@ Validation artifacts include:
 - `robustness_matrix.json`
 - `validation_decision.json`
 - `validation_manifest.json`
+- `environment.json`
 - `validation_report.md`
 
 Manifests hash the core artifacts needed to audit what code, config, data, and
@@ -305,6 +315,13 @@ require a backend artifact contract and are not emitted yet.
 `validation_decision.json` and `robustness_matrix.json` include
 `failure_details` for fatal setup failures that validation catches, while stable
 policy reason strings remain unchanged.
+
+`run_manifest.json` and `validation_manifest.json` keep deterministic research
+identity focused on source commit, config, data, decisions, and artifact hashes.
+Python version, installed package versions, git dirty status, and tracked diff
+hashes are written to `environment.json` instead. Manifest artifact hashes
+exclude `environment.json`, so consumers should use manifests for input/artifact
+identity and `environment.json` for machine/environment audit context.
 
 ## Commands
 

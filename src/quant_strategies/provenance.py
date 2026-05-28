@@ -76,6 +76,26 @@ def git_identity(repo_root: Path, *, exclude_paths: Iterable[Path] = ()) -> dict
     }
 
 
+def source_identity(repo_root: Path) -> dict[str, str | None]:
+    return {
+        "commit": _git_output(repo_root, "rev-parse", "HEAD"),
+        "short_commit": _git_output(repo_root, "rev-parse", "--short", "HEAD"),
+    }
+
+
+def environment_identity(
+    repo_root: Path,
+    *,
+    package_names: Iterable[str],
+    exclude_paths: Iterable[Path] = (),
+) -> dict[str, Any]:
+    return {
+        "repository": git_identity(repo_root, exclude_paths=exclude_paths),
+        "python": python_identity(),
+        "packages": package_versions(package_names),
+    }
+
+
 def _git_scoped_args(repo_root: Path, exclude_paths: Iterable[Path], *args: str) -> list[str]:
     scoped_args = [*args, "--", "."]
     for path in exclude_paths:

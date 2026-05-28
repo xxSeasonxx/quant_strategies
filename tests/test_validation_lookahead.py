@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import quant_strategies.causality as causality
+from quant_strategies.causality import ReplayBoundary, check_hidden_lookahead
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     ExitPolicy,
     InstrumentRef,
     PositionTarget,
     StrategyDecision,
 )
-from quant_strategies.causality import check_hidden_lookahead
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -33,6 +35,24 @@ def row(
     }
     if available_at is not None:
         payload["available_at"] = available_at
+    return payload
+
+
+def contract_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        data=SimpleNamespace(kind="bars"),
+        fill_model=SimpleNamespace(price="close"),
+    )
+
+
+def ohlc_row(
+    timestamp: datetime,
+    close: float,
+    *,
+    available_at: datetime | None = None,
+) -> dict[str, object]:
+    payload = row(timestamp, close, available_at=available_at)
+    payload.update({"open": close, "high": close, "low": close})
     return payload
 
 
@@ -184,6 +204,191 @@ def test_hidden_lookahead_parses_row_visibility_once_per_check(monkeypatch):
 
     assert result.passed is True
     assert parse_calls == len(source_rows) * 2
+
+
+def test_hidden_lookahead_uses_normalized_rows_without_reparsing(monkeypatch):
+    normalized = NormalizedRows.from_rows(
+        contract_config(),
+        [
+            ohlc_row(AS_OF, 100.0, available_at=AS_OF),
+            ohlc_row(FUTURE, 999.0, available_at=FUTURE),
+        ],
+        mode="validation",
+    )
+    baseline = as_of_strategy(normalized.projection_rows(), {})
+    monkeypatch.setattr(
+        causality,
+        "parse_aware_datetime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+    )
+
+    result = check_hidden_lookahead(
+        as_of_strategy,
+        rows=normalized,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+    )
+
+    assert result.passed is True
+
+
+def test_strict_hidden_lookahead_detects_suppressed_replay_emission():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+
+    def suppression_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        if any(item.get("timestamp") == FUTURE for item in rows):
+            return []
+        return [
+            StrategyDecision(
+                decision_id="demo:suppressed",
+                strategy_id="demo",
+                instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+                decision_time=DECISION,
+                as_of_time=AS_OF,
+                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+                exit_policy=ExitPolicy(max_hold_bars=1),
+            )
+        ]
+
+    result = check_hidden_lookahead(
+        suppression_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=suppression_strategy(source_rows, {}),
+        strategy_id="demo",
+        mode="strict",
+        boundaries=(
+            ReplayBoundary(
+                as_of_time=AS_OF,
+                decision_time=DECISION,
+                expected_decision_ids=frozenset(),
+                symbols=frozenset({"BTC-PERP"}),
+            ),
+        ),
+    )
+
+    assert result.passed is False
+    assert result.violations == ("hidden_lookahead_suppression_detected",)
+
+
+def test_strict_hidden_lookahead_rejects_missing_boundaries():
+    result = check_hidden_lookahead(
+        as_of_strategy,
+        rows=[row(AS_OF, 100.0, available_at=AS_OF)],
+        params={},
+        baseline_decisions=[],
+        strategy_id="demo",
+        mode="strict",
+    )
+
+    assert result.passed is False
+    assert result.violations == (
+        "hidden_lookahead_check_failed: strict replay requires caller-supplied boundaries",
+    )
+
+
+def test_strict_hidden_lookahead_detects_same_bar_replay_emission_for_boundary():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+
+    def same_bar_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        if any(item.get("timestamp") == FUTURE for item in rows):
+            return []
+        return [
+            StrategyDecision(
+                decision_id="demo:same-bar",
+                strategy_id="demo",
+                instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+                decision_time=AS_OF,
+                as_of_time=AS_OF,
+                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+                exit_policy=ExitPolicy(max_hold_bars=1),
+            )
+        ]
+
+    result = check_hidden_lookahead(
+        same_bar_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=same_bar_strategy(source_rows, {}),
+        strategy_id="demo",
+        mode="strict",
+        boundaries=(
+            ReplayBoundary(
+                as_of_time=AS_OF,
+                decision_time=DECISION,
+                expected_decision_ids=frozenset(),
+                symbols=frozenset({"BTC-PERP"}),
+            ),
+        ),
+    )
+
+    assert result.passed is False
+    assert result.violations == ("hidden_lookahead_suppression_detected",)
+
+
+def test_strict_hidden_lookahead_allows_legitimate_no_emission_boundary():
+    calls = 0
+
+    def quiet_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        nonlocal calls
+        calls += 1
+        return []
+
+    result = check_hidden_lookahead(
+        quiet_strategy,
+        rows=[row(AS_OF, 100.0, available_at=AS_OF)],
+        params={},
+        baseline_decisions=[],
+        strategy_id="demo",
+        mode="strict",
+        boundaries=(
+            ReplayBoundary(
+                as_of_time=AS_OF,
+                decision_time=DECISION,
+                expected_decision_ids=frozenset(),
+                symbols=frozenset({"BTC-PERP"}),
+            ),
+        ),
+    )
+
+    assert result.passed is True
+    assert calls == 1
+
+
+def test_strict_hidden_lookahead_replays_unique_boundaries_once():
+    calls = 0
+
+    def quiet_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        nonlocal calls
+        calls += 1
+        return []
+
+    shared_boundary = ReplayBoundary(
+        as_of_time=AS_OF,
+        decision_time=DECISION,
+        expected_decision_ids=frozenset(),
+        symbols=frozenset({"BTC-PERP"}),
+    )
+
+    result = check_hidden_lookahead(
+        quiet_strategy,
+        rows=[row(AS_OF, 100.0, available_at=AS_OF)],
+        params={},
+        baseline_decisions=[],
+        strategy_id="demo",
+        mode="strict",
+        boundaries=(shared_boundary, shared_boundary),
+    )
+
+    assert result.passed is True
+    assert calls == 1
 
 
 def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():

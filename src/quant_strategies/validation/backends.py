@@ -74,8 +74,11 @@ def backend_metric_semantics() -> dict[str, dict[str, object]]:
             base="backend portfolio price/cost return path",
             aggregation="scenario total over backend-executed decisions",
             backend="validation_backend",
-            comparability="backend-specific; compare only within declared tolerance and matching execution assumptions",
-            tolerance=1e-9,
+            comparability=(
+                "backend-specific; no cross-backend tolerance is declared until "
+                "a second production backend or explicit agreement test exists"
+            ),
+            tolerance=None,
             asymmetry=(
                 "may differ from runner smoke signed trade-activity sums, "
                 "other backend return paths, and linear funding adjustments"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -10,6 +11,7 @@ BANNED_IMPORT_ROOTS = {
     "quant_strategies.runner",
 }
 BANNED_CALL_NAMES = {
+    "__import__",
     "open",
     "exec",
     "eval",
@@ -26,9 +28,14 @@ BANNED_CALL_ATTRIBUTES = {
     "rmdir",
 }
 BANNED_MODULE_CALLS = {
+    ("datetime", "now"),
+    ("datetime", "utcnow"),
+    ("datetime.datetime", "now"),
+    ("datetime.datetime", "utcnow"),
     ("os", "remove"),
     ("os", "rmdir"),
     ("os", "unlink"),
+    ("random", "*"),
     ("requests", "delete"),
     ("requests", "get"),
     ("requests", "post"),
@@ -37,6 +44,8 @@ BANNED_MODULE_CALLS = {
     ("subprocess", "check_call"),
     ("subprocess", "check_output"),
     ("subprocess", "run"),
+    ("time", "time"),
+    ("numpy.random", "*"),
 }
 
 
@@ -49,6 +58,7 @@ def strategy_purity_violations(path: str | Path) -> tuple[str, ...]:
         return (f"{strategy_path}: invalid Python syntax{line}: {exc.msg}",)
 
     violations: list[str] = []
+    aliases = _import_aliases(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -59,9 +69,11 @@ def strategy_purity_violations(path: str | Path) -> tuple[str, ...]:
             if _is_banned_import(module):
                 violations.append(f"{strategy_path}: from {module} import ...")
         elif isinstance(node, ast.Call):
-            call_name = _call_name(node.func)
-            if call_name in BANNED_CALL_NAMES or _is_banned_module_call(call_name):
+            call_name = _call_name(node.func, aliases)
+            if _is_banned_call_name(call_name):
                 violations.append(f"{strategy_path}: {call_name}()")
+            elif _is_getattr_dynamic_import(node, aliases):
+                violations.append(f"{strategy_path}: getattr(__import__(...), ...)()")
             elif isinstance(node.func, ast.Attribute) and node.func.attr in BANNED_CALL_ATTRIBUTES:
                 violations.append(f"{strategy_path}: .{node.func.attr}()")
 
@@ -75,14 +87,57 @@ def _is_banned_import(module: str) -> bool:
     )
 
 
-def _call_name(node: ast.expr) -> str:
+def _import_aliases(tree: ast.AST) -> dict[str, str]:
+    aliases: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                aliases[local_name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local_name = alias.asname or alias.name
+                aliases[local_name] = f"{module}.{alias.name}" if module else alias.name
+    return aliases
+
+
+def _call_name(node: ast.expr, aliases: Mapping[str, str] | None = None) -> str:
+    aliases = aliases or {}
     if isinstance(node, ast.Name):
-        return node.id
+        return aliases.get(node.id, node.id)
     if isinstance(node, ast.Attribute):
-        parent = _call_name(node.value)
+        parent = _call_name(node.value, aliases)
         return f"{parent}.{node.attr}" if parent else node.attr
     return ""
 
 
 def _is_banned_module_call(call_name: str) -> bool:
-    return any(call_name == f"{module}.{name}" for module, name in BANNED_MODULE_CALLS)
+    return any(
+        call_name == f"{module}.{name}" if name != "*" else call_name.startswith(f"{module}.")
+        for module, name in BANNED_MODULE_CALLS
+    )
+
+
+def _is_banned_call_name(call_name: str) -> bool:
+    return (
+        call_name in BANNED_CALL_NAMES
+        or _is_dynamic_import_call_name(call_name)
+        or _is_banned_module_call(call_name)
+    )
+
+
+def _is_getattr_dynamic_import(node: ast.Call, aliases: Mapping[str, str]) -> bool:
+    if _call_name(node.func, aliases) != "getattr":
+        return False
+    return any(_is_dynamic_import_call(arg, aliases) for arg in node.args)
+
+
+def _is_dynamic_import_call(node: ast.AST, aliases: Mapping[str, str]) -> bool:
+    return isinstance(node, ast.Call) and _is_dynamic_import_call_name(_call_name(node.func, aliases))
+
+
+def _is_dynamic_import_call_name(call_name: str) -> bool:
+    return call_name in {"__import__", "builtins.__import__"}

@@ -51,7 +51,12 @@ class LoadedData:
     normalized_rows: NormalizedRows | None = None
 
 
-def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
+def load_data(
+    config: RunConfig,
+    *,
+    engine: object | None = None,
+    row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
+) -> LoadedData:
     db_engine = engine if engine is not None else _default_engine()
     try:
         rows = _load_rows(config, db_engine)
@@ -62,7 +67,7 @@ def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
     if not rows:
         raise DataLoadError("data load returned no rows")
     rows.sort(key=_row_sort_key)
-    normalized_rows = NormalizedRows.from_rows(config, rows, mode=RowContractMode.SEARCH)
+    normalized_rows = NormalizedRows.from_rows(config, rows, mode=row_contract_mode)
     return LoadedData(rows=normalized_rows.projection_rows(), normalized_rows=normalized_rows)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from inspect import signature
 from pathlib import Path
 from typing import Any, Literal
 
@@ -70,7 +71,13 @@ class StrategyExecutionError(RunnerError):
         self.decision_count = decision_count
 
 
-def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecutionResult:
+def execute_strategy_run(
+    config: RunConfig,
+    *,
+    repo_root: Path,
+    row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
+) -> StrategyExecutionResult:
+    contract_mode = RowContractMode(row_contract_mode)
     try:
         generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
     except SystemExit as exc:
@@ -92,19 +99,23 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         ) from exc
 
     try:
-        loaded = load_data(config)
+        loaded = _load_data(config, row_contract_mode=contract_mode)
     except RunnerError as exc:
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
-    if loaded.normalized_rows is not None:
+    if loaded.normalized_rows is not None and loaded.normalized_rows.mode is contract_mode:
         normalized_rows = loaded.normalized_rows
     elif isinstance(loaded.rows, NormalizedRows):
-        normalized_rows = loaded.rows
+        normalized_rows = (
+            loaded.rows
+            if loaded.rows.mode is contract_mode
+            else NormalizedRows.from_rows(config, loaded.rows, mode=contract_mode)
+        )
     else:
         normalized_rows = NormalizedRows.from_rows(
             config,
             loaded.rows,
-            mode=RowContractMode.SEARCH,
+            mode=contract_mode,
         )
     rows = normalized_rows.projection_rows()
     row_hash = normalized_rows.normalized_rows_sha256
@@ -166,6 +177,16 @@ def _load_strategy(path: str | Path, *, repo_root: Path | None = None) -> Genera
         return load_decision_strategy(path, repo_root=repo_root)
     except DecisionStrategyLoadError as exc:
         raise StrategyLoadError(str(exc)) from exc
+
+
+def _load_data(config: RunConfig, *, row_contract_mode: RowContractMode) -> Any:
+    try:
+        accepts_mode = "row_contract_mode" in signature(load_data).parameters
+    except (TypeError, ValueError):
+        accepts_mode = True
+    if accepts_mode:
+        return load_data(config, row_contract_mode=row_contract_mode)
+    return load_data(config)
 
 
 def _system_exit_message(exc: SystemExit) -> str:

@@ -55,7 +55,7 @@ human-led process.
 
 | User                                         | Role                                                           | What they need                                                                                                                                      |
 | -------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop              | Stable, typed Python API; declarative strategy contract; deterministic artifacts; clear "good vs bad" ranking signals; small surface area to misuse |
+| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop; consumes runner artifacts for search ranking and validation verdicts for retained-candidate triage | Stable, typed Python API for both `runner.run_config` and `validation.run_validation`; declarative strategy contract; deterministic artifacts; clear "good vs bad" ranking signals from runner; advisory verdict labels from validation; small surface area to misuse |
 | **Senior quant researcher (Season)**         | Designs strategies, audits research, makes promotion decisions | Math correctness; explicit ontology; ability to investigate any trade end-to-end; ability to add new strategy axes without rewriting the harness    |
 | **Future strategy authors** (human or agent) | Write new strategy files                                       | One-page contract; obvious where to put thesis/observables/rule/falsifier; impossible to accidentally introduce lookahead                           |
 
@@ -142,9 +142,15 @@ it to:
 `search_only` runs intentionally omit the trade-level chain. Consumers that need to
 investigate a candidate rerun it under `audit_replayable`. The foundation never auto-
 promotes a run to `audit_replayable`; the consumer chooses the tier.
-Validation verdict labels are advisory routing inputs to human review. Downstream
-consumers, including `quant_autoresearch`, must not treat any verdict as an autonomous
-promotion, paper-trading, or live-trading signal.
+
+Validation runs additionally emit a **verdict label** (`hard_no | mechanical_pass |
+watchlist | mechanical_review_candidate`) summarizing mechanical and paper-readiness
+gates. **Verdict labels are advisory inputs to human review**, not autonomous
+promotion signals — they MUST NOT be used by downstream automation to flip
+eligibility bits. The verdict's `reasons` field carries the qualifying context (e.g.,
+`no_positive_realistic_cost_evidence`, `multiple_testing_not_corrected_advisory_only`);
+consumers ranking on the label alone without reading reasons are operating outside
+the contract.
 
 **G6. Good performance code — decent, not microsecond-optimal.**
 The foundation is written with performance discipline. The code:
@@ -165,7 +171,10 @@ code, not benchmark-chasing.
 ### 4.2 Non-goals (explicit, durable)
 
 **NG1.** Market validation. Mechanical and statistical checks are advisory only; no output
-flips a `paper_trade_eligible` or `live_eligible` bit autonomously.
+flips a `paper_trade_eligible` or `live_eligible` bit autonomously. The validation
+verdict label (see G5) is itself advisory — it summarizes mechanical evidence, not
+market-validated alpha. Downstream consumers (including `quant_autoresearch`) MUST
+treat the verdict as an input to human review, never as a promotion signal.
 
 **NG2.** Data acquisition, refresh, repair, source joining. These belong to `quant_data`.
 The foundation gives `quant_data` structured feedback when row contracts are violated and
@@ -189,8 +198,11 @@ are updated and re-run. The foundation does not carry shims for old shapes.
 
 - **NFR-RIGOR.** Math is correct first, fast second. Any optimization that changes
   numerical results requires an explicit decision record.
-- **NFR-DETERMINISM.** Given the same code, config, and data, two runs produce
-  byte-identical artifact hashes (modulo `run_id` timestamp and git identity).
+- **NFR-DETERMINISM.** Given the same source, config, and data, deterministic
+  runner and validation manifests keep research identity focused on source commit,
+  inputs, decisions, and artifact hashes. Python build, installed package versions,
+  git dirty status, and tracked diff hashes are audit context only and live in
+  `environment.json`, which manifest artifact hashes exclude.
 - **NFR-IMMUTABILITY.** No artifact is mutated after write. Re-runs go to new
   directories.
 - **NFR-CAUSALITY.** The lookahead invariant is foundational: no run completes with

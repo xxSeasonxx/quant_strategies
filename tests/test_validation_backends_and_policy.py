@@ -68,7 +68,7 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
     assert net_return["base"] == "backend portfolio price/cost return path"
-    assert net_return["tolerance"] == 1e-9
+    assert net_return["tolerance"] is None
     assert "runner smoke" in net_return["asymmetry"]
     trade_count = payload["trade_count"]
     assert trade_count["unit"] == "count"

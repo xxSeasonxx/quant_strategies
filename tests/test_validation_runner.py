@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 import quant_strategies.validation as validation
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError
@@ -107,9 +108,36 @@ def decision(strategy_id: str = "demo") -> StrategyDecision:
 
 def rows():
     return [
-        {"symbol": "BTC-PERP", "timestamp": AS_OF, "available_at": AS_OF, "close": 100.0},
-        {"symbol": "BTC-PERP", "timestamp": DECISION, "available_at": DECISION, "close": 101.0},
-        {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": 102.0},
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": AS_OF,
+            "available_at": AS_OF,
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "has_funding_event": False,
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": DECISION,
+            "available_at": DECISION,
+            "open": 101.0,
+            "high": 101.0,
+            "low": 101.0,
+            "close": 101.0,
+            "has_funding_event": False,
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "open": 102.0,
+            "high": 102.0,
+            "low": 102.0,
+            "close": 102.0,
+            "has_funding_event": False,
+        },
     ]
 
 
@@ -126,17 +154,30 @@ def expected_row_records() -> list[dict[str, Any]]:
         {
             "available_at": AS_OF.isoformat(),
             "close": 100.0,
+            "has_funding_event": False,
+            "high": 100.0,
+            "low": 100.0,
+            "open": 100.0,
             "symbol": "BTC-PERP",
             "timestamp": AS_OF.isoformat(),
         },
         {
             "available_at": DECISION.isoformat(),
             "close": 101.0,
+            "has_funding_event": False,
+            "high": 101.0,
+            "low": 101.0,
+            "open": 101.0,
             "symbol": "BTC-PERP",
             "timestamp": DECISION.isoformat(),
         },
         {
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc).isoformat(),
             "close": 102.0,
+            "has_funding_event": False,
+            "high": 102.0,
+            "low": 102.0,
+            "open": 102.0,
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc).isoformat(),
         },
@@ -189,7 +230,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
         "funding_return",
         "linear_funding_adjusted_return",
     }
-    assert backend_summary["metric_semantics"]["net_return"]["tolerance"] == 1e-9
+    assert backend_summary["metric_semantics"]["net_return"]["tolerance"] is None
     assert len(backend_summary["results"]) == 4
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
     base_decision_path = "backend_runs/decision_records/validation_2026_h1/base.jsonl"
@@ -278,6 +319,162 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
         base_decision_file
     )
+    assert (result.result_dir / "environment.json").exists()
+    assert "python" not in manifest
+    assert "packages" not in manifest
+    assert "environment.json" not in manifest["artifacts"]
+    environment = json.loads((result.result_dir / "environment.json").read_text())
+    assert environment["python"]["version"]
+    assert "packages" in environment
+
+
+def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
+        "        return []\n"
+        "    return [StrategyDecision(\n"
+        "        decision_id='demo:suppressed',\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.02, "trade_count": 20},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("hidden_lookahead_suppression_detected",)
+    assert result.failure_stage == "data_audit"
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert audit["windows"][0]["violations"] == ["hidden_lookahead_suppression_detected"]
+
+
+def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[-1]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+    events: list[dict[str, object]] = []
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, event_sink=events.append)
+
+    assert result.decision.decision == "hard_no"
+    assert any(
+        event["stage"] == "data_audit" and event["status"] == "failed"
+        for event in events
+    )
+    assert not any(
+        event["stage"] == "data_audit" and event["status"] == "completed"
+        for event in events
+    )
+
+    suppressed = write_candidate(tmp_path / "suppressed")
+    (suppressed / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
+        "        return []\n"
+        "    return [StrategyDecision(\n"
+        "        decision_id='demo:suppressed',\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    events.clear()
+
+    result = run_validation(suppressed / "validation.toml", repo_root=tmp_path / "suppressed", event_sink=events.append)
+
+    assert result.decision.decision == "hard_no"
+    assert any(
+        event["stage"] == "causality_check" and event["status"] == "failed"
+        for event in events
+    )
+    assert not any(
+        event["stage"] == "causality_check" and event["status"] == "completed"
+        for event in events
+    )
+
+
+def test_strict_replay_boundaries_dedupe_shared_row_information_sets():
+    eth_rows = [
+        {
+            **item,
+            "symbol": "ETH-PERP",
+        }
+        for item in rows()
+    ]
+    normalized = NormalizedRows.from_rows(
+        SimpleNamespace(
+            data=SimpleNamespace(kind="crypto_perp_funding"),
+            fill_model=SimpleNamespace(price="close"),
+        ),
+        [*rows(), *eth_rows],
+        mode="retained",
+    )
+
+    boundaries = validation._strict_replay_boundaries(normalized, [])
+
+    assert [
+        (boundary.as_of_time, boundary.decision_time, boundary.symbols)
+        for boundary in boundaries
+    ] == [
+        (AS_OF, DECISION, frozenset({"BTC-PERP", "ETH-PERP"})),
+        (
+            DECISION,
+            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            frozenset({"BTC-PERP", "ETH-PERP"}),
+        ),
+        (
+            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            frozenset({"BTC-PERP", "ETH-PERP"}),
+        ),
+    ]
 
 
 def test_validation_row_snapshot_hash_uses_written_payload(
@@ -805,6 +1002,10 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
 
 def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path, backend=None)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml").read_text()
+        + "\n[paper_readiness]\nenabled = false\n"
+    )
     (candidate / "strategy.py").write_text(
         (candidate / "strategy.py")
         .read_text()
@@ -861,7 +1062,12 @@ def test_run_validation_passes_valid_flat_decisions_to_backend(tmp_path: Path, m
         {
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "open": 103.0,
+            "high": 103.0,
+            "low": 103.0,
             "close": 103.0,
+            "has_funding_event": False,
         }
     ]
     monkeypatch.setattr(

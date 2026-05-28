@@ -13,9 +13,8 @@ from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.provenance import (
     artifact_hashes,
-    git_identity,
-    package_versions,
-    python_identity,
+    environment_identity,
+    source_identity,
 )
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.artifact_profiles import (
@@ -225,10 +224,9 @@ def write_run_manifest(
     evidence: dict[str, object],
     artifact_profile: str,
 ) -> None:
+    _write_environment(result_dir, repo_root=repo_root)
     payload = {
-        "repository": _git_identity(repo_root, result_dir),
-        "python": python_identity(),
-        "packages": _package_versions(["quant-strategies", "quant-data", "pydantic"]),
+        "repository": source_identity(repo_root),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
         "artifact_profile": artifact_profile,
         "artifact_trust_tier": artifact_trust_tier_for_profile(artifact_profile),
@@ -289,17 +287,20 @@ def _normalized_rows(
 def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:
     return artifact_hashes(
         result_dir,
-        exclude_names={"run_manifest.json", "summary.json"},
+        exclude_names={"run_manifest.json", "summary.json", "environment.json"},
         recursive=False,
     )
 
 
-def _package_versions(package_names: list[str]) -> dict[str, str | None]:
-    return package_versions(package_names)
-
-
-def _git_identity(repo_root: Path, result_dir: Path) -> dict[str, Any]:
-    return git_identity(repo_root, exclude_paths=(result_dir,))
+def _write_environment(result_dir: Path, *, repo_root: Path) -> None:
+    _write_json(
+        result_dir / "environment.json",
+        environment_identity(
+            repo_root,
+            package_names=["quant-strategies", "quant-data", "pydantic"],
+            exclude_paths=(result_dir,),
+        ),
+    )
 
 
 def _artifact_names(result_dir: Path, *, include_summary: bool) -> list[str]:

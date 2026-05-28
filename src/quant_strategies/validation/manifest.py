@@ -5,10 +5,9 @@ from typing import Any
 
 from quant_strategies.provenance import (
     artifact_hashes,
+    environment_identity,
     file_sha256,
-    git_identity,
-    package_versions,
-    python_identity,
+    source_identity,
 )
 from quant_strategies.validation.artifacts import write_json_artifact
 from quant_strategies.validation.backends import ScenarioBackendRunResult
@@ -25,12 +24,9 @@ def write_validation_manifest(
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
 ) -> Path:
+    _write_environment(result_dir, repo_root=repo_root)
     payload = {
-        "repository": git_identity(repo_root, exclude_paths=(result_dir,)),
-        "python": python_identity(),
-        "packages": package_versions(
-            ["quant-strategies", "quant-data", "pydantic", "pandas", "vectorbtpro"]
-        ),
+        "repository": source_identity(repo_root),
         "validation": {
             "strategy_id": config.strategy_id,
             "backend": backend_name,
@@ -49,11 +45,23 @@ def write_validation_manifest(
         "core_hashes": _core_hashes(result_dir),
         "artifacts": artifact_hashes(
             result_dir,
-            exclude_names={"validation_manifest.json"},
+            exclude_names={"validation_manifest.json", "environment.json"},
             recursive=True,
         ),
     }
     return write_json_artifact(result_dir, "validation_manifest.json", payload)
+
+
+def _write_environment(result_dir: Path, *, repo_root: Path) -> Path:
+    return write_json_artifact(
+        result_dir,
+        "environment.json",
+        environment_identity(
+            repo_root,
+            package_names=["quant-strategies", "quant-data", "pydantic", "pandas", "vectorbtpro"],
+            exclude_paths=(result_dir,),
+        ),
+    )
 
 
 def _backend_summary(

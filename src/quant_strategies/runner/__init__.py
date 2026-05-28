@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
-from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, runner_evidence_semantics
 from quant_strategies.observation_dependencies import (
@@ -76,7 +76,11 @@ def run_config(
 
     try:
         with events.stage("strategy_execution", strategy_id=config.strategy_id):
-            execution = execute_strategy_run(config, repo_root=effective_repo_root)
+            execution = execute_strategy_run(
+                config,
+                repo_root=effective_repo_root,
+                row_contract_mode=_runner_row_contract_mode(config),
+            )
     except StrategyExecutionError as exc:
         return _execution_failure_result(
             config,
@@ -200,6 +204,12 @@ def _execution_failure_result(
         evidence_quality=exc.evidence_quality,
         event_emitter=event_emitter,
     )
+
+
+def _runner_row_contract_mode(config: config_module.RunConfig) -> RowContractMode:
+    if config.output.artifact_profile == "full":
+        return RowContractMode.VALIDATION
+    return RowContractMode.SEARCH
 
 
 def _write_strategy_input_rows_if_full(
@@ -452,7 +462,7 @@ def _check_causality(
     try:
         return check_hidden_lookahead(
             execution.generate_decisions,
-            rows=execution.frozen_rows,
+            rows=execution.normalized_rows,
             params=execution.frozen_params,
             baseline_decisions=execution.decisions,
             strategy_id=config.strategy_id,
@@ -478,7 +488,7 @@ def _audit_observation_dependencies(
             strategy_id=config.strategy_id,
             decision_count=len(execution.decisions),
         ):
-            _assert_declared_observations_causal(execution.loaded_rows, execution.decisions)
+            _assert_declared_observations_causal(execution.normalized_rows, execution.decisions)
     except RunnerError as exc:
         _write_execution_data_manifest(
             result_dir,
@@ -500,7 +510,7 @@ def _audit_observation_dependencies(
 
 
 def _assert_declared_observations_causal(
-    rows: Sequence[Mapping[str, Any]],
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
 ) -> None:
     row_index, timestamp_violations = observation_row_index(rows)

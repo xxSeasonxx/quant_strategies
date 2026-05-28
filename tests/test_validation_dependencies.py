@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
+import pytest
+
+import quant_strategies.observation_dependencies as observation_dependencies
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     ExitPolicy,
     InstrumentRef,
@@ -39,6 +44,13 @@ def row(symbol: str, timestamp: datetime = AS_OF, available_at: object = AS_OF) 
         "available_at": available_at,
         "close": 100.0,
     }
+
+
+def contract_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        data=SimpleNamespace(kind="bars"),
+        fill_model=SimpleNamespace(price="close"),
+    )
 
 
 def test_no_observations_remains_valid():
@@ -145,3 +157,35 @@ def test_late_observation_available_at_fails():
         "observation row ETH-PERP at 2026-01-01T00:00:00+00:00 used by BTC-PERP "
         "was available after decision_time",
     )
+
+
+def test_observation_index_uses_normalized_rows_without_reparsing(monkeypatch: pytest.MonkeyPatch):
+    normalized = NormalizedRows.from_rows(
+        contract_config(),
+        [
+            {
+                **row("BTC-PERP"),
+                "open": 100.0,
+                "high": 100.0,
+                "low": 100.0,
+            }
+        ],
+        mode="validation",
+    )
+    observations = (
+        ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),
+    )
+    monkeypatch.setattr(
+        observation_dependencies,
+        "parse_aware_datetime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+    )
+
+    row_index, timestamp_violations = observation_dependencies.observation_row_index(normalized)
+    violations = observation_dependencies.audit_observation_dependencies(
+        row_index,
+        [decision(observations=observations)],
+    )
+
+    assert timestamp_violations == ()
+    assert violations == ()

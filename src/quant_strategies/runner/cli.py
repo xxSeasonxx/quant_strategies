@@ -5,9 +5,10 @@ import sys
 from pathlib import Path
 
 from quant_strategies.runner import run_config
-from quant_strategies.runner.events import jsonl_event_sink
+from quant_strategies.runner.events import jsonl_event_sink as runner_jsonl_event_sink
 from quant_strategies.validation import run_validation
 from quant_strategies.validation.errors import ValidationError
+from quant_strategies.validation.events import jsonl_event_sink as validation_jsonl_event_sink
 
 
 _DATA_FAILURE_STAGES = {
@@ -29,6 +30,7 @@ def main(argv: list[str] | None = None) -> int:
 
     validate_parser = subparsers.add_parser("validate", help="validate one validation TOML config")
     validate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative validation config path")
+    validate_parser.add_argument("--events-jsonl", action="store_true", help="write structured validation stage events to stderr")
     validate_parser.add_argument("config", type=Path)
 
     args = parser.parse_args(argv)
@@ -38,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_config(
                 args.config,
                 repo_root=args.repo_root,
-                event_sink=jsonl_event_sink(sys.stderr),
+                event_sink=runner_jsonl_event_sink(sys.stderr),
             )
         else:
             result = run_config(args.config, repo_root=args.repo_root)
@@ -53,7 +55,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "validate":
         try:
-            result = run_validation(args.config, repo_root=args.repo_root)
+            if args.events_jsonl:
+                result = run_validation(
+                    args.config,
+                    repo_root=args.repo_root,
+                    event_sink=validation_jsonl_event_sink(sys.stderr),
+                )
+            else:
+                result = run_validation(args.config, repo_root=args.repo_root)
         except ValidationError as exc:
             print(f"validation failed: {exc}")
             return 1

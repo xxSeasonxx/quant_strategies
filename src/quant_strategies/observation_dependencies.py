@@ -4,8 +4,9 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
+from quant_strategies.decisions import StrategyDecision
 
 
 def audit_observation_dependencies(
@@ -41,7 +42,12 @@ def audit_observation_dependencies(
                         f"missing available_at for observation {label} used by {decision.instrument.symbol}"
                     )
                     continue
-                available_at, reason = parse_aware_datetime(row.get("available_at"))
+                available_value = row.get("available_at")
+                if _is_aware_datetime(available_value):
+                    available_at = available_value
+                    reason = None
+                else:
+                    available_at, reason = parse_aware_datetime(available_value)
                 if available_at is None:
                     violations.append(
                         f"invalid available_at for observation {label} used by "
@@ -58,8 +64,11 @@ def audit_observation_dependencies(
 
 
 def observation_row_index(
-    rows: Sequence[Mapping[str, Any]],
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
 ) -> tuple[dict[tuple[str, datetime], list[Mapping[str, Any]]], tuple[str, ...]]:
+    if isinstance(rows, NormalizedRows):
+        return _normalized_observation_row_index(rows)
+
     index: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
     violations: list[str] = []
     for row in rows:
@@ -70,3 +79,19 @@ def observation_row_index(
             continue
         index.setdefault((symbol, timestamp), []).append(row)
     return index, tuple(violations)
+
+
+def _normalized_observation_row_index(
+    rows: NormalizedRows,
+) -> tuple[dict[tuple[str, datetime], list[Mapping[str, Any]]], tuple[str, ...]]:
+    index: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
+    for row in rows.projection_rows():
+        symbol = row.get("symbol")
+        timestamp = row.get("timestamp")
+        if isinstance(symbol, str) and _is_aware_datetime(timestamp):
+            index.setdefault((symbol, timestamp), []).append(row)
+    return index, ()
+
+
+def _is_aware_datetime(value: object) -> bool:
+    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None

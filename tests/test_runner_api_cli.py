@@ -58,6 +58,7 @@ def rows(
     *closes: float,
     quotes: bool = False,
     research_fields: bool = False,
+    include_available_at: bool = True,
     readiness_lag: timedelta = timedelta(0),
 ) -> list[dict[str, object]]:
     start = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -72,13 +73,14 @@ def rows(
             "low": close,
             "close": close,
         }
+        if include_available_at:
+            row["available_at"] = timestamp + readiness_lag
         if quotes:
             row.update({"bid": close - 0.01, "ask": close + 0.01, "mid": close})
         if research_fields:
-            available_at = timestamp + readiness_lag
+            available_at = row["available_at"]
             row.update(
                 {
-                    "available_at": available_at,
                     "bar_ingested_at": available_at,
                     "quote_ingested_at": available_at if quotes else None,
                     "joined_refreshed_at": available_at,
@@ -264,6 +266,7 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
         "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",
+        "environment.json",
         "summary.json",
         "evidence.json",
         "notes.md",
@@ -286,12 +289,12 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
     assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
     assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] > 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
-    assert summary["data_availability_status"] == "missing"
+    assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
         "field": "available_at",
-        "present": 0,
+        "present": 4,
         "total": 4,
-        "fraction": 0.0,
+        "fraction": 1.0,
     }
     assert summary["row_contract"]["status"] == "passed"
     assert summary["row_contract"]["required_fields"] == [
@@ -301,22 +304,20 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
         "high",
         "low",
         "close",
+        "available_at",
     ]
     assert summary["row_contract"]["quant_data_feedback"] == []
-    assert summary["causality_verified"] is False
-    assert summary["evidence_quality_warnings"] == [
-        "available_at_missing",
-        "runner_causality_not_verified",
-    ]
+    assert summary["causality_verified"] is True
+    assert summary["evidence_quality_warnings"] == []
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_trust_tier"] == "audit_replayable"
     assert_smoke_metric_semantics(data_manifest)
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["row_contract"] == summary["row_contract"]
-    assert data_manifest["causality_verified"] is False
+    assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert_assessment(result, summary, assessment_status="smoke_unverified")
+    assert_assessment(result, summary, assessment_status="smoke_passed")
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
 
 
@@ -340,6 +341,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
         "data_manifest.json",
         "artifact_profile_summary.json",
         "run_manifest.json",
+        "environment.json",
         "summary.json",
         "notes.md",
     }
@@ -351,7 +353,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert "evidence.json" not in names
 
     summary = read_summary(result.result_dir)
-    assert_assessment(result, summary, assessment_status="smoke_unverified", artifact_profile="summary")
+    assert_assessment(result, summary, assessment_status="smoke_passed", artifact_profile="summary")
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
@@ -582,7 +584,7 @@ def test_run_config_writes_data_failure_summary(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
 
     def fail_data_load(config):
         raise DataLoadError("strict data window failed")
@@ -611,7 +613,13 @@ def test_run_config_writes_data_failure_summary(
         "available_at_missing",
         "runner_causality_not_verified",
     ]
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result,
+        summary,
+        assessment_status="runner_failed",
+        artifact_profile="summary",
+        failure_stage=str(summary["stage"]),
+    )
     assert (result.result_dir / "run_manifest.json").exists()
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
 
@@ -621,7 +629,7 @@ def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
 
     def fail_data_load(config):
         raise DataLoadError("strict data window failed")
@@ -786,7 +794,7 @@ def test_run_config_marks_partial_available_at_coverage(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
     partial_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     partial_rows[1].pop("available_at")
     monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=partial_rows))
@@ -1113,10 +1121,13 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert result.run_completed is True
     assert result.result_dir is not None
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    environment = json.loads((result.result_dir / "environment.json").read_text())
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert run_manifest["python"]["version"]
-    assert {"quant-strategies", "quant-data", "pydantic"}.issubset(run_manifest["packages"])
-    assert LEGACY_DISTRIBUTION not in run_manifest["packages"]
+    assert "python" not in run_manifest
+    assert "packages" not in run_manifest
+    assert environment["python"]["version"]
+    assert {"quant-strategies", "quant-data", "pydantic"}.issubset(environment["packages"])
+    assert LEGACY_DISTRIBUTION not in environment["packages"]
     assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v3"}
     assert run_manifest["artifact_profile"] == "full"
     assert run_manifest["artifact_trust_tier"] == "audit_replayable"
@@ -1137,6 +1148,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
     assert run_manifest["artifacts"]["decision_records.jsonl"]["sha256"]
     assert run_manifest["artifacts"]["engine_request.json"]["sha256"]
+    assert "environment.json" not in run_manifest["artifacts"]
     assert data_manifest["data"] == {
         "kind": "bars",
         "dataset": "equity_1min",
@@ -1648,7 +1660,8 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
 
     assert result.result_dir is not None
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
-    repository = run_manifest["repository"]
+    environment = json.loads((result.result_dir / "environment.json").read_text())
+    repository = environment["repository"]
     result_exclusion = f":(exclude){result.result_dir.relative_to(tmp_path).as_posix()}"
     expected_status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=no", "--", ".", result_exclusion],
@@ -1666,6 +1679,8 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
     ).stdout.rstrip("\n")
     expected_status_hash = hashlib.sha256(expected_status.encode("utf-8")).hexdigest()
     expected_diff_hash = hashlib.sha256(expected_diff.encode("utf-8")).hexdigest()
+    assert run_manifest["repository"]["commit"] == repository["commit"]
+    assert "dirty" not in run_manifest["repository"]
     assert repository["commit"]
     assert repository["dirty"] is True
     assert repository["status_porcelain_sha256"] == expected_status_hash
@@ -1692,7 +1707,10 @@ def test_run_manifest_ignores_untracked_detritus_for_repository_identity(
 
     assert result.result_dir is not None
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
-    repository = run_manifest["repository"]
+    environment = json.loads((result.result_dir / "environment.json").read_text())
+    repository = environment["repository"]
+    assert run_manifest["repository"]["commit"] == repository["commit"]
+    assert "dirty" not in run_manifest["repository"]
     assert repository["dirty"] is False
     assert repository["status_porcelain_sha256"] is None
     assert repository["tracked_diff_sha256"] is None
@@ -1953,6 +1971,7 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
         "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",
+        "environment.json",
         "summary.json",
         "evidence.json",
         "notes.md",

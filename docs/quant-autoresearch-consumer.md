@@ -174,7 +174,10 @@ The canonical strategy loader enforces a static AST purity check before module
 import by default. It rejects generated candidates that import `quant_data`,
 runner, or engine packages, and candidates that call obvious filesystem,
 network, subprocess, or dynamic-code primitives such as `open`, `.write()`,
-`requests.get()`, `subprocess.run()`, or `eval()`. The explicit
+`requests.get()`, `subprocess.run()`, `eval()`, `__import__()`, clock calls,
+or RNG calls such as `time.time()`, `datetime.now()`, `random.random()`, and
+`numpy.random.*()`. The check is alias-aware for common generated-code forms,
+but it is not a sandbox or process isolation boundary. The explicit
 `enforce_purity=False` loader option is only for trusted local tests or
 deliberate manual inspection; autoresearch and normal runner/validation flows
 should leave the default enforcement on.
@@ -295,6 +298,11 @@ summarizes error handoff items for missing fields, duplicate keys, timestamp
 issues, and other upstream `quant_data` contract gaps. Search-mode missing
 `available_at` warnings remain excluded from `quant_data_feedback`.
 
+Use `run_manifest.json` for deterministic source/input/artifact identity and
+`environment.json` for machine context. Runner and validation manifests exclude
+Python version, installed packages, git dirty status, and tracked diff hashes
+from artifact identity; those values live in `environment.json` for audit only.
+
 ## What autoresearch Should Not Own
 
 `quant_autoresearch` should not:
@@ -320,6 +328,8 @@ conda run -n quant quant-strategies validate \
 Validation is not based on `researched/`, package manifests, or family/variant
 layouts. Old artifacts that need validation should be copied into a normal
 candidate workspace with `strategy.py` and `validation.toml`.
+Use `--events-jsonl` when a supervising process needs stage-level validation
+progress without parsing the human-readable CLI stdout.
 
 For retained candidates, include `[search_pressure]` in `validation.toml` when
 available so validation artifacts carry candidate counts, trial counts,
@@ -340,13 +350,22 @@ Treat validation verdicts as advisory routing labels only:
 No validation verdict authorizes autonomous promotion, paper trading, or live
 trading.
 
+When `[paper_readiness] enabled = true`, validation uses retained row-contract
+mode and strict replay. Strict replay checks row boundaries where the baseline
+emitted no decision; a future-dependent suppression trick fails with
+`hidden_lookahead_suppression_detected`. Validation without paper readiness uses
+the emitted-decision replay check and must not be interpreted as a retained-grade
+causality claim.
+
 Validation backend metrics are flat but semantically typed in
 `backend_runs/summary.json`. For crypto-perp funding, the VectorBT Pro backend
 keeps required policy `net_return` scoped to the backend price/cost return path
 and reports the linear funding approximation separately as
 `funding_return` and `linear_funding_adjusted_return`. Do not rank or promote a
 candidate on `linear_funding_adjusted_return` unless a later review explicitly
-accepts that diagnostic model.
+accepts that diagnostic model. `net_return` currently declares no cross-backend
+tolerance; compare it only inside matching backend semantics until a second
+production backend or explicit agreement test exists.
 
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.

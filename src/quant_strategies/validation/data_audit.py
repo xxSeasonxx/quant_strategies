@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
@@ -23,12 +25,16 @@ class DataAudit(BaseModel):
 
 
 def audit_decision_rows(
-    rows: Sequence[Mapping[str, Any]],
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
 ) -> DataAudit:
     violations: list[str] = []
-    row_index, timestamp_violations = observation_row_index(rows)
-    violations.extend(timestamp_violations)
+    if isinstance(rows, NormalizedRows):
+        violations.extend(_row_contract_violations(rows))
+        row_index = _normalized_observation_row_index(rows)
+    else:
+        row_index, timestamp_violations = observation_row_index(rows)
+        violations.extend(timestamp_violations)
 
     for decision in decisions:
         key = (decision.instrument.symbol, decision.as_of_time)
@@ -48,7 +54,11 @@ def audit_decision_rows(
                     f"missing available_at for {decision.instrument.symbol} at {decision.as_of_time.isoformat()}"
                 )
                 continue
-            available_at, reason = parse_aware_datetime(row.get("available_at"))
+            if isinstance(rows, NormalizedRows):
+                available_at = row.get("available_at")
+                reason = None if _is_aware_datetime(available_at) else "expected aware datetime"
+            else:
+                available_at, reason = parse_aware_datetime(row.get("available_at"))
             if available_at is None:
                 violations.append(
                     f"invalid available_at for {decision.instrument.symbol} at "
@@ -69,3 +79,31 @@ def audit_decision_rows(
         passed=not violations,
         violations=tuple(violations),
     )
+
+
+def _row_contract_violations(rows: NormalizedRows) -> list[str]:
+    violations: list[str] = []
+    for issue in rows.issues:
+        if issue.severity != "error":
+            continue
+        if issue.field is None:
+            violations.append(issue.reason)
+        else:
+            violations.append(f"{issue.reason}:{issue.field}")
+    return violations
+
+
+def _normalized_observation_row_index(
+    rows: NormalizedRows,
+) -> dict[tuple[str, Any], list[Mapping[str, Any]]]:
+    row_index: dict[tuple[str, Any], list[Mapping[str, Any]]] = {}
+    for row in rows.projection_rows():
+        symbol = row.get("symbol")
+        timestamp = row.get("timestamp")
+        if isinstance(symbol, str) and _is_aware_datetime(timestamp):
+            row_index.setdefault((symbol, timestamp), []).append(row)
+    return row_index
+
+
+def _is_aware_datetime(value: object) -> bool:
+    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
