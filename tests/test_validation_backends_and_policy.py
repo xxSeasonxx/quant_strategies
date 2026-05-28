@@ -258,6 +258,7 @@ def test_policy_records_search_pressure_inputs_for_mechanical_review_candidate()
     )
 
     assert decision.decision == "mechanical_review_candidate"
+    assert decision.reasons == ("deflation_not_evaluated",)
     assert decision.overfit_controls == {
         "candidate_count": 120,
         "trial_count": 18,

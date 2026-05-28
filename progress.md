@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 14: P3 `quant_data` environment boundary.
+Phase 15: P2 deflation-not-evaluated disclosure.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-quant-data-env-boundary-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-quant-data-env-boundary.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-deflation-not-evaluated-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-deflation-not-evaluated.md`
 
 ## Finding Triage
 
@@ -44,6 +44,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-quant-data-env-bou
 | Typed `RunResult` lacks evidence-quality fields | Confirmed true, Phase 12 | Expose `data_availability_status`, `availability_coverage`, `row_contract`, `causality_verified`, and `evidence_quality_warnings` on the stable runner result. |
 | Empty-decision strategy is classified as `runner_failed` | Confirmed true, Phase 13 | Strategy tests treat `[]` as a normal no-op output; runner should classify it as completed zero-trade smoke evidence, not infrastructure failure. |
 | `quant_data` engine discovery has hidden local `.env` coupling | Confirmed true, Phase 14 | Remove runner-owned discovery of an upstream `quant-data/.env`; `quant_data` owns engine environment configuration. |
+| Search pressure is copied but no deflation is evaluated | Confirmed true, Phase 15 | Add explicit `deflation_not_evaluated` reason to search-pressure-backed `mechanical_review_candidate` outputs. |
 
 ## Phase 1 Checklist
 
@@ -431,3 +432,27 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-quant-data-env-bou
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk is the intentional contract shift that `quant_data` or explicit `engine=` injection owns environment configuration.
 - 2026-05-28: Committed Phase 14.
+
+## Phase 15 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add policy and artifact regressions.
+- [x] Add deflation-not-evaluated policy reason.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 15 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py::test_policy_records_search_pressure_inputs_for_mechanical_review_candidate tests/test_validation_runner.py::test_run_validation_writes_mechanical_review_candidate_artifacts_for_two_robust_windows -q` -> failed as expected before implementation; search-pressure-backed `mechanical_review_candidate` reasons were empty.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py::test_policy_mechanical_review_candidate_when_all_paper_gates_pass tests/test_validation_backends_and_policy.py::test_policy_records_search_pressure_inputs_for_mechanical_review_candidate tests/test_validation_runner.py::test_run_validation_writes_mechanical_review_candidate_artifacts_for_two_robust_windows -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_backends_and_policy.py tests/test_validation_runner.py tests/test_readme_contract.py -q` -> 70 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 499 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual note: no artifact-level no-search-pressure `mechanical_review_candidate` test; policy-level regression preserves that core contract.
+- 2026-05-28: Committed Phase 15.

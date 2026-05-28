@@ -170,7 +170,9 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
 These fields are artifact metadata only. They make missing overfit/search
 context explicit; they do not compute statistical corrections or change
-eligibility flags.
+eligibility flags. When non-empty search pressure accompanies a
+`mechanical_review_candidate`, validation records `deflation_not_evaluated` in
+the decision reasons.
 
 The default validation backend is `vectorbtpro`. Install the optional backend
 dependencies before running real validation:

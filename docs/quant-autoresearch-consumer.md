@@ -268,7 +268,9 @@ candidate workspace with `strategy.py` and `validation.toml`.
 For retained candidates, include `[search_pressure]` in `validation.toml` when
 available so validation artifacts carry candidate counts, trial counts,
 parameter search space, selection rule, and split identities. These fields are
-metadata, not statistical proof.
+metadata, not statistical proof. A `mechanical_review_candidate` with non-empty
+search pressure carries `deflation_not_evaluated` in its reasons so reviewers do
+not mistake the metadata for deflated or Monte Carlo evidence.
 
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.

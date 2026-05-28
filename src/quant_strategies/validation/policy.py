@@ -74,7 +74,15 @@ def classify_validation(
     overfit_controls = overfit_controls_from_search_pressure(search_pressure)
 
     def finish(decision: ValidationPolicyDecision) -> ValidationPolicyDecision:
-        return decision.model_copy(update={"overfit_controls": overfit_controls})
+        reasons = decision.reasons
+        if decision.decision == "mechanical_review_candidate" and _has_search_pressure(overfit_controls):
+            reasons = tuple(dict.fromkeys((*reasons, "deflation_not_evaluated")))
+        return decision.model_copy(
+            update={
+                "reasons": reasons,
+                "overfit_controls": overfit_controls,
+            }
+        )
 
     if not data_passed:
         return finish(
@@ -132,6 +140,18 @@ def overfit_controls_from_search_pressure(search_pressure: object | None) -> dic
         "deflated_sharpe": None,
         "monte_carlo": None,
     }
+
+
+def _has_search_pressure(overfit_controls: dict[str, Any | None]) -> bool:
+    return any(
+        (
+            overfit_controls.get("candidate_count") is not None,
+            overfit_controls.get("trial_count") is not None,
+            bool(overfit_controls.get("parameter_search_space")),
+            overfit_controls.get("selection_rule") is not None,
+            bool(overfit_controls.get("split_ids")),
+        )
+    )
 
 
 def _scenario_result(

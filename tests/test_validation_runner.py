@@ -345,6 +345,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
     assert result.success is True
     assert result.decision.decision == "mechanical_review_candidate"
+    assert result.decision.reasons == ("deflation_not_evaluated",)
     assert result.result_dir is not None
     assert backend.calls == 12
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -354,6 +355,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True
+    assert decision_payload["reasons"] == ["deflation_not_evaluated"]
     assert decision_payload["failed_gates"] == []
     assert decision_payload["failure_details"] == []
     assert decision_payload["overfit_controls"] == {
@@ -380,6 +382,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
     assert robustness_matrix["decision"]["decision"] == "mechanical_review_candidate"
+    assert robustness_matrix["decision"]["reasons"] == ["deflation_not_evaluated"]
     assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
     assert robustness_matrix["decision"]["failed_gates"] == []
     assert "gate_details" in robustness_matrix["decision"]
@@ -388,7 +391,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `mechanical_review_candidate`" in report
-    assert "Reasons: none" in report
+    assert "Reasons: deflation_not_evaluated" in report
     assert "Passed gates: " in report
     assert "Failed gates: none" in report
     assert "Gate details:" in report
