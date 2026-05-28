@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 38: P4 researched layout false-positive rejection.
+Phase 39: P4 StrategyGenerator Protocol false-positive rejection.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-researched-layout-false-positive-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-researched-layout-false-positive.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-strategy-generator-protocol-false-positive-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-strategy-generator-protocol-false-positive.md`
 
 ## Finding Triage
 
@@ -67,6 +67,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-researched-layout-
 | Structured stage observability is missing | Confirmed true, Phase 25 | Add optional runner event sink and CLI JSONL stderr events for core runner stages. |
 | Validation lookahead replay reparses row visibility per decision | Confirmed true, Phase 26 | Cache parsed row visibility metadata and visible frozen row slices in the shared causality checker. |
 | `researched/` folder convention is not enforced by runner/validation | Rejected false positive, Phase 38 | PRD C-4/C-6 and docs make validation layout-agnostic and promotion a separate human process; adding path special-casing would contradict the contract. |
+| Public `generate_decisions` Protocol missing | Rejected false positive, Phase 39 | `StrategyGenerator` is already defined in `decisions.strategy_loader`, re-exported from `quant_strategies.decisions`, documented for consumers, and covered by a public import test. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -1054,8 +1055,22 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-researched-layout-
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Follow-up code review confirmed the Important lifecycle wording finding is resolved and found no new Critical or Important issues.
 - 2026-05-28: Committed Phase 38.
-- 2026-05-28: Code review found the new docs-contract test was freezing contradictory lifecycle wording between PRD C-6 and AGENTS/README. Fixed by reconciling PRD C-6 to say promotion into `tested/` from `untested/` or `researched/` is human-controlled, then reran verification.
-- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py -q` -> 3 passed.
+
+## Phase 39 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Verify existing StrategyGenerator Protocol contract.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 39 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_decision_models.py::test_strategy_generator_protocol_is_publicly_importable -q` -> 1 passed.
 - 2026-05-28: `conda run -n quant pytest -q` -> 524 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review confirmed the `StrategyGenerator` false-positive rejection is justified. One Important progress-log copy/paste issue was fixed before commit.
+- 2026-05-28: Committed Phase 39.
