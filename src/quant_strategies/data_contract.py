@@ -227,7 +227,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             )
 
             for field_name in _BASE_REQUIRED_FIELDS:
-                if _is_missing(normalized, field_name):
+                if _is_missing_required_field(normalized, field_name):
                     issues.append(
                         _issue(
                             "row_missing_required_field",
@@ -246,7 +246,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                     field_name,
                     issues,
                     minimum=0.0,
-                    allow_zero=True,
+                    allow_zero=False,
                 )
             _validate_ohlc_order(normalized, issues)
 
@@ -284,6 +284,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                         minimum=0.0,
                         allow_zero=False,
                     )
+                _validate_quote_order(normalized, issues)
 
             available_at = normalized.get("available_at")
             if _is_missing(normalized, "available_at"):
@@ -576,6 +577,16 @@ def _is_missing(row: Mapping[str, Any], field_name: str) -> bool:
     return field_name not in row or row.get(field_name) is None
 
 
+def _is_missing_required_field(row: Mapping[str, Any], field_name: str) -> bool:
+    if _is_missing(row, field_name):
+        return True
+    return field_name == "symbol" and _is_blank_symbol(row.get(field_name))
+
+
+def _is_blank_symbol(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() == ""
+
+
 def _symbol_for_issue(row: Mapping[str, Any]) -> str | None:
     value = row.get("symbol")
     if value is None:
@@ -712,7 +723,7 @@ def _normalize_funding_event_fields(
 
 def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
     values = {field_name: row.get(field_name) for field_name in _OHLC_FIELDS}
-    if not all(isinstance(value, float) for value in values.values()):
+    if not all(isinstance(value, float) and value > 0 for value in values.values()):
         return
     high = values["high"]
     low = values["low"]
@@ -729,6 +740,26 @@ def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
             row,
             severity="error",
             message="OHLC fields must satisfy high >= max(open, close, low) and low <= min(open, close, high)",
+        )
+    )
+
+
+def _validate_quote_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
+    values = {field_name: row.get(field_name) for field_name in _QUOTE_FIELDS}
+    if not all(isinstance(value, float) and value > 0 for value in values.values()):
+        return
+    bid = values["bid"]
+    ask = values["ask"]
+    mid = values["mid"]
+    if bid <= ask and bid <= mid <= ask:
+        return
+    issues.append(
+        _issue(
+            "row_invalid_numeric_field",
+            "quote",
+            row,
+            severity="error",
+            message="quote fields must satisfy bid <= ask and bid <= mid <= ask",
         )
     )
 

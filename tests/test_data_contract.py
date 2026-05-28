@@ -75,6 +75,23 @@ def test_invalid_numeric_field_emits_invalid_numeric_field():
     assert normalized.issues[0].field == "close"
 
 
+@pytest.mark.parametrize(("field_name", "value"), [("open", 0.0), ("close", -1.0)])
+def test_nonpositive_ohlc_emits_invalid_numeric_field(
+    field_name: str,
+    value: float,
+):
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(**{field_name: value})],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_numeric_field", field_name)
+    ]
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
 def test_invalid_ohlc_order_emits_invalid_ohlc_order():
     normalized = NormalizedRows.from_rows(
         config(),
@@ -83,6 +100,21 @@ def test_invalid_ohlc_order_emits_invalid_ohlc_order():
     )
 
     assert "row_invalid_ohlc_order" in issue_reasons(normalized)
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
+@pytest.mark.parametrize("symbol", ["", "   "])
+def test_empty_or_blank_symbol_emits_missing_required_field(symbol: str):
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(symbol=symbol)],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_missing_required_field", "symbol")
+    ]
+    assert normalized.row_contract_summary()["missing_required_fields"] == {"symbol": 1}
     assert normalized.row_contract_summary()["status"] == "failed"
 
 
@@ -195,6 +227,30 @@ def test_quote_fill_missing_quote_field_emits_quote_issue():
     assert "row_missing_quote_field" in issue_reasons(normalized)
     assert normalized.issues[0].field == "ask"
     assert normalized.row_contract_summary()["missing_required_fields"] == {"ask": 1}
+
+
+@pytest.mark.parametrize(
+    "quotes",
+    [
+        {"bid": 1.2, "ask": 1.1, "mid": 1.15},
+        {"bid": 1.0, "ask": 1.1, "mid": 0.9},
+        {"bid": 1.0, "ask": 1.1, "mid": 1.2},
+    ],
+)
+def test_quote_fill_invalid_quote_order_emits_invalid_numeric_field(
+    quotes: dict[str, float],
+):
+    normalized = NormalizedRows.from_rows(
+        config("forex_with_quotes", fill_price="quote"),
+        [valid_row(symbol="EURUSD", **quotes)],
+        mode="validation",
+    )
+
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_invalid_numeric_field", "quote")
+    ]
+    assert "bid <= ask and bid <= mid <= ask" in normalized.issues[0].message
+    assert normalized.row_contract_summary()["status"] == "failed"
 
 
 def test_crypto_funding_event_missing_or_invalid_fields_emit_funding_issue():

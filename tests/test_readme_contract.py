@@ -75,10 +75,18 @@ def test_docs_describe_runner_normalized_row_contract():
     assert "`Sequence[Mapping[str, Any]]`" in consumer
     assert re.search(r"they do not\s+receive row model objects", readme)
     assert "not free-form issue messages" in consumer
-    assert "`strategy_input_rows.jsonl` is the normalized projection" in readme
-    assert "`strategy_input_rows.jsonl` is the normalized projection" in consumer
-    assert "file hash matches `normalized_rows_sha256`" in readme
-    assert "file hash matches `normalized_rows_sha256`" in consumer
+    assert re.search(
+        r"`strategy_input_rows\.jsonl` contains a JSON-safe canonical\s+serialization",
+        readme,
+    )
+    assert re.search(
+        r"`strategy_input_rows\.jsonl` contains a JSON-safe canonical\s+serialization",
+        consumer,
+    )
+    assert re.search(r"non-finite ancillary values are\s+written as `null`", readme)
+    assert re.search(r"non-finite\s+ancillary values are written as `null`", consumer)
+    assert re.search(r"file hash matches\s+`normalized_rows_sha256`", readme)
+    assert re.search(r"file hash matches\s+`normalized_rows_sha256`", consumer)
     assert "Missing `available_at` in search mode is warning evidence" in readme
     assert "Missing `available_at` in search mode is warning evidence" in consumer
     assert re.search(r"Invalid `available_at` is a\s+row contract failure", consumer)

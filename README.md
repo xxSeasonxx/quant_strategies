@@ -269,8 +269,9 @@ After config loading succeeds, runner result dirs include `config.toml`;
 reach data loading include `data_manifest.json` and, for
 `artifact_profile = "full"`, `strategy_input_rows.jsonl` even if decision
 generation later fails. In full-profile runner runs,
-`strategy_input_rows.jsonl` is the normalized projection supplied to the
-strategy, and its file hash matches `normalized_rows_sha256` in
+`strategy_input_rows.jsonl` contains a JSON-safe canonical serialization of the
+normalized projection used for strategy input; non-finite ancillary values are
+written as `null`, and its file hash matches `normalized_rows_sha256` in
 `data_manifest.json`. Runner failures still write `run_manifest.json`,
 `summary.json`, and `notes.md`. Successful default `artifact_profile = "summary"`
 runs also write `artifact_profile_summary.json` and declare

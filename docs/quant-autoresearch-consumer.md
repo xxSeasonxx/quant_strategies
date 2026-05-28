@@ -224,9 +224,10 @@ search sweeps; it still writes `summary.json` plus
 `artifact_profile = "full"` for retained or debug runs when you need input
 rows, decision records, engine request JSON, and full evidence
 artifacts; those runs are marked `artifact_trust_tier = "audit_replayable"`.
-In full-profile runs, `strategy_input_rows.jsonl` is the normalized projection
-passed to the strategy, and its file hash matches `normalized_rows_sha256` in
-`data_manifest.json`.
+In full-profile runs, `strategy_input_rows.jsonl` contains a JSON-safe canonical
+serialization of the normalized projection used for strategy input; non-finite
+ancillary values are written as `null`, and its file hash matches
+`normalized_rows_sha256` in `data_manifest.json`.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them
 under `smoke_score.sum_signed_trade_activity_gross`,

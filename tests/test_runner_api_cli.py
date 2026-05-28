@@ -996,6 +996,34 @@ def test_run_config_records_row_contract_feedback(
     assert data_manifest["row_contract"] == row_contract
 
 
+def test_run_config_records_engine_invalid_row_contract_before_engine_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('stop')\n")
+    config_path = write_config(tmp_path)
+    contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
+    contract_rows[1]["close"] = 0.0
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    row_contract = summary["row_contract"]
+    assert summary["stage"] == "decision_generation"
+    assert row_contract["status"] == "failed"
+    assert row_contract["issue_reasons"] == {"row_invalid_numeric_field": 1}
+    assert row_contract["quant_data_feedback"] == ["row_invalid_numeric_field:close:1"]
+    assert data_manifest["row_contract"] == row_contract
+    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert not (result.result_dir / "engine_request.json").exists()
+
+
 def test_run_config_requires_crypto_funding_event_indicator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1176,6 +1204,12 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     assert result.run_completed is True
     assert result.result_dir is not None
     assert (result.result_dir / "run_manifest.json").exists()
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    jsonl_path = result.result_dir / "strategy_input_rows.jsonl"
+    assert jsonl_path.exists()
+    assert hashlib.sha256(jsonl_path.read_bytes()).hexdigest() == data_manifest[
+        "normalized_rows_sha256"
+    ]
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "smoke_score" not in summary["engine"]
