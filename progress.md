@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 16: P3 retire runner strategy-loader wrapper.
+Phase 17: P3 retire unused validation error classes.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-retire-runner-strategy-loader-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-runner-strategy-loader.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-retire-unused-validation-errors-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-unused-validation-errors.md`
 
 ## Finding Triage
 
@@ -46,6 +46,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-runner-stra
 | `quant_data` engine discovery has hidden local `.env` coupling | Confirmed true, Phase 14 | Remove runner-owned discovery of an upstream `quant-data/.env`; `quant_data` owns engine environment configuration. |
 | Search pressure is copied but no deflation is evaluated | Confirmed true, Phase 15 | Add explicit `deflation_not_evaluated` reason to search-pressure-backed `mechanical_review_candidate` outputs. |
 | `runner/strategy_loader.py` is a pass-through wrapper | Confirmed true, Phase 16 | Retire the wrapper and inline runner-specific exception translation at the execution boundary. |
+| `ValidationBackendError` and `ValidationDataError` are unused | Confirmed true, Phase 17 | Retire the unused subclasses and keep only raised validation error classes. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -484,3 +485,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-retire-runner-stra
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: direct external imports of retired `quant_strategies.runner.strategy_loader` now fail by design.
 - 2026-05-28: Committed Phase 16.
+
+## Phase 17 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add error-surface regression.
+- [x] Delete unused validation error subclasses.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 17 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_errors.py -q` -> failed as expected before implementation; `ValidationBackendError` and `ValidationDataError` were still public error classes.
+- 2026-05-28: `rg -n "ValidationBackendError|ValidationDataError" src tests` -> no matches.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_errors.py tests/test_validation_config.py tests/test_validation_cli.py tests/test_validation_runner.py -q` -> 62 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 500 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: direct external imports of retired `ValidationBackendError` or `ValidationDataError` now fail by design.
+- 2026-05-28: Committed Phase 17.
