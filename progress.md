@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 27: P2 validation row artifacts.
+Phase 28: P3 public API PRD reconciliation.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-validation-row-artifacts-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-validation-row-artifacts.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-public-api-prd-reconciliation-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-public-api-prd-reconciliation.md`
 
 ## Finding Triage
 
@@ -29,7 +29,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-validation-row-art
 | Runner/validation neutral kernel incomplete | Partly true, deferred | Shared execution exists; causality is not shared. Phase 1 extracts causality only. |
 | Engine parallel ontology | Confirmed true, Phase 6 | Collapse runner/engine signal path into direct `StrategyDecision` consumption. |
 | Validation orchestrator god-function | Confirmed true, Phase 4 | Behavior-preserving split into focused private helpers. |
-| Public API re-export mismatch | Partly true, deferred | `AGENTS.md` chooses `quant_strategies.runner.run_config`; treat as PRD/docs reconciliation, not immediate code change. |
+| Public API re-export mismatch | Confirmed true, Phase 28 | Preserve `quant_strategies.runner.run_config` as the public surface and reconcile stale PRD top-level re-export wording. |
 | Full G1 ontology support missing | Confirmed true, Phase 2 | Define ontology/capability gates before executing all asset classes. |
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
 | Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
@@ -791,3 +791,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-validation-row-art
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed after review fix.
 - 2026-05-28: Follow-up code review found the non-finite row snapshot issue closed and no new Critical/Important issues.
 - 2026-05-28: Committed Phase 27.
+
+## Phase 28 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add public API docs-contract regression.
+- [x] Reconcile PRD public surface wording.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 28 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py::test_prd_matches_runner_public_api_contract -q` -> failed as expected before implementation; PRD did not name `quant_strategies.runner.run_config` and still promised a re-exported public surface.
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py::test_prd_matches_runner_public_api_contract -q` -> 1 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_readme_contract.py -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 515 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical/Important issues.
+- 2026-05-28: Committed Phase 28.

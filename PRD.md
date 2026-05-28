@@ -120,7 +120,11 @@ reach into runner internals.
 - `quant_autoresearch` writes exactly two files per candidate (`strategy.py`,
 `experiment.toml`).
 - It reads exactly one typed result object and structured artifacts.
-- The public consumer surface is re-exported and Protocol-typed. Internals are private.
+- The public consumer surface is intentionally narrow:
+  `quant_strategies.runner.run_config` returns
+  `quant_strategies.runner.RunResult`, and no top-level facade is promised.
+  Strategy generation and backend extension points are Protocol-typed;
+  internals are private.
 - Misusing the surface (returning the wrong shape, importing private modules, etc.)
 produces a clear error, not a silent miscalculation.
 

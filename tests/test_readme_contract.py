@@ -47,3 +47,23 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "target_contracts" in text
     assert "target_vol" in text
     assert "unsupported smoke" in text
+
+
+def test_prd_matches_runner_public_api_contract():
+    prd = Path("PRD.md").read_text()
+    readme = Path("README.md").read_text()
+    consumer = Path("docs/quant-autoresearch-consumer.md").read_text()
+
+    assert "`quant_strategies.runner.run_config`" in prd
+    assert "`quant_strategies.runner.RunResult`" in prd
+    assert "The public consumer surface is re-exported" not in prd
+    assert "top-level facade" in prd
+
+    assert "`quant_strategies.runner.run_config`" in readme
+    assert "`quant_strategies.runner.RunResult`" in readme
+    assert "`quant_strategies.runner.run_config`" in consumer
+    assert "`quant_strategies.runner.RunResult`" in consumer
+
+    import quant_strategies
+
+    assert not hasattr(quant_strategies, "run_config")
