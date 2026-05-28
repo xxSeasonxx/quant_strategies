@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+import quant_strategies.validation as validation
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError
@@ -290,6 +291,44 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
         base_decision_file
     )
+
+
+def test_validation_row_snapshot_hash_uses_written_payload(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.02, "trade_count": 20},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+    )
+    original_file_sha256 = validation.file_sha256
+
+    def forbid_row_file_hash(path: Path) -> str:
+        if "data_rows" in path.parts:
+            raise AssertionError("row snapshot hash should use the written payload")
+        return original_file_sha256(path)
+
+    monkeypatch.setattr(validation, "file_sha256", forbid_row_file_hash)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    row_path = "data_rows/validation_2026_h1.jsonl"
+    row_file = result.result_dir / row_path
+    assert manifest["data"]["windows"][0]["rows_path"] == row_path
+    assert manifest["data"]["windows"][0]["rows_sha256"] == file_sha256(row_file)
+    assert read_jsonl(row_file) == expected_row_records()
 
 
 def test_run_validation_writes_mechanical_review_candidate_artifacts_for_two_robust_windows(

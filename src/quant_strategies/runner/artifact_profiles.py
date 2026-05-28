@@ -19,11 +19,15 @@ SUMMARY_SAMPLE_SIZE = 5
 
 
 def normalized_rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
+    return text_sha256(canonical_rows_jsonl(rows))
+
+
+def canonical_rows_jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
     lines = [
         json.dumps(json_safe_value(row), sort_keys=True, separators=(",", ":"), allow_nan=False)
         for row in rows
     ]
-    return text_sha256("\n".join(lines) + ("\n" if lines else ""))
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def summary_profile_payload(

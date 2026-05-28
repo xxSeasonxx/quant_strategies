@@ -11,7 +11,11 @@ from quant_strategies.decisions import (
     validate_decision_output,
     validate_strategy_params,
 )
-from quant_strategies.provenance import file_sha256
+from quant_strategies.provenance import file_sha256, text_sha256
+from quant_strategies.runner.artifact_profiles import (
+    canonical_rows_jsonl,
+    normalized_rows_sha256,
+)
 from quant_strategies.runner.config import default_repo_root
 from quant_strategies.runner.execution import (
     StrategyExecutionError,
@@ -40,7 +44,7 @@ from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
 from quant_strategies.validation.lookahead import check_hidden_lookahead
-from quant_strategies.validation.manifest import rows_sha256, write_validation_manifest
+from quant_strategies.validation.manifest import write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
 from quant_strategies.validation.policy import (
     ValidationPolicyDecision,
@@ -592,7 +596,7 @@ def _data_provenance(
         },
         "row_count": row_count,
         "rows_path": None if rows is None else rows_path,
-        "rows_sha256": None if rows is None else rows_hash or rows_sha256(rows),
+        "rows_sha256": None if rows is None else rows_hash or normalized_rows_sha256(rows),
     }
     if message is not None:
         payload["message"] = message
@@ -717,8 +721,10 @@ def _write_window_rows(
     rows: Sequence[Mapping[str, Any]],
 ) -> tuple[str, str]:
     artifact_name = f"data_rows/{_safe_scenario_artifact_path(window_id)}.jsonl"
-    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(rows)))
-    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+    payload = canonical_rows_jsonl(rows)
+    path = write_text_artifact(result_dir, artifact_name, payload)
+    written_payload = payload if payload.endswith("\n") else f"{payload}\n"
+    return path.relative_to(result_dir).as_posix(), text_sha256(written_payload)
 
 
 def _safe_scenario_artifact_path(scenario_id: str) -> str:

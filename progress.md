@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 31: P3 evidence quality reuse.
+Phase 32: P2 validation row hash canonicalization.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-evidence-quality-reuse-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-evidence-quality-reuse.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-validation-row-hash-canonicalization-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-validation-row-hash-canonicalization.md`
 
 ## Finding Triage
 
@@ -37,6 +37,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-evidence-quality-r
 | Repository identity hashes untracked detritus | Confirmed true, Phase 29 | Use tracked-only git status for repository identity while preserving tracked diff hashes and input snapshots. |
 | Failure summaries include null smoke score objects | Confirmed true, Phase 30 | Omit `engine.smoke_score` when smoke was not computed; keep real zero-valued scores for completed no-trade runs. |
 | Evidence quality walks rows twice on successful runs | Confirmed true, Phase 31 | Reuse execution evidence quality and update only causality fields after replay. |
+| Validation row hashing duplicates runner canonicalization | Confirmed true, Phase 32 | Share runner row JSONL canonicalization with validation row snapshots and hash the bytes written. |
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
@@ -886,3 +887,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-evidence-quality-r
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues.
 - 2026-05-28: Committed Phase 31.
+
+## Phase 32 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add row hash canonicalization regression.
+- [x] Implement shared row JSONL helper.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 32 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_validation_row_snapshot_hash_uses_written_payload -q` -> failed as expected before implementation; `_write_window_rows()` reread `data_rows/*.jsonl` through `file_sha256()`.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py::test_validation_row_snapshot_hash_uses_written_payload tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_validation_runner.py::test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot tests/test_runner_artifact_profiles.py::test_normalized_rows_sha256_is_stable_for_json_equivalent_rows -q` -> 4 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_artifacts.py tests/test_runner_artifact_profiles.py -q` -> 47 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 518 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues.
+- 2026-05-28: Committed Phase 32.

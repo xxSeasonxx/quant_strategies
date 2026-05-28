@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -10,14 +9,9 @@ from quant_strategies.provenance import (
     git_identity,
     package_versions,
     python_identity,
-    text_sha256,
 )
-from quant_strategies.validation.artifacts import canonical_jsonl_lines, write_json_artifact
+from quant_strategies.validation.artifacts import write_json_artifact
 from quant_strategies.validation.backends import ScenarioBackendRunResult
-
-
-def rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
-    return text_sha256(canonical_jsonl_lines(list(rows)))
 
 
 def write_validation_manifest(
