@@ -96,11 +96,16 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
     except RunnerError as exc:
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
-    normalized_rows = loaded.normalized_rows or NormalizedRows.from_rows(
-        config,
-        loaded.rows,
-        mode=RowContractMode.SEARCH,
-    )
+    if loaded.normalized_rows is not None:
+        normalized_rows = loaded.normalized_rows
+    elif isinstance(loaded.rows, NormalizedRows):
+        normalized_rows = loaded.rows
+    else:
+        normalized_rows = NormalizedRows.from_rows(
+            config,
+            loaded.rows,
+            mode=RowContractMode.SEARCH,
+        )
     rows = normalized_rows.projection_rows()
     row_hash = normalized_rows.normalized_rows_sha256
     evidence = compact_evidence_quality(normalized_rows.evidence_quality(causality_verified=False))

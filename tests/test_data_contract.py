@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -258,3 +258,70 @@ def test_projection_rows_are_mapping_compatible_and_hash_ordering_is_stable():
     assert tuple(dict(row) for row in first.projection_rows()) == tuple(
         dict(row) for row in second.projection_rows()
     )
+
+
+def test_nested_projection_values_are_isolated_and_immutable():
+    row = valid_row(
+        metadata={
+            "levels": [{"bid": 100.0, "ask": 100.1}],
+            "tags": ["research", "paper"],
+        }
+    )
+    normalized = NormalizedRows.from_rows(config(), [row], mode="validation")
+    projected = normalized.projection_rows()
+    original_hash = normalized.normalized_rows_sha256
+
+    metadata = row["metadata"]
+    assert isinstance(metadata, dict)
+    levels = metadata["levels"]
+    tags = metadata["tags"]
+    assert isinstance(levels, list)
+    assert isinstance(levels[0], dict)
+    assert isinstance(tags, list)
+    levels[0]["bid"] = 999.0
+    tags.append("mutated")
+
+    assert normalized.normalized_rows_sha256 == original_hash
+    assert projected[0]["metadata"]["levels"][0]["bid"] == 100.0
+    assert projected[0]["metadata"]["tags"] == ("research", "paper")
+    with pytest.raises(TypeError):
+        projected[0]["metadata"]["new"] = True
+    with pytest.raises(TypeError):
+        projected[0]["metadata"]["levels"][0]["bid"] = 101.0
+    with pytest.raises(TypeError):
+        projected[0]["metadata"]["tags"][0] = "changed"
+
+
+def test_row_contract_summary_counts_all_issues_while_bounding_issue_sample():
+    rows = [
+        valid_row(
+            timestamp=TIMESTAMP + timedelta(minutes=index),
+            available_at=AVAILABLE_AT + timedelta(minutes=index),
+            close="not-a-number",
+        )
+        for index in range(40)
+    ]
+    rare_row = valid_row(
+        timestamp=TIMESTAMP + timedelta(minutes=40),
+        available_at=AVAILABLE_AT + timedelta(minutes=40),
+    )
+    del rare_row["high"]
+    rows.append(rare_row)
+
+    normalized = NormalizedRows.from_rows(config(), rows, mode="validation")
+    summary = normalized.row_contract_summary()
+
+    assert normalized.issue_count == 41
+    assert len(normalized.issues) == 25
+    assert summary["issue_count"] == 41
+    assert summary["issue_reasons"] == {
+        "row_invalid_numeric_field": 40,
+        "row_missing_required_field": 1,
+    }
+    assert summary["missing_required_fields"] == {"high": 1}
+    assert summary["quant_data_feedback"] == [
+        "row_invalid_numeric_field:close:40",
+        "row_missing_required_field:high:1",
+    ]
+    assert len(summary["issues"]) == 25
+    assert any(issue["reason"] == "row_missing_required_field" for issue in summary["issues"])

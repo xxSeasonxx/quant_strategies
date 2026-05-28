@@ -10,7 +10,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 from quant_strategies.datetime_utils import parse_aware_datetime
 
@@ -44,6 +44,7 @@ _METADATA_COVERAGE_FIELDS = (
     "funding_ingested_at",
     "joined_refreshed_at",
 )
+_ISSUE_SAMPLE_SIZE = 25
 
 
 @dataclass(frozen=True)
@@ -69,12 +70,104 @@ class RowContractIssue:
         return self.to_jsonable()
 
 
+class _IssueSink(Protocol):
+    def append(self, issue: RowContractIssue) -> None: ...
+
+
+class _IssueAccumulator:
+    def __init__(self, *, sample_size: int) -> None:
+        self._sample_size = sample_size
+        self._next_index = 0
+        self._first_samples_by_key: dict[
+            tuple[object, object, object],
+            tuple[int, RowContractIssue],
+        ] = {}
+        self._overflow_samples: list[tuple[int, RowContractIssue]] = []
+        self._issue_reasons: Counter[str] = Counter()
+        self._missing_required_fields: Counter[str] = Counter()
+        self._funding_event_missing_fields: Counter[str] = Counter()
+        self._error_issue_reasons: Counter[str] = Counter()
+        self._error_issue_fields: Counter[tuple[str, str | None]] = Counter()
+        self.issue_count = 0
+        self.has_errors = False
+
+    def append(self, issue: RowContractIssue) -> None:
+        index = self._next_index
+        self._next_index += 1
+        self.issue_count += 1
+        self._issue_reasons[issue.reason] += 1
+        self._record_summary_counts(issue)
+        self._append_sample(index, issue)
+
+    def sample(self) -> tuple[RowContractIssue, ...]:
+        samples = [*self._first_samples_by_key.values(), *self._overflow_samples]
+        return tuple(issue for _, issue in sorted(samples, key=lambda item: item[0]))
+
+    def issue_reason_items(self) -> tuple[tuple[str, int], ...]:
+        return tuple(sorted(self._issue_reasons.items()))
+
+    def missing_required_field_items(self) -> tuple[tuple[str, int], ...]:
+        return tuple(sorted(self._missing_required_fields.items()))
+
+    def funding_event_missing_field_items(self) -> tuple[tuple[str, int], ...]:
+        return tuple(sorted(self._funding_event_missing_fields.items()))
+
+    def quant_data_feedback_items(self) -> tuple[str, ...]:
+        feedback: list[str] = []
+        for (reason, field_name), count in sorted(self._error_issue_fields.items()):
+            if field_name is None:
+                feedback.append(f"{reason}:{count}")
+            else:
+                feedback.append(f"{reason}:{field_name}:{count}")
+        for reason, count in sorted(self._error_issue_reasons.items()):
+            if not any(item.startswith(f"{reason}:") for item in feedback):
+                feedback.append(f"{reason}:{count}")
+        return tuple(feedback)
+
+    def _record_summary_counts(self, issue: RowContractIssue) -> None:
+        if issue.severity == "error":
+            self.has_errors = True
+            self._error_issue_reasons[issue.reason] += 1
+            self._error_issue_fields[(issue.reason, issue.field)] += 1
+
+        if issue.field is None:
+            return
+        if issue.reason in {"row_missing_required_field", "row_missing_quote_field"}:
+            self._missing_required_fields[issue.field] += 1
+        if issue.reason == "row_missing_available_at" and issue.severity == "error":
+            self._missing_required_fields[issue.field] += 1
+        if issue.reason == "row_invalid_funding_fields":
+            self._funding_event_missing_fields[issue.field] += 1
+
+    def _append_sample(self, index: int, issue: RowContractIssue) -> None:
+        if self._sample_size <= 0:
+            return
+
+        key = _issue_sample_key(issue)
+        if key not in self._first_samples_by_key:
+            if len(self._first_samples_by_key) < self._sample_size:
+                self._first_samples_by_key[key] = (index, issue)
+                self._trim_overflow()
+            return
+
+        if self._sample_count() < self._sample_size:
+            self._overflow_samples.append((index, issue))
+
+    def _sample_count(self) -> int:
+        return len(self._first_samples_by_key) + len(self._overflow_samples)
+
+    def _trim_overflow(self) -> None:
+        while self._sample_count() > self._sample_size and self._overflow_samples:
+            self._overflow_samples.pop()
+
+
 @dataclass(frozen=True)
 class NormalizedRows(Sequence[Mapping[str, Any]]):
     mode: RowContractMode
     data_kind: str
     required_fields: tuple[str, ...]
     issues: tuple[RowContractIssue, ...]
+    issue_count: int
     normalized_rows_sha256: str
     data_availability_status: str
     duplicate_key_count: int
@@ -82,6 +175,11 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     _range_items: tuple[tuple[str, tuple[tuple[str, Any], ...]], ...] = field(repr=False)
     _metadata_field_items: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = field(repr=False)
     _availability_coverage_items: tuple[tuple[str, Any], ...] = field(repr=False)
+    _issue_reason_items: tuple[tuple[str, int], ...] = field(repr=False)
+    _missing_required_field_items: tuple[tuple[str, int], ...] = field(repr=False)
+    _funding_event_missing_field_items: tuple[tuple[str, int], ...] = field(repr=False)
+    _quant_data_feedback_items: tuple[str, ...] = field(repr=False)
+    _has_error_issues: bool = field(repr=False)
     _projection_rows_cache: tuple[Mapping[str, Any], ...] | None = field(
         default=None,
         init=False,
@@ -108,7 +206,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         fill_price = _fill_price(config)
         required_fields = required_row_fields(config, mode=contract_mode)
         normalized_rows: list[dict[str, Any]] = []
-        issues: list[RowContractIssue] = []
+        issues = _IssueAccumulator(sample_size=_ISSUE_SAMPLE_SIZE)
         valid_available_at = 0
         invalid_available_at = 0
         metadata_present = {field_name: 0 for field_name in _METADATA_COVERAGE_FIELDS}
@@ -277,7 +375,8 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             mode=contract_mode,
             data_kind=data_kind,
             required_fields=required_fields,
-            issues=tuple(issues),
+            issues=issues.sample(),
+            issue_count=issues.issue_count,
             normalized_rows_sha256=_normalized_rows_sha256_from_storage(storage),
             data_availability_status=availability_status,
             duplicate_key_count=duplicate_key_count,
@@ -285,6 +384,11 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             _range_items=_range_items(normalized_rows),
             _metadata_field_items=_mapping_items(metadata_field_coverage),
             _availability_coverage_items=tuple(availability_coverage.items()),
+            _issue_reason_items=issues.issue_reason_items(),
+            _missing_required_field_items=issues.missing_required_field_items(),
+            _funding_event_missing_field_items=issues.funding_event_missing_field_items(),
+            _quant_data_feedback_items=issues.quant_data_feedback_items(),
+            _has_error_issues=issues.has_errors,
         )
 
     def __len__(self) -> int:
@@ -348,28 +452,31 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     def availability_coverage(self) -> dict[str, Any]:
         return dict(self._availability_coverage_items)
 
+    @property
+    def issue_reasons(self) -> dict[str, int]:
+        return dict(self._issue_reason_items)
+
     def row_contract_summary(self) -> dict[str, Any]:
-        issue_counts = Counter(issue.reason for issue in self.issues)
-        missing_required_fields = _missing_required_field_counts(self.issues)
-        funding_event_missing_fields = _field_counts(
-            self.issues,
-            reasons={"row_invalid_funding_fields"},
-        )
-        has_errors = any(issue.severity == "error" for issue in self.issues)
-        status = "not_evaluated" if len(self) == 0 else "failed" if has_errors else "passed"
+        if len(self) == 0:
+            status = "not_evaluated"
+        elif self._has_error_issues:
+            status = "failed"
+        else:
+            status = "passed"
         return {
             "data_kind": self.data_kind,
             "mode": self.mode.value,
             "status": status,
             "required_fields": list(self.required_fields),
-            "missing_required_fields": missing_required_fields,
+            "missing_required_fields": dict(self._missing_required_field_items),
             "timestamp_status": self._timestamp_status(),
             "duplicate_key_count": self.duplicate_key_count,
-            "funding_event_missing_fields": funding_event_missing_fields,
+            "funding_event_missing_fields": dict(self._funding_event_missing_field_items),
             "freshness_status": "not_evaluated",
             "quant_data_feedback": self._quant_data_feedback(),
             "issues": [issue.to_jsonable() for issue in self.issues],
-            "issue_reasons": dict(sorted(issue_counts.items())),
+            "issue_count": self.issue_count,
+            "issue_reasons": self.issue_reasons,
         }
 
     def evidence_quality(self, *, causality_verified: bool) -> dict[str, Any]:
@@ -404,21 +511,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     def _quant_data_feedback(self) -> list[str]:
         if len(self) == 0:
             return ["row_contract_not_evaluated:no_rows"]
-        error_issues = [issue for issue in self.issues if issue.severity == "error"]
-        error_issue_counts = Counter(issue.reason for issue in error_issues)
-        feedback: list[str] = []
-        field_counts: Counter[tuple[str, str | None]] = Counter(
-            (issue.reason, issue.field) for issue in error_issues
-        )
-        for (reason, field_name), count in sorted(field_counts.items()):
-            if field_name is None:
-                feedback.append(f"{reason}:{count}")
-            else:
-                feedback.append(f"{reason}:{field_name}:{count}")
-        for reason, count in sorted(error_issue_counts.items()):
-            if not any(item.startswith(f"{reason}:") for item in feedback):
-                feedback.append(f"{reason}:{count}")
-        return feedback
+        return list(self._quant_data_feedback_items)
 
 
 def required_row_fields(
@@ -513,7 +606,7 @@ def _normalize_timestamp_field(
     *,
     field_name: str,
     issue_reason: RowContractReason,
-    issues: list[RowContractIssue],
+    issues: _IssueSink,
     symbol: str | None,
 ) -> datetime | None:
     if _is_missing(row, field_name):
@@ -538,7 +631,7 @@ def _normalize_timestamp_field(
 def _normalize_numeric_field(
     row: dict[str, Any],
     field_name: str,
-    issues: list[RowContractIssue],
+    issues: _IssueSink,
     *,
     minimum: float | None = None,
     allow_zero: bool = True,
@@ -564,7 +657,7 @@ def _normalize_numeric_field(
 
 def _normalize_funding_event_fields(
     row: dict[str, Any],
-    issues: list[RowContractIssue],
+    issues: _IssueSink,
 ) -> None:
     if _is_missing(row, "funding_timestamp"):
         issues.append(
@@ -617,7 +710,7 @@ def _normalize_funding_event_fields(
     row["funding_rate"] = parsed_funding_rate
 
 
-def _validate_ohlc_order(row: Mapping[str, Any], issues: list[RowContractIssue]) -> None:
+def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:
     values = {field_name: row.get(field_name) for field_name in _OHLC_FIELDS}
     if not all(isinstance(value, float) for value in values.values()):
         return
@@ -662,6 +755,10 @@ def _duplicate_timestamp_key(
     if parsed_timestamp is not None:
         return parsed_timestamp
     return ("invalid_timestamp", _hashable_json_safe_value(raw_timestamp))
+
+
+def _issue_sample_key(issue: RowContractIssue) -> tuple[object, object, object]:
+    return (issue.severity, issue.reason, issue.field)
 
 
 def _hashable_json_safe_value(value: Any) -> Any:
@@ -714,7 +811,22 @@ def _range_items(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, tuple[tu
 
 
 def _storage_row(row: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
-    return tuple(sorted(row.items(), key=lambda item: item[0]))
+    return tuple(
+        sorted(
+            ((key, _freeze_storage_value(value)) for key, value in row.items()),
+            key=lambda item: item[0],
+        )
+    )
+
+
+def _freeze_storage_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _freeze_storage_value(item) for key, item in value.items()}
+        )
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_storage_value(item) for item in value)
+    return value
 
 
 def _mapping_items(mapping: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
@@ -735,29 +847,6 @@ def _normalized_rows_sha256_from_storage(
         digest.update(line.encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
-
-
-def _field_counts(
-    issues: Sequence[RowContractIssue],
-    *,
-    reasons: set[str],
-) -> dict[str, int]:
-    counts: Counter[str] = Counter(
-        issue.field for issue in issues if issue.reason in reasons and issue.field is not None
-    )
-    return dict(sorted(counts.items()))
-
-
-def _missing_required_field_counts(issues: Sequence[RowContractIssue]) -> dict[str, int]:
-    counts: Counter[str] = Counter()
-    for issue in issues:
-        if issue.field is None:
-            continue
-        if issue.reason in {"row_missing_required_field", "row_missing_quote_field"}:
-            counts[issue.field] += 1
-        if issue.reason == "row_missing_available_at" and issue.severity == "error":
-            counts[issue.field] += 1
-    return dict(sorted(counts.items()))
 
 
 def _causality_evidence(

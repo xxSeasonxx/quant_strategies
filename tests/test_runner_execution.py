@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner import execution
 from quant_strategies.runner.config import load_config
@@ -119,6 +120,27 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     assert result.decisions == [decision()]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"
+
+
+def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    config = write_config(tmp_path)
+    normalized = NormalizedRows.from_rows(config, rows())
+
+    def generate_decisions(loaded_rows, params):
+        assert loaded_rows[0]["symbol"] == "SPY"
+        return [decision()]
+
+    monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: generate_decisions)
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=normalized))
+
+    result = execute_strategy_run(config, repo_root=tmp_path)
+
+    assert result.normalized_rows is normalized
+    assert result.loaded_rows is normalized.projection_rows()
+    assert result.normalized_rows_sha256 == normalized.normalized_rows_sha256
 
 
 def test_execute_strategy_run_maps_strategy_import_failure(
