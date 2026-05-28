@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+import quant_strategies.runner as runner_package
 import quant_strategies.runner.artifacts as artifacts
+import quant_strategies.runner.execution as runner_execution
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.artifact_profiles import (
     canonical_rows_jsonl,
     normalized_rows_sha256,
@@ -18,7 +21,10 @@ from quant_strategies.runner.config import load_config
 
 
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
-    assert not hasattr(artifacts, "RowSummary")
+    for module in (artifacts, runner_execution, runner_package):
+        assert not hasattr(module, "RowSummary")
+    assert "row_summary" not in inspect.signature(artifacts.write_data_manifest).parameters
+    assert "row_summary" not in inspect.signature(runner_execution.StrategyExecutionError).parameters
 
 
 def test_row_contract_issue_compaction_samples_each_failure_class():

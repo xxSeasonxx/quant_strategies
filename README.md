@@ -73,6 +73,11 @@ the `StrategyDecision` contract, runs hidden-lookahead replay keyed by
 `decision_id`, checks decision row availability, builds an engine request from
 supported decisions, and writes result artifacts.
 
+Runner rows are normalized once at the data-load boundary through the neutral
+`quant_strategies.data_contract.NormalizedRows` contract. Strategies still
+receive plain mapping rows typed as `Sequence[Mapping[str, Any]]`; they do not
+receive row model objects.
+
 With `[output] mode = "screen"`, the engine simulates entries and exits from
 the decisions, fill model, cost model, and exit policy. It reports
 `trade_count` plus `smoke_score.sum_signed_trade_activity_gross`,
@@ -112,12 +117,23 @@ and smoke metrics instead of any single completion flag.
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
 `causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay
-failures stop the run as `runner_failed`. Runner smoke keeps missing, partial,
-or invalid availability non-fatal for search, but it records that uncertainty as
-`smoke_unverified` and does not set `causality_verified`. `row_contract`
-reports the loaded row schema status for the configured `data.kind`, including
-missing required fields, timestamp awareness, duplicate symbol/timestamp keys,
-and `quant_data_feedback` strings for upstream data fixes.
+failures stop the run as `runner_failed`. Runner smoke records missing,
+partial, or invalid availability as uncertainty with `smoke_unverified` and
+does not set `causality_verified`.
+Missing `available_at` in search mode is warning evidence; invalid
+`available_at` is a row contract failure.
+
+`row_contract` reports the loaded row schema status for the configured
+`data.kind`, including missing required fields, timestamp awareness, duplicate
+symbol/timestamp keys, and `quant_data_feedback` strings for upstream data
+fixes. Stable issue reasons include `row_missing_required_field`,
+`row_invalid_timestamp`, `row_invalid_numeric_field`, `row_invalid_ohlc_order`,
+`row_duplicate_symbol_timestamp`, `row_invalid_available_at`,
+`row_missing_available_at`, `row_missing_quote_field`, and
+`row_invalid_funding_fields`. Runner artifacts may sample or compact
+`row_contract.issues`, while `issue_count`, `issue_reasons`, and
+`quant_data_feedback` preserve complete counts and reason summaries for
+consumers.
 
 Runner artifacts also declare `artifact_trust_tier`. Summary-profile runs are
 the default and are `search_only`: useful for fast ranking but not enough to
@@ -252,7 +268,10 @@ After config loading succeeds, runner result dirs include `config.toml`;
 `strategy_snapshot.py` is copied when the strategy file is available. Runs that
 reach data loading include `data_manifest.json` and, for
 `artifact_profile = "full"`, `strategy_input_rows.jsonl` even if decision
-generation later fails. Runner failures still write `run_manifest.json`,
+generation later fails. In full-profile runner runs,
+`strategy_input_rows.jsonl` is the normalized projection supplied to the
+strategy, and its file hash matches `normalized_rows_sha256` in
+`data_manifest.json`. Runner failures still write `run_manifest.json`,
 `summary.json`, and `notes.md`. Successful default `artifact_profile = "summary"`
 runs also write `artifact_profile_summary.json` and declare
 `artifact_trust_tier = "search_only"`. Completed

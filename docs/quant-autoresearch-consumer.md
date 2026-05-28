@@ -105,6 +105,11 @@ def generate_decisions(rows, params):
 The return value must be a list of `StrategyDecision` objects. The public
 strategy callable type is `StrategyGenerator`.
 
+Runner data is normalized once at the load boundary through
+`quant_strategies.data_contract.NormalizedRows`, but the strategy still receives
+plain mapping rows: `Sequence[Mapping[str, Any]]`. Do not generate strategies
+that depend on row model objects or runner-private row wrappers.
+
 ```python
 from quant_strategies.decisions import (
     ExitPolicy,
@@ -219,6 +224,9 @@ search sweeps; it still writes `summary.json` plus
 `artifact_profile = "full"` for retained or debug runs when you need input
 rows, decision records, engine request JSON, and full evidence
 artifacts; those runs are marked `artifact_trust_tier = "audit_replayable"`.
+In full-profile runs, `strategy_input_rows.jsonl` is the normalized projection
+passed to the strategy, and its file hash matches `normalized_rows_sha256` in
+`data_manifest.json`.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them
 under `smoke_score.sum_signed_trade_activity_gross`,
@@ -267,10 +275,24 @@ never rank from `run_completed` alone.
 Treat `smoke_passed` as stronger mechanical evidence than `smoke_unverified`;
 `smoke_unverified` means the smoke gates passed but row availability coverage
 was missing, partial, or invalid, so the runner could not claim causality
-verification. Treat `search_only` artifacts as ranking evidence only; rerun
-retained candidates with `artifact_profile = "full"` before audit handoff.
-`row_contract.quant_data_feedback` is the handoff channel for missing fields,
-duplicate keys, timestamp issues, and other upstream `quant_data` contract gaps.
+verification. Missing `available_at` in search mode is warning evidence:
+non-fatal, but `causality_verified` remains false and the assessment stays
+`smoke_unverified` when smoke gates otherwise pass. Invalid `available_at` is a
+row contract failure. Treat `search_only` artifacts as ranking evidence only;
+rerun retained candidates with `artifact_profile = "full"` before audit handoff.
+
+Route from stable row issue reasons and counts, not free-form issue messages.
+Runner `summary.json` and `data_manifest.json` expose reasons such as
+`row_missing_required_field`, `row_invalid_timestamp`,
+`row_invalid_numeric_field`, `row_invalid_ohlc_order`,
+`row_duplicate_symbol_timestamp`, `row_invalid_available_at`,
+`row_missing_available_at`, `row_missing_quote_field`, and
+`row_invalid_funding_fields`. `row_contract.issues` may be sampled or compacted
+in artifacts, while `issue_count`, `issue_reasons`, and
+`quant_data_feedback` preserve complete counts and reason summaries for
+consumers. `row_contract.quant_data_feedback` is the handoff channel for missing
+fields, duplicate keys, timestamp issues, and other upstream `quant_data`
+contract gaps.
 
 ## What autoresearch Should Not Own
 

@@ -57,7 +57,7 @@ def summary_profile_payload(
         "artifact_profile": "summary",
         "artifact_trust_tier": artifact_trust_tier_for_profile("summary"),
         "strategy_id": config.strategy_id,
-        "rows": _row_summary(
+        "rows": _rows_profile_payload(
             config,
             rows,
             normalized_rows_hash=normalized_rows_hash,
@@ -139,7 +139,7 @@ def json_safe_value(value: Any) -> Any:
     return value
 
 
-def _row_summary(
+def _rows_profile_payload(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]],
     *,

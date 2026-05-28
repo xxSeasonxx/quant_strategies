@@ -53,6 +53,45 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "Explicitly extended decisions are rejected by unsupported" in text
 
 
+def test_docs_describe_runner_normalized_row_contract():
+    readme = Path("README.md").read_text()
+    consumer = Path("docs/quant-autoresearch-consumer.md").read_text()
+    combined = readme + "\n" + consumer
+    row_issue_reasons = (
+        "row_missing_required_field",
+        "row_invalid_timestamp",
+        "row_invalid_numeric_field",
+        "row_invalid_ohlc_order",
+        "row_duplicate_symbol_timestamp",
+        "row_invalid_available_at",
+        "row_missing_available_at",
+        "row_missing_quote_field",
+        "row_invalid_funding_fields",
+    )
+
+    assert "`quant_strategies.data_contract.NormalizedRows`" in readme
+    assert "`quant_strategies.data_contract.NormalizedRows`" in consumer
+    assert "`Sequence[Mapping[str, Any]]`" in readme
+    assert "`Sequence[Mapping[str, Any]]`" in consumer
+    assert re.search(r"they do not\s+receive row model objects", readme)
+    assert "not free-form issue messages" in consumer
+    assert "`strategy_input_rows.jsonl` is the normalized projection" in readme
+    assert "`strategy_input_rows.jsonl` is the normalized projection" in consumer
+    assert "file hash matches `normalized_rows_sha256`" in readme
+    assert "file hash matches `normalized_rows_sha256`" in consumer
+    assert "Missing `available_at` in search mode is warning evidence" in readme
+    assert "Missing `available_at` in search mode is warning evidence" in consumer
+    assert re.search(r"Invalid `available_at` is a\s+row contract failure", consumer)
+    assert "`row_contract.issues`" in readme
+    assert "`row_contract.issues`" in consumer
+    assert "`issue_count`, `issue_reasons`, and" in readme
+    assert "`issue_count`, `issue_reasons`, and" in consumer
+    assert "`quant_data_feedback` preserve complete counts" in readme
+    assert "`quant_data_feedback` preserve complete counts" in consumer
+    for reason in row_issue_reasons:
+        assert reason in combined
+
+
 def test_prd_matches_runner_public_api_contract():
     prd = Path("PRD.md").read_text()
     readme = Path("README.md").read_text()
