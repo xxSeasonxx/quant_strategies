@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import InstrumentRef, StrategyDecision
 from quant_strategies.engine import (
     Bar,
@@ -38,12 +40,16 @@ class EngineRun:
 def build_request(
     *,
     strategy_id: str,
-    rows: list[dict[str, Any]],
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
     fill_model: FillModelConfig,
     cost_model: CostModelConfig,
 ) -> EvaluationRequest:
-    engine_bars = tuple(_bar_from_row(row) for row in rows)
+    source_rows, normalized_timestamps = _engine_rows(rows)
+    engine_bars = tuple(
+        _bar_from_row(row, normalized_timestamp=normalized_timestamps)
+        for row in source_rows
+    )
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id=strategy_id, decisions=tuple(decisions)),
         bars=engine_bars,
@@ -116,11 +122,23 @@ def _validation_summary(report, *, include_trades: bool) -> dict[str, Any]:
     return payload
 
 
-def _bar_from_row(row: dict[str, Any]) -> Bar:
+def _engine_rows(
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+) -> tuple[Sequence[Mapping[str, Any]], bool]:
+    if isinstance(rows, NormalizedRows):
+        return rows.projection_rows(), True
+    return rows, False
+
+
+def _bar_from_row(row: Mapping[str, Any], *, normalized_timestamp: bool = False) -> Bar:
     try:
         payload = {
             "symbol": row["symbol"],
-            "timestamp": _as_datetime(row["timestamp"], "timestamp"),
+            "timestamp": (
+                row["timestamp"]
+                if normalized_timestamp
+                else _as_datetime(row["timestamp"], "timestamp")
+            ),
             "open": row["open"],
             "high": row["high"],
             "low": row["low"],

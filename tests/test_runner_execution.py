@@ -113,7 +113,9 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     result = execute_strategy_run(config, repo_root=tmp_path)
 
     assert result.validated_params == {"weight": 1.0}
-    assert result.loaded_rows is loaded_rows
+    assert tuple(dict(row) for row in result.loaded_rows) == tuple(loaded_rows)
+    assert result.loaded_rows == result.normalized_rows.projection_rows()
+    assert result.normalized_rows.normalized_rows_sha256 == result.normalized_rows_sha256
     assert result.decisions == [decision()]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"
@@ -239,7 +241,9 @@ def test_execute_strategy_run_invalid_decision_output_carries_loaded_context(
 
     assert str(error.value) == "invalid_decision_output[0]"
     assert error.value.stage == "decision_generation"
-    assert error.value.loaded_rows is loaded_rows
+    assert tuple(dict(row) for row in error.value.loaded_rows or ()) == tuple(loaded_rows)
+    assert error.value.normalized_rows is not None
+    assert error.value.loaded_rows == error.value.normalized_rows.projection_rows()
     assert error.value.normalized_rows_sha256 is not None
     assert len(error.value.normalized_rows_sha256) == 64
     assert error.value.evidence_quality is not None
@@ -266,7 +270,9 @@ def test_execute_strategy_run_maps_generation_exception_with_loaded_context(
 
     assert str(error.value) == "strategy execution failed: boom"
     assert error.value.stage == "decision_generation"
-    assert error.value.loaded_rows is loaded_rows
+    assert tuple(dict(row) for row in error.value.loaded_rows or ()) == tuple(loaded_rows)
+    assert error.value.normalized_rows is not None
+    assert error.value.loaded_rows == error.value.normalized_rows.projection_rows()
     assert error.value.normalized_rows_sha256 is not None
     assert len(error.value.normalized_rows_sha256) == 64
     assert error.value.evidence_quality is not None
@@ -290,7 +296,8 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
 
     result = execute_strategy_run(config, repo_root=tmp_path)
 
-    assert result.loaded_rows is loaded_rows
+    assert tuple(dict(row) for row in result.loaded_rows) == tuple(loaded_rows)
+    assert result.loaded_rows == result.normalized_rows.projection_rows()
     assert result.decisions == [decision(direction="flat", size=0.0)]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"

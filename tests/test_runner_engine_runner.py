@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     DecisionIntent,
     ExitPolicy,
@@ -27,6 +29,13 @@ from quant_strategies.runner.errors import RequestBuildError
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+def config() -> SimpleNamespace:
+    return SimpleNamespace(
+        data=SimpleNamespace(kind="bars"),
+        fill_model=SimpleNamespace(price="close"),
+    )
 
 
 def bars(*closes: float, quotes: bool = False) -> list[dict[str, object]]:
@@ -114,6 +123,33 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_decisions():
     assert request.bars[0].close == 100.0
     assert request.bars[0].funding_rate is None
     assert request.spec.decisions == (source_decision,)
+
+
+def test_build_request_accepts_normalized_rows_without_timestamp_parsing(monkeypatch: pytest.MonkeyPatch):
+    raw_rows = bars(100.0, 101.0, 102.0, 104.0)
+    for raw_row in raw_rows:
+        raw_row["timestamp"] = raw_row["timestamp"].isoformat().replace("+00:00", "Z")
+        for field in ("open", "high", "low", "close"):
+            raw_row[field] = str(raw_row[field])
+    normalized = NormalizedRows.from_rows(config(), raw_rows, mode="search")
+    import quant_strategies.runner.engine_runner as runner_engine_runner
+
+    monkeypatch.setattr(
+        runner_engine_runner,
+        "_as_datetime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+    )
+
+    request = build_request(
+        strategy_id="demo",
+        rows=normalized,
+        decisions=[decision()],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    assert request.bars[0].timestamp == START
+    assert request.bars[0].open == 100.0
 
 
 def test_build_request_serializes_decision_metadata_without_signal_rows():

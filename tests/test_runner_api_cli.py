@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from quant_strategies.data_contract import NormalizedRows
 import quant_strategies.runner.artifacts as artifacts
 import quant_strategies.runner.execution as execution
 from quant_strategies.runner import RunResult, cli, config as config_module, engine_runner, run_config
@@ -764,20 +765,20 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
         "load_data",
         lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
-    row_summary_calls = 0
-    original_from_rows = artifacts.RowSummary.from_rows
+    normalized_rows_calls = 0
+    original_from_rows = NormalizedRows.from_rows
 
     def counting_from_rows(config, loaded_rows, **kwargs):
-        nonlocal row_summary_calls
-        row_summary_calls += 1
+        nonlocal normalized_rows_calls
+        normalized_rows_calls += 1
         return original_from_rows(config, loaded_rows, **kwargs)
 
-    monkeypatch.setattr(artifacts.RowSummary, "from_rows", staticmethod(counting_from_rows))
+    monkeypatch.setattr(NormalizedRows, "from_rows", staticmethod(counting_from_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.run_completed is True
-    assert row_summary_calls == 1
+    assert normalized_rows_calls == 1
 
 
 def test_run_config_marks_partial_available_at_coverage(
@@ -985,9 +986,13 @@ def test_run_config_records_row_contract_feedback(
     assert row_contract["duplicate_key_count"] == 1
     assert row_contract["timestamp_status"] == "aware"
     assert row_contract["quant_data_feedback"] == [
-        "missing_required_field:high:1",
-        "duplicate_symbol_timestamp_keys:1",
+        "row_duplicate_symbol_timestamp:1",
+        "row_missing_required_field:high:1",
     ]
+    assert row_contract["issue_reasons"] == {
+        "row_duplicate_symbol_timestamp": 1,
+        "row_missing_required_field": 1,
+    }
     assert data_manifest["row_contract"] == row_contract
 
 
@@ -1016,7 +1021,7 @@ def test_run_config_requires_crypto_funding_event_indicator(
     assert row_contract["status"] == "failed"
     assert row_contract["missing_required_fields"] == {"has_funding_event": 4}
     assert row_contract["quant_data_feedback"] == [
-        "missing_required_field:has_funding_event:4"
+        "row_missing_required_field:has_funding_event:4"
     ]
 
 
@@ -1101,6 +1106,39 @@ def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
     assert jsonl_rows[0]["research_nan"] is None
     assert jsonl_rows[0]["research_decimal"] == 1.25
     assert len(data_manifest["normalized_rows_sha256"]) == 64
+
+
+def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
+    for loaded_row in loaded_rows:
+        timestamp = loaded_row["timestamp"]
+        loaded_row["timestamp"] = timestamp.isoformat().replace("+00:00", "Z")
+        loaded_row["available_at"] = loaded_row["timestamp"]
+        for field in ("open", "high", "low", "close"):
+            loaded_row[field] = str(loaded_row[field])
+    config = config_module.load_config(config_path, repo_root=tmp_path)
+    expected_normalized = NormalizedRows.from_rows(config, loaded_rows, mode="search")
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    jsonl_path = result.result_dir / "strategy_input_rows.jsonl"
+    written_hash = hashlib.sha256(jsonl_path.read_bytes()).hexdigest()
+    jsonl_rows = [json.loads(line) for line in jsonl_path.read_text().splitlines()]
+
+    assert written_hash == expected_normalized.normalized_rows_sha256
+    assert data_manifest["normalized_rows_sha256"] == expected_normalized.normalized_rows_sha256
+    assert jsonl_rows[0]["timestamp"] == "2024-01-01T00:00:00+00:00"
+    assert jsonl_rows[0]["available_at"] == "2024-01-01T00:00:00+00:00"
+    assert jsonl_rows[0]["open"] == 100.0
 
 
 def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

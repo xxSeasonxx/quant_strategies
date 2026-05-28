@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner import data_readiness
 from quant_strategies.runner.errors import DataReadinessError
 
 
 DECISION_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+
+def config() -> SimpleNamespace:
+    return SimpleNamespace(
+        data=SimpleNamespace(kind="bars"),
+        fill_model=SimpleNamespace(price="close"),
+    )
 
 
 def row(**overrides: object) -> dict[str, object]:
@@ -98,6 +107,30 @@ def test_timezone_equivalent_iso_strings_match_and_allow_ready_row():
         ],
         [decision()],
     )
+
+
+def test_normalized_rows_path_uses_shared_timestamp_normalization(monkeypatch: pytest.MonkeyPatch):
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [
+            row(
+                timestamp="2024-01-01T00:00:00Z",
+                available_at="2023-12-31T19:00:00-05:00",
+                open="100",
+                high="101",
+                low="99",
+                close="100.5",
+            )
+        ],
+        mode="search",
+    )
+    monkeypatch.setattr(
+        data_readiness,
+        "parse_aware_datetime",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+    )
+
+    data_readiness.assert_decision_rows_ready(normalized, [decision()])
 
 
 def test_no_matching_readiness_metadata_does_not_block_when_as_of_row_is_ready():

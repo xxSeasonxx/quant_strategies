@@ -103,7 +103,9 @@ def test_bars_adapter_loads_one_symbol(tmp_path: Path, monkeypatch: pytest.Monke
     loaded = data_loader.load_data(config, engine=engine)
 
     assert calls == [(engine, "SPY", "equity_1min", True)]
-    assert loaded.rows == [row("SPY")]
+    assert [dict(item) for item in loaded.rows] == [row("SPY")]
+    assert loaded.normalized_rows is not None
+    assert loaded.rows == loaded.normalized_rows.projection_rows()
 
 
 def test_bars_adapter_loads_multiple_symbols(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

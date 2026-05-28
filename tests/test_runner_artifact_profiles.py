@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+import quant_strategies.runner.artifacts as artifacts
 from quant_strategies.runner.artifact_profiles import (
     canonical_rows_jsonl,
     normalized_rows_sha256,
@@ -14,6 +15,10 @@ from quant_strategies.runner.artifact_profiles import (
 )
 from quant_strategies.runner.artifacts import write_jsonl
 from quant_strategies.runner.config import load_config
+
+
+def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
+    assert not hasattr(artifacts, "RowSummary")
 
 
 def row(symbol: str, timestamp: datetime, close: float) -> dict[str, object]:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.errors import DataLoadError
 
@@ -43,7 +45,8 @@ _default_engine_value: object = _UNSET
 
 @dataclass(frozen=True)
 class LoadedData:
-    rows: list[dict[str, Any]]
+    rows: Sequence[Mapping[str, Any]]
+    normalized_rows: NormalizedRows | None = None
 
 
 def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
@@ -57,7 +60,8 @@ def load_data(config: RunConfig, *, engine: object | None = None) -> LoadedData:
     if not rows:
         raise DataLoadError("data load returned no rows")
     rows.sort(key=lambda row: (str(row.get("symbol", "")), row.get("timestamp")))
-    return LoadedData(rows=rows)
+    normalized_rows = NormalizedRows.from_rows(config, rows, mode=RowContractMode.SEARCH)
+    return LoadedData(rows=normalized_rows.projection_rows(), normalized_rows=normalized_rows)
 
 
 def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:

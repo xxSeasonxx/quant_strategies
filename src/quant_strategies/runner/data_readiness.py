@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.runner.errors import DataReadinessError
@@ -14,9 +15,13 @@ DECISION_AS_OF_FIELD = "as_of_time"
 
 
 def assert_decision_rows_ready(
-    rows: list[dict[str, Any]],
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
     decisions: list[StrategyDecision],
 ) -> None:
+    if isinstance(rows, NormalizedRows):
+        _assert_normalized_decision_rows_ready(rows, decisions)
+        return
+
     rows_by_key: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
     for row in rows:
         timestamp = _matching_datetime(row.get("timestamp"), "timestamp")
@@ -43,6 +48,41 @@ def assert_decision_rows_ready(
             _assert_row_ready(row, symbol=symbol, as_of_time=as_of_time, decision_time=decision_time)
 
 
+def _assert_normalized_decision_rows_ready(
+    normalized_rows: NormalizedRows,
+    decisions: list[StrategyDecision],
+) -> None:
+    rows_by_key: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
+    for row in normalized_rows.projection_rows():
+        timestamp = row.get("timestamp")
+        if not _is_aware_datetime(timestamp):
+            continue
+        rows_by_key.setdefault((str(row.get("symbol", "")), timestamp), []).append(row)
+
+    for decision in decisions:
+        decision_time = decision.decision_time
+        as_of_time = decision.as_of_time
+        if as_of_time > decision_time:
+            raise DataReadinessError(
+                f"{DECISION_AS_OF_FIELD} for {decision.instrument.symbol} "
+                f"must be at or before decision_time"
+            )
+        symbol = decision.instrument.symbol
+        matching_rows = rows_by_key.get((symbol, as_of_time), [])
+        if not matching_rows:
+            raise DataReadinessError(
+                f"{DECISION_AS_OF_FIELD} does not match a row timestamp for "
+                f"{symbol}: {as_of_time.isoformat()}"
+            )
+        for row in matching_rows:
+            _assert_normalized_row_ready(
+                row,
+                symbol=symbol,
+                as_of_time=as_of_time,
+                decision_time=decision_time,
+            )
+
+
 def _assert_row_ready(
     row: Mapping[str, Any],
     *,
@@ -56,6 +96,25 @@ def _assert_row_ready(
             f"{AVAILABILITY_FIELD} for {symbol} as_of_time {as_of_time.isoformat()} "
             f"is available after decision_time {decision_time.isoformat()}: {ready_at.isoformat()}"
         )
+
+
+def _assert_normalized_row_ready(
+    row: Mapping[str, Any],
+    *,
+    symbol: str,
+    as_of_time: datetime,
+    decision_time: datetime,
+) -> None:
+    ready_at = row.get(AVAILABILITY_FIELD)
+    if _is_aware_datetime(ready_at) and ready_at > decision_time:
+        raise DataReadinessError(
+            f"{AVAILABILITY_FIELD} for {symbol} as_of_time {as_of_time.isoformat()} "
+            f"is available after decision_time {decision_time.isoformat()}: {ready_at.isoformat()}"
+        )
+
+
+def _is_aware_datetime(value: object) -> bool:
+    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
 
 
 def _matching_datetime(value: object, field_name: str) -> datetime | None:

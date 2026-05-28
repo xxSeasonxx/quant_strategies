@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
+from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import (
     DecisionStrategyLoadError,
     load_decision_strategy,
@@ -13,7 +14,7 @@ from quant_strategies.decisions import (
     validate_strategy_params,
 )
 from quant_strategies.decisions.models import StrategyDecision
-from quant_strategies.runner.artifacts import RowSummary
+from quant_strategies.runner.artifacts import compact_evidence_quality
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.data_loader import load_data
 from quant_strategies.runner.errors import RunnerError, StrategyLoadError
@@ -36,13 +37,13 @@ GenerateDecisions = Callable[
 class StrategyExecutionResult:
     generate_decisions: GenerateDecisions
     validated_params: dict[str, Any]
-    loaded_rows: list[dict[str, Any]]
+    loaded_rows: Sequence[Mapping[str, Any]]
+    normalized_rows: NormalizedRows
     frozen_rows: tuple[FrozenMapping, ...]
     frozen_params: FrozenMapping
     decisions: list[StrategyDecision]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
-    row_summary: RowSummary
 
 
 class StrategyExecutionError(RunnerError):
@@ -51,19 +52,20 @@ class StrategyExecutionError(RunnerError):
         stage: ExecutionStage,
         message: str,
         *,
-        loaded_rows: list[dict[str, Any]] | None = None,
-        normalized_rows_sha256: str | None = None,
+        loaded_rows: Sequence[Mapping[str, Any]] | None = None,
+        normalized_rows: NormalizedRows | None = None,
         evidence_quality: dict[str, Any] | None = None,
-        row_summary: RowSummary | None = None,
         violations: tuple[str, ...] = (),
         decision_count: int | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage
         self.loaded_rows = loaded_rows
-        self.normalized_rows_sha256 = normalized_rows_sha256
+        self.normalized_rows = normalized_rows
+        self.normalized_rows_sha256 = (
+            None if normalized_rows is None else normalized_rows.normalized_rows_sha256
+        )
         self.evidence_quality = evidence_quality
-        self.row_summary = row_summary
         self.violations = violations
         self.decision_count = decision_count
 
@@ -94,10 +96,14 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
     except RunnerError as exc:
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
-    rows = loaded.rows
-    row_summary = RowSummary.from_rows(config, rows)
-    row_hash = row_summary.normalized_rows_sha256
-    evidence = row_summary.evidence_quality(causality_verified=False)
+    normalized_rows = loaded.normalized_rows or NormalizedRows.from_rows(
+        config,
+        loaded.rows,
+        mode=RowContractMode.SEARCH,
+    )
+    rows = normalized_rows.projection_rows()
+    row_hash = normalized_rows.normalized_rows_sha256
+    evidence = compact_evidence_quality(normalized_rows.evidence_quality(causality_verified=False))
     strategy_rows = frozen_rows(rows)
     strategy_params = frozen_params(validated_params)
 
@@ -111,9 +117,8 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
                 "decision_generation",
                 "; ".join(violations),
                 loaded_rows=rows,
-                normalized_rows_sha256=row_hash,
+                normalized_rows=normalized_rows,
                 evidence_quality=evidence,
-                row_summary=row_summary,
                 violations=tuple(violations),
                 decision_count=decision_count,
             )
@@ -124,9 +129,8 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
             "decision_generation",
             f"strategy execution exited: {_system_exit_message(exc)}",
             loaded_rows=rows,
-            normalized_rows_sha256=row_hash,
+            normalized_rows=normalized_rows,
             evidence_quality=evidence,
-            row_summary=row_summary,
             decision_count=decision_count,
         ) from exc
     except Exception as exc:
@@ -134,9 +138,8 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
             "decision_generation",
             f"strategy execution failed: {exc}",
             loaded_rows=rows,
-            normalized_rows_sha256=row_hash,
+            normalized_rows=normalized_rows,
             evidence_quality=evidence,
-            row_summary=row_summary,
             decision_count=decision_count,
         ) from exc
 
@@ -144,12 +147,12 @@ def execute_strategy_run(config: RunConfig, *, repo_root: Path) -> StrategyExecu
         generate_decisions=generate_decisions,
         validated_params=validated_params,
         loaded_rows=rows,
+        normalized_rows=normalized_rows,
         frozen_rows=strategy_rows,
         frozen_params=strategy_params,
         decisions=decisions,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,
-        row_summary=row_summary,
     )
 
 

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, runner_evidence_semantics
 from quant_strategies.observation_dependencies import (
@@ -105,8 +106,7 @@ def run_config(
         result_dir,
         config,
         rows=execution.loaded_rows,
-        normalized_rows_hash=execution.normalized_rows_sha256,
-        row_summary=execution.row_summary,
+        normalized_rows=execution.normalized_rows,
         evidence_quality=evidence_quality,
     )
     if not causality.passed:
@@ -177,7 +177,7 @@ def _execution_failure_result(
     if (
         exc.stage == "decision_generation"
         and exc.loaded_rows is not None
-        and exc.normalized_rows_sha256 is not None
+        and exc.normalized_rows is not None
     ):
         _write_strategy_input_rows_if_full(
             result_dir,
@@ -188,8 +188,7 @@ def _execution_failure_result(
             result_dir,
             config,
             rows=exc.loaded_rows,
-            normalized_rows_hash=exc.normalized_rows_sha256,
-            row_summary=exc.row_summary,
+            normalized_rows=exc.normalized_rows,
             evidence_quality=exc.evidence_quality,
         )
     return _failure_result(
@@ -206,7 +205,7 @@ def _execution_failure_result(
 def _write_strategy_input_rows_if_full(
     result_dir: Path,
     config: config_module.RunConfig,
-    rows: list[dict[str, Any]],
+    rows: Sequence[Mapping[str, Any]],
 ) -> None:
     if config.output.artifact_profile != "full":
         return
@@ -217,17 +216,15 @@ def _write_execution_data_manifest(
     result_dir: Path,
     config: config_module.RunConfig,
     *,
-    rows: list[dict[str, Any]],
-    normalized_rows_hash: str,
-    row_summary: artifacts.RowSummary | None = None,
+    rows: Sequence[Mapping[str, Any]],
+    normalized_rows: NormalizedRows,
     evidence_quality: dict[str, object] | None,
 ) -> None:
     artifacts.write_data_manifest(
         result_dir,
         config,
         rows,
-        normalized_rows_hash=normalized_rows_hash,
-        row_summary=row_summary,
+        normalized_rows=normalized_rows,
         evidence_quality_payload=evidence_quality,
     )
 
@@ -285,7 +282,7 @@ def _prepare_engine_request(
             strategy_id=config.strategy_id,
             decision_count=len(execution.decisions),
         ):
-            data_readiness.assert_decision_rows_ready(execution.loaded_rows, execution.decisions)
+            data_readiness.assert_decision_rows_ready(execution.normalized_rows, execution.decisions)
     except RunnerError as exc:
         return None, _failure_result(
             config,
@@ -306,7 +303,7 @@ def _prepare_engine_request(
         ):
             request = engine_runner.build_request(
                 strategy_id=config.strategy_id,
-                rows=execution.loaded_rows,
+                rows=execution.normalized_rows,
                 decisions=execution.decisions,
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
@@ -387,7 +384,7 @@ def _write_completion_artifacts(
                 decisions=execution.decisions,
                 engine=engine_summary,
                 normalized_rows_hash=execution.normalized_rows_sha256,
-                row_ranges=execution.row_summary.ranges_by_symbol,
+                row_ranges=execution.normalized_rows.ranges_by_symbol,
             )
         notes = _completion_notes(config, engine_run)
         artifacts.write_notes(result_dir, notes)
@@ -453,8 +450,7 @@ def _audit_observation_dependencies(
             result_dir,
             config,
             rows=execution.loaded_rows,
-            normalized_rows_hash=execution.normalized_rows_sha256,
-            row_summary=execution.row_summary,
+            normalized_rows=execution.normalized_rows,
             evidence_quality=execution.evidence_quality,
         )
         return _failure_result(
