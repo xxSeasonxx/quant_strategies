@@ -115,10 +115,10 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
             "passed": True,
             "trade_count": 2,
             "smoke_score": {
-                "sum_weighted_trade_gross_return": 0.03,
-                "sum_weighted_trade_funding_return": 0.0,
-                "sum_weighted_trade_cost_return": 0.0,
-                "sum_weighted_trade_net_return": 0.03,
+                "sum_signed_trade_activity_gross": 0.03,
+                "sum_signed_trade_activity_funding": 0.0,
+                "sum_signed_trade_activity_cost": 0.0,
+                "sum_signed_trade_activity_net": 0.03,
             },
         },
     )
@@ -135,10 +135,10 @@ def test_summary_profile_payload_contains_rows_decisions_signals_and_engine(tmp_
         "passed": True,
         "trade_count": 2,
         "smoke_score": {
-            "sum_weighted_trade_gross_return": 0.03,
-            "sum_weighted_trade_funding_return": 0.0,
-            "sum_weighted_trade_cost_return": 0.0,
-            "sum_weighted_trade_net_return": 0.03,
+            "sum_signed_trade_activity_gross": 0.03,
+            "sum_signed_trade_activity_funding": 0.0,
+            "sum_signed_trade_activity_cost": 0.0,
+            "sum_signed_trade_activity_net": 0.03,
         },
     }
 
@@ -190,10 +190,10 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
             "passed": True,
             "trade_count": 1,
             "smoke_score": {
-                "sum_weighted_trade_gross_return": 0.01,
-                "sum_weighted_trade_funding_return": 0.0,
-                "sum_weighted_trade_cost_return": 0.0,
-                "sum_weighted_trade_net_return": 0.01,
+                "sum_signed_trade_activity_gross": 0.01,
+                "sum_signed_trade_activity_funding": 0.0,
+                "sum_signed_trade_activity_cost": 0.0,
+                "sum_signed_trade_activity_net": 0.01,
             },
         },
     )

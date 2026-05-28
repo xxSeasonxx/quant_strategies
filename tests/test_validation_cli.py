@@ -10,7 +10,7 @@ from quant_strategies.validation.errors import ValidationError
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
 
-@pytest.mark.parametrize("decision", ["mechanical_pass", "watchlist", "paper_candidate"])
+@pytest.mark.parametrize("decision", ["mechanical_pass", "watchlist", "mechanical_review_candidate"])
 def test_validate_cli_returns_zero_for_completed_advisory_decisions(
     decision: str,
     monkeypatch,

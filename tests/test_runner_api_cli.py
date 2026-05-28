@@ -188,7 +188,7 @@ def assert_assessment(
     assert summary["artifact_profile"] == artifact_profile
     assert summary["evidence_class"] == "runner_smoke"
     assert summary["strategy_contract"] == "decision"
-    assert summary["return_model"] == "smoke_score.sum_weighted_trade_net_return"
+    assert summary["return_model"] == "smoke_score.sum_signed_trade_activity_net"
     assert summary["funding_model"] == "none"
     assert summary["promotion_eligible"] is promotion_eligible
     assert summary["paper_trade_eligible"] is False
@@ -229,10 +229,10 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert summary["status"] == "passed"
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] > 0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] > 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] > 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] > 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert summary["data_availability_status"] == "missing"
     assert summary["availability_coverage"] == {
@@ -262,7 +262,7 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert data_manifest["row_contract"] == summary["row_contract"]
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert_assessment(result, summary, assessment_status="smoke_passed")
+    assert_assessment(result, summary, assessment_status="smoke_unverified")
     assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
 
 
@@ -297,13 +297,13 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert "evidence.json" not in names
 
     summary = read_summary(result.result_dir)
-    assert_assessment(result, summary, assessment_status="smoke_passed", artifact_profile="summary")
+    assert_assessment(result, summary, assessment_status="smoke_unverified", artifact_profile="summary")
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] is not None
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] is not None
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] is not None
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
@@ -314,9 +314,9 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert profile["signals"]["count"] == 1
     assert profile["engine"]["passed"] is True
     assert profile["engine"]["trade_count"] == 1
-    assert profile["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] is not None
-    assert profile["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] is not None
-    assert profile["engine"]["smoke_score"]["sum_weighted_trade_net_return"] is not None
+    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
+    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] is not None
+    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_net"] is not None
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
@@ -362,10 +362,10 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert summary["status"] == "screened"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] < 0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_funding_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_cost_return"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] < 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] < 0
     assert_assessment(result, summary, assessment_status="screened")
     notes = (result.result_dir / "notes.md").read_text()
     assert "status: screened" in notes
@@ -436,8 +436,8 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_gross_return"] < 0
-    assert summary["engine"]["smoke_score"]["sum_weighted_trade_net_return"] < 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] < 0
+    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] < 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="smoke_failed")
     assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
@@ -578,7 +578,7 @@ def test_run_config_marks_complete_available_at_coverage(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -589,16 +589,18 @@ def test_run_config_marks_complete_available_at_coverage(
     assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
         "field": "available_at",
-        "present": 3,
-        "total": 3,
+        "present": 4,
+        "total": 4,
         "fraction": 1.0,
     }
-    assert summary["causality_verified"] is False
-    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
+    assert summary["causality_verified"] is True
+    assert summary["evidence_quality_warnings"] == []
     assert data_manifest["data_availability_status"] == "complete"
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
-    assert data_manifest["causality_verified"] is False
+    assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    assert result.assessment_status == "smoke_passed"
+    assert summary["assessment_status"] == "smoke_passed"
 
 
 def test_run_config_marks_partial_available_at_coverage(
@@ -607,7 +609,7 @@ def test_run_config_marks_partial_available_at_coverage(
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    partial_rows = rows(100.0, 101.0, 102.0, research_fields=True)
+    partial_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     partial_rows[1].pop("available_at")
     monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=partial_rows))
 
@@ -619,9 +621,9 @@ def test_run_config_marks_partial_available_at_coverage(
     assert summary["data_availability_status"] == "partial"
     coverage = summary["availability_coverage"]
     assert coverage["field"] == "available_at"
-    assert coverage["present"] == 2
-    assert coverage["total"] == 3
-    assert coverage["fraction"] == pytest.approx(2 / 3)
+    assert coverage["present"] == 3
+    assert coverage["total"] == 4
+    assert coverage["fraction"] == pytest.approx(3 / 4)
     assert summary["causality_verified"] is False
     assert summary["evidence_quality_warnings"] == [
         "available_at_partial",
@@ -629,11 +631,98 @@ def test_run_config_marks_partial_available_at_coverage(
     ]
     assert data_manifest["data_availability_status"] == "partial"
     assert data_manifest["availability_coverage"]["field"] == "available_at"
-    assert data_manifest["availability_coverage"]["present"] == 2
-    assert data_manifest["availability_coverage"]["total"] == 3
-    assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(2 / 3)
+    assert data_manifest["availability_coverage"]["present"] == 3
+    assert data_manifest["availability_coverage"]["total"] == 4
+    assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(3 / 4)
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    assert result.assessment_status == "smoke_unverified"
+    assert summary["assessment_status"] == "smoke_unverified"
+
+
+def test_run_config_rejects_invalid_available_at_for_causality_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    invalid_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+    invalid_rows[1]["available_at"] = "not-a-datetime"
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=invalid_rows))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["data_availability_status"] == "invalid"
+    assert summary["availability_coverage"] == {
+        "field": "available_at",
+        "present": 3,
+        "total": 4,
+        "fraction": 0.75,
+        "invalid": 1,
+    }
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "available_at_invalid",
+        "runner_causality_not_verified",
+    ]
+    assert data_manifest["data_availability_status"] == "invalid"
+    assert data_manifest["availability_coverage"] == summary["availability_coverage"]
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    assert result.assessment_status == "smoke_unverified"
+    assert summary["assessment_status"] == "smoke_unverified"
+
+
+def test_runner_catches_hidden_lookahead_before_decision_adapter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    as_of_row = rows[1]\n"
+        "    future_rows = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
+        "    size = 2.0 if future_rows else 1.0\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
+        "        decision_time=as_of_row['timestamp'],\n"
+        "        as_of_time=as_of_row['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=size),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is False
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["stage"] == "causality"
+    assert summary["message"] == "hidden_lookahead_detected"
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
+    assert data_manifest["causality_verified"] is False
+    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    assert (result.result_dir / "strategy_input_rows.jsonl").exists()
+    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert not (result.result_dir / "signals.csv").exists()
+    assert not (result.result_dir / "engine_request.json").exists()
+    assert result.assessment_status == "runner_failed"
+    assert summary["assessment_status"] == "runner_failed"
 
 
 def test_run_config_records_row_contract_feedback(
@@ -714,7 +803,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["evidence"] == {
         "evidence_class": "runner_smoke",
         "strategy_contract": "decision",
-        "return_model": "smoke_score.sum_weighted_trade_net_return",
+        "return_model": "smoke_score.sum_signed_trade_activity_net",
         "funding_model": "none",
         "promotion_eligible": False,
         "paper_trade_eligible": False,
@@ -936,7 +1025,7 @@ def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
     assert summary["stage"] == "completed"
 
 
-def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_request(
+def test_unavailable_decision_row_fails_causality_before_adapter(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -956,17 +1045,17 @@ def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_reque
         "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "data_manifest.json",
-        "decision_records.jsonl",
-        "signals.csv",
         "run_manifest.json",
         "summary.json",
         "notes.md",
     ):
         assert (result.result_dir / name).exists()
+    assert not (result.result_dir / "decision_records.jsonl").exists()
+    assert not (result.result_dir / "signals.csv").exists()
     assert not (result.result_dir / "engine_request.json").exists()
     summary = read_summary(result.result_dir)
-    assert summary["stage"] == "data_readiness"
-    assert "available after decision_time" in summary["message"]
+    assert summary["stage"] == "causality"
+    assert summary["message"].startswith("hidden_lookahead_check_failed:")
     assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
         "field": "available_at",
@@ -974,7 +1063,10 @@ def test_data_readiness_failure_preserves_prior_artifacts_and_skips_engine_reque
         "total": 4,
         "fraction": 1.0,
     }
-    assert_assessment(result, summary, assessment_status="runner_failed")
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
+    assert result.assessment_status == "runner_failed"
+    assert summary["assessment_status"] == "runner_failed"
 
 
 def test_malformed_decision_time_remains_decision_generation_failure(

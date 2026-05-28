@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.runner.errors import DataReadinessError
 
 
@@ -57,7 +58,7 @@ def _assert_row_ready(
     as_of_time: datetime,
     decision_time: datetime,
 ) -> None:
-    ready_at = _optional_datetime(row.get(AVAILABILITY_FIELD), AVAILABILITY_FIELD)
+    ready_at = _optional_datetime(row.get(AVAILABILITY_FIELD))
     if ready_at is not None and ready_at > decision_time:
         raise DataReadinessError(
             f"{AVAILABILITY_FIELD} for {symbol} as_of_time {as_of_time.isoformat()} "
@@ -72,8 +73,11 @@ def _matching_datetime(value: object, field_name: str) -> datetime | None:
         return None
 
 
-def _optional_datetime(value: object, field_name: str) -> datetime | None:
-    return _parse_datetime(value, field_name)
+def _optional_datetime(value: object) -> datetime | None:
+    if _is_missing(value):
+        return None
+    parsed, _ = parse_aware_datetime(value)
+    return parsed
 
 
 def _parse_datetime(value: object, field_name: str) -> datetime | None:

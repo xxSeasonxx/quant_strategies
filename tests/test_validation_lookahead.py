@@ -10,7 +10,8 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-from quant_strategies.validation.lookahead import check_hidden_lookahead
+from quant_strategies.causality import check_hidden_lookahead
+from quant_strategies.validation.lookahead import check_hidden_lookahead as legacy_check_hidden_lookahead
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -81,6 +82,10 @@ def test_hidden_lookahead_check_passes_as_of_only_strategy():
 
     assert result.passed is True
     assert result.violations == ()
+
+
+def test_validation_lookahead_reexports_causality_checker():
+    assert legacy_check_hidden_lookahead is check_hidden_lookahead
 
 
 def test_hidden_lookahead_check_detects_future_sensitive_strategy():

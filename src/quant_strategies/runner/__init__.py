@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
 from quant_strategies.evidence_semantics import runner_evidence_semantics
 from quant_strategies.runner import (
     artifacts,
@@ -13,7 +14,11 @@ from quant_strategies.runner import (
 from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 from quant_strategies.runner.decision_adapter import decisions_to_signal_rows
 from quant_strategies.runner.errors import RunnerError
-from quant_strategies.runner.execution import StrategyExecutionError, execute_strategy_run
+from quant_strategies.runner.execution import (
+    StrategyExecutionError,
+    StrategyExecutionResult,
+    execute_strategy_run,
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
                 exc.loaded_rows,
                 strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
                 normalized_rows_hash=exc.normalized_rows_sha256,
+                evidence_quality_payload=exc.evidence_quality,
             )
         return _failure_result(
             config,
@@ -74,13 +80,30 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             result_dir,
             execution.loaded_rows,
         )
+    causality = _check_causality(config, execution)
+    causality_verified = causality.passed
+    evidence_quality = artifacts.evidence_quality(
+        config,
+        execution.loaded_rows,
+        causality_verified=causality_verified,
+    )
     artifacts.write_data_manifest(
         result_dir,
         config,
         execution.loaded_rows,
         strategy_input_rows_jsonl_sha256=strategy_input_rows_jsonl_sha256,
         normalized_rows_hash=execution.normalized_rows_sha256,
+        evidence_quality_payload=evidence_quality,
     )
+    if not causality.passed:
+        return _failure_result(
+            config,
+            result_dir,
+            "causality",
+            _causality_message(causality),
+            repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
+        )
     try:
         signals = decisions_to_signal_rows(execution.decisions)
     except RunnerError as exc:
@@ -90,7 +113,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "decision_generation",
             f"strategy execution failed: {exc}",
             repo_root=effective_repo_root,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=evidence_quality,
         )
     if config.output.artifact_profile == "full":
         artifacts.write_decision_records(result_dir, execution.decisions)
@@ -105,7 +128,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "data_readiness",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=evidence_quality,
         )
 
     try:
@@ -125,7 +148,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "request_build",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=evidence_quality,
         )
 
     try:
@@ -141,7 +164,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             "engine_evaluation",
             str(exc),
             repo_root=effective_repo_root,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=evidence_quality,
         )
 
     engine_summary = _compact_engine_summary(engine_run)
@@ -166,7 +189,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         artifact_profile=config.output.artifact_profile,
     )
     success = _result_success(engine_run)
-    assessment_status = _assessment_status(engine_run)
+    assessment_status = _assessment_status(engine_run, evidence_quality=evidence_quality)
     artifacts.write_summary(
         result_dir,
         _summary_payload(
@@ -177,7 +200,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
             message=notes.strip(),
             engine=engine_summary,
             assessment_status=assessment_status,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=evidence_quality,
         ),
     )
     return RunResult(
@@ -189,6 +212,29 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         assessment_status=assessment_status,
         promotion_eligible=False,
     )
+
+
+def _check_causality(
+    config: config_module.RunConfig,
+    execution: StrategyExecutionResult,
+) -> LookaheadCheckResult:
+    try:
+        return check_hidden_lookahead(
+            execution.generate_decisions,
+            rows=execution.loaded_rows,
+            params=execution.validated_params,
+            baseline_decisions=execution.decisions,
+            strategy_id=config.strategy_id,
+        )
+    except Exception as exc:
+        return LookaheadCheckResult(
+            passed=False,
+            violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
+        )
+
+
+def _causality_message(result: LookaheadCheckResult) -> str:
+    return "; ".join(result.violations) if result.violations else "hidden_lookahead_check_failed"
 
 
 def _failure_result(
@@ -248,10 +294,10 @@ def _summary_payload(
     engine_payload.setdefault(
         "smoke_score",
         {
-            "sum_weighted_trade_gross_return": None,
-            "sum_weighted_trade_funding_return": None,
-            "sum_weighted_trade_cost_return": None,
-            "sum_weighted_trade_net_return": None,
+            "sum_signed_trade_activity_gross": None,
+            "sum_signed_trade_activity_funding": None,
+            "sum_signed_trade_activity_cost": None,
+            "sum_signed_trade_activity_net": None,
         },
     )
     return {
@@ -293,17 +339,17 @@ def _compact_engine_summary(engine_run: engine_runner.EngineRun) -> dict[str, ob
     smoke_score = source.get("smoke_score") if isinstance(source, dict) else None
     if isinstance(smoke_score, dict):
         summary["smoke_score"] = {
-            "sum_weighted_trade_gross_return": smoke_score.get("sum_weighted_trade_gross_return"),
-            "sum_weighted_trade_funding_return": smoke_score.get("sum_weighted_trade_funding_return"),
-            "sum_weighted_trade_cost_return": smoke_score.get("sum_weighted_trade_cost_return"),
-            "sum_weighted_trade_net_return": smoke_score.get("sum_weighted_trade_net_return"),
+            "sum_signed_trade_activity_gross": smoke_score.get("sum_signed_trade_activity_gross"),
+            "sum_signed_trade_activity_funding": smoke_score.get("sum_signed_trade_activity_funding"),
+            "sum_signed_trade_activity_cost": smoke_score.get("sum_signed_trade_activity_cost"),
+            "sum_signed_trade_activity_net": smoke_score.get("sum_signed_trade_activity_net"),
         }
     else:
         summary["smoke_score"] = {
-            "sum_weighted_trade_gross_return": None,
-            "sum_weighted_trade_funding_return": None,
-            "sum_weighted_trade_cost_return": None,
-            "sum_weighted_trade_net_return": None,
+            "sum_signed_trade_activity_gross": None,
+            "sum_signed_trade_activity_funding": None,
+            "sum_signed_trade_activity_cost": None,
+            "sum_signed_trade_activity_net": None,
         }
     if engine_run.validate_summary is not None:
         gates = engine_run.validate_summary.get("gates")
@@ -332,9 +378,15 @@ def _result_status(engine_run: engine_runner.EngineRun) -> str:
     return "passed" if engine_run.passed else "failed"
 
 
-def _assessment_status(engine_run: engine_runner.EngineRun) -> str:
+def _assessment_status(
+    engine_run: engine_runner.EngineRun,
+    *,
+    evidence_quality: dict[str, object],
+) -> str:
     if engine_run.mode == "screen":
         return "screened"
+    if engine_run.passed and not evidence_quality.get("causality_verified"):
+        return "smoke_unverified"
     return "smoke_passed" if engine_run.passed else "smoke_failed"
 
 

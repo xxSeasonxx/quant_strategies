@@ -159,10 +159,10 @@ class Trade(EngineModel):
 
 
 class SmokeScore(EngineModel):
-    sum_weighted_trade_gross_return: float
-    sum_weighted_trade_funding_return: float = 0.0
-    sum_weighted_trade_cost_return: float
-    sum_weighted_trade_net_return: float
+    sum_signed_trade_activity_gross: float
+    sum_signed_trade_activity_funding: float = 0.0
+    sum_signed_trade_activity_cost: float
+    sum_signed_trade_activity_net: float
 
 
 class ScreeningResult(EngineModel):

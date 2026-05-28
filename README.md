@@ -35,12 +35,13 @@ validation, row hashing, and evidence-quality context. Runner remains the owner
 of smoke-engine signal conversion and engine artifacts.
 
 `engine` performs deterministic smoke screening and validation gates on supplied
-bars and decisions. Aggregate smoke totals live under
-`smoke_score.sum_weighted_trade_*`.
+bars and decisions. Aggregate smoke activity sums live under
+`smoke_score.sum_signed_trade_activity_*`; they are not portfolio or NAV-path
+returns.
 
 `validation` runs advisory checks from an explicit `validation.toml` plus the
 referenced `strategy.py`. Advisory outcomes are
-`hard_no`, `mechanical_pass`, `watchlist`, and `paper_candidate`;
+`hard_no`, `mechanical_pass`, `watchlist`, and `mechanical_review_candidate`;
 `promotion_eligible`, `paper_trade_eligible`, and `live_eligible` remain false.
 
 Data materialization, refresh, backfill, repair, and source joining belong in
@@ -50,31 +51,35 @@ Data materialization, refresh, backfill, repair, and source joining belong in
 
 `quant-strategies run path/to/config.toml` executes one TOML experiment config.
 The runner loads rows, calls pure `generate_decisions(rows, params)`, validates
-the `StrategyDecision` contract, checks decision row availability, converts
-decisions to engine signals, builds an engine request, and writes result
-artifacts.
+the `StrategyDecision` contract, runs hidden-lookahead replay, checks decision
+row availability, converts decisions to engine signals, builds an engine
+request, and writes result artifacts.
 
 With `[output] mode = "screen"`, the engine simulates entries and exits from
 the decisions, fill model, cost model, and exit policy. It reports
-`trade_count` plus `smoke_score.sum_weighted_trade_gross_return`,
-`sum_weighted_trade_funding_return`, `sum_weighted_trade_cost_return`, and
-`sum_weighted_trade_net_return`. A completed screen has
+`trade_count` plus `smoke_score.sum_signed_trade_activity_gross`,
+`sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
+`sum_signed_trade_activity_net`. A completed screen has
 `assessment_status = "screened"`.
 
 With `[output] mode = "validate"`, the engine runs the same screen and applies
 smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
-`positive_net`. Passing gates produce `assessment_status = "smoke_passed"`.
-These gates are mechanical checks only; they do not test statistical
-significance, regime robustness, capacity, or execution quality.
+`positive_net`. Passing gates produce `assessment_status = "smoke_passed"` only
+when hidden-lookahead replay passes and all rows carry `available_at`. Passing
+gates with missing, partial, or invalid `available_at` produce
+`assessment_status = "smoke_unverified"`. These gates are mechanical checks
+only; they do not test statistical significance, regime robustness, capacity,
+or execution quality.
 
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
-`causality_verified`, and `evidence_quality_warnings`. Runner smoke keeps
-missing availability non-fatal for search, but it records that uncertainty and
-never claims hidden-lookahead causality verification. `row_contract` reports the
-loaded row schema status for the configured `data.kind`, including missing
-required fields, timestamp awareness, duplicate symbol/timestamp keys, and
-`quant_data_feedback` strings for upstream data fixes.
+`causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay
+failures stop the run as `runner_failed`. Runner smoke keeps missing, partial,
+or invalid availability non-fatal for search, but it records that uncertainty as
+`smoke_unverified` and does not set `causality_verified`. `row_contract`
+reports the loaded row schema status for the configured `data.kind`, including
+missing required fields, timestamp awareness, duplicate symbol/timestamp keys,
+and `quant_data_feedback` strings for upstream data fixes.
 
 ## Validation Configs
 
@@ -168,11 +173,11 @@ available within each decision's information set. A mismatch becomes
 
 For each validation window, the validator expands required and diagnostic
 scenarios, runs the configured backend, and classifies the candidate as
-`hard_no`, `mechanical_pass`, `watchlist`, or `paper_candidate`. A
+`hard_no`, `mechanical_pass`, `watchlist`, or `mechanical_review_candidate`. A
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
 `watchlist` captures unsupported required backend semantics, or positive
-evidence that misses paper-readiness gates. A `paper_candidate`
+evidence that misses paper-readiness gates. A `mechanical_review_candidate`
 requires mechanical validation plus paper-readiness gates such as multiple
 windows, enough realistic-cost trades, no zero-trade windows, positive
 realistic-cost evidence, sufficient positive-window fraction, and stressed-cost

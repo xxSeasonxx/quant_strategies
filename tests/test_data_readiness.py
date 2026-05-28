@@ -118,6 +118,17 @@ def test_missing_like_optional_metadata_is_ignored(missing: object):
     )
 
 
+@pytest.mark.parametrize(
+    "invalid",
+    ["not-a-timestamp", datetime(2024, 1, 1)],
+)
+def test_invalid_optional_available_at_is_left_to_evidence_quality(invalid: object):
+    data_readiness.assert_decision_rows_ready(
+        [row(available_at=invalid)],
+        [signal()],
+    )
+
+
 def test_pandas_missing_like_optional_metadata_is_ignored():
     pd = pytest.importorskip("pandas")
 

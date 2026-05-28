@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.provenance import (
     artifact_hashes,
@@ -111,29 +112,54 @@ def write_evidence(result_dir: Path, evidence_json: str) -> None:
     (result_dir / "evidence.json").write_text(evidence_json)
 
 
-def evidence_quality(config: RunConfig, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def evidence_quality(
+    config: RunConfig,
+    rows: list[dict[str, Any]],
+    *,
+    causality_verified: bool = False,
+) -> dict[str, Any]:
     total = len(rows)
-    present = sum(1 for row in rows if row.get("available_at") is not None)
+    present = 0
+    invalid = 0
+    for row in rows:
+        value = row.get("available_at")
+        if value is None:
+            continue
+        parsed, _ = parse_aware_datetime(value)
+        if parsed is None:
+            invalid += 1
+            continue
+        present += 1
     fraction = None if total == 0 else present / total
     if total > 0 and present == total:
         status = "complete"
-        warnings = ["runner_causality_not_verified"]
+        verified = causality_verified
+        warnings = [] if verified else ["runner_causality_not_verified"]
+    elif invalid > 0:
+        status = "invalid"
+        verified = False
+        warnings = ["available_at_invalid", "runner_causality_not_verified"]
     elif present > 0:
         status = "partial"
+        verified = False
         warnings = ["available_at_partial", "runner_causality_not_verified"]
     else:
         status = "missing"
+        verified = False
         warnings = ["available_at_missing", "runner_causality_not_verified"]
+    coverage: dict[str, Any] = {
+        "field": "available_at",
+        "present": present,
+        "total": total,
+        "fraction": fraction,
+    }
+    if invalid:
+        coverage["invalid"] = invalid
     return {
         "data_availability_status": status,
-        "availability_coverage": {
-            "field": "available_at",
-            "present": present,
-            "total": total,
-            "fraction": fraction,
-        },
+        "availability_coverage": coverage,
         "row_contract": row_contract_status(config, rows),
-        "causality_verified": False,
+        "causality_verified": verified,
         "evidence_quality_warnings": warnings,
     }
 
@@ -186,8 +212,9 @@ def write_data_manifest(
     *,
     strategy_input_rows_jsonl_sha256: str | None,
     normalized_rows_hash: str,
+    evidence_quality_payload: dict[str, Any] | None = None,
 ) -> None:
-    quality = evidence_quality(config, rows)
+    quality = evidence_quality_payload or evidence_quality(config, rows)
     payload = {
         "artifact_profile": config.output.artifact_profile,
         "data": {

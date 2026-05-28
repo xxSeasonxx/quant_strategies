@@ -10,7 +10,7 @@ from quant_strategies.evidence_semantics import validation_evidence_semantics
 from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
 
 
-ValidationDecision = Literal["hard_no", "mechanical_pass", "watchlist", "paper_candidate"]
+ValidationDecision = Literal["hard_no", "mechanical_pass", "watchlist", "mechanical_review_candidate"]
 
 
 class ValidationPolicyDecision(BaseModel):
@@ -460,7 +460,7 @@ def _paper_readiness_decision(
 
     if not failed_gates:
         return _decision(
-            "paper_candidate",
+            "mechanical_review_candidate",
             passed=tuple(passed_gates),
             details=gate_details,
         )

@@ -246,7 +246,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     )
 
 
-def test_run_validation_writes_paper_candidate_artifacts_for_two_robust_windows(
+def test_run_validation_writes_mechanical_review_candidate_artifacts_for_two_robust_windows(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -334,12 +334,12 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.success is True
-    assert result.decision.decision == "paper_candidate"
+    assert result.decision.decision == "mechanical_review_candidate"
     assert result.result_dir is not None
     assert backend.calls == 12
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert decision_payload["decision"] == "paper_candidate"
-    assert decision_payload["advisory_decision"] == "paper_candidate"
+    assert decision_payload["decision"] == "mechanical_review_candidate"
+    assert decision_payload["advisory_decision"] == "mechanical_review_candidate"
     assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
@@ -369,7 +369,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
 
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "paper_candidate"
+    assert robustness_matrix["decision"]["decision"] == "mechanical_review_candidate"
     assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
     assert robustness_matrix["decision"]["failed_gates"] == []
     assert "gate_details" in robustness_matrix["decision"]
@@ -377,7 +377,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert robustness_matrix["failure_details"] == []
 
     report = (result.result_dir / "validation_report.md").read_text()
-    assert "Decision: `paper_candidate`" in report
+    assert "Decision: `mechanical_review_candidate`" in report
     assert "Reasons: none" in report
     assert "Passed gates: " in report
     assert "Failed gates: none" in report

@@ -172,14 +172,14 @@ def test_policy_mechanical_pass_for_positive_sufficient_backend_result():
     assert_advisory_only(decision)
 
 
-def test_policy_paper_candidate_when_all_paper_gates_pass():
+def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
     decision = classify_validation(
         data_passed=True,
         backend_results=paper_ready_scenarios(),
         min_trades=10,
     )
 
-    assert decision.decision == "paper_candidate"
+    assert decision.decision == "mechanical_review_candidate"
     assert decision.reasons == ()
     assert decision.failed_gates == ()
     assert "mechanical_validation" in decision.passed_gates
@@ -193,7 +193,7 @@ def test_policy_paper_candidate_when_all_paper_gates_pass():
     assert_advisory_only(decision)
 
 
-def test_policy_records_search_pressure_inputs_for_paper_candidate():
+def test_policy_records_search_pressure_inputs_for_mechanical_review_candidate():
     search_pressure = type(
         "SearchPressure",
         (),
@@ -214,7 +214,7 @@ def test_policy_records_search_pressure_inputs_for_paper_candidate():
         search_pressure=search_pressure,
     )
 
-    assert decision.decision == "paper_candidate"
+    assert decision.decision == "mechanical_review_candidate"
     assert decision.overfit_controls == {
         "candidate_count": 120,
         "trial_count": 18,
@@ -284,7 +284,7 @@ def test_policy_uses_worst_window_stressed_and_fill_lag_loss_floors():
         min_trades=10,
     )
 
-    assert decision.decision == "paper_candidate"
+    assert decision.decision == "mechanical_review_candidate"
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
     assert decision.gate_details["stressed_net_floor"] == "-0.015 >= -0.02"

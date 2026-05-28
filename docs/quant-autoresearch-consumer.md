@@ -175,6 +175,11 @@ Use `artifact_profile = "summary"` for large search sweeps; it still writes
 rows, decision records, signal rows, engine request JSON, and full evidence
 artifacts.
 
+Smoke scores are activity sums, not portfolio returns. The runner reports them
+under `smoke_score.sum_signed_trade_activity_gross`,
+`sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
+`sum_signed_trade_activity_net`.
+
 ## What autoresearch Reads
 
 `RunResult` tells the search loop whether the runner completed and where
@@ -194,8 +199,12 @@ machine interface.
 
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
-Use `data_availability_status`, `availability_coverage`, `row_contract`, and
-`evidence_quality_warnings` as ranking filters before comparing smoke scores.
+Use `assessment_status`, `causality_verified`, `data_availability_status`,
+`availability_coverage`, `row_contract`, and `evidence_quality_warnings` as
+ranking filters before comparing smoke scores. Treat `smoke_passed` as stronger
+mechanical evidence than `smoke_unverified`; `smoke_unverified` means the smoke
+gates passed but row availability coverage was missing, partial, or invalid, so
+the runner could not claim causality verification.
 `row_contract.quant_data_feedback` is the handoff channel for missing fields,
 duplicate keys, timestamp issues, and other upstream `quant_data` contract gaps.
 
@@ -243,4 +252,6 @@ A downstream setup is correctly aligned when:
 - generated strategies return `StrategyDecision` objects,
 - search modifies only `strategy.py` and `experiment.toml`,
 - ranking reads structured artifacts under `results/`,
+- ranking treats `causality_verified` and `assessment_status` as evidence
+  quality filters before comparing smoke activity scores,
 - no autoresearch code imports engine or validation internals.

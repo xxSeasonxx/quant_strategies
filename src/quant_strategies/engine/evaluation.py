@@ -104,10 +104,10 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
         strategy_id=request.spec.strategy_id,
         trade_count=len(trades),
         smoke_score=SmokeScore(
-            sum_weighted_trade_gross_return=gross_total,
-            sum_weighted_trade_funding_return=funding_total,
-            sum_weighted_trade_cost_return=cost_total,
-            sum_weighted_trade_net_return=net_total,
+            sum_signed_trade_activity_gross=gross_total,
+            sum_signed_trade_activity_funding=funding_total,
+            sum_signed_trade_activity_cost=cost_total,
+            sum_signed_trade_activity_net=net_total,
         ),
         trades=tuple(trades),
     )
@@ -141,10 +141,10 @@ def validate(
         gates.append(
             GateResult(
                 name="positive_gross",
-                passed=screening_result.smoke_score.sum_weighted_trade_gross_return > 0,
+                passed=screening_result.smoke_score.sum_signed_trade_activity_gross > 0,
                 detail=(
-                    "sum_weighted_trade_gross_return="
-                    f"{screening_result.smoke_score.sum_weighted_trade_gross_return:.12g}"
+                    "sum_signed_trade_activity_gross="
+                    f"{screening_result.smoke_score.sum_signed_trade_activity_gross:.12g}"
                 ),
             )
         )
@@ -152,10 +152,10 @@ def validate(
         gates.append(
             GateResult(
                 name="positive_net",
-                passed=screening_result.smoke_score.sum_weighted_trade_net_return > 0,
+                passed=screening_result.smoke_score.sum_signed_trade_activity_net > 0,
                 detail=(
-                    "sum_weighted_trade_net_return="
-                    f"{screening_result.smoke_score.sum_weighted_trade_net_return:.12g}"
+                    "sum_signed_trade_activity_net="
+                    f"{screening_result.smoke_score.sum_signed_trade_activity_net:.12g}"
                 ),
             )
         )

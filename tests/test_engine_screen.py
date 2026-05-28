@@ -80,7 +80,7 @@ def test_screen_uses_declared_fill_timing_without_decision_bar_lookahead():
 
     assert result.trades[0].entry_price == 100.0
     assert result.trades[0].exit_price == 110.0
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx(0.10)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx(0.10)
     assert "max_drawdown" not in result.model_dump()
 
 
@@ -101,7 +101,7 @@ def test_screen_long_and_short_pnl_signs_are_correct():
 
     assert result.trade_count == 2
     assert [trade.gross_return for trade in result.trades] == pytest.approx([0.10, 0.10])
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx(0.20)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx(0.20)
 
 
 def test_screen_costs_reduce_net_returns():
@@ -117,9 +117,9 @@ def test_screen_costs_reduce_net_returns():
 
     result = screen(request)
 
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx(0.10)
-    assert result.smoke_score.sum_weighted_trade_cost_return == pytest.approx(0.003)
-    assert result.smoke_score.sum_weighted_trade_net_return == pytest.approx(0.097)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx(0.10)
+    assert result.smoke_score.sum_signed_trade_activity_cost == pytest.approx(0.003)
+    assert result.smoke_score.sum_signed_trade_activity_net == pytest.approx(0.097)
 
 
 def test_screen_applies_funding_cashflows_after_entry_through_exit():
@@ -140,9 +140,9 @@ def test_screen_applies_funding_cashflows_after_entry_through_exit():
     assert [trade.gross_return for trade in result.trades] == pytest.approx([0.10, -0.10])
     assert [trade.funding_return for trade in result.trades] == pytest.approx([-0.001, 0.001])
     assert [trade.net_return for trade in result.trades] == pytest.approx([0.099, -0.099])
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx(0.0)
-    assert result.smoke_score.sum_weighted_trade_funding_return == pytest.approx(0.0)
-    assert result.smoke_score.sum_weighted_trade_net_return == pytest.approx(0.0)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx(0.0)
+    assert result.smoke_score.sum_signed_trade_activity_funding == pytest.approx(0.0)
+    assert result.smoke_score.sum_signed_trade_activity_net == pytest.approx(0.0)
 
 
 def test_engine_bar_index_builds_positions_by_symbol():
@@ -188,7 +188,7 @@ def test_screen_weight_scales_return_exposure():
     result = screen(request)
 
     assert result.trades[0].weight == 0.5
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx(0.05)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx(0.05)
 
 
 def test_screen_quote_long_uses_ask_entry_and_bid_exit():
@@ -205,7 +205,7 @@ def test_screen_quote_long_uses_ask_entry_and_bid_exit():
 
     assert result.trades[0].entry_price == 100.1
     assert result.trades[0].exit_price == 110.0
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx((110.0 - 100.1) / 100.1)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx((110.0 - 100.1) / 100.1)
 
 
 def test_screen_quote_short_uses_bid_entry_and_ask_exit():
@@ -222,7 +222,7 @@ def test_screen_quote_short_uses_bid_entry_and_ask_exit():
 
     assert result.trades[0].entry_price == 100.0
     assert result.trades[0].exit_price == 90.1
-    assert result.smoke_score.sum_weighted_trade_gross_return == pytest.approx((100.0 - 90.1) / 100.0)
+    assert result.smoke_score.sum_signed_trade_activity_gross == pytest.approx((100.0 - 90.1) / 100.0)
 
 
 def test_screen_quote_fill_fails_closed_without_selected_quotes():

@@ -348,7 +348,7 @@ def run_validation(
 
 def _validation_result(result_dir: Path, decision: ValidationPolicyDecision) -> ValidationRunResult:
     return ValidationRunResult(
-        success=decision.decision in {"mechanical_pass", "watchlist", "paper_candidate"},
+        success=decision.decision in {"mechanical_pass", "watchlist", "mechanical_review_candidate"},
         result_dir=result_dir,
         decision=decision,
         message=f"validation decision: {decision.decision}",

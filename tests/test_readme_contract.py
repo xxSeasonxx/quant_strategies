@@ -27,10 +27,12 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "hard_no" in text
     assert "mechanical_pass" in text
     assert "watchlist" in text
-    assert "paper_candidate" in text
+    assert "mechanical_review_candidate" in text
     assert "[paper_readiness]" in text
     assert "min_windows = 2" in text
     assert "min_total_trades = 30" in text
     assert "max_stressed_net_loss = -0.02" in text
     assert "max_fill_lag_net_loss = -0.02" in text
-    assert "smoke_score.sum_weighted_trade_*" in text
+    assert "smoke_score.sum_signed_trade_activity_*" in text
+    assert "smoke_unverified" in text
+    assert "causality_verified" in text
