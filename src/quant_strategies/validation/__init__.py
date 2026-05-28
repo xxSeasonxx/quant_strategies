@@ -5,12 +5,7 @@ from dataclasses import dataclass, field as _field
 from pathlib import Path
 from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
 
-from quant_strategies.boundary import frozen_params, frozen_rows
-from quant_strategies.decisions import (
-    StrategyDecision,
-    validate_decision_output,
-    validate_strategy_params,
-)
+from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
 from quant_strategies.runner.artifact_profiles import (
     canonical_rows_jsonl,
@@ -35,15 +30,11 @@ from quant_strategies.validation.backends import (
     backend_metric_semantics,
     get_backend,
 )
-from quant_strategies.validation.capabilities import (
-    backend_capability_matrix,
-    unknown_backend_capability_matrix,
-)
 from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
-from quant_strategies.validation.lookahead import check_hidden_lookahead
+from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.validation.manifest import write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
 from quant_strategies.validation.policy import (
@@ -130,7 +121,6 @@ def run_validation(
             config=config,
             config_path=resolved_config_path,
             backend_name=backend_name,
-            backend=None,
             decisions=state.all_decisions,
             data_audits=state.data_audits,
             data_provenance=state.data_provenance,
@@ -162,7 +152,6 @@ def run_validation(
         config=config,
         config_path=resolved_config_path,
         backend_name=backend_name,
-        backend=selected_backend,
         decisions=state.all_decisions,
         data_audits=state.data_audits,
         data_provenance=state.data_provenance,
@@ -394,14 +383,7 @@ def _run_scenario_backend(
         data=run_config.data,
     )
     decision_outcome = _scenario_decision_outcome(
-        scenario=scenario,
-        generate_decisions=execution.generate_decisions,
         base_decisions=execution.decisions,
-        rows=execution.frozen_rows,
-        strategy_id=context.config.strategy_id,
-        scenario_config=scenario_config,
-        readiness=context.config.readiness,
-        backend_name=context.backend_name,
     )
     backend_result = decision_outcome.failure
     decision_records_path = None
@@ -484,7 +466,6 @@ def _failure_result_from_state(
         config=context.config,
         config_path=context.config_path,
         backend_name=context.backend_name,
-        backend=context.selected_backend,
         decisions=state.all_decisions,
         data_audits=state.data_audits,
         data_provenance=state.data_provenance,
@@ -551,7 +532,6 @@ def _failure_result(
     config: Any,
     config_path: Path,
     backend_name: str,
-    backend: ValidationBackend | None,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
@@ -571,7 +551,6 @@ def _failure_result(
         config=config,
         config_path=config_path,
         backend_name=backend_name,
-        backend=backend,
         decisions=decisions,
         data_audits=data_audits,
         data_provenance=data_provenance,
@@ -657,85 +636,12 @@ def _scenario_config(
 
 def _scenario_decision_outcome(
     *,
-    scenario: MatrixScenario,
-    generate_decisions: Any,
     base_decisions: list[StrategyDecision],
-    rows: Sequence[Mapping[str, Any]],
-    strategy_id: str,
-    scenario_config: Any,
-    readiness: Any,
-    backend_name: str,
 ) -> _ScenarioDecisionOutcome:
-    if scenario.kind != "parameter":
-        return _ScenarioDecisionOutcome(
-            decisions=list(base_decisions),
-            decision_generation_status="base_reused",
-            decisions_regenerated=False,
-        )
-    try:
-        scenario_params = validate_strategy_params(generate_decisions, scenario_config.params)
-        decision_output = generate_decisions(frozen_rows(rows), frozen_params(scenario_params))
-    except SystemExit as exc:
-        return _ScenarioDecisionOutcome(
-            decisions=[],
-            decision_generation_status="failed",
-            decisions_regenerated=False,
-            failure=_failed_backend_result(
-                backend_name,
-                f"parameter_decision_generation_failed: SystemExit: {exc}",
-            ),
-        )
-    except Exception as exc:
-        return _ScenarioDecisionOutcome(
-            decisions=[],
-            decision_generation_status="failed",
-            decisions_regenerated=False,
-            failure=_failed_backend_result(
-                backend_name,
-                f"parameter_decision_generation_failed: {exc}",
-            ),
-        )
-
-    scenario_decisions, violations = validate_decision_output(
-        decision_output,
-        strategy_id=strategy_id,
-    )
-    if violations:
-        return _ScenarioDecisionOutcome(
-            decisions=[],
-            decision_generation_status="failed",
-            decisions_regenerated=False,
-            failure=_failed_backend_result(
-                backend_name,
-                f"parameter_decision_generation_failed: {'; '.join(violations)}",
-            ),
-        )
-    audit = audit_decision_rows(frozen_rows(rows), scenario_decisions)
-    if not audit.passed:
-        return _ScenarioDecisionOutcome(
-            decisions=[],
-            decision_generation_status="failed",
-            decisions_regenerated=False,
-            failure=_failed_backend_result(
-                backend_name,
-                f"parameter_decision_audit_failed: {'; '.join(audit.violations)}",
-            ),
-        )
-    readiness_violations = check_validation_readiness(scenario_decisions, readiness)
-    if readiness_violations:
-        return _ScenarioDecisionOutcome(
-            decisions=[],
-            decision_generation_status="failed",
-            decisions_regenerated=False,
-            failure=_failed_backend_result(
-                backend_name,
-                f"parameter_decision_readiness_failed: {'; '.join(readiness_violations)}",
-            ),
-        )
     return _ScenarioDecisionOutcome(
-        decisions=scenario_decisions,
-        decision_generation_status="regenerated",
-        decisions_regenerated=True,
+        decisions=list(base_decisions),
+        decision_generation_status="base_reused",
+        decisions_regenerated=False,
     )
 
 
@@ -810,7 +716,6 @@ def _write_validation_artifacts(
     config: Any,
     config_path: Path,
     backend_name: str,
-    backend: ValidationBackend | None,
     decisions: list[StrategyDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
@@ -819,11 +724,6 @@ def _write_validation_artifacts(
     failure_details: list[dict[str, str]] | None = None,
 ) -> None:
     failure_details = failure_details or []
-    capability_matrix = (
-        unknown_backend_capability_matrix(backend_name, backend_results)
-        if backend is None
-        else backend_capability_matrix(backend, backend_results)
-    )
     write_text_artifact(result_dir, "decision_records.jsonl", canonical_jsonl_lines(decisions))
     write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
     write_json_artifact(
@@ -878,7 +778,6 @@ def _write_validation_artifacts(
             "failure_details": failure_details,
         },
     )
-    write_json_artifact(result_dir, "backend_capability_matrix.json", capability_matrix)
     decision_payload = decision.model_dump(mode="json")
     decision_payload["failure_details"] = failure_details
     write_json_artifact(result_dir, "validation_decision.json", decision_payload)
@@ -911,7 +810,6 @@ def _write_validation_artifacts(
         backend_name=backend_name,
         data_provenance=data_provenance,
         backend_results=backend_results,
-        capability_matrix=capability_matrix,
     )
 
 

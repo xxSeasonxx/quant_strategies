@@ -43,10 +43,14 @@ def test_readme_uses_generic_foundation_contract_language():
     assert "smoke_unverified" in text
     assert "causality_verified" in text
     assert "decision_id" in text
+    assert "decisions.extended_ontology" in text
     assert "target_notional" in text
     assert "target_contracts" in text
     assert "target_vol" in text
-    assert "unsupported smoke" in text
+    assert "multiple_testing_not_corrected_advisory_only" in text
+    assert "deflation_not_evaluated" not in text
+    assert "backend_capability_matrix.json" not in text
+    assert "Explicitly extended decisions are rejected by unsupported" in text
 
 
 def test_prd_matches_runner_public_api_contract():
@@ -63,6 +67,8 @@ def test_prd_matches_runner_public_api_contract():
     assert "`quant_strategies.runner.RunResult`" in readme
     assert "`quant_strategies.runner.run_config`" in consumer
     assert "`quant_strategies.runner.RunResult`" in consumer
+    assert "decisions.extended_ontology" in consumer
+    assert "multiple_testing_not_corrected_advisory_only" in consumer
 
     import quant_strategies
 

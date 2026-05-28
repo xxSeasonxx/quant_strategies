@@ -10,7 +10,7 @@ from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
 )
-from quant_strategies.validation.datetime_utils import parse_aware_datetime
+from quant_strategies.datetime_utils import parse_aware_datetime
 
 
 class DataAudit(BaseModel):

@@ -45,8 +45,6 @@ def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
         "parameter_search_space": {},
         "selection_rule": None,
         "split_ids": [],
-        "deflated_sharpe": None,
-        "monte_carlo": None,
     }
 
 
@@ -232,7 +230,7 @@ def test_policy_hard_no_for_required_unsupported_semantics():
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_pass_for_positive_sufficient_backend_result():
+def test_policy_hard_no_without_positive_realistic_cost_evidence_when_paper_enabled():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -247,7 +245,7 @@ def test_policy_mechanical_pass_for_positive_sufficient_backend_result():
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
     assert_advisory_only(decision)
 
@@ -328,13 +326,26 @@ def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
     assert "compounded_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_records_search_pressure_inputs_for_mechanical_review_candidate():
+def test_policy_hard_no_for_zero_realistic_cost_evidence_when_paper_enabled():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=paper_ready_scenarios(cost_returns=(0.0, 0.0)),
+        min_trades=10,
+    )
+
+    assert decision.decision == "hard_no"
+    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert_advisory_only(decision)
+
+
+def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate():
     search_pressure = type(
         "SearchPressure",
         (),
@@ -355,16 +366,14 @@ def test_policy_records_search_pressure_inputs_for_mechanical_review_candidate()
         search_pressure=search_pressure,
     )
 
-    assert decision.decision == "mechanical_review_candidate"
-    assert decision.reasons == ("deflation_not_evaluated",)
+    assert decision.decision == "watchlist"
+    assert decision.reasons == ("multiple_testing_not_corrected_advisory_only",)
     assert decision.overfit_controls == {
         "candidate_count": 120,
         "trial_count": 18,
         "parameter_search_space": {"lookback": [12, 24, 48]},
         "selection_rule": "top risk-adjusted smoke score",
         "split_ids": ["validation_2026_h1", "validation_2026_h2"],
-        "deflated_sharpe": None,
-        "monte_carlo": None,
     }
     assert decision.evidence_class == "validation_advisory"
     assert decision.requires_manual_approval is True
@@ -437,7 +446,7 @@ def test_policy_uses_worst_window_stressed_and_fill_lag_loss_floors():
 def test_policy_mechanical_pass_when_paper_readiness_disabled():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(),
+        backend_results=paper_ready_scenarios(cost_returns=(-0.01, 0.0)),
         min_trades=10,
         paper_readiness=PaperReadinessConfig(enabled=False),
     )
@@ -558,7 +567,7 @@ def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
     assert_advisory_only(decision)
 
 
-def test_policy_ignores_diagnostic_scenarios_for_mechanical_pass():
+def test_policy_ignores_diagnostic_scenarios_before_paper_readiness_classification():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -591,12 +600,13 @@ def test_policy_ignores_diagnostic_scenarios_for_mechanical_pass():
         required_scenario_count=1,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert "unsupported_semantics" not in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_pass_for_negative_realistic_cost_evidence():
+def test_policy_hard_no_for_negative_realistic_cost_evidence():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -610,13 +620,13 @@ def test_policy_mechanical_pass_for_negative_realistic_cost_evidence():
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
     assert "compounded_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_pass_for_zero_realistic_cost_evidence():
+def test_policy_hard_no_for_zero_realistic_cost_evidence():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -630,7 +640,7 @@ def test_policy_mechanical_pass_for_zero_realistic_cost_evidence():
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
     assert "compounded_realistic_net_positive" in decision.failed_gates
     assert_advisory_only(decision)
@@ -644,7 +654,7 @@ def test_policy_uses_compounded_realistic_return_not_arithmetic_sum():
         required_scenario_ids=tuple(item.scenario_id for item in paper_ready_scenarios()),
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
     assert "compounded_realistic_net_positive" in decision.failed_gates
     assert decision.gate_details["compounded_realistic_net_positive"] == "0.0 > 0.0"
@@ -788,7 +798,7 @@ def test_policy_marks_missing_paper_scenario_group_details_as_missing():
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "hard_no"
     assert decision.gate_details["no_zero_trade_windows"] == "missing cost scenarios"
     assert decision.gate_details["compounded_realistic_net_positive"] == "missing cost scenarios"
     assert decision.gate_details["stressed_net_floor"] == "missing cost_stress scenarios"

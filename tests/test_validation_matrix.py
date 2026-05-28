@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
@@ -23,14 +25,11 @@ def test_expand_validation_matrix_includes_required_v1_scenarios():
     assert "validation_2026_h1/realistic_costs" in names
     assert "validation_2026_h1/stressed_costs" in names
     assert "validation_2026_h1/fill_lag_plus_1" in names
-    assert "validation_2026_h1/param_threshold_down_10pct" in names
-    assert "validation_2026_h1/param_threshold_up_10pct" in names
+    assert not any("param_" in name for name in names)
     assert _scenario_by_id(scenarios, "validation_2026_h1/base").required is True
     assert _scenario_by_id(scenarios, "validation_2026_h1/realistic_costs").required is True
     assert _scenario_by_id(scenarios, "validation_2026_h1/stressed_costs").required is True
     assert _scenario_by_id(scenarios, "validation_2026_h1/fill_lag_plus_1").required is True
-    assert _scenario_by_id(scenarios, "validation_2026_h1/param_threshold_down_10pct").required is False
-    assert _scenario_by_id(scenarios, "validation_2026_h1/param_threshold_up_10pct").required is False
 
 
 def test_base_scenario_uses_no_cost_baseline():
@@ -101,18 +100,7 @@ def test_fill_lag_preserves_base_fill_keys_and_increments_entry_lag():
     }
 
 
-def test_bool_params_are_skipped_for_perturbation():
-    scenarios = expand_validation_matrix(
-        window_id="validation_2026_h1",
-        base_params={"enabled": True},
-        base_costs={},
-        base_fill={},
-    )
-
-    assert not any("param_enabled" in scenario.id for scenario in scenarios)
-
-
-def test_only_first_numeric_non_bool_param_is_perturbed_for_v1():
+def test_params_do_not_expand_diagnostic_parameter_scenarios():
     scenarios = expand_validation_matrix(
         window_id="validation_2026_h1",
         base_params={"enabled": True, "threshold": 1.0, "lookback": 20},
@@ -120,20 +108,20 @@ def test_only_first_numeric_non_bool_param_is_perturbed_for_v1():
         base_fill={},
     )
 
-    names = {scenario.id for scenario in scenarios}
-    threshold_down = _scenario_by_id(
-        scenarios, "validation_2026_h1/param_threshold_down_10pct"
+    assert tuple(scenario.kind for scenario in scenarios) == (
+        "base",
+        "cost",
+        "cost_stress",
+        "fill_lag",
     )
 
-    assert "validation_2026_h1/param_threshold_up_10pct" in names
-    assert "validation_2026_h1/param_lookback_down_10pct" not in names
-    assert "validation_2026_h1/param_lookback_up_10pct" not in names
-    assert threshold_down.params == {
-        "enabled": True,
-        "threshold": 0.9,
-        "lookback": 20,
-    }
-    assert threshold_down.required is False
+
+def test_validation_source_has_no_parameter_regeneration_branch():
+    source = Path("src/quant_strategies/validation/__init__.py").read_text()
+
+    assert "parameter_decision_" not in source
+    assert 'kind == "parameter"' not in source
+    assert 'kind != "parameter"' not in source
 
 
 def test_scenario_override_maps_are_immutable_and_isolated_from_callers():

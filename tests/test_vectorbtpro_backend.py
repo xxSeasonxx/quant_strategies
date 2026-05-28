@@ -9,13 +9,18 @@ import pytest
 from quant_strategies.decisions import (
     DecisionIntent,
     ExitPolicy,
-    FutureRef,
-    InstrumentLeg,
     InstrumentRef,
-    MultiLegInstrumentRef,
-    OptionRef,
     PositionTarget,
     StrategyDecision,
+)
+from quant_strategies.decisions.extended_ontology import (
+    DecisionIntent as ExtendedDecisionIntent,
+    FutureRef,
+    InstrumentLeg,
+    MultiLegInstrumentRef,
+    OptionRef,
+    PositionTarget as ExtendedPositionTarget,
+    StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
 
@@ -106,13 +111,24 @@ def decision(
     intent=None,
     **exit_kwargs,
 ):
-    return StrategyDecision(
+    intent = intent or DecisionIntent(action="open")
+    instrument = instrument or InstrumentRef(kind="crypto_perp", symbol=symbol)
+    is_extended = (
+        not isinstance(instrument, InstrumentRef)
+        or type(intent) is not DecisionIntent
+        or sizing_kind != "target_weight"
+    )
+    target_cls = ExtendedPositionTarget if is_extended else PositionTarget
+    decision_cls = ExtendedStrategyDecision if is_extended else StrategyDecision
+    if is_extended and type(intent) is DecisionIntent:
+        intent = ExtendedDecisionIntent(action=intent.action)
+    return decision_cls(
         strategy_id="demo",
-        instrument=instrument or InstrumentRef(kind="crypto_perp", symbol=symbol),
-        intent=intent or DecisionIntent(action="open"),
+        instrument=instrument,
+        intent=intent,
         decision_time=decision_time,
         as_of_time=AS_OF,
-        target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
+        target=target_cls(direction=direction, sizing_kind=sizing_kind, size=size),
         exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_kwargs),
     )
 
@@ -528,7 +544,7 @@ def test_vectorbtpro_backend_reports_unsupported_flat_target():
 
 def test_vectorbtpro_backend_reports_unsupported_non_open_intent():
     result = VectorBTProBackend().run(
-        decisions=[decision(intent=DecisionIntent(action="roll", book_side="buy"))],
+        decisions=[decision(intent=ExtendedDecisionIntent(action="roll", book_side="buy"))],
         rows=rows(),
         config=None,
     )

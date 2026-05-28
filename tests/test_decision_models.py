@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -8,16 +9,21 @@ from pydantic import ValidationError
 from quant_strategies.decisions import (
     DecisionIntent,
     ExitPolicy,
-    FutureRef,
-    InstrumentLeg,
     InstrumentRef,
-    MultiLegInstrumentRef,
     ObservationRef,
-    OptionRef,
     PositionTarget,
     StrategyGenerator,
     StrategyDecision,
     validate_decision_output,
+)
+from quant_strategies.decisions.extended_ontology import (
+    DecisionIntent as ExtendedDecisionIntent,
+    FutureRef,
+    InstrumentLeg,
+    MultiLegInstrumentRef,
+    OptionRef,
+    PositionTarget as ExtendedPositionTarget,
+    StrategyDecision as ExtendedStrategyDecision,
 )
 
 
@@ -80,7 +86,7 @@ def test_strategy_decision_accepts_explicit_intent_and_decision_id():
     decision = StrategyDecision(
         decision_id="manual-001",
         strategy_id="demo",
-        intent=DecisionIntent(action="close", book_side="sell"),
+        intent=DecisionIntent(action="open"),
         instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
         decision_time=DECISION_TIME,
         as_of_time=AS_OF_TIME,
@@ -89,8 +95,22 @@ def test_strategy_decision_accepts_explicit_intent_and_decision_id():
     )
 
     assert decision.decision_id == "manual-001"
-    assert decision.intent.action == "close"
-    assert decision.intent.book_side == "sell"
+    assert decision.intent.action == "open"
+    assert not hasattr(decision.intent, "book_side")
+
+
+def test_default_intent_rejects_extended_actions_and_book_side():
+    with pytest.raises(ValidationError):
+        DecisionIntent(action="close")
+    with pytest.raises(ValidationError):
+        DecisionIntent(action="open", book_side="buy")
+
+
+def test_extended_intent_accepts_actions_and_book_side():
+    intent = ExtendedDecisionIntent(action="close", book_side="sell")
+
+    assert intent.action == "close"
+    assert intent.book_side == "sell"
 
 
 def test_strategy_decision_generates_deterministic_decision_id():
@@ -204,7 +224,52 @@ def test_strategy_generator_protocol_is_publicly_importable():
     assert strategy([], {}) == []
 
 
-def test_strategy_decision_accepts_future_option_and_multi_leg_instruments():
+def test_default_import_boundary_excludes_extended_ontology():
+    import quant_strategies.decisions as decision_api
+    import quant_strategies.decisions.models as decision_models
+
+    extended_names = {
+        "BookSide",
+        "FutureRef",
+        "InstrumentLeg",
+        "LegDirection",
+        "MultiLegInstrumentRef",
+        "OptionRef",
+        "OptionType",
+        "Settlement",
+        "SingleInstrumentRef",
+    }
+
+    for name in extended_names:
+        assert not hasattr(decision_api, name)
+        assert not hasattr(decision_models, name)
+
+    assert "FutureRef" not in decision_api.__all__
+
+
+def test_default_model_source_does_not_name_extended_vocabulary():
+    source = Path("src/quant_strategies/decisions/models.py").read_text()
+
+    for name in (
+        "BookSide",
+        "FutureRef",
+        "InstrumentLeg",
+        "LegDirection",
+        "MultiLegInstrumentRef",
+        "OptionRef",
+        "OptionType",
+        "Settlement",
+        "SingleInstrumentRef",
+        "book_side",
+        "multi_leg",
+        "target_notional",
+        "target_contracts",
+        "target_vol",
+    ):
+        assert name not in source
+
+
+def test_extended_strategy_decision_accepts_future_option_and_multi_leg_instruments():
     future = FutureRef(
         kind="future",
         symbol="ESM26",
@@ -232,15 +297,34 @@ def test_strategy_decision_accepts_future_option_and_multi_leg_instruments():
     )
 
     for instrument in (future, option, multi_leg):
-        decision = StrategyDecision(
+        decision = ExtendedStrategyDecision(
             strategy_id="demo",
             instrument=instrument,
+            intent=ExtendedDecisionIntent(action="open"),
+            decision_time=DECISION_TIME,
+            as_of_time=AS_OF_TIME,
+            target=ExtendedPositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
+            exit_policy=ExitPolicy(max_hold_bars=5),
+        )
+        assert decision.instrument == instrument
+
+
+def test_default_strategy_decision_rejects_extended_instruments():
+    with pytest.raises(ValidationError):
+        StrategyDecision(
+            strategy_id="demo",
+            instrument=FutureRef(
+                kind="future",
+                symbol="ESM26",
+                expiry=DECISION_TIME,
+                multiplier=50.0,
+                settlement="cash",
+            ),
             decision_time=DECISION_TIME,
             as_of_time=AS_OF_TIME,
             target=PositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
             exit_policy=ExitPolicy(max_hold_bars=5),
         )
-        assert decision.instrument == instrument
 
 
 def test_instrument_models_reject_invalid_contract_fields():
@@ -279,17 +363,31 @@ def test_instrument_models_reject_invalid_contract_fields():
 
 @pytest.mark.parametrize(
     "sizing_kind",
-    ["target_weight", "target_notional", "target_contracts", "target_vol"],
+    ["target_weight"],
 )
-def test_position_target_accepts_declared_sizing_modes(sizing_kind: str):
+def test_position_target_accepts_default_sizing_mode(sizing_kind: str):
     target = PositionTarget(direction="long", sizing_kind=sizing_kind, size=1.0)
 
     assert target.sizing_kind == sizing_kind
 
 
-def test_position_target_rejects_legacy_notional_sizing_name():
+@pytest.mark.parametrize(
+    "sizing_kind",
+    ["target_notional", "target_contracts", "target_vol"],
+)
+def test_position_target_rejects_extended_sizing_modes_by_default(sizing_kind: str):
     with pytest.raises(ValidationError):
-        PositionTarget(direction="long", sizing_kind="notional", size=1.0)
+        PositionTarget(direction="long", sizing_kind=sizing_kind, size=1.0)
+
+
+@pytest.mark.parametrize(
+    "sizing_kind",
+    ["target_weight", "target_notional", "target_contracts", "target_vol"],
+)
+def test_extended_position_target_accepts_declared_sizing_modes(sizing_kind: str):
+    target = ExtendedPositionTarget(direction="long", sizing_kind=sizing_kind, size=1.0)
+
+    assert target.sizing_kind == sizing_kind
 
 
 def test_observation_ref_rejects_naive_timestamp():

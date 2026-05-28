@@ -190,7 +190,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
         "linear_funding_adjusted_return",
     }
     assert backend_summary["metric_semantics"]["net_return"]["tolerance"] == 1e-9
-    assert len(backend_summary["results"]) == 6
+    assert len(backend_summary["results"]) == 4
     assert len([item for item in backend_summary["results"] if item["required"]]) == 4
     base_decision_path = "backend_runs/decision_records/validation_2026_h1/base.jsonl"
     base_decision_file = result.result_dir / base_decision_path
@@ -224,14 +224,14 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert '": ' not in main_decision_line
     assert main_decision_file.exists()
     assert (result.result_dir / "data_audit.json").exists()
-    assert (result.result_dir / "backend_capability_matrix.json").exists()
+    assert not (result.result_dir / "backend_capability_matrix.json").exists()
     assert (result.result_dir / "validation_config.toml").exists()
     assert (result.result_dir / "strategy_snapshot.py").exists()
     assert (result.result_dir / "decision_schema.json").exists()
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
     assert robustness_matrix["decision"]["decision"] == "watchlist"
     assert "min_windows" in robustness_matrix["decision"]["failed_gates"]
-    assert len(robustness_matrix["scenarios"]) == 6
+    assert len(robustness_matrix["scenarios"]) == 4
     assert robustness_matrix["failure_details"] == []
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `watchlist`" in report
@@ -257,21 +257,8 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert row_line.startswith('{"available_at":')
     assert '": ' not in row_line
     assert read_jsonl(row_file) == expected_row_records()
-    assert manifest["backend"]["status_counts"] == {"completed": 6}
-    capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
-    assert capability_matrix == {
-        "backend": "fake",
-        "observed_unsupported_semantics": [],
-        "semantics": [
-            {
-                "semantic": "test_double",
-                "status": "supported",
-                "details": "Deterministic validation test double.",
-                "observed_unsupported": False,
-            }
-        ],
-    }
-    assert manifest["backend"]["capability_matrix"] == capability_matrix
+    assert manifest["backend"]["status_counts"] == {"completed": 4}
+    assert "capability_matrix" not in manifest["backend"]
     assert manifest["backend"]["scenarios"][0]["decision_records_path"] == base_decision_path
     assert manifest["backend"]["scenarios"][0]["decision_records_sha256"] == file_sha256(
         base_decision_file
@@ -279,9 +266,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert manifest["core_hashes"]["decision_records.jsonl"] == file_sha256(
         result.result_dir / "decision_records.jsonl"
     )
-    assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
-        result.result_dir / "backend_capability_matrix.json"
-    )
+    assert "backend_capability_matrix.json" not in manifest["core_hashes"]
     assert manifest["core_hashes"]["validation_decision.json"] == file_sha256(
         result.result_dir / "validation_decision.json"
     )
@@ -333,7 +318,7 @@ def test_validation_row_snapshot_hash_uses_written_payload(
     assert read_jsonl(row_file) == expected_row_records()
 
 
-def test_run_validation_writes_mechanical_review_candidate_artifacts_for_two_robust_windows(
+def test_run_validation_downgrades_search_pressure_candidate_artifacts(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -421,18 +406,18 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.run_completed is True
-    assert result.decision.decision == "mechanical_review_candidate"
-    assert result.decision.reasons == ("deflation_not_evaluated",)
+    assert result.decision.decision == "watchlist"
+    assert result.decision.reasons == ("multiple_testing_not_corrected_advisory_only",)
     assert result.result_dir is not None
-    assert backend.calls == 12
+    assert backend.calls == 8
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert decision_payload["decision"] == "mechanical_review_candidate"
-    assert decision_payload["advisory_decision"] == "mechanical_review_candidate"
+    assert decision_payload["decision"] == "watchlist"
+    assert decision_payload["advisory_decision"] == "watchlist"
     assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True
-    assert decision_payload["reasons"] == ["deflation_not_evaluated"]
+    assert decision_payload["reasons"] == ["multiple_testing_not_corrected_advisory_only"]
     assert decision_payload["failed_gates"] == []
     assert decision_payload["failure_details"] == []
     assert decision_payload["overfit_controls"] == {
@@ -441,8 +426,6 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "parameter_search_space": {"weight": [0.5, 1.0, 1.5]},
         "selection_rule": "top risk-adjusted smoke score",
         "split_ids": ["validation_2026_h1", "validation_2026_h2"],
-        "deflated_sharpe": None,
-        "monte_carlo": None,
     }
     assert set(decision_payload["passed_gates"]) >= {
         "mechanical_validation",
@@ -458,17 +441,19 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
 
     robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "mechanical_review_candidate"
-    assert robustness_matrix["decision"]["reasons"] == ["deflation_not_evaluated"]
+    assert robustness_matrix["decision"]["decision"] == "watchlist"
+    assert robustness_matrix["decision"]["reasons"] == [
+        "multiple_testing_not_corrected_advisory_only"
+    ]
     assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
     assert robustness_matrix["decision"]["failed_gates"] == []
     assert "gate_details" in robustness_matrix["decision"]
-    assert len(robustness_matrix["scenarios"]) == 12
+    assert len(robustness_matrix["scenarios"]) == 8
     assert robustness_matrix["failure_details"] == []
 
     report = (result.result_dir / "validation_report.md").read_text()
-    assert "Decision: `mechanical_review_candidate`" in report
-    assert "Reasons: deflation_not_evaluated" in report
+    assert "Decision: `watchlist`" in report
+    assert "Reasons: multiple_testing_not_corrected_advisory_only" in report
     assert "Passed gates: " in report
     assert "Failed gates: none" in report
     assert "Gate details:" in report
@@ -493,17 +478,15 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     assert audit["windows"][0]["passed"] is False
     assert audit["windows"][0]["violations"] == ["data_load_failed: data load returned no rows"]
     assert (result.result_dir / "validation_decision.json").exists()
-    capability_matrix = json.loads((result.result_dir / "backend_capability_matrix.json").read_text())
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["data"]["windows"][0]["status"] == "failed"
     assert manifest["data"]["windows"][0]["row_count"] == 0
     assert manifest["data"]["windows"][0]["rows_path"] is None
     assert manifest["data"]["windows"][0]["rows_sha256"] is None
     assert not (result.result_dir / "data_rows").exists()
-    assert manifest["backend"]["capability_matrix"] == capability_matrix
-    assert manifest["core_hashes"]["backend_capability_matrix.json"] == file_sha256(
-        result.result_dir / "backend_capability_matrix.json"
-    )
+    assert not (result.result_dir / "backend_capability_matrix.json").exists()
+    assert "capability_matrix" not in manifest["backend"]
+    assert "backend_capability_matrix.json" not in manifest["core_hashes"]
 
 
 def test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot(
@@ -616,7 +599,7 @@ def test_run_validation_ignores_unconfigured_manifest_next_to_config(
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "watchlist"
-    assert backend.calls == 6
+    assert backend.calls == 4
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert "research_manifest" not in manifest
@@ -919,7 +902,7 @@ def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, m
 
     assert result.decision.decision == "hard_no"
     assert "insufficient_trades" in result.decision.reasons
-    assert backend.calls == 6
+    assert backend.calls == 4
 
 
 def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
@@ -941,7 +924,7 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
     assert result.decision.decision == "watchlist"
     assert "min_total_trades" in result.decision.failed_gates
     assert len(loaded_row_ids) == 2
-    assert backend.calls == 12
+    assert backend.calls == 8
     h1_row_ids = {
         row_id
         for scenario_id, row_id in backend.row_ids_by_scenario
@@ -991,78 +974,9 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert configs["validation_2026_h1/stressed_costs"].cost_model.fee_bps_per_side == 1.0
     assert configs["validation_2026_h1/stressed_costs"].cost_model.slippage_bps_per_side == 1.0
     assert configs["validation_2026_h1/fill_lag_plus_1"].fill_model.entry_lag_bars == 2
-    assert configs["validation_2026_h1/param_weight_up_10pct"].params == {"weight": 1.1}
     assert decision_sizes["validation_2026_h1/base"] == [1.0]
-    assert decision_sizes["validation_2026_h1/param_weight_up_10pct"] == [1.1]
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    param_summary = {
-        item["scenario_id"]: item
-        for item in summary["results"]
-        if item["scenario_kind"] == "parameter"
-    }
-    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["diagnostic_only"] is True
-    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["decisions_regenerated"] is True
-    assert (
-        param_summary["validation_2026_h1/param_weight_up_10pct"]["decision_generation_status"]
-        == "regenerated"
-    )
-    assert param_summary["validation_2026_h1/param_weight_up_10pct"]["decision_count"] == 1
-    param_decision_path = param_summary["validation_2026_h1/param_weight_up_10pct"][
-        "decision_records_path"
-    ]
-    param_decision_file = result.result_dir / param_decision_path
-    assert file_sha256(param_decision_file) == param_summary[
-        "validation_2026_h1/param_weight_up_10pct"
-    ]["decision_records_sha256"]
-    assert read_jsonl(param_decision_file)[0]["target"]["size"] == 1.1
-
-
-def test_run_validation_records_failed_parameter_generation_without_backend_call(
-    tmp_path: Path,
-    monkeypatch,
-):
-    candidate = write_candidate(tmp_path)
-    (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
-        "def validate_params(params):\n"
-        "    if float(params['weight']) > 1.0:\n"
-        "        raise ValueError('weight too high')\n"
-        "    return dict(params)\n"
-        "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
-        "        strategy_id='demo',\n"
-        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "        decision_time=rows[0]['timestamp'],\n"
-        "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
-        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
-        "    )]\n"
-    )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
-    backend = RecordingBackend()
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
-
-    assert result.decision.decision == "watchlist"
-    assert backend.calls == 5
-    assert result.result_dir is not None
-    summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    by_scenario = {item["scenario_id"]: item for item in summary["results"]}
-    failed = by_scenario["validation_2026_h1/param_weight_up_10pct"]
-    assert failed["diagnostic_only"] is True
-    assert failed["decisions_regenerated"] is False
-    assert failed["decision_generation_status"] == "failed"
-    assert failed["decision_count"] == 0
-    assert failed["decision_records_path"] is None
-    assert failed["decision_records_sha256"] is None
-    assert failed["result"]["status"] == "failed"
-    assert failed["result"]["warnings"] == [
-        "parameter_decision_generation_failed: weight too high"
-    ]
-    assert "validation_2026_h1/param_weight_up_10pct" not in {
-        scenario_id for scenario_id, _ in backend.decision_sizes_by_scenario
-    }
+    assert not any(item["scenario_kind"] == "parameter" for item in summary["results"])
 
 
 def test_run_validation_rejects_unknown_params_with_strategy_validator(
@@ -1202,7 +1116,7 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
     assert (result.result_dir / "validation_decision.json").exists()
     assert (result.result_dir / "validation_report.md").exists()
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert len(summary["results"]) == 6
+    assert len(summary["results"]) == 4
     assert summary["results"][0]["scenario_id"] == "validation_2026_h1/base"
     assert summary["results"][0]["result"]["status"] == "failed"
     assert summary["results"][0]["result"]["warnings"] == ["backend_exception: backend crashed"]
@@ -1251,7 +1165,7 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     assert (result.result_dir / "validation_decision.json").exists()
     assert (result.result_dir / "validation_report.md").exists()
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert len(summary["results"]) == 6
+    assert len(summary["results"]) == 4
     assert summary["results"][0]["scenario_id"] == "validation_2026_h1/base"
     assert summary["results"][0]["result"]["status"] == "failed"
     assert "invalid_backend_result" in summary["results"][0]["result"]["warnings"][0]

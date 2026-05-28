@@ -77,23 +77,20 @@ not optimized for ad-hoc exploration; that is `quant_autoresearch`'s domain.
 
 ### 4.1 Strategic goals
 
-**G1. Flexible strategy expression across the axes a real quant uses.**
-The strategy contract MUST express, at minimum:
+**G1. Default-narrow strategy expression with explicit extended ontology.**
+The default strategy contract MUST express the executable v1 path clearly:
 
 - **Direction / state**: long, short, flat.
-- **Action / intent**: open, close, adjust (rebalance), roll.
-- **Side of book**: buy, sell — distinct from net direction.
-- **Instrument**: equity / ETF, FX pair, crypto perp, futures (with expiry + multiplier),
-options (call / put with strike + expiry + multiplier + settlement style).
-- **Multi-leg structures**: pair trades, spreads, calendars — one decision, multiple legs,
-joint exit policy.
-- **Sizing**: target weight, target notional, target contracts, and at least one
-risk-targeted sizing (e.g., vol-targeted) — declared at the type level even if not all
-are executed by every backend.
-- **Exit**: time-based, threshold-based, expiry-based, event-based.
+- **Action / intent**: open.
+- **Instrument**: equity / ETF, FX pair, crypto perp.
+- **Sizing**: target weight.
+- **Exit**: time-based plus declared optional threshold controls.
 
-A strategy that needs any of the above MUST be expressible without monkey-patching the
-foundation.
+Extended vocabulary for futures, options, multi-leg structures, buy/sell book side,
+close/adjust/roll actions, target notional, target contracts, and vol-targeted sizing
+MUST live behind explicit opt-in imports. A strategy that needs those axes must be able
+to express them without monkey-patching the foundation, but the default import path must
+not imply that unsupported execution semantics are executable.
 
 **G2. Math correctness adequate for paper-readiness research.**
 Every numeric quantity emitted by the foundation MUST:
@@ -103,7 +100,8 @@ points of signed trade activity", "NAV-path total return").
 - Be reproducible by reading the artifact set without re-running the code **when the
 consumer requested an `audit_replayable` run**. `search_only` runs MUST be explicitly
 marked as not reproducible from artifacts alone.
-- Match across backends within a declared tolerance, or declare the asymmetry explicitly.
+- Declare backend-specific comparability and asymmetry explicitly. If multiple
+  production backends exist later, cross-backend comparisons need a declared tolerance.
 - Be **named in a way that does not overstate what it computes** (no "paper_candidate"
 without statistical evidence; no "return" for a sum-of-trade-activity figure).
 
@@ -144,6 +142,9 @@ it to:
 `search_only` runs intentionally omit the trade-level chain. Consumers that need to
 investigate a candidate rerun it under `audit_replayable`. The foundation never auto-
 promotes a run to `audit_replayable`; the consumer chooses the tier.
+Validation verdict labels are advisory routing inputs to human review. Downstream
+consumers, including `quant_autoresearch`, must not treat any verdict as an autonomous
+promotion, paper-trading, or live-trading signal.
 
 **G6. Good performance code — decent, not microsecond-optimal.**
 The foundation is written with performance discipline. The code:
@@ -214,9 +215,9 @@ are updated and re-run. The foundation does not carry shims for old shapes.
 
 A consumer should be able to say "yes" to all of these without qualification.
 
-- **Expressiveness.** A quant can express their intended strategy — across put/call,
-  buy/sell, long/short/flat, single-leg and multi-leg — without monkey-patching the
-  foundation.
+- **Expressiveness.** A quant can use the default executable ontology without ambiguity,
+  and can opt into extended vocabulary for put/call, buy/sell, long/short/flat,
+  single-leg and multi-leg research without monkey-patching the foundation.
 - **Math correctness.** Every emitted metric is unit-tagged, named consistently with
   what it actually computes, and either agrees across backends within a declared
   tolerance or has the asymmetry declared explicitly. `audit_replayable` runs are fully

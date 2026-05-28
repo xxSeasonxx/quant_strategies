@@ -147,12 +147,14 @@ def generate_decisions(rows, params):
     ]
 ```
 
-`StrategyDecision` can express futures, options, multi-leg instruments, intent,
-book side, and `target_weight`, `target_notional`, `target_contracts`, and
-`target_vol` sizing. The runner smoke engine currently executes only single-leg
-equity/ETF, FX, or crypto-perp `open` decisions with non-flat `target_weight`
-sizing. Other valid ontology shapes are useful for downstream review, but smoke
-runs reject them explicitly as unsupported execution semantics.
+The default `StrategyDecision` contract is deliberately narrow: single-leg
+equity/ETF, FX, or crypto-perp `open` decisions with `target_weight` sizing.
+Extended vocabulary for futures, options, multi-leg instruments, book side,
+close/adjust/roll actions, and `target_notional`, `target_contracts`, or
+`target_vol` sizing is available only through explicit imports from
+`quant_strategies.decisions.extended_ontology`. Extended shapes are useful for
+manual review, but runner smoke and validation backends reject unsupported
+execution semantics instead of approximating their PnL.
 
 Strategy code must stay pure:
 
@@ -299,9 +301,21 @@ candidate workspace with `strategy.py` and `validation.toml`.
 For retained candidates, include `[search_pressure]` in `validation.toml` when
 available so validation artifacts carry candidate counts, trial counts,
 parameter search space, selection rule, and split identities. These fields are
-metadata, not statistical proof. A `mechanical_review_candidate` with non-empty
-search pressure carries `deflation_not_evaluated` in its reasons so reviewers do
-not mistake the metadata for deflated or Monte Carlo evidence.
+metadata, not statistical proof. Non-empty search pressure downgrades an
+otherwise `mechanical_review_candidate` verdict to `watchlist` with
+`multiple_testing_not_corrected_advisory_only` in its reasons so reviewers do
+not mistake the metadata for deflated, Monte Carlo, or otherwise corrected
+evidence.
+
+Treat validation verdicts as advisory routing labels only:
+
+- `hard_no`: skip or return to strategy generation.
+- `mechanical_pass`: keep as mechanical evidence, not promotion evidence.
+- `watchlist`: keep only with the recorded caveat.
+- `mechanical_review_candidate`: escalate for human review.
+
+No validation verdict authorizes autonomous promotion, paper trading, or live
+trading.
 
 Validation backend metrics are flat but semantically typed in
 `backend_runs/summary.json`. For crypto-perp funding, the VectorBT Pro backend

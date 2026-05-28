@@ -8,13 +8,18 @@ import pytest
 from quant_strategies.decisions import (
     DecisionIntent,
     ExitPolicy,
-    FutureRef,
-    InstrumentLeg,
     InstrumentRef,
-    MultiLegInstrumentRef,
-    OptionRef,
     PositionTarget,
     StrategyDecision,
+)
+from quant_strategies.decisions.extended_ontology import (
+    DecisionIntent as ExtendedDecisionIntent,
+    FutureRef,
+    InstrumentLeg,
+    MultiLegInstrumentRef,
+    OptionRef,
+    PositionTarget as ExtendedPositionTarget,
+    StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
@@ -57,14 +62,25 @@ def decision(
     trailing_stop_bps: float | None = None,
 ) -> StrategyDecision:
     timestamp = START + timedelta(days=index)
-    return StrategyDecision(
+    intent = intent or DecisionIntent(action="open")
+    instrument = instrument or InstrumentRef(kind="equity_or_etf", symbol="SPY")
+    is_extended = (
+        not isinstance(instrument, InstrumentRef)
+        or type(intent) is not DecisionIntent
+        or sizing_kind != "target_weight"
+    )
+    target_cls = ExtendedPositionTarget if is_extended else PositionTarget
+    decision_cls = ExtendedStrategyDecision if is_extended else StrategyDecision
+    if is_extended and type(intent) is DecisionIntent:
+        intent = ExtendedDecisionIntent(action=intent.action)
+    return decision_cls(
         decision_id=decision_id,
         strategy_id="demo",
-        instrument=instrument or InstrumentRef(kind="equity_or_etf", symbol="SPY"),
-        intent=intent or DecisionIntent(action="open"),
+        instrument=instrument,
+        intent=intent,
         decision_time=timestamp,
         as_of_time=timestamp,
-        target=PositionTarget(direction=direction, sizing_kind=sizing_kind, size=size),
+        target=target_cls(direction=direction, sizing_kind=sizing_kind, size=size),
         exit_policy=ExitPolicy(
             max_hold_bars=max_hold_bars,
             stop_loss_bps=stop_loss_bps,
@@ -148,7 +164,7 @@ def test_build_request_rejects_non_open_intent():
         build_request(
             strategy_id="demo",
             rows=bars(100.0, 101.0, 102.0, 104.0),
-            decisions=[decision(intent=DecisionIntent(action="close", book_side="sell"))],
+            decisions=[decision(intent=ExtendedDecisionIntent(action="close", book_side="sell"))],
             fill_model=close_fill(),
             cost_model=zero_cost(),
         )

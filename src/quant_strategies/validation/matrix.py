@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.boundary import frozen_params
 
-ScenarioKind = Literal["base", "cost", "cost_stress", "fill_lag", "parameter"]
+ScenarioKind = Literal["base", "cost", "cost_stress", "fill_lag"]
 
 
 class MatrixScenario(BaseModel):
@@ -69,24 +69,4 @@ def expand_validation_matrix(
             },
         ),
     ]
-    for name, value in base_params.items():
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            continue
-        scenarios.append(
-            MatrixScenario(
-                id=f"{window_id}/param_{name}_down_10pct",
-                kind="parameter",
-                required=False,
-                params={**base_params, name: float(value) * 0.9},
-            )
-        )
-        scenarios.append(
-            MatrixScenario(
-                id=f"{window_id}/param_{name}_up_10pct",
-                kind="parameter",
-                required=False,
-                params={**base_params, name: float(value) * 1.1},
-            )
-        )
-        break
     return tuple(scenarios)

@@ -34,8 +34,6 @@ class ValidationPolicyDecision(BaseModel):
             "parameter_search_space": {},
             "selection_rule": None,
             "split_ids": [],
-            "deflated_sharpe": None,
-            "monte_carlo": None,
         }
     )
 
@@ -76,10 +74,16 @@ def classify_validation(
 
     def finish(decision: ValidationPolicyDecision) -> ValidationPolicyDecision:
         reasons = decision.reasons
+        verdict = decision.decision
         if decision.decision == "mechanical_review_candidate" and _has_search_pressure(overfit_controls):
-            reasons = tuple(dict.fromkeys((*reasons, "deflation_not_evaluated")))
+            verdict = "watchlist"
+            reasons = tuple(
+                dict.fromkeys((*reasons, "multiple_testing_not_corrected_advisory_only"))
+            )
         return decision.model_copy(
             update={
+                "decision": verdict,
+                "advisory_decision": verdict,
                 "reasons": reasons,
                 "overfit_controls": overfit_controls,
             }
@@ -138,8 +142,6 @@ def overfit_controls_from_search_pressure(search_pressure: object | None) -> dic
         "parameter_search_space": dict(parameter_search_space or {}),
         "selection_rule": _settings_value(search_pressure, "selection_rule", None),
         "split_ids": list(split_ids or ()),
-        "deflated_sharpe": None,
-        "monte_carlo": None,
     }
 
 
@@ -473,7 +475,7 @@ def _paper_readiness_decision(
             details=gate_details,
         )
     return _decision(
-        "mechanical_pass",
+        "hard_no",
         reasons=("no_positive_realistic_cost_evidence",),
         passed=passed,
         failed=failed,

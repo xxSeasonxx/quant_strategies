@@ -17,19 +17,20 @@ to them, but they must not load data, call engines, write artifacts, run loops,
 or mutate their inputs. Each strategy module documents thesis, observables,
 rule, assumptions, provenance, and falsifier in its module docstring.
 
-The canonical output is `StrategyDecision`. Decisions carry a stable
-`decision_id`, instrument, intent, optional buy/sell book side, decision time,
-as-of time, target, `ExitPolicy(max_hold_bars=...)`, optional exit controls,
-metadata, and `ObservationRef` lineage for consumed rows.
+The canonical default output is `StrategyDecision`. Decisions carry a stable
+`decision_id`, instrument, open intent, decision time, as-of time, target,
+`ExitPolicy(max_hold_bars=...)`, optional exit controls, metadata, and
+`ObservationRef` lineage for consumed rows.
 
-The decision ontology can express equities/ETFs, FX pairs, crypto perps,
-futures, options, multi-leg instruments, and sizing modes
-`target_weight`, `target_notional`, `target_contracts`, and `target_vol`.
-Runner smoke execution is intentionally narrower: it supports only single-leg
-equity/ETF, FX, and crypto-perp `open` decisions with non-flat
-`target_weight` sizing. Richer futures, options, multi-leg, close/adjust/roll,
-and non-weight decisions are valid strategy outputs, but unsupported smoke or
-backend paths reject them explicitly instead of approximating their PnL.
+The default decision ontology is intentionally narrow: equities/ETFs, FX pairs,
+and crypto perps with `open` intent and `target_weight` sizing. Extended
+vocabulary for futures, options, multi-leg instruments, buy/sell book side,
+close/adjust/roll actions, and `target_notional`, `target_contracts`, or
+`target_vol` sizing lives behind explicit imports from
+`quant_strategies.decisions.extended_ontology`. Runner smoke execution supports
+only single-leg equity/ETF, FX, and crypto-perp `open` decisions with non-flat
+`target_weight` sizing. Explicitly extended decisions are rejected by unsupported
+smoke or backend paths instead of approximating their PnL.
 
 ## Boundaries
 
@@ -186,9 +187,10 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 
 These fields are artifact metadata only. They make missing overfit/search
 context explicit; they do not compute statistical corrections or change
-eligibility flags. When non-empty search pressure accompanies a
-`mechanical_review_candidate`, validation records `deflation_not_evaluated` in
-the decision reasons.
+eligibility flags. When non-empty search pressure would otherwise produce a
+`mechanical_review_candidate`, validation downgrades the advisory verdict to
+`watchlist` and records `multiple_testing_not_corrected_advisory_only` in the
+decision reasons.
 
 The default validation backend is `vectorbtpro`. Install the optional backend
 dependencies before running real validation:
@@ -222,12 +224,15 @@ scenarios, runs the configured backend, and classifies the candidate as
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
 required backend scenario with unsupported execution semantics is a `hard_no`
-because the mechanical check did not execute. A `watchlist` captures positive
-evidence that misses paper-readiness gates. A `mechanical_review_candidate`
-requires mechanical validation plus paper-readiness gates such as multiple
-windows, enough realistic-cost trades, no zero-trade windows, positive
-realistic-cost evidence, sufficient positive-window fraction, and stressed-cost
-and fill-lag loss floors. Eligibility flags still remain false.
+because the mechanical check did not execute. With paper-readiness enabled,
+nonpositive realistic-cost evidence is also a `hard_no`. A `watchlist` captures
+positive evidence that misses paper-readiness gates or carries uncorrected
+search pressure. A `mechanical_review_candidate` requires mechanical validation,
+paper-readiness gates such as multiple windows, enough realistic-cost trades, no
+zero-trade windows, positive realistic-cost evidence, sufficient
+positive-window fraction, stressed-cost and fill-lag loss floors, and empty
+search pressure. Verdict labels are advisory inputs to human review, never
+autonomous promotion signals, and eligibility flags still remain false.
 
 Validation backend summaries include `metric_semantics` for required policy
 metrics such as `net_return` and `trade_count`, plus optional funding metrics
@@ -262,7 +267,6 @@ Validation artifacts include:
 - `data_rows/<window_id>.jsonl` for each window that successfully loaded rows
 - `data_audit.json`
 - `backend_runs/summary.json`
-- `backend_capability_matrix.json`
 - `robustness_matrix.json`
 - `validation_decision.json`
 - `validation_manifest.json`

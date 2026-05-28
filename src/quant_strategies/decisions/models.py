@@ -6,19 +6,15 @@ import math
 from collections.abc import Mapping
 from datetime import datetime
 from types import MappingProxyType
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 InstrumentKind = Literal["equity_or_etf", "fx_pair", "crypto_perp"]
 Direction = Literal["long", "short", "flat"]
-LegDirection = Literal["long", "short"]
-BookSide = Literal["buy", "sell"]
-DecisionAction = Literal["open", "close", "adjust", "roll"]
-SizingKind = Literal["target_weight", "target_notional", "target_contracts", "target_vol"]
-Settlement = Literal["cash", "physical"]
-OptionType = Literal["call", "put"]
+DecisionAction = Literal["open"]
+SizingKind = Literal["target_weight"]
 
 
 class DecisionModel(BaseModel):
@@ -75,94 +71,11 @@ class InstrumentRef(DecisionModel):
         return _stripped_non_empty(value, "symbol")
 
 
-class FutureRef(DecisionModel):
-    kind: Literal["future"]
-    symbol: str
-    expiry: datetime
-    multiplier: float = Field(gt=0)
-    settlement: Settlement
-
-    @field_validator("symbol")
-    @classmethod
-    def validate_symbol(cls, value: str) -> str:
-        return _stripped_non_empty(value, "symbol")
-
-    @field_validator("expiry")
-    @classmethod
-    def validate_expiry(cls, value: datetime) -> datetime:
-        return _timezone_aware(value, "expiry")
-
-    @field_validator("multiplier")
-    @classmethod
-    def validate_multiplier(cls, value: float) -> float:
-        return _finite_positive(value, "multiplier")
-
-
-class OptionRef(DecisionModel):
-    kind: Literal["option"]
-    symbol: str
-    underlying_symbol: str
-    option_type: OptionType
-    strike: float = Field(gt=0)
-    expiry: datetime
-    multiplier: float = Field(gt=0)
-    settlement: Settlement
-
-    @field_validator("symbol", "underlying_symbol")
-    @classmethod
-    def validate_symbol(cls, value: str, info) -> str:
-        return _stripped_non_empty(value, info.field_name)
-
-    @field_validator("expiry")
-    @classmethod
-    def validate_expiry(cls, value: datetime) -> datetime:
-        return _timezone_aware(value, "expiry")
-
-    @field_validator("strike")
-    @classmethod
-    def validate_strike(cls, value: float) -> float:
-        return _finite_positive(value, "strike")
-
-    @field_validator("multiplier")
-    @classmethod
-    def validate_multiplier(cls, value: float) -> float:
-        return _finite_positive(value, "multiplier")
-
-
-SingleInstrumentRef = Annotated[InstrumentRef | FutureRef | OptionRef, Field(discriminator="kind")]
-
-
-class InstrumentLeg(DecisionModel):
-    instrument: SingleInstrumentRef
-    direction: LegDirection
-    ratio: float = Field(gt=0)
-
-    @field_validator("ratio")
-    @classmethod
-    def validate_ratio(cls, value: float) -> float:
-        return _finite_positive(value, "ratio")
-
-
-class MultiLegInstrumentRef(DecisionModel):
-    kind: Literal["multi_leg"]
-    symbol: str
-    legs: tuple[InstrumentLeg, ...] = Field(min_length=2)
-
-    @field_validator("symbol")
-    @classmethod
-    def validate_symbol(cls, value: str) -> str:
-        return _stripped_non_empty(value, "symbol")
-
-
-DecisionInstrument = Annotated[
-    InstrumentRef | FutureRef | OptionRef | MultiLegInstrumentRef,
-    Field(discriminator="kind"),
-]
+DecisionInstrument = InstrumentRef
 
 
 class DecisionIntent(DecisionModel):
     action: DecisionAction = "open"
-    book_side: BookSide | None = None
 
 
 class ObservationRef(DecisionModel):
@@ -265,71 +178,15 @@ class StrategyDecision(DecisionModel):
 def _generated_decision_id(decision: StrategyDecision, frozen_metadata: Mapping[str, Any]) -> str:
     payload = {
         "strategy_id": decision.strategy_id,
-        "instrument": _instrument_payload(decision.instrument),
-        "intent": {
-            "action": decision.intent.action,
-            "book_side": decision.intent.book_side,
-        },
+        "instrument": decision.instrument.model_dump(mode="json"),
+        "intent": decision.intent.model_dump(mode="json"),
         "decision_time": decision.decision_time.isoformat(),
         "as_of_time": decision.as_of_time.isoformat(),
-        "target": {
-            "direction": decision.target.direction,
-            "sizing_kind": decision.target.sizing_kind,
-            "size": decision.target.size,
-        },
-        "exit_policy": {
-            "max_hold_bars": decision.exit_policy.max_hold_bars,
-            "stop_loss_bps": decision.exit_policy.stop_loss_bps,
-            "take_profit_bps": decision.exit_policy.take_profit_bps,
-            "trailing_stop_bps": decision.exit_policy.trailing_stop_bps,
-        },
-        "observations": [
-            {
-                "symbol": item.symbol,
-                "timestamp": item.timestamp.isoformat(),
-                "field": item.field,
-                "source": item.source,
-            }
-            for item in decision.observations
-        ],
+        "target": decision.target.model_dump(mode="json"),
+        "exit_policy": decision.exit_policy.model_dump(mode="json"),
+        "observations": [item.model_dump(mode="json") for item in decision.observations],
         "metadata": _jsonable_metadata_value(frozen_metadata),
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
     digest = hashlib.sha256(raw.encode()).hexdigest()[:16]
     return f"{decision.strategy_id}:{digest}"
-
-
-def _instrument_payload(instrument: DecisionInstrument) -> dict[str, Any]:
-    if isinstance(instrument, InstrumentRef):
-        return {"kind": instrument.kind, "symbol": instrument.symbol}
-    if isinstance(instrument, FutureRef):
-        return {
-            "kind": instrument.kind,
-            "symbol": instrument.symbol,
-            "expiry": instrument.expiry.isoformat(),
-            "multiplier": instrument.multiplier,
-            "settlement": instrument.settlement,
-        }
-    if isinstance(instrument, OptionRef):
-        return {
-            "kind": instrument.kind,
-            "symbol": instrument.symbol,
-            "underlying_symbol": instrument.underlying_symbol,
-            "option_type": instrument.option_type,
-            "strike": instrument.strike,
-            "expiry": instrument.expiry.isoformat(),
-            "multiplier": instrument.multiplier,
-            "settlement": instrument.settlement,
-        }
-    return {
-        "kind": instrument.kind,
-        "symbol": instrument.symbol,
-        "legs": [
-            {
-                "instrument": _instrument_payload(leg.instrument),
-                "direction": leg.direction,
-                "ratio": leg.ratio,
-            }
-            for leg in instrument.legs
-        ],
-    }
