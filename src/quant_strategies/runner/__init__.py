@@ -110,9 +110,8 @@ def run_config(
         if not causality.passed:
             causality_event.fail(_causality_message(causality))
     causality_verified = causality.passed
-    evidence_quality = artifacts.evidence_quality(
-        config,
-        execution.loaded_rows,
+    evidence_quality = artifacts.with_causality_verification(
+        execution.evidence_quality,
         causality_verified=causality_verified,
     )
     artifacts.write_data_manifest(

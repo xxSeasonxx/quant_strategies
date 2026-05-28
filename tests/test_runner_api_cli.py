@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import quant_strategies.runner.artifacts as artifacts
 import quant_strategies.runner.execution as execution
 from quant_strategies.runner import RunResult, cli, config as config_module, engine_runner, run_config
 from quant_strategies.runner.data_loader import LoadedData
@@ -722,6 +723,33 @@ def test_run_config_marks_complete_available_at_coverage(
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
     assert result.assessment_status == "smoke_passed"
     assert summary["assessment_status"] == "smoke_passed"
+
+
+def test_run_config_reuses_execution_evidence_quality_after_causality(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+    )
+    row_contract_calls = 0
+    original_row_contract_status = artifacts.row_contract_status
+
+    def counting_row_contract_status(config, loaded_rows):
+        nonlocal row_contract_calls
+        row_contract_calls += 1
+        return original_row_contract_status(config, loaded_rows)
+
+    monkeypatch.setattr(artifacts, "row_contract_status", counting_row_contract_status)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.success is True
+    assert row_contract_calls == 1
 
 
 def test_run_config_marks_partial_available_at_coverage(

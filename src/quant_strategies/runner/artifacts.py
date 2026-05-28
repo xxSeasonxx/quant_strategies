@@ -5,7 +5,7 @@ import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
@@ -83,20 +83,12 @@ def evidence_quality(
     fraction = None if total == 0 else present / total
     if total > 0 and present == total:
         status = "complete"
-        verified = causality_verified
-        warnings = [] if verified else ["runner_causality_not_verified"]
     elif invalid > 0:
         status = "invalid"
-        verified = False
-        warnings = ["available_at_invalid", "runner_causality_not_verified"]
     elif present > 0:
         status = "partial"
-        verified = False
-        warnings = ["available_at_partial", "runner_causality_not_verified"]
     else:
         status = "missing"
-        verified = False
-        warnings = ["available_at_missing", "runner_causality_not_verified"]
     coverage: dict[str, Any] = {
         "field": "available_at",
         "present": present,
@@ -105,10 +97,48 @@ def evidence_quality(
     }
     if invalid:
         coverage["invalid"] = invalid
-    return {
+    payload = {
         "data_availability_status": status,
         "availability_coverage": coverage,
         "row_contract": row_contract_status(config, rows),
+    }
+    payload.update(_causality_evidence(status, causality_verified=causality_verified))
+    return payload
+
+
+def with_causality_verification(
+    evidence_quality_payload: Mapping[str, Any],
+    *,
+    causality_verified: bool,
+) -> dict[str, Any]:
+    payload = dict(evidence_quality_payload)
+    payload.update(
+        _causality_evidence(
+            payload.get("data_availability_status"),
+            causality_verified=causality_verified,
+        )
+    )
+    return payload
+
+
+def _causality_evidence(
+    data_availability_status: object,
+    *,
+    causality_verified: bool,
+) -> dict[str, Any]:
+    if data_availability_status == "complete":
+        verified = causality_verified
+        warnings = [] if verified else ["runner_causality_not_verified"]
+    elif data_availability_status == "invalid":
+        verified = False
+        warnings = ["available_at_invalid", "runner_causality_not_verified"]
+    elif data_availability_status == "partial":
+        verified = False
+        warnings = ["available_at_partial", "runner_causality_not_verified"]
+    else:
+        verified = False
+        warnings = ["available_at_missing", "runner_causality_not_verified"]
+    return {
         "causality_verified": verified,
         "evidence_quality_warnings": warnings,
     }

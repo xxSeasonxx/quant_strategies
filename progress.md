@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 30: P3 failure smoke score artifacts.
+Phase 31: P3 evidence quality reuse.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-failure-smoke-score-artifact-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-failure-smoke-score-artifact.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-evidence-quality-reuse-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-evidence-quality-reuse.md`
 
 ## Finding Triage
 
@@ -36,6 +36,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-failure-smoke-scor
 | Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
 | Repository identity hashes untracked detritus | Confirmed true, Phase 29 | Use tracked-only git status for repository identity while preserving tracked diff hashes and input snapshots. |
 | Failure summaries include null smoke score objects | Confirmed true, Phase 30 | Omit `engine.smoke_score` when smoke was not computed; keep real zero-valued scores for completed no-trade runs. |
+| Evidence quality walks rows twice on successful runs | Confirmed true, Phase 31 | Reuse execution evidence quality and update only causality fields after replay. |
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
@@ -862,3 +863,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-failure-smoke-scor
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no Critical/Important issues.
 - 2026-05-28: Committed Phase 30.
+
+## Phase 31 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add evidence-quality reuse regression.
+- [x] Implement causality evidence update helper.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 31 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_reuses_execution_evidence_quality_after_causality -q` -> failed as expected before implementation; successful runs evaluated row-contract quality twice.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_reuses_execution_evidence_quality_after_causality tests/test_runner_api_cli.py::test_run_config_marks_complete_available_at_coverage tests/test_runner_api_cli.py::test_run_config_marks_partial_available_at_coverage tests/test_runner_api_cli.py::test_run_config_rejects_invalid_available_at_for_causality_claim -q` -> 4 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_execution.py tests/test_runner_artifact_profiles.py -q` -> 59 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 517 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues.
+- 2026-05-28: Committed Phase 31.
