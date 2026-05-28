@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 11: P1 duplicate decision execution keys.
+Phase 12: P2 typed RunResult evidence quality.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-duplicate-decision-key-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-duplicate-decision-key.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p2-run-result-evidence-quality-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p2-run-result-evidence-quality.md`
 
 ## Finding Triage
 
@@ -41,6 +41,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-duplicate-decision
 | Duplicate freezing idioms and repeated row deepcopy | Confirmed true, Phase 9 | Use `boundary` as the single recursive freeze helper and reuse frozen execution inputs. |
 | Validation capability matrix hard-codes backend identity | Confirmed true, Phase 10 | Move static capability records onto backend implementations and keep observed-semantics extraction centralized. |
 | Duplicate `(symbol, decision_time)` decisions can double-count smoke PnL | Confirmed true, Phase 11 | Reject duplicate execution keys at shared decision-output validation. |
+| Typed `RunResult` lacks evidence-quality fields | Confirmed true, Phase 12 | Expose `data_availability_status`, `availability_coverage`, `row_contract`, `causality_verified`, and `evidence_quality_warnings` on the stable runner result. |
 
 ## Phase 1 Checklist
 
@@ -348,3 +349,27 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-duplicate-decision
 - 2026-05-28: `conda run -n quant pytest -q` -> 495 passed.
 - 2026-05-28: `git diff --check` -> passed.
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+
+## Phase 12 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add `RunResult` API regression.
+- [x] Add typed evidence-quality fields and population helper.
+- [x] Update consumer docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 12 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts -q` -> failed as expected before implementation; `RunResult` lacked `data_availability_status`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts tests/test_runner_api_cli.py::test_run_config_writes_data_failure_summary tests/test_runner_api_cli.py::test_cli_reports_failure_with_notes -q` -> 3 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_execution.py tests/test_readme_contract.py -q` -> 49 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 495 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: `RunResult.availability_coverage` and `RunResult.row_contract` preserve artifact-shaped mutable dict payloads as shallow copies.
+- 2026-05-28: Committed Phase 12.

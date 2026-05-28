@@ -205,11 +205,17 @@ result.message
 result.run_completed
 result.assessment_status
 result.artifact_trust_tier
+result.data_availability_status
+result.availability_coverage
+result.row_contract
+result.causality_verified
+result.evidence_quality_warnings
 ```
 
 For ranking, read structured artifacts from `result.result_dir`, especially
 `summary.json` for summary-profile runs. Do not parse `notes.md` as the primary
-machine interface.
+machine interface. The evidence-quality fields exposed on `RunResult` are also
+written to `summary.json` and `data_manifest.json` for audit and replay.
 
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.

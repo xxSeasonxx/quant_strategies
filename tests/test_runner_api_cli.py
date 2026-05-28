@@ -193,6 +193,11 @@ def assert_assessment(
     assert result.assessment_status == assessment_status
     assert result.promotion_eligible is promotion_eligible
     assert result.artifact_trust_tier == expected_trust
+    assert result.data_availability_status == summary["data_availability_status"]
+    assert result.availability_coverage == summary["availability_coverage"]
+    assert result.row_contract == summary["row_contract"]
+    assert result.causality_verified is summary["causality_verified"]
+    assert result.evidence_quality_warnings == tuple(summary["evidence_quality_warnings"])
     assert summary["run_completed"] is run_completed
     assert summary["assessment_status"] == assessment_status
     assert summary["artifact_profile"] == artifact_profile

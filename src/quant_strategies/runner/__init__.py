@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -30,6 +31,11 @@ class RunResult:
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
     artifact_trust_tier: str | None = None
+    data_availability_status: str | None = None
+    availability_coverage: dict[str, object] | None = None
+    row_contract: dict[str, object] | None = None
+    causality_verified: bool = False
+    evidence_quality_warnings: tuple[str, ...] = ()
 
 
 def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> RunResult:
@@ -211,6 +217,7 @@ def run_config(config_path: str | Path, *, repo_root: Path | None = None) -> Run
         assessment_status=assessment_status,
         promotion_eligible=False,
         artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
+        **_run_result_evidence_fields(evidence_quality),
     )
 
 
@@ -247,6 +254,7 @@ def _failure_result(
     evidence_quality: dict[str, object] | None = None,
 ) -> RunResult:
     notes = _failure_notes(stage, message)
+    quality = evidence_quality or artifacts.evidence_quality(config, [])
     artifacts.write_notes(result_dir, notes)
     artifacts.write_run_manifest(
         result_dir,
@@ -264,7 +272,7 @@ def _failure_result(
             message=message,
             engine={"passed": None, "trade_count": None},
             assessment_status="runner_failed",
-            evidence_quality=evidence_quality or artifacts.evidence_quality(config, []),
+            evidence_quality=quality,
         ),
     )
     return RunResult(
@@ -276,7 +284,38 @@ def _failure_result(
         assessment_status="runner_failed",
         promotion_eligible=False,
         artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
+        **_run_result_evidence_fields(quality),
     )
+
+
+def _run_result_evidence_fields(evidence_quality: dict[str, object] | None) -> dict[str, object]:
+    if evidence_quality is None:
+        return {}
+    return {
+        "data_availability_status": _optional_str(evidence_quality.get("data_availability_status")),
+        "availability_coverage": _optional_dict(evidence_quality.get("availability_coverage")),
+        "row_contract": _optional_dict(evidence_quality.get("row_contract")),
+        "causality_verified": bool(evidence_quality.get("causality_verified")),
+        "evidence_quality_warnings": _string_tuple(evidence_quality.get("evidence_quality_warnings")),
+    }
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _optional_dict(value: object) -> dict[str, object] | None:
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value)
+    return (str(value),)
 
 
 def _summary_payload(
