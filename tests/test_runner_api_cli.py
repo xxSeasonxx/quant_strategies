@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import hashlib
 import json
 import subprocess
@@ -250,7 +249,6 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     expected = {
         "config.toml",
         "strategy_snapshot.py",
-        "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
         "engine_request.json",
@@ -665,16 +663,12 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.result_dir is not None
-    with (result.result_dir / "strategy_input_rows.csv").open() as handle:
-        csv_rows = list(csv.DictReader(handle))
+    assert not (result.result_dir / "strategy_input_rows.csv").exists()
     jsonl_rows = [
         json.loads(line)
         for line in (result.result_dir / "strategy_input_rows.jsonl").read_text().splitlines()
     ]
     request = json.loads((result.result_dir / "engine_request.json").read_text())
-    assert csv_rows[0]["bid"] == "1.09"
-    assert csv_rows[0]["ask"] == "1.11"
-    assert csv_rows[0]["funding_rate"] == "0.0001"
     assert jsonl_rows[0]["timestamp"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["available_at"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["bar_ingested_at"] == "2024-01-01T00:00:00+00:00"
@@ -1172,7 +1166,6 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
     assert result.success is False
     assert result.result_dir is not None
     for name in (
-        "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "data_manifest.json",
         "run_manifest.json",
@@ -1180,6 +1173,7 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
         "notes.md",
     ):
         assert (result.result_dir / name).exists()
+    assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert not (result.result_dir / "decision_records.jsonl").exists()
     assert not (result.result_dir / "signals.csv").exists()
     assert not (result.result_dir / "engine_request.json").exists()
@@ -1255,7 +1249,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "invalid_decision_output" in summary["message"]
-    assert (result.result_dir / "strategy_input_rows.csv").exists()
+    assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
     assert not (result.result_dir / "decision_records.jsonl").exists()
@@ -1294,7 +1288,7 @@ def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "request_build"
     assert "smoke engine cannot represent flat target for SPY" in summary["message"]
-    assert (result.result_dir / "strategy_input_rows.csv").exists()
+    assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
     assert (result.result_dir / "decision_records.jsonl").exists()
@@ -1416,13 +1410,13 @@ def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, m
     assert result.success is False
     assert result.result_dir is not None
     for name in (
-        "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
         "summary.json",
         "notes.md",
     ):
         assert (result.result_dir / name).exists()
+    assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert not (result.result_dir / "engine_request.json").exists()
     assert read_summary(result.result_dir)["stage"] == "request_build"
 
@@ -1544,7 +1538,6 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
     expected_artifacts = {
         "config.toml",
         "strategy_snapshot.py",
-        "strategy_input_rows.csv",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
         "engine_request.json",

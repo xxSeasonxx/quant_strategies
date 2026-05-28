@@ -225,7 +225,7 @@ Runner and validation artifacts are generated under ignored result directories.
 After config loading succeeds, runner result dirs include `config.toml`;
 `strategy_snapshot.py` is copied when the strategy file is available. Runs that
 reach data loading include `data_manifest.json` and, for
-`artifact_profile = "full"`, strategy input row artifacts even if decision
+`artifact_profile = "full"`, `strategy_input_rows.jsonl` even if decision
 generation later fails. Runner failures still write `run_manifest.json`,
 `summary.json`, and `notes.md`. Successful `artifact_profile = "summary"` runs
 also write `artifact_profile_summary.json` and declare

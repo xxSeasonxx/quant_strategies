@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 20: P4 document review archive directory.
+Phase 21: P3 keep one input row artifact.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p4-review-archive-docs-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-review-archive-docs.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-jsonl-only-input-rows-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-jsonl-only-input-rows.md`
 
 ## Finding Triage
 
@@ -50,6 +50,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-review-archive-doc
 | Internal Pydantic revalidation across boundaries | Partly true, Phase 18 | Drop `BackendRunResult.model_validate()` for typed backend returns; keep runner config-to-engine `FillModel`/`CostModel` construction as required adaptation. |
 | Strategy provenance docstring test under-enforces source specificity | Confirmed true, Phase 19 | Require DOI, SSRN, URL, or `internal_note:` in `Source / provenance:` blocks. |
 | Empty docs scaffolds | Partly true, Phase 20 | `docs/superpowers/{plans,specs}` are now populated; add `docs/reviews/README.md` instead of moving active root review inputs. |
+| Full-profile runner duplicates input rows as CSV and JSONL | Confirmed true, Phase 21 | Keep `strategy_input_rows.jsonl` only; leave default artifact profile as a separate remaining finding. |
 | `validation.matrix._FrozenDict` duplicate freezing idiom | Resolved before Phase 16 | Current source no longer contains `_FrozenDict`; earlier single-freezing phase removed it. |
 
 ## Phase 1 Checklist
@@ -577,3 +578,29 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p4-review-archive-doc
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no blocking issues. Residual risk: root review inputs remain active files until the overall review workflow is archived.
 - 2026-05-28: Committed Phase 20.
+
+## Phase 21 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Update artifact expectations.
+- [x] Remove CSV row artifact writing.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 21 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts tests/test_runner_api_cli.py::test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request tests/test_runner_api_cli.py::test_request_build_failure_preserves_prior_stage_artifacts -q` -> failed as expected before implementation; full-profile runs still wrote `strategy_input_rows.csv`.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts tests/test_runner_api_cli.py::test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request tests/test_runner_api_cli.py::test_request_build_failure_preserves_prior_stage_artifacts -q` -> 3 passed.
+- 2026-05-28: `rg -n "write_csv|csv\\.DictWriter|import csv" src tests` -> no matches.
+- 2026-05-28: `rg -n "strategy_input_rows\\.csv" src README.md docs/quant-autoresearch-consumer.md` -> no matches.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_runner_artifact_profiles.py tests/test_readme_contract.py -q` -> 49 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 502 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no blocking issues. Residual risk: frozen historical researched artifacts may still include old CSV row outputs, but current runner output no longer writes them.
+- 2026-05-28: Committed Phase 21.

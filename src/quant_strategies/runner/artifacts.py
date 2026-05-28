@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import csv
 import json
 import re
 import shutil
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,26 +44,6 @@ def initialize_run_artifacts(config_path: Path, config: RunConfig, result_dir: P
 
 
 def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> str:
-    preferred_fields = [
-        "symbol",
-        "timestamp",
-        "available_at",
-        "open",
-        "high",
-        "low",
-        "close",
-        "bid",
-        "ask",
-        "mid",
-        "funding_timestamp",
-        "funding_rate",
-        "bar_ingested_at",
-        "quote_ingested_at",
-        "funding_ingested_at",
-        "joined_refreshed_at",
-        "has_funding_event",
-    ]
-    write_csv(result_dir / "strategy_input_rows.csv", rows, preferred_fields=preferred_fields)
     jsonl_path = result_dir / "strategy_input_rows.jsonl"
     write_jsonl(jsonl_path, rows)
     return _file_sha256(jsonl_path)
@@ -253,32 +231,6 @@ def _canonical_json_line(value: Any) -> str:
     else:
         payload = json_safe_value(value)
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
-
-
-def write_csv(path: Path, rows: list[dict[str, Any]], *, preferred_fields: list[str]) -> None:
-    fields = _ordered_fields(rows, preferred_fields)
-    with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({key: _csv_value(row.get(key)) for key in fields})
-
-
-def _ordered_fields(rows: list[dict[str, Any]], preferred: list[str]) -> list[str]:
-    if not rows:
-        return preferred
-    keys = {key for row in rows for key in row}
-    ordered = [key for key in preferred if key in keys]
-    ordered.extend(sorted(keys.difference(ordered)))
-    return ordered
-
-
-def _csv_value(value: object) -> object:
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, Mapping | list | tuple):
-        return json.dumps(json_safe_value(value), sort_keys=True)
-    return value
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
