@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 28: P3 public API PRD reconciliation.
+Phase 29: P3 tracked git identity.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-public-api-prd-reconciliation-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-public-api-prd-reconciliation.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p3-tracked-git-identity-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-tracked-git-identity.md`
 
 ## Finding Triage
 
@@ -34,6 +34,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-public-api-prd-rec
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
 | Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
 | Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
+| Repository identity hashes untracked detritus | Confirmed true, Phase 29 | Use tracked-only git status for repository identity while preserving tracked diff hashes and input snapshots. |
 | Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
@@ -814,3 +815,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p3-public-api-prd-rec
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: Code review found no Critical/Important issues.
 - 2026-05-28: Committed Phase 28.
+
+## Phase 29 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Add repository identity regressions.
+- [x] Implement tracked-only git status.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 29 Verification Log
+
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_manifest_ignores_untracked_detritus_for_repository_identity -q` -> failed as expected before implementation; untracked scratch files dirtied repository identity.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_manifest_marks_dirty_git_worktree tests/test_runner_api_cli.py::test_run_manifest_ignores_untracked_detritus_for_repository_identity -q` -> 2 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_validation_runner.py -q` -> 79 passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 516 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: Code review found no Critical/Important issues.
+- 2026-05-28: Committed Phase 29.

@@ -60,7 +60,7 @@ def git_identity(repo_root: Path, *, exclude_paths: Iterable[Path] = ()) -> dict
             exclude_paths,
             "status",
             "--porcelain",
-            "--untracked-files=all",
+            "--untracked-files=no",
         ),
     )
     diff = _git_output(

@@ -1364,7 +1364,7 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
     repository = run_manifest["repository"]
     result_exclusion = f":(exclude){result.result_dir.relative_to(tmp_path).as_posix()}"
     expected_status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=all", "--", ".", result_exclusion],
+        ["git", "status", "--porcelain", "--untracked-files=no", "--", ".", result_exclusion],
         cwd=tmp_path,
         check=True,
         capture_output=True,
@@ -1383,6 +1383,32 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
     assert repository["dirty"] is True
     assert repository["status_porcelain_sha256"] == expected_status_hash
     assert repository["tracked_diff_sha256"] == expected_diff_hash
+
+
+def test_run_manifest_ignores_untracked_detritus_for_repository_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    (tmp_path / ".gitignore").write_text("results/\n")
+    (tmp_path / "README.md").write_text("clean\n")
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "scratch.txt").write_text("untracked\n")
+    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    repository = run_manifest["repository"]
+    assert repository["dirty"] is False
+    assert repository["status_porcelain_sha256"] is None
+    assert repository["tracked_diff_sha256"] is None
 
 
 def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
