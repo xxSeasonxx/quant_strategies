@@ -14,10 +14,10 @@ Goal: Address `review-codex.md` and `review-claude.md` phase by phase, reject fa
 
 ## Current Phase
 
-Phase 6: P0 engine strategy ontology collapse.
+Phase 7: P1 deterministic JSON artifact encoding.
 
-Design: `docs/superpowers/specs/2026-05-28-foundation-review-p0-engine-ontology-design.md`
-Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0-engine-ontology.md`
+Design: `docs/superpowers/specs/2026-05-28-foundation-review-p1-deterministic-json-design.md`
+Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p1-deterministic-json.md`
 
 ## Finding Triage
 
@@ -34,6 +34,7 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0-engine-ontology.md
 | Metric units, bases, and comparability not first-class | Confirmed true, Phase 3 | Scope Phase 3 to runner smoke metric semantics; validation backend metric schema remains deferred. |
 | Summary artifacts can look audit-sufficient | Confirmed true, Phase 3 | Add machine-readable artifact trust tiers for summary/full profiles. |
 | Full-run artifact determinism not regression-tested | Confirmed true, Phase 3 | Add repeated-run stable artifact hash regression. |
+| Decision record JSONL encoding not canonical | Confirmed true, Phase 7 | Replace pydantic-default `model_dump_json()` artifact writes with sorted compact JSON. |
 | Validation backend metrics are unstructured | Confirmed true, Phase 5 | Add typed backend metric contract while preserving flat artifacts. |
 | Required unsupported backend semantics too soft | Confirmed true, Phase 5 | Required unsupported semantics should be `hard_no`, not `watchlist`. |
 
@@ -197,3 +198,26 @@ Plan: `docs/superpowers/plans/2026-05-28-foundation-review-p0-engine-ontology.md
 - 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
 - 2026-05-28: `conda run -n quant pytest tests/test_engine_models.py tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_engine_runner.py tests/test_data_readiness.py tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_krohn_mueller_whelan_fix_reversal.py tests/test_fx_triangular_residual_reversion.py tests/test_phase5_performance.py tests/test_readme_contract.py -q` -> 146 passed.
 - 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.
+
+## Phase 7 Checklist
+
+- [x] Create design artifact.
+- [x] Create implementation plan.
+- [x] Complete engineering review in the plan.
+- [x] Canonicalize runner decision-record JSONL.
+- [x] Canonicalize validation decision-record JSONL.
+- [x] Update docs.
+- [x] Run focused tests.
+- [x] Run full test suite.
+- [x] Request code review and fix findings.
+- [x] Commit.
+
+## Phase 7 Verification Log
+
+- 2026-05-28: `rg "model_dump_json\\(" src` -> no matches.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py::test_run_config_writes_success_artifacts tests/test_runner_api_cli.py::test_repeated_runner_artifacts_are_byte_deterministic tests/test_validation_runner.py::test_run_validation_writes_watchlist_artifacts_for_one_positive_window tests/test_readme_contract.py -q` -> 4 passed.
+- 2026-05-28: `conda run -n quant pytest tests/test_runner_api_cli.py tests/test_validation_runner.py tests/test_readme_contract.py -q` -> 73 passed.
+- 2026-05-28: `git diff --check` -> passed.
+- 2026-05-28: `conda run -n quant python -m compileall -q src tests` -> passed.
+- 2026-05-28: `conda run -n quant pytest -q` -> 485 passed.
+- 2026-05-28: Code review found no blocking issues. Non-blocking note: empty validation JSONL payloads still write a newline through `write_text_artifact`, preserving prior behavior.

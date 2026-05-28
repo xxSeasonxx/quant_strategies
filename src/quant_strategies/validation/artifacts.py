@@ -40,6 +40,14 @@ def write_text_artifact(result_dir: Path, name: str, payload: str) -> Path:
     return path
 
 
+def canonical_jsonl_lines(items: list[Any]) -> str:
+    lines = [
+        json.dumps(_json_value(item), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        for item in items
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def _artifact_path(result_dir: Path, name: str) -> Path:
     artifact_name = Path(name)
     if artifact_name.is_absolute() or ".." in artifact_name.parts:

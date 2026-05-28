@@ -72,12 +72,7 @@ def write_strategy_input_rows(result_dir: Path, rows: list[dict[str, Any]]) -> s
 
 
 def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
-    lines = [
-        decision.model_dump_json()
-        if hasattr(decision, "model_dump_json")
-        else json.dumps(json_safe_value(decision), sort_keys=True)
-        for decision in decisions
-    ]
+    lines = [_canonical_json_line(decision) for decision in decisions]
     (result_dir / "decision_records.jsonl").write_text("\n".join(lines) + ("\n" if lines else ""))
 
 
@@ -250,6 +245,14 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w") as handle:
         for row in rows:
             handle.write(json.dumps(json_safe_value(row), sort_keys=True) + "\n")
+
+
+def _canonical_json_line(value: Any) -> str:
+    if hasattr(value, "model_dump"):
+        payload = value.model_dump(mode="json")
+    else:
+        payload = json_safe_value(value)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def write_csv(path: Path, rows: list[dict[str, Any]], *, preferred_fields: list[str]) -> None:

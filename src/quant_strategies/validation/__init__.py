@@ -18,6 +18,7 @@ from quant_strategies.runner.execution import (
     execute_strategy_run,
 )
 from quant_strategies.validation.artifacts import (
+    canonical_jsonl_lines,
     create_validation_result_dir,
     write_json_artifact,
     write_text_artifact,
@@ -673,8 +674,7 @@ def _write_scenario_decision_records(
     decisions: list[StrategyDecision],
 ) -> tuple[str, str]:
     artifact_name = f"backend_runs/decision_records/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
-    lines = [item.model_dump_json() for item in decisions]
-    path = write_text_artifact(result_dir, artifact_name, "\n".join(lines))
+    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(decisions))
     return path.relative_to(result_dir).as_posix(), file_sha256(path)
 
 
@@ -734,8 +734,7 @@ def _write_validation_artifacts(
 ) -> None:
     failure_details = failure_details or []
     capability_matrix = backend_capability_matrix(backend_name, backend_results)
-    decision_lines = [item.model_dump_json() for item in decisions]
-    write_text_artifact(result_dir, "decision_records.jsonl", "\n".join(decision_lines))
+    write_text_artifact(result_dir, "decision_records.jsonl", canonical_jsonl_lines(decisions))
     write_json_artifact(result_dir, "data_audit.json", {"windows": data_audits})
     write_json_artifact(
         result_dir,

@@ -183,8 +183,16 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
             "unsupported_semantics": [],
         },
     }
+    base_decision_line = base_decision_file.read_text().splitlines()[0]
+    assert base_decision_line.startswith('{"as_of_time":')
+    assert ',"decision_time":' in base_decision_line
+    assert '": ' not in base_decision_line
     assert read_jsonl(base_decision_file)[0]["target"]["size"] == 1.0
-    assert (result.result_dir / "decision_records.jsonl").exists()
+    main_decision_file = result.result_dir / "decision_records.jsonl"
+    main_decision_line = main_decision_file.read_text().splitlines()[0]
+    assert main_decision_line.startswith('{"as_of_time":')
+    assert '": ' not in main_decision_line
+    assert main_decision_file.exists()
     assert (result.result_dir / "data_audit.json").exists()
     assert (result.result_dir / "backend_capability_matrix.json").exists()
     assert (result.result_dir / "validation_config.toml").exists()

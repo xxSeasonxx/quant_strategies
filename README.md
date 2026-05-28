@@ -96,7 +96,7 @@ and `quant_data_feedback` strings for upstream data fixes.
 Runner artifacts also declare `artifact_trust_tier`. Summary-profile runs are
 `search_only`: useful for fast ranking but not enough to replay every reported
 number from artifacts alone. Full-profile runs are `audit_replayable`: they
-include the row, decision, signal, engine-request, and evidence artifacts needed
+include the row, decision, engine-request, and evidence artifacts needed
 for audit replay of runner smoke metrics.
 
 ## Validation Configs

@@ -258,6 +258,9 @@ def test_run_config_writes_success_artifacts(tmp_path: Path, monkeypatch: pytest
     assert {path.name for path in result.result_dir.iterdir() if path.is_file()} == expected
     decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
     assert len(decision_records) == 1
+    assert decision_records[0].startswith('{"as_of_time":')
+    assert ',"decision_time":' in decision_records[0]
+    assert '": ' not in decision_records[0]
     assert json.loads(decision_records[0])["strategy_id"] == "demo"
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "completed"
