@@ -140,16 +140,18 @@ def write_config(
     allow_same_bar_close_fill: bool = False,
     mode: str = "validate",
     artifact_profile: str = "full",
+    row_contract: str | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
+    row_contract_line = f'row_contract = "{row_contract}"\n' if row_contract else ""
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         f'''
 strategy_path = "tested/demo.py"
 strategy_id = "demo"
-
+{row_contract_line}
 [data]
 kind = "{kind}"
 {dataset_line}symbols = ["{symbol}"]
@@ -253,7 +255,7 @@ def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
 def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -299,6 +301,8 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
         "fraction": 1.0,
     }
     assert summary["row_contract"]["status"] == "passed"
+    # Default quick-run uses the lenient "search" contract: available_at is
+    # present in the data (availability "complete") but is not a *required* field.
     assert summary["row_contract"]["required_fields"] == [
         "symbol",
         "timestamp",
@@ -306,7 +310,6 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
         "high",
         "low",
         "close",
-        "available_at",
     ]
     assert summary["row_contract"]["quant_data_feedback"] == []
     assert summary["causality_verified"] is True
@@ -329,7 +332,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -397,7 +400,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
     monkeypatch.setattr(
         engine_runner,
         "evidence_json",
@@ -414,7 +417,7 @@ def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monke
 def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, mode="screen")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -445,7 +448,7 @@ def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, mode="screen")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -495,7 +498,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "    )]\n"
     )
     config_path = write_config(tmp_path, mode="screen")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -519,7 +522,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
 def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, mode="validate")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -546,7 +549,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, mode="validate")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -588,7 +591,7 @@ def test_run_config_writes_data_failure_summary(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
 
-    def fail_data_load(config):
+    def fail_data_load(config, **_kwargs):
         raise DataLoadError("strict data window failed")
 
     monkeypatch.setattr(execution, "load_data", fail_data_load)
@@ -633,7 +636,7 @@ def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
 
-    def fail_data_load(config):
+    def fail_data_load(config, **_kwargs):
         raise DataLoadError("strict data window failed")
 
     monkeypatch.setattr(execution, "load_data", fail_data_load)
@@ -652,7 +655,7 @@ def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch:
     strategy.write_text("VALUE = 1\n")
     config_path = write_config(tmp_path)
 
-    def forbidden_data_load(config):
+    def forbidden_data_load(config, **_kwargs):
         raise AssertionError("data should not load after strategy import failure")
 
     monkeypatch.setattr(execution, "load_data", forbidden_data_load)
@@ -698,7 +701,7 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(1.10, 1.11, 1.12, 1.13, quotes=True, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(1.10, 1.11, 1.12, 1.13, quotes=True, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -739,7 +742,7 @@ def test_run_config_marks_complete_available_at_coverage(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -773,7 +776,7 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
     normalized_rows_calls = 0
     original_from_rows = NormalizedRows.from_rows
@@ -799,7 +802,7 @@ def test_run_config_marks_partial_available_at_coverage(
     config_path = write_config(tmp_path, artifact_profile="summary")
     partial_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     partial_rows[1].pop("available_at")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=partial_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=partial_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -836,7 +839,7 @@ def test_run_config_rejects_invalid_available_at_for_causality_claim(
     config_path = write_config(tmp_path)
     invalid_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     invalid_rows[1]["available_at"] = "not-a-datetime"
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=invalid_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=invalid_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -898,7 +901,7 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, research_fields=True)),
     )
     events: list[dict[str, object]] = []
 
@@ -930,6 +933,43 @@ def test_runner_catches_hidden_lookahead_before_request_build(
         event["stage"] == "causality_check" and event["status"] == "completed"
         for event in events
     )
+
+
+def test_row_contract_strictness_is_independent_of_artifact_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # F6: artifact_profile is pure verbosity and must NOT change pass/fail. The
+    # SAME data (missing available_at) is tolerated under the default "search"
+    # contract regardless of profile, and fails only when row_contract="validation".
+    write_strategy(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, include_available_at=False)
+        ),
+    )
+
+    def row_contract_status(config_path: Path) -> dict:
+        result = run_config(config_path, repo_root=tmp_path)
+        return json.loads((result.result_dir / "summary.json").read_text())["row_contract"]
+
+    # Verbose ("full") and terse ("summary") profiles agree under the default contract.
+    full_status = row_contract_status(write_config(tmp_path, artifact_profile="full"))
+    summary_status = row_contract_status(
+        write_config(tmp_path, relative_path="run_summary.toml", artifact_profile="summary")
+    )
+    assert full_status["status"] == "passed"
+    assert summary_status["status"] == "passed"
+    assert full_status["mode"] == summary_status["mode"] == "search"
+
+    # Opting into the validation contract makes the identical data fail.
+    validation_status = row_contract_status(
+        write_config(tmp_path, relative_path="run_validation.toml", row_contract="validation")
+    )
+    assert validation_status["status"] == "failed"
+    assert validation_status["mode"] == "validation"
 
 
 def test_runner_catches_peek_to_suppress_with_strict_replay(
@@ -964,7 +1004,7 @@ def test_runner_catches_peek_to_suppress_with_strict_replay(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 99.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 99.0, research_fields=True)),
     )
     events: list[dict[str, object]] = []
 
@@ -1016,7 +1056,7 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
     events: list[dict[str, object]] = []
 
@@ -1050,7 +1090,7 @@ def test_run_config_records_row_contract_feedback(
     contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
     contract_rows[1].pop("high")
     contract_rows[2]["timestamp"] = contract_rows[1]["timestamp"]
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1084,7 +1124,7 @@ def test_run_config_records_engine_invalid_row_contract_before_engine_request(
     config_path = write_config(tmp_path)
     contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
     contract_rows[1]["close"] = 0.0
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1117,7 +1157,7 @@ def test_run_config_requires_crypto_funding_event_indicator(
     for row in contract_rows:
         row["symbol"] = "BTC-PERP"
         row.pop("has_funding_event")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1148,7 +1188,7 @@ def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
     contract_rows[0]["has_funding_event"] = "yes"
     contract_rows[0]["funding_timestamp"] = contract_rows[0]["timestamp"]
     contract_rows[0]["funding_rate"] = Decimal("0.0001")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1176,7 +1216,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1243,7 +1283,7 @@ def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
     loaded_rows[0]["research_nan"] = float("nan")
     loaded_rows[0]["research_decimal"] = Decimal("1.25")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1274,7 +1314,7 @@ def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
             loaded_row[field] = str(loaded_row[field])
     config = config_module.load_config(config_path, repo_root=tmp_path)
     expected_normalized = NormalizedRows.from_rows(config, loaded_rows, mode="search")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1301,7 +1341,7 @@ def test_full_profile_strategy_input_rows_hash_mismatch_fails_artifact_write(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
     )
     original_write = artifacts.write_strategy_input_rows
 
@@ -1320,7 +1360,7 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('boom')\n")
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1349,7 +1389,7 @@ def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest
     )
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1371,7 +1411,7 @@ def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pyte
         "    return []\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1395,7 +1435,7 @@ def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch
     config_path = write_config(tmp_path)
     load_calls = 0
 
-    def load_data(config):
+    def load_data(config, **_kwargs):
         nonlocal load_calls
         load_calls += 1
         return LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0))
@@ -1427,7 +1467,7 @@ def test_runner_rejects_non_mapping_validate_params_return(
         "    return []\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1474,7 +1514,7 @@ def test_runner_structures_strategy_execution_system_exit(
         "    raise SystemExit('strategy exited')\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1511,7 +1551,7 @@ def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=readiness_lag)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1530,7 +1570,7 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(minutes=1))),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(minutes=1))),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1587,7 +1627,7 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1611,7 +1651,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1650,7 +1690,7 @@ def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1690,7 +1730,7 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1716,7 +1756,7 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
     subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "README.md").write_text("dirty\n")
     (tmp_path / "scratch.txt").write_text("untracked\n")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1763,7 +1803,7 @@ def test_run_manifest_ignores_untracked_detritus_for_repository_identity(
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
     (tmp_path / "scratch.txt").write_text("untracked\n")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1787,7 +1827,7 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1807,7 +1847,7 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
 def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1831,7 +1871,7 @@ def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
     monkeypatch.setattr(
         engine_runner,
         "evaluate_request",
@@ -1856,7 +1896,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     repo_root.mkdir()
     write_strategy(repo_root)
     config_path = write_config(repo_root, relative_path="runs/demo.toml")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
     monkeypatch.chdir(tmp_path)
 
     result = run_config("runs/demo.toml", repo_root=repo_root)
@@ -1869,7 +1909,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
 def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
     events: list[dict[str, object]] = []
 
     result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
@@ -1908,7 +1948,7 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     repo_root.mkdir()
     write_strategy(repo_root)
     write_config(repo_root, relative_path="runs/demo.toml")
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(["run", "--repo-root", str(repo_root), "runs/demo.toml"])
@@ -1926,7 +1966,7 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     exit_code = cli.main(["run", "--events-jsonl", str(config_path)])
     captured = capsys.readouterr()
@@ -1952,7 +1992,7 @@ def test_cli_smoke_uses_runner_and_prints_result_dir(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     exit_code = cli.main(["run", str(config_path)])
     output = capsys.readouterr().out.strip()
@@ -2017,7 +2057,7 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
 
-    def load_data(config):
+    def load_data(config, **_kwargs):
         return LoadedData(rows=[dict(row) for row in loaded_rows])
 
     monkeypatch.setattr(execution, "load_data", load_data)

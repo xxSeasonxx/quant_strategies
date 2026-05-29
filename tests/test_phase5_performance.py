@@ -161,7 +161,7 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
     monkeypatch: pytest.MonkeyPatch,
 ):
     config_path = runner_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=runner_rows()))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=runner_rows()))
 
     result = run_config(config_path, repo_root=tmp_path)
 

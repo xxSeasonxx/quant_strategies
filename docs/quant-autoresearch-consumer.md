@@ -193,6 +193,7 @@ run. It must return a mapping.
 ```toml
 strategy_path = "strategy.py"
 strategy_id = "candidate"
+row_contract = "search"   # row-contract strictness; independent of artifact_profile (see table below)
 
 [data]
 kind = "bars"
@@ -220,17 +221,37 @@ mode = "screen"
 artifact_profile = "summary"
 ```
 
-`artifact_profile = "summary"` is the default and should be used for large
-search sweeps; it still writes `summary.json` plus
-`artifact_profile_summary.json`, and marks the result
-`artifact_trust_tier = "search_only"`. Use
-`artifact_profile = "full"` for retained or debug runs when you need input
-rows, decision records, engine request JSON, and full evidence
-artifacts; those runs are marked `artifact_trust_tier = "audit_replayable"`.
+`artifact_profile` controls **verbosity only** — which artifacts are written —
+and never changes pass/fail. `summary` (the default, for large search sweeps)
+writes `summary.json` plus `artifact_profile_summary.json` and marks the result
+`artifact_trust_tier = "search_only"`. `full` (for retained or debug runs)
+additionally writes input rows, decision records, engine request JSON, and full
+evidence artifacts, and marks the result `artifact_trust_tier = "audit_replayable"`.
 In full-profile runs, `strategy_input_rows.jsonl` contains a JSON-safe canonical
 serialization of the normalized projection used for strategy input; non-finite
 ancillary values are written as `null`, and its file hash matches
 `normalized_rows_sha256` in `data_manifest.json`.
+
+`row_contract` is a **separate, explicit strictness policy** and is *not* derived
+from `artifact_profile`: `search` (default) treats a missing `available_at` as
+non-fatal warning evidence; `validation` requires `available_at` and fails the
+row contract when it is missing or invalid. Choose strictness deliberately — it
+is never a side effect of asking for richer artifacts.
+
+### Run vocabulary — one quick run, one validation run
+
+| Surface / knob | Values | Controls | Notes |
+|---|---|---|---|
+| quick run | `quant-strategies run` / `run_config` | the fast `search_only` quick-run | iterate and rank here |
+| validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | **distinct from `mode = "validate"`** |
+| `[output] mode` | `screen` \| `validate` | engine quick-run scoring (`screen`) vs engine smoke-**gating** (`validate`) — NOT the validation run | `validate` mode only applies `valid_inputs`/`min_trades` gates to the quick run |
+| `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
+| `artifact_profile` | `summary` \| `full` | artifact verbosity | never changes pass/fail |
+| `artifact_trust_tier` | `search_only` \| `audit_replayable` | derived replayability label | follows `artifact_profile`; not set directly |
+
+Note the two senses of "validate": the `quant-strategies validate` command runs
+the validation package (windows, scenarios, verdict), while `[output] mode =
+"validate"` only asks the engine to apply smoke gates during a quick run.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them
 under `smoke_score.sum_signed_trade_activity_gross`,
@@ -282,8 +303,10 @@ was missing or partial, so the runner could not claim causality verification.
 Missing `available_at` in search mode is warning evidence: non-fatal, but
 `causality_verified` remains false and the assessment stays `smoke_unverified`
 when smoke gates otherwise pass. Invalid `available_at` is a row contract failure.
-Treat `search_only` artifacts as ranking evidence only; rerun retained candidates
-with `artifact_profile = "full"` before audit handoff.
+Set `row_contract = "validation"` to also make missing `available_at` a row
+contract failure. Treat `search_only` artifacts as ranking evidence only; rerun
+retained candidates with `artifact_profile = "full"` before audit handoff to
+obtain `audit_replayable` artifacts.
 
 Route from stable row issue reasons and counts, not free-form issue messages.
 Runner `summary.json` and `data_manifest.json` expose reasons such as
@@ -350,12 +373,16 @@ Treat validation verdicts as advisory routing labels only:
 No validation verdict authorizes autonomous promotion, paper trading, or live
 trading.
 
-When `[paper_readiness] enabled = true`, validation uses retained row-contract
-mode and strict replay. Strict replay checks row boundaries where the baseline
-emitted no decision; a future-dependent suppression trick fails with
-`hidden_lookahead_suppression_detected`. Validation without paper readiness uses
-the emitted-decision replay check and must not be interpreted as a retained-grade
-causality claim.
+Strict suppression replay is always on, for both the quick run and the validation
+run. It re-runs the strategy at row-grid boundaries where the baseline emitted no
+decision; a future-dependent suppression trick fails with
+`hidden_lookahead_suppression_detected`. Only a strict run sets
+`strict_no_emission_verified = true` (and therefore `causality_verified = true`);
+runner evidence also exposes `emitted_replay_verified` so a quick run cannot claim
+verification it did not perform. `[paper_readiness] enabled = true` additionally
+applies the paper-readiness gates (window count, trade floors, stressed and
+fill-lag net floors) and the retained row-contract mode — it no longer governs
+replay strictness.
 
 Validation backend metrics are flat but semantically typed in
 `backend_runs/summary.json`. The verdict PnL source is the engine smoke kernel,

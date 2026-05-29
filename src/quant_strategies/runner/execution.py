@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from inspect import signature
 from pathlib import Path
 from typing import Any, Literal
 
@@ -99,7 +98,7 @@ def execute_strategy_run(
         ) from exc
 
     try:
-        loaded = _load_data(config, row_contract_mode=contract_mode)
+        loaded = load_data(config, row_contract_mode=contract_mode)
     except RunnerError as exc:
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
@@ -177,16 +176,6 @@ def _load_strategy(path: str | Path, *, repo_root: Path | None = None) -> Genera
         return load_decision_strategy(path, repo_root=repo_root)
     except DecisionStrategyLoadError as exc:
         raise StrategyLoadError(str(exc)) from exc
-
-
-def _load_data(config: RunConfig, *, row_contract_mode: RowContractMode) -> Any:
-    try:
-        accepts_mode = "row_contract_mode" in signature(load_data).parameters
-    except (TypeError, ValueError):
-        accepts_mode = True
-    if accepts_mode:
-        return load_data(config, row_contract_mode=row_contract_mode)
-    return load_data(config)
 
 
 def _system_exit_message(exc: SystemExit) -> str:

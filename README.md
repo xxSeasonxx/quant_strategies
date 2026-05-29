@@ -119,12 +119,19 @@ and smoke metrics instead of any single completion flag.
 
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,
-`causality_verified`, and `evidence_quality_warnings`. Hidden-lookahead replay
-failures stop the run as `runner_failed`. Runner smoke records missing or
+`causality_verified`, `emitted_replay_verified`, `strict_no_emission_verified`,
+and `evidence_quality_warnings`. Strict suppression replay runs by default; only
+a strict run sets `strict_no_emission_verified` (and therefore
+`causality_verified`), while `emitted_replay_verified` records the weaker subset
+check — so a run never claims verification it did not perform. Hidden-lookahead
+replay failures stop the run as `runner_failed`. Runner smoke records missing or
 partial availability as uncertainty with `smoke_unverified` and does not set
 `causality_verified`.
-Missing `available_at` in search mode is warning evidence; invalid
-`available_at` is a row contract failure.
+Row-contract strictness is set explicitly by `row_contract = "search" |
+"validation"` (default `search`) and is independent of `artifact_profile`.
+Missing `available_at` in search mode is warning evidence; under
+`row_contract = "validation"` it is a row contract failure. Invalid
+`available_at` is a row contract failure regardless of strictness.
 
 `row_contract` reports the loaded row schema status for the configured
 `data.kind`, including missing required fields, timestamp awareness, duplicate
@@ -254,10 +261,12 @@ The check compares baseline decisions against decisions generated from rows
 available within each decision's information set. A mismatch becomes
 `hidden_lookahead_detected`; replay errors become
 `hidden_lookahead_check_failed`.
-When `[paper_readiness] enabled = true`, validation uses retained row-contract
-mode and strict replay. Strict replay also checks no-emission row boundaries, so
-a strategy that suppresses an otherwise emitted decision by peeking at future
-rows fails with `hidden_lookahead_suppression_detected`.
+Strict replay runs by default for both the quick run and the validation run: it
+also checks no-emission row-grid boundaries, so a strategy that suppresses an
+otherwise emitted decision by peeking at future rows fails with
+`hidden_lookahead_suppression_detected`. `[paper_readiness] enabled = true`
+additionally applies the paper-readiness gates and the retained row-contract
+mode; it no longer governs replay strictness.
 
 For each validation window, the validator expands required and diagnostic
 scenarios, runs the engine verdict kernel (and, when enabled, the agreement

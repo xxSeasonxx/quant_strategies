@@ -109,7 +109,7 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
         "    )]\n",
     )
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = execute_strategy_run(config, repo_root=tmp_path)
 
@@ -134,7 +134,7 @@ def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(
         return [decision()]
 
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: generate_decisions)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=normalized))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=normalized))
 
     result = execute_strategy_run(config, repo_root=tmp_path)
 
@@ -178,7 +178,7 @@ def test_execute_strategy_run_maps_param_validation_failure(
     config = write_config(tmp_path)
     load_calls = 0
 
-    def load_data(config):
+    def load_data(config, **_kwargs):
         nonlocal load_calls
         load_calls += 1
         return LoadedData(rows=rows())
@@ -209,7 +209,7 @@ def test_execute_strategy_run_maps_param_validation_system_exit(
     config = write_config(tmp_path)
     load_calls = 0
 
-    def load_data(config):
+    def load_data(config, **_kwargs):
         nonlocal load_calls
         load_calls += 1
         return LoadedData(rows=rows())
@@ -234,7 +234,7 @@ def test_execute_strategy_run_maps_data_load_failure(
     write_strategy(tmp_path, "def generate_decisions(rows, params): return []\n")
     config = write_config(tmp_path)
 
-    def fail_load_data(config):
+    def fail_load_data(config, **_kwargs):
         raise DataLoadError("data load returned no rows")
 
     monkeypatch.setattr(execution, "load_data", fail_load_data)
@@ -256,7 +256,7 @@ def test_execute_strategy_run_invalid_decision_output_carries_loaded_context(
     loaded_rows = rows()
     write_strategy(tmp_path, "def generate_decisions(rows, params): return ['not a decision']\n")
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     with pytest.raises(StrategyExecutionError) as error:
         execute_strategy_run(config, repo_root=tmp_path)
@@ -285,7 +285,7 @@ def test_execute_strategy_run_maps_generation_exception_with_loaded_context(
         "    raise RuntimeError('boom')\n",
     )
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     with pytest.raises(StrategyExecutionError) as error:
         execute_strategy_run(config, repo_root=tmp_path)
@@ -314,7 +314,7 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
     write_strategy(tmp_path, "def generate_decisions(rows, params): return []\n")
     config = write_config(tmp_path)
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: flat_decision_strategy)
-    monkeypatch.setattr(execution, "load_data", lambda config: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = execute_strategy_run(config, repo_root=tmp_path)
 

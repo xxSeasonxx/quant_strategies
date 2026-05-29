@@ -209,9 +209,9 @@ def _execution_failure_result(
 
 
 def _runner_row_contract_mode(config: config_module.RunConfig) -> RowContractMode:
-    if config.output.artifact_profile == "full":
-        return RowContractMode.VALIDATION
-    return RowContractMode.SEARCH
+    # Strictness comes from the explicit `row_contract` policy, NOT from the
+    # `artifact_profile` verbosity knob (a verbosity change must never flip pass/fail).
+    return RowContractMode(config.row_contract)
 
 
 def _write_strategy_input_rows_if_full(

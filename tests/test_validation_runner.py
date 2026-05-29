@@ -189,7 +189,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     candidate = write_candidate(tmp_path)
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     backend = FakeBackend(
         BackendRunResult(
@@ -350,7 +350,7 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     backend = FakeBackend(
         BackendRunResult(
@@ -401,7 +401,7 @@ def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -431,7 +431,7 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     events: list[dict[str, object]] = []
 
@@ -523,7 +523,7 @@ def test_validation_row_snapshot_hash_uses_written_payload(
     candidate = write_candidate(tmp_path)
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     backend = FakeBackend(
         BackendRunResult(
@@ -576,7 +576,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     backend = ScenarioAwareBackend(
         {
@@ -700,7 +700,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
 
-    def raise_data_load_error(config: Any) -> LoadedData:
+    def raise_data_load_error(config: Any, **_kwargs: object) -> LoadedData:
         raise DataLoadError("data load returned no rows")
 
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", raise_data_load_error)
@@ -735,7 +735,7 @@ def test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot(
     loaded_rows[1]["research_inf"] = float("inf")
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=loaded_rows),
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
@@ -829,7 +829,7 @@ def test_run_validation_ignores_unconfigured_manifest_next_to_config(
             }
         )
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -916,7 +916,7 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -948,7 +948,7 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -978,7 +978,7 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -996,7 +996,7 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: lambda loaded_rows, params: [decision("other")],
@@ -1016,7 +1016,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
 def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
         lambda path, repo_root: lambda loaded_rows, params: "not decisions",
@@ -1054,7 +1054,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
         .replace("decision_time=rows[0]['timestamp']", "decision_time=rows[1]['timestamp']")
         .replace("as_of_time=rows[0]['timestamp']", "as_of_time=rows[1]['timestamp']")
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
@@ -1105,7 +1105,7 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
         for minute in range(5)
     ]
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=long_rows)
+        "quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=long_rows)
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1163,7 +1163,7 @@ def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path
     (candidate / "strategy.py").write_text(_long_strategy_text())
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=_upward_rows())
+        "quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows())
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1181,7 +1181,7 @@ def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, mo
     candidate = write_candidate(tmp_path)
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows())
+        "quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
     )
 
     def diverging(**_kwargs):
@@ -1217,7 +1217,7 @@ def test_run_validation_agreement_oracle_skips_threshold_exit(tmp_path: Path, mo
     )
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=_upward_rows())
+        "quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows())
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1262,7 +1262,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     ]
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=loaded_rows),
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1281,7 +1281,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = ScenarioAwareBackend(
         {
             "validation_2026_h1/stressed_costs": BackendRunResult(
@@ -1307,7 +1307,7 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
     candidate = write_candidate(tmp_path, window_ids=("validation_2026_h1", "validation_2026_h2"))
     loaded_row_ids = []
 
-    def load_data(config: Any) -> LoadedData:
+    def load_data(config: Any, **_kwargs: object) -> LoadedData:
         loaded_rows = rows()
         loaded_row_ids.append(id(loaded_rows))
         return LoadedData(rows=loaded_rows)
@@ -1351,7 +1351,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
             'strict = true\nstart = "2025-01-01"\nend = "2026-12-31"',
         )
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1401,7 +1401,7 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
     (candidate / "validation.toml").write_text(
         validation_config.replace("weight = 1.0", "weight = 1.0\ntypo = 2.0")
     )
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1433,7 +1433,7 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
     loaded_rows = rows()
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=loaded_rows),
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -1455,7 +1455,7 @@ def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypat
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config: LoadedData(rows=rows()),
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -1471,7 +1471,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     def raise_generation_error(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
         raise RuntimeError("signal code failed")
@@ -1501,7 +1501,7 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = ExplodingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1522,7 +1522,7 @@ def test_run_validation_trusts_backend_run_result_without_pydantic_revalidation(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     def reject_revalidation(*args: object, **kwargs: object) -> None:
         raise AssertionError("BackendRunResult.model_validate should not be called")
@@ -1550,7 +1550,7 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = MalformedBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1569,7 +1569,7 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
 
 def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = InvalidStatusBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1585,7 +1585,7 @@ def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypat
 
 def test_run_validation_propagates_backend_system_exit(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     with pytest.raises(SystemExit, match="backend exited"):
         run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=ExitingBackend())
@@ -1595,7 +1595,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     def exit_generation(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
         raise SystemExit("signal code exited")
