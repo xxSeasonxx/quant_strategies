@@ -275,20 +275,53 @@ def test_strict_hidden_lookahead_detects_suppressed_replay_emission():
     assert result.violations == ("hidden_lookahead_suppression_detected",)
 
 
-def test_strict_hidden_lookahead_rejects_missing_boundaries():
+def test_strict_replay_is_default_and_reports_split_flags():
+    rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+    baseline = as_of_strategy(rows, {})
+
+    # No mode= -> defaults to strict and auto-derives row-grid boundaries.
     result = check_hidden_lookahead(
         as_of_strategy,
-        rows=[row(AS_OF, 100.0, available_at=AS_OF)],
+        rows=rows,
         params={},
-        baseline_decisions=[],
+        baseline_decisions=baseline,
         strategy_id="demo",
-        mode="strict",
+    )
+
+    assert result.mode == "strict"
+    assert result.passed is True
+    assert result.emitted_replay_verified is True
+    assert result.strict_suppression_verified is True
+
+
+def test_strict_replay_auto_derived_boundaries_catch_suppression():
+    # A causal baseline emits nothing; a strategy that would emit on the truncated
+    # grid (because it peeked ahead to suppress) is caught with no explicit boundaries.
+    rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+
+    def suppression_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        if any(item.get("timestamp") == FUTURE for item in rows):
+            return []
+        return [decision()]
+
+    result = check_hidden_lookahead(
+        suppression_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=suppression_strategy(rows, {}),
+        strategy_id="demo",
     )
 
     assert result.passed is False
-    assert result.violations == (
-        "hidden_lookahead_check_failed: strict replay requires caller-supplied boundaries",
-    )
+    assert result.violations == ("hidden_lookahead_suppression_detected",)
+    assert result.emitted_replay_verified is True
+    assert result.strict_suppression_verified is False
 
 
 def test_strict_hidden_lookahead_detects_same_bar_replay_emission_for_boundary():
@@ -422,6 +455,7 @@ def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
         params={},
         baseline_decisions=baseline,
         strategy_id="demo",
+        mode="emitted",
     )
 
     assert result.passed is True
@@ -471,6 +505,7 @@ def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
         params={},
         baseline_decisions=baseline,
         strategy_id="demo",
+        mode="emitted",
     )
 
     assert result.passed is True

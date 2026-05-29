@@ -612,6 +612,7 @@ def test_vectorbtpro_backend_runs_conservative_multi_asset_target_weights(monkey
     assert captured["size_type"] == "valuepercent"
     assert captured["cash_sharing"] is True
     assert captured["group_by"] is True
+    assert captured["init_cash"] == pytest.approx(100.0)  # F4: pinned explicitly
     assert captured["size"].loc[entry_time, "BTC-PERP"] == pytest.approx(0.6)
     assert captured["size"].loc[entry_time, "ETH-PERP"] == pytest.approx(0.4)
     assert result.metrics["portfolio_target_weight_model"] == "vectorbtpro_valuepercent_cash_sharing"

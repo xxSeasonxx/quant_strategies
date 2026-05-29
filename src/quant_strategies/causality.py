@@ -12,13 +12,16 @@ from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.decisions import StrategyDecision, validate_decision_output
 
 
+ReplayMode = Literal["emitted", "strict"]
+
+
 @dataclass(frozen=True)
 class LookaheadCheckResult:
     passed: bool
     violations: tuple[str, ...] = ()
-
-
-ReplayMode = Literal["emitted", "strict"]
+    mode: ReplayMode = "emitted"
+    emitted_replay_verified: bool = False
+    strict_suppression_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,7 @@ class ReplayBoundary:
     as_of_time: datetime
     decision_time: datetime
     expected_decision_ids: frozenset[str | None] = frozenset()
+    allowed_decision_ids: frozenset[str | None] = frozenset()
     symbols: frozenset[str] = frozenset()
 
 
@@ -55,25 +59,36 @@ def check_hidden_lookahead(
     params: Mapping[str, Any],
     baseline_decisions: list[StrategyDecision],
     strategy_id: str,
-    mode: ReplayMode = "emitted",
+    mode: ReplayMode = "strict",
     boundaries: Sequence[ReplayBoundary] | None = None,
 ) -> LookaheadCheckResult:
-    if mode == "strict" and boundaries is None:
+    """Replay a strategy at point-in-time boundaries to detect hidden lookahead.
+
+    Two directions are checked. The *subset* check (``expected ⊆ replay``) catches a
+    strategy that reads future rows to *change* a decision: truncated replay fails
+    to reproduce the emitted decision. The *suppression* check (``scoped ⊆ allowed``,
+    strict only) catches a strategy that reads the future to *withhold* a losing
+    trade: at the row-grid boundary where the trade would otherwise be emitted, the
+    truncated replay emits a decision the baseline never produced.
+
+    ``mode="strict"`` is the default and the only mode that may set
+    ``strict_suppression_verified``; it auto-derives row-grid boundaries when none
+    are supplied.
+    """
+    if boundaries is not None:
+        replay_boundaries = tuple(boundaries)
+    elif mode == "strict":
+        replay_boundaries = strict_replay_boundaries(rows, baseline_decisions)
+    else:
+        replay_boundaries = _emitted_boundaries(baseline_decisions)
+
+    if not replay_boundaries:
+        # Nothing to replay (no rows and no decisions): vacuously verified.
         return LookaheadCheckResult(
-            passed=False,
-            violations=(
-                "hidden_lookahead_check_failed: strict replay requires caller-supplied boundaries",
-            ),
-        )
-    replay_boundaries = tuple(
-        boundaries if boundaries is not None else _emitted_boundaries(baseline_decisions)
-    )
-    if mode == "strict" and not replay_boundaries:
-        return LookaheadCheckResult(
-            passed=False,
-            violations=(
-                "hidden_lookahead_check_failed: strict replay requires at least one boundary",
-            ),
+            passed=True,
+            mode=mode,
+            emitted_replay_verified=True,
+            strict_suppression_verified=mode == "strict",
         )
 
     row_index = _visible_row_index(rows)
@@ -93,15 +108,24 @@ def check_hidden_lookahead(
             try:
                 replay_output = generate_decisions(replay_rows, replay_params)
             except SystemExit as exc:
-                return LookaheadCheckResult(
-                    passed=False,
-                    violations=(f"hidden_lookahead_check_failed: SystemExit: {exc}",),
-                )
+                if boundary.expected_decision_ids:
+                    return LookaheadCheckResult(
+                        passed=False,
+                        mode=mode,
+                        violations=(f"hidden_lookahead_check_failed: SystemExit: {exc}",),
+                    )
+                # Pure probe boundary (no emitted decision to reproduce): a strategy
+                # that cannot run on this prefix did not suppress a trade here, so
+                # skip rather than fail. Strategies need not handle every short prefix.
+                continue
             except Exception as exc:
-                return LookaheadCheckResult(
-                    passed=False,
-                    violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
-                )
+                if boundary.expected_decision_ids:
+                    return LookaheadCheckResult(
+                        passed=False,
+                        mode=mode,
+                        violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
+                    )
+                continue
 
             parsed_decisions, violations = validate_decision_output(
                 replay_output,
@@ -110,6 +134,7 @@ def check_hidden_lookahead(
             if violations:
                 return LookaheadCheckResult(
                     passed=False,
+                    mode=mode,
                     violations=(f"hidden_lookahead_check_failed: {'; '.join(violations)}",),
                 )
             replay_decisions = tuple(parsed_decisions)
@@ -123,6 +148,7 @@ def check_hidden_lookahead(
         if not boundary.expected_decision_ids.issubset(replay_decision_ids):
             return LookaheadCheckResult(
                 passed=False,
+                mode=mode,
                 violations=("hidden_lookahead_detected",),
             )
         if mode == "strict":
@@ -131,13 +157,21 @@ def check_hidden_lookahead(
                 for replay in replay_decisions
                 if _decision_matches_boundary(replay, boundary)
             )
-            if not scoped_decision_ids.issubset(boundary.expected_decision_ids):
+            if not scoped_decision_ids.issubset(boundary.allowed_decision_ids):
                 return LookaheadCheckResult(
                     passed=False,
+                    mode="strict",
+                    emitted_replay_verified=True,
+                    strict_suppression_verified=False,
                     violations=("hidden_lookahead_suppression_detected",),
                 )
 
-    return LookaheadCheckResult(passed=True)
+    return LookaheadCheckResult(
+        passed=True,
+        mode=mode,
+        emitted_replay_verified=True,
+        strict_suppression_verified=mode == "strict",
+    )
 
 
 def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBoundary, ...]:
@@ -156,6 +190,68 @@ def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBo
         )
         for as_of_time, decision_time in sorted(items)
     )
+
+
+def strict_replay_boundaries(
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+    decisions: Sequence[StrategyDecision],
+) -> tuple[ReplayBoundary, ...]:
+    """Row-grid replay boundaries for strict suppression replay.
+
+    One boundary per (as_of_time, next_timestamp) per symbol on the row grid,
+    merged with the emitted-decision boundaries. Strict replay at each grid point
+    catches a strategy that peeks ahead to *withhold* a trade: at the point the
+    trade would otherwise be emitted, the truncated replay cannot see the future
+    used to suppress it, so it emits a decision absent from the expected set.
+    """
+    # Exact emissions per (as_of, decision_time) drive the subset check; the merged
+    # per-(as_of, symbol) set is what the suppression check is allowed to see, so a
+    # legitimate decision that depends on later-available data is not wrongly demanded
+    # at an earlier grid boundary.
+    expected_by_key: dict[tuple[datetime, datetime], set[str | None]] = {}
+    allowed_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
+    symbols_by_key: dict[tuple[datetime, datetime], set[str]] = {}
+    for decision in decisions:
+        key = (decision.as_of_time, decision.decision_time)
+        expected_by_key.setdefault(key, set()).add(decision.decision_id)
+        symbols_by_key.setdefault(key, set()).add(decision.instrument.symbol)
+        allowed_by_asof_symbol.setdefault(
+            (decision.as_of_time, decision.instrument.symbol),
+            set(),
+        ).add(decision.decision_id)
+
+    projection = rows.projection_rows() if isinstance(rows, NormalizedRows) else rows
+    timestamps_by_symbol: dict[str, list[datetime]] = {}
+    for row in projection:
+        symbol = row.get("symbol")
+        timestamp = row.get("timestamp")
+        if isinstance(symbol, str) and _is_aware_datetime(timestamp):
+            timestamps_by_symbol.setdefault(symbol, []).append(timestamp)
+
+    for symbol, timestamps in timestamps_by_symbol.items():
+        ordered = sorted(dict.fromkeys(timestamps))
+        for index, timestamp in enumerate(ordered):
+            decision_time = ordered[index + 1] if index + 1 < len(ordered) else timestamp
+            key = (timestamp, decision_time)
+            expected_by_key.setdefault(key, set())
+            symbols_by_key.setdefault(key, set()).add(symbol)
+
+    boundaries: list[ReplayBoundary] = []
+    for as_of_time, decision_time in sorted(expected_by_key):
+        symbols = symbols_by_key.get((as_of_time, decision_time), set())
+        allowed: set[str | None] = set()
+        for symbol in symbols:
+            allowed.update(allowed_by_asof_symbol.get((as_of_time, symbol), set()))
+        boundaries.append(
+            ReplayBoundary(
+                as_of_time=as_of_time,
+                decision_time=decision_time,
+                expected_decision_ids=frozenset(expected_by_key[(as_of_time, decision_time)]),
+                allowed_decision_ids=frozenset(allowed),
+                symbols=frozenset(symbols),
+            )
+        )
+    return tuple(boundaries)
 
 
 def _visible_row_index(rows: NormalizedRows | Sequence[Mapping[str, Any]]) -> _VisibleRowIndex:

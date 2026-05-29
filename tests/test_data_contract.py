@@ -173,7 +173,9 @@ def test_search_missing_available_at_warns_without_failing_validation_mode_error
         ("row_missing_available_at", "warning")
     ]
     assert search_rows.row_contract_summary()["quant_data_feedback"] == []
-    assert search_rows.evidence_quality(causality_verified=True)["causality_verified"] is False
+    assert search_rows.evidence_quality(
+        emitted_replay_verified=True, strict_no_emission_verified=True
+    )["causality_verified"] is False
 
     validation_row = valid_row()
     del validation_row["available_at"]

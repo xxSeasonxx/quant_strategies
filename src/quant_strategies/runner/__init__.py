@@ -43,6 +43,8 @@ class RunResult:
     availability_coverage: dict[str, object] | None = None
     row_contract: dict[str, object] | None = None
     causality_verified: bool = False
+    emitted_replay_verified: bool = False
+    strict_no_emission_verified: bool = False
     evidence_quality_warnings: tuple[str, ...] = ()
 
 
@@ -261,7 +263,8 @@ def _prepare_causality_evidence(
             causality_event.fail(_causality_message(causality))
     evidence_quality = artifacts.with_causality_verification(
         execution.evidence_quality,
-        causality_verified=causality.passed,
+        emitted_replay_verified=causality.emitted_replay_verified,
+        strict_no_emission_verified=causality.strict_suppression_verified,
     )
     return causality, evidence_quality
 
@@ -581,6 +584,8 @@ def _run_result_evidence_fields(evidence_quality: dict[str, object] | None) -> d
         "availability_coverage": _optional_dict(evidence_quality.get("availability_coverage")),
         "row_contract": _optional_dict(evidence_quality.get("row_contract")),
         "causality_verified": bool(evidence_quality.get("causality_verified")),
+        "emitted_replay_verified": bool(evidence_quality.get("emitted_replay_verified")),
+        "strict_no_emission_verified": bool(evidence_quality.get("strict_no_emission_verified")),
         "evidence_quality_warnings": _string_tuple(evidence_quality.get("evidence_quality_warnings")),
     }
 

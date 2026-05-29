@@ -114,6 +114,7 @@ class VectorBTProBackend:
                 size_type="valuepercent",
                 cash_sharing=True,
                 group_by=True,
+                init_cash=100.0,
             )
         except Exception as exc:
             return _failed(self.name, f"vectorbtpro_run_failed:{exc}")

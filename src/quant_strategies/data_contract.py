@@ -13,6 +13,7 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
 from quant_strategies.datetime_utils import parse_aware_datetime
+from quant_strategies.evidence_semantics import causality_evidence_fields
 
 
 class RowContractMode(StrEnum):
@@ -455,16 +456,22 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             "issue_reasons": self.issue_reasons,
         }
 
-    def evidence_quality(self, *, causality_verified: bool) -> dict[str, Any]:
+    def evidence_quality(
+        self,
+        *,
+        emitted_replay_verified: bool = False,
+        strict_no_emission_verified: bool = False,
+    ) -> dict[str, Any]:
         payload = {
             "data_availability_status": self.data_availability_status,
             "availability_coverage": self.availability_coverage,
             "row_contract": self.row_contract_summary(),
         }
         payload.update(
-            _causality_evidence(
+            causality_evidence_fields(
                 self.data_availability_status,
-                causality_verified=causality_verified,
+                emitted_replay_verified=emitted_replay_verified,
+                strict_no_emission_verified=strict_no_emission_verified,
             )
         )
         return payload
@@ -924,29 +931,6 @@ def _normalized_rows_sha256_from_storage(
         digest.update(line.encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
-
-
-def _causality_evidence(
-    data_availability_status: object,
-    *,
-    causality_verified: bool,
-) -> dict[str, Any]:
-    if data_availability_status == "complete":
-        verified = causality_verified
-        warnings = [] if verified else ["runner_causality_not_verified"]
-    elif data_availability_status == "invalid":
-        verified = False
-        warnings = ["available_at_invalid", "runner_causality_not_verified"]
-    elif data_availability_status == "partial":
-        verified = False
-        warnings = ["available_at_partial", "runner_causality_not_verified"]
-    else:
-        verified = False
-        warnings = ["available_at_missing", "runner_causality_not_verified"]
-    return {
-        "causality_verified": verified,
-        "evidence_quality_warnings": warnings,
-    }
 
 
 __all__ = [

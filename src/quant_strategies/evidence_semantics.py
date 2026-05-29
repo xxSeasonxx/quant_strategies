@@ -108,3 +108,47 @@ def validation_evidence_semantics() -> dict[str, object]:
         "live_eligible": False,
         "requires_manual_approval": True,
     }
+
+
+def causality_evidence_fields(
+    data_availability_status: object,
+    *,
+    emitted_replay_verified: bool,
+    strict_no_emission_verified: bool,
+) -> dict[str, object]:
+    """Single home for the availability->causal-verification policy.
+
+    Shared by the row contract (`data_contract`) and the runner artifacts so the
+    mapping from data availability + replay results to the audited
+    ``causality_verified`` flag lives in exactly one place. ``causality_verified``
+    is True only when the information set is complete *and* both replay halves
+    verified: the emitted-replay subset check and the strict no-emission
+    suppression check. A run can never claim full causal verification it did not
+    perform.
+    """
+    if data_availability_status == "complete":
+        emitted = bool(emitted_replay_verified)
+        strict = bool(strict_no_emission_verified)
+        verified = emitted and strict
+        warnings: list[str] = []
+        if emitted and not strict:
+            # Emitted-replay subset check passed but strict suppression replay did
+            # not run; surface that the run did not earn full causal verification.
+            warnings.append("strict_suppression_replay_not_verified")
+        if not verified:
+            warnings.append("runner_causality_not_verified")
+    else:
+        emitted = False
+        strict = False
+        verified = False
+        availability_warning = {
+            "invalid": "available_at_invalid",
+            "partial": "available_at_partial",
+        }.get(str(data_availability_status), "available_at_missing")
+        warnings = [availability_warning, "runner_causality_not_verified"]
+    return {
+        "causality_verified": verified,
+        "emitted_replay_verified": emitted,
+        "strict_no_emission_verified": strict,
+        "evidence_quality_warnings": warnings,
+    }

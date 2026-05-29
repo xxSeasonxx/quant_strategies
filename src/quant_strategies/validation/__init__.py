@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field as _field
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
 
-from quant_strategies.causality import ReplayBoundary, check_hidden_lookahead
+from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
@@ -78,7 +77,6 @@ class _ValidationContext:
     backend_name: str
     selected_backend: ValidationBackend
     row_contract_mode: RowContractMode
-    strict_replay: bool
     event_emitter: ValidationStageEmitter
 
 
@@ -164,7 +162,6 @@ def run_validation(
         backend_name=backend_name,
         selected_backend=selected_backend,
         row_contract_mode=row_contract_mode,
-        strict_replay=row_contract_mode is RowContractMode.RETAINED,
         event_emitter=events,
     )
     for window in config.windows:
@@ -371,21 +368,18 @@ def _audit_window_execution(
             "causality_check",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            mode="strict" if context.strict_replay else "emitted",
+            mode="strict",
             decision_count=len(decisions),
         ) as causality_event:
+            # Strict suppression-replay is always on: boundaries auto-derive from the
+            # row grid so a peek-to-suppress strategy is caught on the default path,
+            # not only when paper_readiness is enabled.
             lookahead = check_hidden_lookahead(
                 execution.generate_decisions,
                 rows=execution.normalized_rows,
                 params=execution.frozen_params,
                 baseline_decisions=decisions,
                 strategy_id=context.config.strategy_id,
-                mode="strict" if context.strict_replay else "emitted",
-                boundaries=(
-                    _strict_replay_boundaries(execution.normalized_rows, decisions)
-                    if context.strict_replay
-                    else None
-                ),
             )
             if not lookahead.passed:
                 causality_event.fail(
@@ -796,57 +790,6 @@ def _scenario_decision_outcome(
         decision_generation_status="base_reused",
         decisions_regenerated=False,
     )
-
-
-def _strict_replay_boundaries(
-    rows: NormalizedRows,
-    decisions: list[StrategyDecision],
-) -> tuple[ReplayBoundary, ...]:
-    expected_by_key: dict[tuple[datetime, datetime], set[str | None]] = {}
-    expected_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
-    symbols_by_key: dict[tuple[datetime, datetime], set[str]] = {}
-    for decision in decisions:
-        key = (decision.as_of_time, decision.decision_time)
-        expected_by_key.setdefault(key, set()).add(decision.decision_id)
-        symbols_by_key.setdefault(key, set()).add(decision.instrument.symbol)
-        expected_by_asof_symbol.setdefault(
-            (decision.as_of_time, decision.instrument.symbol),
-            set(),
-        ).add(decision.decision_id)
-
-    timestamps_by_symbol: dict[str, list[datetime]] = {}
-    for row in rows.projection_rows():
-        symbol = row.get("symbol")
-        timestamp = row.get("timestamp")
-        if isinstance(symbol, str) and _is_aware_datetime(timestamp):
-            timestamps_by_symbol.setdefault(symbol, []).append(timestamp)
-
-    for symbol, timestamps in timestamps_by_symbol.items():
-        ordered = sorted(dict.fromkeys(timestamps))
-        for index, timestamp in enumerate(ordered):
-            decision_time = ordered[index + 1] if index + 1 < len(ordered) else timestamp
-            key = (timestamp, decision_time)
-            expected_by_key.setdefault(key, set())
-            symbols_by_key.setdefault(key, set()).add(symbol)
-
-    for (as_of_time, decision_time), symbols in symbols_by_key.items():
-        expected = expected_by_key.setdefault((as_of_time, decision_time), set())
-        for symbol in symbols:
-            expected.update(expected_by_asof_symbol.get((as_of_time, symbol), set()))
-
-    return tuple(
-        ReplayBoundary(
-            as_of_time=as_of_time,
-            decision_time=decision_time,
-            expected_decision_ids=frozenset(expected_by_key[(as_of_time, decision_time)]),
-            symbols=frozenset(symbols_by_key[(as_of_time, decision_time)]),
-        )
-        for as_of_time, decision_time in sorted(expected_by_key)
-    )
-
-
-def _is_aware_datetime(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
 
 
 def _event_failure_message(violations: Sequence[str], fallback: str) -> str:

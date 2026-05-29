@@ -10,7 +10,11 @@ from typing import Any
 
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
-from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
+from quant_strategies.evidence_semantics import (
+    artifact_trust_tier_for_profile,
+    causality_evidence_fields,
+    smoke_score_metric_semantics,
+)
 from quant_strategies.provenance import (
     artifact_hashes,
     environment_identity,
@@ -70,23 +74,29 @@ def evidence_quality(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
     *,
-    causality_verified: bool = False,
+    emitted_replay_verified: bool = False,
+    strict_no_emission_verified: bool = False,
 ) -> dict[str, Any]:
     return compact_evidence_quality(
-        _normalized_rows(config, rows).evidence_quality(causality_verified=causality_verified)
+        _normalized_rows(config, rows).evidence_quality(
+            emitted_replay_verified=emitted_replay_verified,
+            strict_no_emission_verified=strict_no_emission_verified,
+        )
     )
 
 
 def with_causality_verification(
     evidence_quality_payload: Mapping[str, Any],
     *,
-    causality_verified: bool,
+    emitted_replay_verified: bool,
+    strict_no_emission_verified: bool,
 ) -> dict[str, Any]:
     payload = compact_evidence_quality(evidence_quality_payload)
     payload.update(
-        _causality_evidence(
+        causality_evidence_fields(
             payload.get("data_availability_status"),
-            causality_verified=causality_verified,
+            emitted_replay_verified=emitted_replay_verified,
+            strict_no_emission_verified=strict_no_emission_verified,
         )
     )
     return payload
@@ -152,29 +162,6 @@ def _issue_sample_key(issue: object) -> tuple[object, object, object]:
     return (None, None, None)
 
 
-def _causality_evidence(
-    data_availability_status: object,
-    *,
-    causality_verified: bool,
-) -> dict[str, Any]:
-    if data_availability_status == "complete":
-        verified = causality_verified
-        warnings = [] if verified else ["runner_causality_not_verified"]
-    elif data_availability_status == "invalid":
-        verified = False
-        warnings = ["available_at_invalid", "runner_causality_not_verified"]
-    elif data_availability_status == "partial":
-        verified = False
-        warnings = ["available_at_partial", "runner_causality_not_verified"]
-    else:
-        verified = False
-        warnings = ["available_at_missing", "runner_causality_not_verified"]
-    return {
-        "causality_verified": verified,
-        "evidence_quality_warnings": warnings,
-    }
-
-
 def row_contract_status(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
@@ -192,7 +179,7 @@ def write_data_manifest(
 ) -> None:
     normalized = _normalized_rows(config, rows, normalized_rows=normalized_rows)
     quality = compact_evidence_quality(
-        evidence_quality_payload or normalized.evidence_quality(causality_verified=False)
+        evidence_quality_payload or normalized.evidence_quality()
     )
     payload = {
         "artifact_profile": config.output.artifact_profile,

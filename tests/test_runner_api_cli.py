@@ -43,6 +43,8 @@ SUMMARY_KEYS = {
     "availability_coverage",
     "row_contract",
     "causality_verified",
+    "emitted_replay_verified",
+    "strict_no_emission_verified",
     "evidence_quality_warnings",
 }
 SMOKE_SCORE_KEYS = {
@@ -926,6 +928,66 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     )
     assert not any(
         event["stage"] == "causality_check" and event["status"] == "completed"
+        for event in events
+    )
+
+
+def test_runner_catches_peek_to_suppress_with_strict_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Strategy reads a future bar to *withhold* a losing trade. The baseline emits
+    # nothing; strict row-grid replay re-runs at the suppressed bar without the
+    # future and emits the trade -> suppression detected. Emitted-only replay would
+    # miss it because there is no emitted boundary to replay.
+    strategy = tmp_path / "tested" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
+        "    as_of_row = rows[1]\n"
+        "    future = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
+        "    if any(row['close'] < as_of_row['close'] for row in future):\n"
+        "        return []\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
+        "        decision_time=as_of_row['timestamp'],\n"
+        "        as_of_time=as_of_row['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config: LoadedData(rows=rows(100.0, 101.0, 99.0, research_fields=True)),
+    )
+    events: list[dict[str, object]] = []
+
+    result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "causality"
+    assert summary["message"] == "hidden_lookahead_suppression_detected"
+    assert summary["causality_verified"] is False
+    assert summary["emitted_replay_verified"] is True
+    assert summary["strict_no_emission_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "strict_suppression_replay_not_verified",
+        "runner_causality_not_verified",
+    ]
+    assert result.assessment_status == "runner_failed"
+    assert not (result.result_dir / "engine_request.json").exists()
+    assert any(
+        event["stage"] == "causality_check"
+        and event["status"] == "failed"
+        and "hidden_lookahead_suppression_detected" in str(event["error"])
         for event in events
     )
 

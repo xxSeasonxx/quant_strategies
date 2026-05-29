@@ -208,12 +208,17 @@ def test_hidden_lookahead_grouped_replay_completes_under_runtime_budget():
         return baseline
 
     start = time.perf_counter()
+    # Emitted mode groups all decisions sharing one (as_of, decision_time) into a
+    # single replay; this asserts that grouping optimization. Strict-default
+    # performance on realistic datasets is covered by the runner/validation
+    # integration budgets.
     result = check_hidden_lookahead(
         grouped_strategy,
         rows=rows,
         params={},
         baseline_decisions=baseline,
         strategy_id="lookahead_perf",
+        mode="emitted",
     )
     elapsed = time.perf_counter() - start
 

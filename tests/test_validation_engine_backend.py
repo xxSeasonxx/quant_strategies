@@ -105,6 +105,26 @@ def test_engine_backend_net_return_is_funding_inclusive():
     assert m["net_return"] < m["gross_return"]  # funding drags net below the price path
 
 
+def test_engine_backend_funding_can_flip_gated_net_negative():
+    # F2: the verdict gates on this net_return, and it is funding-inclusive. A perp
+    # with a profitable price path but a large funding cost has a *negative* gated
+    # net_return, so it cannot clear the validation net floors -- the exact economic
+    # correctness the pre-P0 funding-excluded "net" gate violated.
+    big_funding = rows()
+    big_funding[-1] = {
+        **big_funding[-1],
+        "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+        "funding_rate": 0.05,  # large positive funding rate; a long pays it
+        "has_funding_event": True,
+    }
+    result = EngineBackend().run(decisions=[decision()], rows=big_funding, config=scenario_config())
+    m = result.metrics
+    assert m["gross_return"] > 0.0  # price path alone is profitable
+    assert m["funding_return"] == pytest.approx(-0.05)
+    assert m["net_return"] < 0.0  # but the funding-inclusive gated number is a loss
+    assert m["net_return"] == pytest.approx(m["gross_return"] - 0.05)
+
+
 def test_engine_backend_metrics_feed_backend_metrics_contract():
     from quant_strategies.validation.backends import BackendMetrics
 

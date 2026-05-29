@@ -119,7 +119,7 @@ def execute_strategy_run(
         )
     rows = normalized_rows.projection_rows()
     row_hash = normalized_rows.normalized_rows_sha256
-    evidence = compact_evidence_quality(normalized_rows.evidence_quality(causality_verified=False))
+    evidence = compact_evidence_quality(normalized_rows.evidence_quality())
     strategy_rows = frozen_rows(rows)
     strategy_params = frozen_params(validated_params)
 

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 import quant_strategies.validation as validation
+from quant_strategies.causality import strict_replay_boundaries
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.runner.data_loader import LoadedData
@@ -370,6 +371,46 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
     assert audit["windows"][0]["violations"] == ["hidden_lookahead_suppression_detected"]
 
 
+def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_disabled(
+    tmp_path: Path,
+    monkeypatch,
+):
+    # F3: strict suppression replay is decoupled from paper_readiness. Even with
+    # paper_readiness explicitly disabled, a peek-to-suppress strategy is caught on
+    # the default validation path (previously this path ran emitted-only replay).
+    candidate = write_candidate(tmp_path)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml").read_text()
+        + "\n[paper_readiness]\nenabled = false\n"
+    )
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
+        "        return []\n"
+        "    return [StrategyDecision(\n"
+        "        decision_id='demo:suppressed',\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config: LoadedData(rows=rows()),
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("hidden_lookahead_suppression_detected",)
+    assert result.failure_stage == "data_audit"
+
+
 def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     tmp_path: Path,
     monkeypatch,
@@ -455,7 +496,7 @@ def test_strict_replay_boundaries_dedupe_shared_row_information_sets():
         mode="retained",
     )
 
-    boundaries = validation._strict_replay_boundaries(normalized, [])
+    boundaries = strict_replay_boundaries(normalized, [])
 
     assert [
         (boundary.as_of_time, boundary.decision_time, boundary.symbols)
