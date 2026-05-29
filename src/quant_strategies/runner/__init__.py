@@ -38,6 +38,7 @@ class RunResult:
     failure_stage: str | None = None
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
+    param_contract: str = "validated"
     artifact_trust_tier: str | None = None
     data_availability_status: str | None = None
     availability_coverage: dict[str, object] | None = None
@@ -185,6 +186,7 @@ def run_config(
         failure_stage=None,
         assessment_status=assessment_status,
         promotion_eligible=False,
+        param_contract=execution.param_contract,
         artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
         **artifacts.run_result_evidence_fields(evidence_quality),
     )
@@ -471,6 +473,7 @@ def _write_completion_artifacts(
                 engine=engine_summary,
                 assessment_status=assessment_status,
                 evidence_quality=evidence_quality,
+                param_contract=execution.param_contract,
             ),
         )
     return assessment_status, notes.strip()

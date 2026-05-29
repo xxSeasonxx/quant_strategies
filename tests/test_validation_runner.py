@@ -24,6 +24,13 @@ AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 
 
+def _validated(generate):
+    # Validation requires a strategy-level validate_params; injected test
+    # strategies attach a trivial one so they reach the stage under test.
+    generate.validate_params = lambda params: dict(params)
+    return generate
+
+
 def write_candidate(
     tmp_path: Path,
     *,
@@ -33,6 +40,8 @@ def write_candidate(
     candidate.mkdir(parents=True)
     strategy_text = (
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -333,6 +342,8 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
@@ -384,6 +395,8 @@ def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_
     )
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
@@ -417,6 +430,8 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -449,6 +464,8 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     suppressed = write_candidate(tmp_path / "suppressed")
     (suppressed / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
@@ -905,6 +922,8 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -935,6 +954,8 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    future_rows = [row for row in rows if row['timestamp'] > rows[0]['timestamp']]\n"
         "    size = 2.0 if len(future_rows) > 1 else 1.0\n"
@@ -965,6 +986,8 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 3:\n"
         "        raise RuntimeError('need future row')\n"
@@ -998,7 +1021,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
-        lambda path, repo_root: lambda loaded_rows, params: [decision("other")],
+        lambda path, repo_root: _validated(lambda loaded_rows, params: [decision("other")]),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1018,7 +1041,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
-        lambda path, repo_root: lambda loaded_rows, params: "not decisions",
+        lambda path, repo_root: _validated(lambda loaded_rows, params: "not decisions"),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1078,6 +1101,8 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -1122,6 +1147,8 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
 def _long_strategy_text() -> str:
     return (
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -1236,6 +1263,8 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
@@ -1425,6 +1454,8 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
 def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    rows[0]['close'] = 999.0\n"
         "    return []\n"
@@ -1448,6 +1479,8 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
 def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    params['weight'] = 2.0\n"
         "    return []\n"
@@ -1477,7 +1510,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
 
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
-        lambda path, repo_root: raise_generation_error,
+        lambda path, repo_root: _validated(raise_generation_error),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -1601,7 +1634,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
 
     monkeypatch.setattr(
         "quant_strategies.runner.execution._load_strategy",
-        lambda path, repo_root: exit_generation,
+        lambda path, repo_root: _validated(exit_generation),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -1819,3 +1852,37 @@ def test_run_validation_artifact_write_failure_returns_structured_result(
     # Verdict was computed before the failed write; the structured result still carries it.
     assert result.decision.decision == "watchlist"
     assert "artifact write failed" in result.message
+
+
+def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkeypatch):
+    # F18: validation must not produce a paper-readiness verdict on unvalidated
+    # params. A schema-less strategy fails fast at the param_validation stage.
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("param_validation_failed",)
+    assert result.failure_stage == "param_validation"
+    assert backend.calls == 0
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert "validate_params" in audit["windows"][0]["violations"][0]

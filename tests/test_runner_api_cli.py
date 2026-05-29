@@ -28,6 +28,7 @@ SUMMARY_KEYS = {
     "engine",
     "run_completed",
     "assessment_status",
+    "param_contract",
     "artifact_profile",
     "artifact_trust_tier",
     "evidence_class",
@@ -2149,3 +2150,21 @@ def test_run_cli_backstops_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     assert code == 1
     assert "run failed" in capsys.readouterr().out
+
+
+def test_run_config_flags_unvalidated_passthrough_on_quick_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The default demo strategy defines no validate_params: the quick run completes
+    # but is visibly flagged as exploratory (params not schema-checked).
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.param_contract == "unvalidated_passthrough"
+    summary = json.loads((result.result_dir / "summary.json").read_text())
+    assert summary["param_contract"] == "unvalidated_passthrough"

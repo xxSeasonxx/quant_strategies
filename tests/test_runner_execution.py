@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -111,7 +112,7 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     config = write_config(tmp_path)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
-    result = execute_strategy_run(config, repo_root=tmp_path)
+    result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert result.validated_params == {"weight": 1.0}
     assert tuple(dict(row) for row in result.loaded_rows) == tuple(loaded_rows)
@@ -136,7 +137,7 @@ def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: generate_decisions)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=normalized))
 
-    result = execute_strategy_run(config, repo_root=tmp_path)
+    result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert result.normalized_rows is normalized
     assert result.loaded_rows is normalized.projection_rows()
@@ -156,7 +157,7 @@ def test_execute_strategy_run_maps_strategy_import_failure(
     monkeypatch.setattr(execution, "_load_strategy", fail_load_strategy)
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "strategy file missing"
     assert error.value.stage == "strategy_import"
@@ -186,7 +187,7 @@ def test_execute_strategy_run_maps_param_validation_failure(
     monkeypatch.setattr(execution, "load_data", load_data)
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "param validation failed: unknown weight"
     assert error.value.stage == "param_validation"
@@ -217,7 +218,7 @@ def test_execute_strategy_run_maps_param_validation_system_exit(
     monkeypatch.setattr(execution, "load_data", load_data)
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "param validation exited: params exited"
     assert error.value.stage == "param_validation"
@@ -240,7 +241,7 @@ def test_execute_strategy_run_maps_data_load_failure(
     monkeypatch.setattr(execution, "load_data", fail_load_data)
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "data load returned no rows"
     assert error.value.stage == "data_load"
@@ -259,7 +260,7 @@ def test_execute_strategy_run_invalid_decision_output_carries_loaded_context(
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "invalid_decision_output[0]"
     assert error.value.stage == "decision_generation"
@@ -288,7 +289,7 @@ def test_execute_strategy_run_maps_generation_exception_with_loaded_context(
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     with pytest.raises(StrategyExecutionError) as error:
-        execute_strategy_run(config, repo_root=tmp_path)
+        execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert str(error.value) == "strategy execution failed: boom"
     assert error.value.stage == "decision_generation"
@@ -316,10 +317,55 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: flat_decision_strategy)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
-    result = execute_strategy_run(config, repo_root=tmp_path)
+    result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
     assert tuple(dict(row) for row in result.loaded_rows) == tuple(loaded_rows)
     assert result.loaded_rows == result.normalized_rows.projection_rows()
     assert result.decisions == [decision(direction="flat", size=0.0)]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"
+
+
+_SCHEMALESS_STRATEGY = (
+    "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+    "def generate_decisions(rows, params):\n"
+    "    return [StrategyDecision(\n"
+    "        strategy_id='demo',\n"
+    "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
+    "        decision_time=rows[0]['timestamp'],\n"
+    "        as_of_time=rows[0]['timestamp'],\n"
+    "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+    "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+    "    )]\n"
+)
+
+
+def test_execute_strategy_run_flags_schemaless_passthrough(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    # No validate_params + runner default (require_param_validator=False): the run
+    # completes but the params are flagged as unvalidated passthrough.
+    write_strategy(tmp_path, _SCHEMALESS_STRATEGY)
+    config = write_config(tmp_path)
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
+
+    assert result.param_contract == "unvalidated_passthrough"
+    assert result.validated_params == {"weight": 1.0}
+
+
+def test_execute_strategy_run_requires_validate_params_when_spec_demands_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The validation run sets require_param_validator=True; a schema-less strategy
+    # then fails fast at the param_validation stage (no verdict on unvalidated params).
+    write_strategy(tmp_path, _SCHEMALESS_STRATEGY)
+    config = write_config(tmp_path)
+    spec = replace(config.to_execution_spec(), require_param_validator=True)
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    with pytest.raises(StrategyExecutionError) as excinfo:
+        execute_strategy_run(spec, repo_root=tmp_path)
+
+    assert excinfo.value.stage == "param_validation"
+    assert "validate_params" in str(excinfo.value)

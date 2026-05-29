@@ -44,6 +44,7 @@ class StrategyExecutionResult:
     decisions: list[StrategyDecision]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
+    param_contract: str = "validated"
 
 
 class StrategyExecutionError(RunnerError):
@@ -85,7 +86,11 @@ def execute_strategy_run(
         raise StrategyExecutionError("strategy_import", str(exc)) from exc
 
     try:
-        validated_params = validate_strategy_params(generate_decisions, config.params)
+        validated_params, had_param_validator = validate_strategy_params(
+            generate_decisions,
+            config.params,
+            require_validator=config.require_param_validator,
+        )
     except SystemExit as exc:
         raise StrategyExecutionError(
             "param_validation",
@@ -168,6 +173,7 @@ def execute_strategy_run(
         decisions=decisions,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,
+        param_contract="validated" if had_param_validator else "unvalidated_passthrough",
     )
 
 

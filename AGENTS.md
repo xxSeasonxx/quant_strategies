@@ -29,6 +29,12 @@ process Season approves.
 - Use public `quant_data` loader APIs only. Data materialization, refresh,
 backfill, repair, and source joining belong upstream in `quant-data`.
 Document and provide feedback to Season on any limitation of `quant_data`.
+- A strategy may define an optional `validate_params` hook. It is optional for
+quick runs (a schema-less run still completes but is flagged
+`param_contract="unvalidated_passthrough"`), but **required** for validation
+runs — a candidate without `validate_params` is refused with
+`failure_stage="param_validation"`. Define a real schema before validation-running
+an agent-generated candidate.
 - Write or update tests before moving a strategy from `untested/` to `tested/`.
 - Every strategy needs a short rationale docstring covering the actual strategy
 source/provenance, market

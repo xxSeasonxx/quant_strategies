@@ -81,3 +81,7 @@ class StrategyExecutionSpec:
     params: dict[str, Any] = field(default_factory=dict)
     fill_model: FillModelConfig = field(default_factory=FillModelConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
+    # The validation run sets this so a missing `validate_params` is a hard error
+    # (no paper-readiness verdict on unvalidated params); the runner quick-run
+    # leaves it False and instead flags schema-less runs as exploratory.
+    require_param_validator: bool = False

@@ -206,6 +206,7 @@ class ValidationConfig(ValidationConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            require_param_validator=True,
         )
 
 

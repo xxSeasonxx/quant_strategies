@@ -278,6 +278,7 @@ result.message
 result.run_completed
 result.failure_stage
 result.assessment_status
+result.param_contract
 result.artifact_trust_tier
 result.data_availability_status
 result.availability_coverage
@@ -290,6 +291,14 @@ For ranking, read structured artifacts from `result.result_dir`, especially
 `summary.json` for summary-profile runs. Do not parse `notes.md` as the primary
 machine interface. The evidence-quality fields exposed on `RunResult` are also
 written to `summary.json` and `data_manifest.json` for audit and replay.
+
+`param_contract` is `"validated"` when the strategy defines a `validate_params`
+hook and `"unvalidated_passthrough"` when it does not. A schema-less quick run
+still completes, but treat `"unvalidated_passthrough"` as exploratory evidence:
+typo'd or stale params pass through unchecked. The validation run is stricter —
+a candidate without `validate_params` is refused with `hard_no` and
+`failure_stage = "param_validation"`, so give an agent-generated candidate a real
+param schema before validation-running it.
 
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.

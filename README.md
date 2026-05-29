@@ -26,6 +26,15 @@ The real guarantee is the contract plus review; the lint is the cheap first
 line of defense. Compute on the rows you were handed (e.g. pandas math) is fine;
 loading new data is not.
 
+Strategies may define an optional `validate_params(params) -> Mapping` hook that
+validates and normalizes params before a run. It is optional for the quick run: a
+schema-less strategy still runs, but the result is flagged
+`param_contract = "unvalidated_passthrough"` (on `RunResult` and in `summary.json`)
+so the run is visibly exploratory. The validation run **requires** it — a candidate
+without `validate_params` is refused (`hard_no`, `failure_stage = "param_validation"`),
+because a paper-readiness verdict must not rest on params that were never
+schema-checked (a typo'd or stale knob would otherwise pass through silently).
+
 The canonical default output is `StrategyDecision`. Decisions carry a stable
 `decision_id`, instrument, open intent, decision time, as-of time, target,
 `ExitPolicy(max_hold_bars=...)`, optional exit controls, metadata, and

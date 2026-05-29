@@ -346,6 +346,7 @@ def summary_payload(
     engine: dict[str, object],
     assessment_status: str,
     evidence_quality: dict[str, object],
+    param_contract: str = "validated",
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
@@ -362,6 +363,9 @@ def summary_payload(
         "engine": engine_payload,
         "run_completed": True,
         "assessment_status": assessment_status,
+        # "unvalidated_passthrough" when the strategy defines no validate_params:
+        # the quick-run still ran but its params were not schema-checked.
+        "param_contract": param_contract,
         **semantics,
         **evidence_quality,
     }
