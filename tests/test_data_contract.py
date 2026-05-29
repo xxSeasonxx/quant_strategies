@@ -191,10 +191,8 @@ def test_search_missing_available_at_warns_without_failing_validation_mode_error
     }
 
 
-@pytest.mark.parametrize("mode", [RowContractMode.VALIDATION, RowContractMode.RETAINED])
-def test_missing_and_invalid_available_at_error_in_validation_and_retained_modes(
-    mode: RowContractMode,
-):
+def test_missing_and_invalid_available_at_error_in_validation_mode():
+    mode = RowContractMode.VALIDATION
     missing_row = valid_row()
     del missing_row["available_at"]
     missing_rows = NormalizedRows.from_rows(config(), [missing_row], mode=mode)

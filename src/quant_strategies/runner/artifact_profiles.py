@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.data_contract import json_safe_value
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.runner.config import RunConfig
@@ -113,30 +112,6 @@ def row_ranges_by_symbol(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[st
         summary["min_timestamp"] = json_safe_value(summary["min_timestamp"])
         summary["max_timestamp"] = json_safe_value(summary["max_timestamp"])
     return dict(sorted(by_symbol.items()))
-
-
-def json_safe_value(value: Any) -> Any:
-    if isinstance(value, datetime | date):
-        return value.isoformat()
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, Decimal):
-        numeric = float(value)
-        return numeric if math.isfinite(numeric) else None
-    if hasattr(value, "item") and callable(value.item):
-        try:
-            return json_safe_value(value.item())
-        except (TypeError, ValueError):
-            pass
-    if isinstance(value, Mapping):
-        return {str(key): json_safe_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [json_safe_value(item) for item in value]
-    try:
-        json.dumps(value, allow_nan=False)
-    except (TypeError, ValueError):
-        return str(value)
-    return value
 
 
 def _rows_profile_payload(

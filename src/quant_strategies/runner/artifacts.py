@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows, RowContractMode, json_safe_value
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
     artifact_trust_tier_for_profile,
@@ -21,10 +21,7 @@ from quant_strategies.provenance import (
     source_identity,
 )
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.artifact_profiles import (
-    canonical_row_line,
-    json_safe_value,
-)
+from quant_strategies.runner.artifact_profiles import canonical_row_line
 
 
 ROW_CONTRACT_ISSUE_SAMPLE_SIZE = 25
@@ -198,7 +195,6 @@ def write_data_manifest(
         },
         "normalized_rows_sha256": normalized.normalized_rows_sha256,
         "metric_semantics": smoke_score_metric_semantics(config.data.kind),
-        "metadata_field_coverage": normalized.metadata_field_coverage,
         **quality,
     }
     _write_json(result_dir / "data_manifest.json", payload)

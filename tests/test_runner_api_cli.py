@@ -728,9 +728,6 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     assert request["bars"][0]["funding_timestamp"] == "2024-01-01T00:00:00Z"
     assert request["bars"][0]["funding_rate"] == 0.0001
     assert request["bars"][0]["has_funding_event"] is True
-    manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert manifest["metadata_field_coverage"]["available_at"] == {"present": 4, "total": 4}
-    assert manifest["metadata_field_coverage"]["quote_ingested_at"] == {"present": 4, "total": 4}
 
 
 def test_run_config_marks_complete_available_at_coverage(

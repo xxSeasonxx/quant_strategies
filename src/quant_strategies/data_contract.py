@@ -19,7 +19,6 @@ from quant_strategies.evidence_semantics import causality_evidence_fields
 class RowContractMode(StrEnum):
     SEARCH = "search"
     VALIDATION = "validation"
-    RETAINED = "retained"
 
 
 RowContractReason = Literal[
@@ -38,13 +37,6 @@ RowContractSeverity = Literal["warning", "error"]
 _BASE_REQUIRED_FIELDS = ("symbol", "timestamp", "open", "high", "low", "close")
 _OHLC_FIELDS = ("open", "high", "low", "close")
 _QUOTE_FIELDS = ("bid", "ask", "mid")
-_METADATA_COVERAGE_FIELDS = (
-    "available_at",
-    "bar_ingested_at",
-    "quote_ingested_at",
-    "funding_ingested_at",
-    "joined_refreshed_at",
-)
 _ISSUE_SAMPLE_SIZE = 25
 
 
@@ -174,7 +166,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     duplicate_key_count: int
     _storage: tuple[tuple[tuple[str, Any], ...], ...] = field(repr=False)
     _range_items: tuple[tuple[str, tuple[tuple[str, Any], ...]], ...] = field(repr=False)
-    _metadata_field_items: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = field(repr=False)
     _availability_coverage_items: tuple[tuple[str, Any], ...] = field(repr=False)
     _issue_reason_items: tuple[tuple[str, int], ...] = field(repr=False)
     _missing_required_field_items: tuple[tuple[str, int], ...] = field(repr=False)
@@ -210,8 +201,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         issues = _IssueAccumulator(sample_size=_ISSUE_SAMPLE_SIZE)
         valid_available_at = 0
         invalid_available_at = 0
-        metadata_present = {field_name: 0 for field_name in _METADATA_COVERAGE_FIELDS}
-        metadata_seen: set[str] = set()
         seen_keys: set[tuple[str, Any]] = set()
         duplicate_key_count = 0
 
@@ -293,12 +282,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                     normalized["available_at"] = parsed_available_at
                     valid_available_at += 1
 
-            for field_name in _METADATA_COVERAGE_FIELDS:
-                if field_name in normalized:
-                    metadata_seen.add(field_name)
-                    if normalized.get(field_name) is not None:
-                        metadata_present[field_name] += 1
-
             if symbol is not None and "timestamp" in normalized:
                 key_timestamp = _duplicate_timestamp_key(
                     parsed_timestamp=parsed_timestamp,
@@ -342,11 +325,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         }
         if invalid_available_at:
             availability_coverage["invalid"] = invalid_available_at
-        metadata_field_coverage = {
-            field_name: {"present": metadata_present[field_name], "total": total}
-            for field_name in _METADATA_COVERAGE_FIELDS
-            if field_name in metadata_seen
-        }
 
         return cls(
             mode=contract_mode,
@@ -359,7 +337,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             duplicate_key_count=duplicate_key_count,
             _storage=storage,
             _range_items=_range_items(normalized_rows),
-            _metadata_field_items=_mapping_items(metadata_field_coverage),
             _availability_coverage_items=tuple(availability_coverage.items()),
             _issue_reason_items=issues.issue_reason_items(),
             _missing_required_field_items=issues.missing_required_field_items(),
@@ -419,13 +396,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         }
 
     @property
-    def metadata_field_coverage(self) -> dict[str, dict[str, int]]:
-        return {
-            field_name: dict(items)
-            for field_name, items in self._metadata_field_items
-        }
-
-    @property
     def availability_coverage(self) -> dict[str, Any]:
         return dict(self._availability_coverage_items)
 
@@ -449,7 +419,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             "timestamp_status": self._timestamp_status(),
             "duplicate_key_count": self.duplicate_key_count,
             "funding_event_missing_fields": dict(self._funding_event_missing_field_items),
-            "freshness_status": "not_evaluated",
             "quant_data_feedback": self._quant_data_feedback(),
             "issues": [issue.to_jsonable() for issue in self.issues],
             "issue_count": self.issue_count,

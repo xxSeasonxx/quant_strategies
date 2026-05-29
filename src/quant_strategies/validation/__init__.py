@@ -94,13 +94,6 @@ class _ValidationState:
 _MIN_VALIDATION_TRADES = 10
 
 
-def _validation_row_contract_mode(config: Any) -> RowContractMode:
-    paper_readiness = getattr(config, "paper_readiness", None)
-    if bool(getattr(paper_readiness, "enabled", False)):
-        return RowContractMode.RETAINED
-    return RowContractMode.VALIDATION
-
-
 def run_validation(
     config_path: str | Path,
     *,
@@ -152,7 +145,9 @@ def run_validation(
             event_emitter=events,
         )
 
-    row_contract_mode = _validation_row_contract_mode(config)
+    # Validation always uses the validation row contract; strict replay is always
+    # on (Phase 1) and paper_readiness governs only the readiness gates.
+    row_contract_mode = RowContractMode.VALIDATION
     context = _ValidationContext(
         repo_root=root,
         path_base=path_base,
