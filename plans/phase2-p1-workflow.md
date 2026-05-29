@@ -28,7 +28,12 @@ vocabulary.
 ### 2c — Docs: side-by-side vocab table (F6 d)
 - Update `README.md` and `docs/quant-autoresearch-consumer.md` with a single table distinguishing: quick-run (`run` / `run_config`, engine `screen`|`validate` gating, `row_contract` strictness, `artifact_profile` verbosity, `artifact_trust_tier`) vs the validation run (`validate` / `run_validation`). Explicitly call out that runner `mode="validate"` is *engine smoke-gating*, not the validation package.
 
-### 2d — F6 mode rename — DEFERRED (decision recorded)
+### 2d — F6 mode rename — DONE in Phase 4a (was deferred, then completed)
+
+**UPDATE:** completed in Phase 4a (`validate`→`gate` across engine/runner/tests/docs
++ 15 frozen `researched/` configs migrated). The deferral rationale below is kept
+for history; Season directed "finish the goal," so it was executed.
+
 **Decision: not executed overnight.** Renaming the runner/engine `validate` mode to
 `gate` would change the `mode` literal in `EvidencePacket`/`GatingReport`/`ScreeningResult`,
 which is serialized into `evidence.json` and `summary.json` — a **breaking change to the

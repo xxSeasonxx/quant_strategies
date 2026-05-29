@@ -37,7 +37,13 @@ and to splitting `data_contract.py`'s normalization vs serialization. These are
 further mechanical relocations; left as a follow-up to keep this change bounded
 and individually reviewable.
 
-### 3d — F9 neutral execution spec — DEFERRED (decision recorded)
+### 3d — F9 neutral execution spec — DONE in Phase 4b (was deferred, then completed)
+
+**UPDATE:** completed in Phase 4b (neutral `StrategyExecutionSpec` in core; validation
+no longer imports `runner.config`; AST test enforces it). The F10 remainder
+(runner/__init__ split, data_contract `json_safe_value` extraction) completed in
+Phase 4c. The deferral rationale below is kept for history.
+
 **Not executed overnight.** Validation threads `run_config` (a runner `RunConfig`)
 and `StrategyExecutionResult` through ~10 functions and calls the shared
 `execute_strategy_run`; the clean fix (a neutral `StrategyExecutionSpec` both
