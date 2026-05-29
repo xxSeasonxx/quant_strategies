@@ -565,30 +565,36 @@ def _failure_result(
     notes = artifacts.failure_notes(stage, message)
     quality = evidence_quality or artifacts.evidence_quality(config, [])
     emitter = event_emitter or RunnerStageEmitter()
-    with emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage=stage):
-        artifacts.write_notes(result_dir, notes)
-        artifacts.write_run_manifest(
-            result_dir,
-            repo_root=repo_root,
-            evidence=runner_evidence_semantics(config.data.kind),
-            artifact_profile=config.output.artifact_profile,
-        )
-        artifacts.write_summary(
-            result_dir,
-            artifacts.summary_payload(
-                config,
-                status="failed",
-                stage=stage,
-                failure_stage=stage,
-                message=message,
-                engine={"passed": None, "trade_count": None},
-                assessment_status="runner_failed",
-                evidence_quality=quality,
-            ),
-        )
+    notes_path: Path | None = result_dir / "notes.md"
+    try:
+        with emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage=stage):
+            artifacts.write_notes(result_dir, notes)
+            artifacts.write_run_manifest(
+                result_dir,
+                repo_root=repo_root,
+                evidence=runner_evidence_semantics(config.data.kind),
+                artifact_profile=config.output.artifact_profile,
+            )
+            artifacts.write_summary(
+                result_dir,
+                artifacts.summary_payload(
+                    config,
+                    status="failed",
+                    stage=stage,
+                    failure_stage=stage,
+                    message=message,
+                    engine={"passed": None, "trade_count": None},
+                    assessment_status="runner_failed",
+                    evidence_quality=quality,
+                ),
+            )
+    except OSError:
+        # Artifacts could not be persisted; return the structured failure (original
+        # stage) rather than letting a raw filesystem error escape to the caller.
+        notes_path = None
     return RunResult(
         result_dir=result_dir,
-        notes_path=result_dir / "notes.md",
+        notes_path=notes_path,
         message=notes.strip(),
         run_completed=True,
         failure_stage=stage,

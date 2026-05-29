@@ -134,10 +134,11 @@ evidence was produced, `1` means infrastructure or execution failed, `2` means
 validation completed with `hard_no`, and `3` means data readiness or audit
 failed. Programmatic callers should use `run_completed`, `failure_stage`,
 `assessment_status`, verdicts, trust tier, causality/data fields, row contract,
-and smoke metrics instead of any single completion flag. Artifact I/O errors
-(result-directory creation or artifact writes) are surfaced as structured
-results with `failure_stage` `artifact_initialization` or `artifact_write`
-(exit `1`), never as a raw traceback.
+and smoke metrics instead of any single completion flag. Artifact I/O errors are
+routed to structured results rather than raw exceptions: result-directory
+creation, the final artifact write, and failure-result writes return a
+`failure_stage` of `artifact_initialization` or `artifact_write` (exit `1`). The
+CLI additionally backstops any remaining filesystem error as a clean exit `1`.
 
 Runner summaries and data manifests include evidence-quality fields:
 `data_availability_status`, `availability_coverage`, `row_contract`,

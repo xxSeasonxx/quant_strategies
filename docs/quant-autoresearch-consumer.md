@@ -301,6 +301,13 @@ a candidate without `validate_params` is refused with `hard_no` and
 `failure_stage = "param_validation"`, so give an agent-generated candidate a real
 param schema before validation-running it.
 
+`failure_stage` names the stage that failed. Data stages (`data_readiness`,
+`observation_audit`, `data_audit`, `validation_readiness`) map to CLI exit `3`;
+all other stages — including the infrastructure stages `artifact_initialization`
+and `artifact_write` (result-directory creation or artifact writes failing) — map
+to exit `1`. Artifact I/O failures on the result-directory, final-write, and
+failure-result paths are returned as structured results, not raised.
+
 Treat all runner output as smoke evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
 Use `assessment_status`, `causality_verified`, `data_availability_status`,

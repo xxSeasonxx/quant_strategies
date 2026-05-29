@@ -702,21 +702,27 @@ def _failure_result(
         reason,
         search_pressure=getattr(config, "search_pressure", None),
     )
-    _write_validation_artifacts(
-        result_dir=result_dir,
-        repo_root=repo_root,
-        path_base=path_base,
-        config=config,
-        config_path=config_path,
-        backend_name=backend_name,
-        decisions=decisions,
-        data_audits=data_audits,
-        data_provenance=data_provenance,
-        backend_results=backend_results,
-        decision=decision,
-        failure_details=failure_details or [],
-        event_emitter=event_emitter,
-    )
+    try:
+        _write_validation_artifacts(
+            result_dir=result_dir,
+            repo_root=repo_root,
+            path_base=path_base,
+            config=config,
+            config_path=config_path,
+            backend_name=backend_name,
+            decisions=decisions,
+            data_audits=data_audits,
+            data_provenance=data_provenance,
+            backend_results=backend_results,
+            decision=decision,
+            failure_details=failure_details or [],
+            event_emitter=event_emitter,
+        )
+    except OSError:
+        # Artifacts could not be persisted; still return the structured verdict with
+        # its original failure_stage rather than raising to the caller (every hard_no
+        # path routes through here, including API consumers with no CLI backstop).
+        pass
     return _validation_result(result_dir, decision, failure_stage=failure_stage)
 
 
@@ -823,15 +829,28 @@ def _event_failure_message(violations: Sequence[str], fallback: str) -> str:
     return "; ".join(violations) if violations else fallback
 
 
+def _write_scenario_jsonl(
+    *,
+    result_dir: Path,
+    subdir: str,
+    scenario_id: str,
+    records: Sequence[Any],
+) -> tuple[str, str]:
+    # Single home for the per-scenario JSONL artifact path + hash contract.
+    artifact_name = f"backend_runs/{subdir}/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
+    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(records)))
+    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+
+
 def _write_scenario_decision_records(
     *,
     result_dir: Path,
     scenario_id: str,
     decisions: list[StrategyDecision],
 ) -> tuple[str, str]:
-    artifact_name = f"backend_runs/decision_records/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
-    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(decisions))
-    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+    return _write_scenario_jsonl(
+        result_dir=result_dir, subdir="decision_records", scenario_id=scenario_id, records=decisions
+    )
 
 
 def _write_scenario_trade_ledger(
@@ -840,11 +859,10 @@ def _write_scenario_trade_ledger(
     scenario_id: str,
     trades: Sequence[Any],
 ) -> tuple[str, str]:
-    # Per-scenario engine trade ledger: each line is a Trade record. The gated
-    # net_return is recomputable as sum(trade.net_return) over this file.
-    artifact_name = f"backend_runs/trade_ledgers/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
-    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(trades)))
-    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+    # Per-scenario engine trade ledger: net_return is recomputable as sum(trade.net_return).
+    return _write_scenario_jsonl(
+        result_dir=result_dir, subdir="trade_ledgers", scenario_id=scenario_id, records=trades
+    )
 
 
 def _write_window_rows(

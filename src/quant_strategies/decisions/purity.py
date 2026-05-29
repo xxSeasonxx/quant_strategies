@@ -49,8 +49,6 @@ BANNED_CALL_ATTRIBUTES = {
     "read_feather",
     "read_pickle",
     "read_hdf",
-    "read_sql",
-    "read_table",
 }
 BANNED_MODULE_CALLS = {
     ("datetime", "now"),

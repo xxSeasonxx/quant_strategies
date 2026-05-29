@@ -2168,3 +2168,28 @@ def test_run_config_flags_unvalidated_passthrough_on_quick_run(
     assert result.param_contract == "unvalidated_passthrough"
     summary = json.loads((result.result_dir / "summary.json").read_text())
     assert summary["param_contract"] == "unvalidated_passthrough"
+
+
+def test_run_config_failure_path_artifact_write_error_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A failure path (data_load) routes through _failure_result; if its artifact
+    # write also fails, run_config must return a structured result, not raise.
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+
+    def fail_data_load(config, **_kwargs):
+        raise DataLoadError("no data")
+
+    monkeypatch.setattr(execution, "load_data", fail_data_load)
+
+    def raise_oserror(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(artifacts, "write_notes", raise_oserror)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.failure_stage == "data_load"
+    assert result.notes_path is None

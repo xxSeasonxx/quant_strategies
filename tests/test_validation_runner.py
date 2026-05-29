@@ -1894,9 +1894,31 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
     # F16: the gated net_return is recomputable from the emitted per-trade ledger.
     # No backend injected -> the engine is the verdict source and emits the ledger.
     candidate = write_candidate(tmp_path)
+    # Emit TWO causal decisions (at the first two bars, each depending only on its own
+    # row) so each scenario ledger holds >1 trade -- otherwise `sum == metric` is the
+    # tautology `x == x` and never exercises summation over the ledger.
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    out = []\n"
+        "    for i, row in enumerate(rows):\n"
+        "        if i < 2:\n"
+        "            out.append(StrategyDecision(\n"
+        "                strategy_id='demo',\n"
+        "                instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "                decision_time=row['timestamp'],\n"
+        "                as_of_time=row['timestamp'],\n"
+        "                target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "                exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "                observations=(ObservationRef(symbol='BTC-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
+        "            ))\n"
+        "    return out\n"
+    )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=_upward_rows(5)),
+        lambda config, **_kwargs: LoadedData(rows=_upward_rows(6)),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1909,6 +1931,8 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     ledgered = [item for item in backend_summary["results"] if item["trade_ledger_path"]]
     assert ledgered  # the engine emitted at least one per-trade ledger
+    # Guard against regressing to the tautological single-trade case.
+    assert any(item["result"]["metrics"]["trade_count"] >= 2 for item in ledgered)
     for item in ledgered:
         ledger_file = result.result_dir / item["trade_ledger_path"]
         assert item["trade_ledger_sha256"] == file_sha256(ledger_file)
@@ -1919,3 +1943,40 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
         assert len(trades) == metrics["trade_count"]
         # the verdict net_return is exactly the sum of the emitted per-trade net returns
         assert sum(t["net_return"] for t in trades) == pytest.approx(metrics["net_return"], abs=1e-9)
+
+
+def test_run_validation_failure_path_artifact_write_error_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch,
+):
+    # A hard_no path (here param_validation on a schema-less strategy) routes through
+    # _failure_result; if its artifact write fails, the structured verdict must still
+    # be returned, not raised -- API consumers have no CLI backstop.
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    def raise_oserror(**_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(validation, "_write_validation_artifacts", raise_oserror)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "hard_no"
+    assert result.failure_stage == "param_validation"
