@@ -2094,3 +2094,58 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
         for path in second.result_dir.iterdir()
         if path.is_file()
     }
+
+
+def test_run_config_artifact_initialization_failure_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+
+    def raise_oserror(config, **_kwargs):
+        raise PermissionError("results dir not writable")
+
+    monkeypatch.setattr(artifacts, "create_result_dir", raise_oserror)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.failure_stage == "artifact_initialization"
+    assert result.result_dir is None
+    assert result.run_completed is False
+    assert "artifact initialization failed" in result.message
+
+
+def test_run_config_completion_write_failure_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import quant_strategies.runner as runner_pkg
+
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+
+    def raise_oserror(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(runner_pkg, "_write_completion_artifacts", raise_oserror)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.failure_stage == "artifact_write"
+    assert result.run_completed is False
+    assert result.result_dir is not None
+    assert "artifact write failed" in result.message
+
+
+def test_run_cli_backstops_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    def raise_oserror(path, repo_root=None, **_kwargs):
+        raise PermissionError("results dir not writable")
+
+    monkeypatch.setattr("quant_strategies.runner.cli.run_config", raise_oserror)
+
+    code = cli.main(["run", "--repo-root", str(tmp_path), "run.toml"])
+
+    assert code == 1
+    assert "run failed" in capsys.readouterr().out

@@ -139,3 +139,15 @@ def test_validate_cli_events_jsonl_wires_validation_event_sink(
     assert "watchlist" in captured.out
     assert json.loads(captured.err)["event"] == "validation_stage"
     assert json.loads(captured.err)["stage"] == "window_execution"
+
+
+def test_validate_cli_backstops_oserror(monkeypatch, tmp_path: Path, capsys):
+    def raise_oserror(path, repo_root=None, **_kwargs):
+        raise PermissionError("results dir not writable")
+
+    monkeypatch.setattr("quant_strategies.runner.cli.run_validation", raise_oserror)
+
+    code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
+
+    assert code == 1
+    assert "validation failed" in capsys.readouterr().out

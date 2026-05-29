@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
 from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1768,3 +1767,55 @@ class InvalidStatusBackend:
             "warnings": (),
             "unsupported_semantics": (),
         }
+
+
+def test_run_validation_artifact_initialization_failure_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+
+    def raise_oserror(results_root, strategy_id):
+        raise PermissionError("results dir not writable")
+
+    monkeypatch.setattr(validation, "create_validation_result_dir", raise_oserror)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.failure_stage == "artifact_initialization"
+    assert result.result_dir is None
+    assert result.run_completed is False
+    assert result.decision.decision == "hard_no"
+    assert "artifact initialization failed" in result.message
+
+
+def test_run_validation_artifact_write_failure_returns_structured_result(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.02, "trade_count": 20},
+        )
+    )
+
+    def raise_oserror(**_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(validation, "_write_validation_artifacts", raise_oserror)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.failure_stage == "artifact_write"
+    assert result.run_completed is False
+    assert result.result_dir is not None
+    # Verdict was computed before the failed write; the structured result still carries it.
+    assert result.decision.decision == "watchlist"
+    assert "artifact write failed" in result.message

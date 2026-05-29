@@ -72,9 +72,17 @@ def run_config(
             failure_stage="config_load",
         )
 
-    with events.stage("artifact_initialization", strategy_id=config.strategy_id):
-        result_dir = artifacts.create_result_dir(config)
-        artifacts.initialize_run_artifacts(config_file, config, result_dir)
+    try:
+        with events.stage("artifact_initialization", strategy_id=config.strategy_id):
+            result_dir = artifacts.create_result_dir(config)
+            artifacts.initialize_run_artifacts(config_file, config, result_dir)
+    except OSError as exc:
+        return RunResult(
+            result_dir=None,
+            notes_path=None,
+            message=f"artifact initialization failed: {exc}",
+            failure_stage="artifact_initialization",
+        )
 
     try:
         with events.stage("strategy_execution", strategy_id=config.strategy_id):
@@ -150,15 +158,25 @@ def run_config(
     if failure is not None:
         return failure
 
-    assessment_status, notes = _write_completion_artifacts(
-        config,
-        result_dir,
-        execution,
-        engine_run,
-        evidence_quality,
-        repo_root=effective_repo_root,
-        event_emitter=events,
-    )
+    try:
+        assessment_status, notes = _write_completion_artifacts(
+            config,
+            result_dir,
+            execution,
+            engine_run,
+            evidence_quality,
+            repo_root=effective_repo_root,
+            event_emitter=events,
+        )
+    except OSError as exc:
+        # Engine ran and the verdict is known, but completion artifacts could not be
+        # written. Return a structured artifact_write failure instead of raising.
+        return RunResult(
+            result_dir=result_dir,
+            notes_path=None,
+            message=f"artifact write failed: {exc}",
+            failure_stage="artifact_write",
+        )
     return RunResult(
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",

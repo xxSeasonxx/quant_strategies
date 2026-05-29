@@ -113,12 +113,24 @@ def run_validation(
         config = load_validation_config(resolved_config_path)
         path_base = config.base_dir
 
-    with events.stage("artifact_initialization", strategy_id=config.strategy_id):
-        result_dir = create_validation_result_dir(config.output.results_dir, config.strategy_id)
-        _write_static_validation_artifacts(
-            result_dir=result_dir,
-            config=config,
-            config_path=resolved_config_path,
+    try:
+        with events.stage("artifact_initialization", strategy_id=config.strategy_id):
+            result_dir = create_validation_result_dir(config.output.results_dir, config.strategy_id)
+            _write_static_validation_artifacts(
+                result_dir=result_dir,
+                config=config,
+                config_path=resolved_config_path,
+            )
+    except OSError as exc:
+        # The result dir/static artifacts could not be written; there is no dir to
+        # write a failure manifest into, so return a structured result directly
+        # instead of letting a raw filesystem error escape to the caller/CLI.
+        return ValidationRunResult(
+            result_dir=None,
+            decision=_hard_no_decision("artifact_initialization_failed"),
+            message=f"artifact initialization failed: {exc}",
+            run_completed=False,
+            failure_stage="artifact_initialization",
         )
 
     state = _ValidationState()
@@ -167,21 +179,33 @@ def run_validation(
 
     with events.stage("policy_classification", strategy_id=config.strategy_id):
         decision = _classify_validation_state(context, state)
-    _write_validation_artifacts(
-        result_dir=result_dir,
-        repo_root=root,
-        path_base=path_base,
-        config=config,
-        config_path=resolved_config_path,
-        backend_name=backend_name,
-        decisions=state.all_decisions,
-        data_audits=state.data_audits,
-        data_provenance=state.data_provenance,
-        backend_results=state.backend_results,
-        decision=decision,
-        failure_details=[],
-        event_emitter=events,
-    )
+    try:
+        _write_validation_artifacts(
+            result_dir=result_dir,
+            repo_root=root,
+            path_base=path_base,
+            config=config,
+            config_path=resolved_config_path,
+            backend_name=backend_name,
+            decisions=state.all_decisions,
+            data_audits=state.data_audits,
+            data_provenance=state.data_provenance,
+            backend_results=state.backend_results,
+            decision=decision,
+            failure_details=[],
+            event_emitter=events,
+        )
+    except OSError as exc:
+        # Verdict was computed but its artifacts could not be persisted. Surface the
+        # computed decision with an artifact_write failure rather than re-routing
+        # through _failure_result (which would attempt the same write again).
+        return ValidationRunResult(
+            result_dir=result_dir,
+            decision=decision,
+            message=f"validation decision: {decision.decision}; artifact write failed: {exc}",
+            run_completed=False,
+            failure_stage="artifact_write",
+        )
     return _validation_result(result_dir, decision, failure_stage=state.failure_stage)
 
 

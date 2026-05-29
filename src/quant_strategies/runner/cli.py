@@ -36,14 +36,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "run":
-        if args.events_jsonl:
-            result = run_config(
-                args.config,
-                repo_root=args.repo_root,
-                event_sink=runner_jsonl_event_sink(sys.stderr),
-            )
-        else:
-            result = run_config(args.config, repo_root=args.repo_root)
+        try:
+            if args.events_jsonl:
+                result = run_config(
+                    args.config,
+                    repo_root=args.repo_root,
+                    event_sink=runner_jsonl_event_sink(sys.stderr),
+                )
+            else:
+                result = run_config(args.config, repo_root=args.repo_root)
+        except OSError as exc:
+            # Backstop: run_config routes artifact failures to structured results,
+            # but any filesystem error that still escapes becomes a clean exit, not
+            # a traceback.
+            print(f"run failed: {exc}")
+            return 1
         if _run_exit_code(result) == 0:
             print(result.result_dir)
             return 0
@@ -64,6 +71,11 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 result = run_validation(args.config, repo_root=args.repo_root)
         except ValidationError as exc:
+            print(f"validation failed: {exc}")
+            return 1
+        except OSError as exc:
+            # Backstop for filesystem errors that escape run_validation's structured
+            # artifact-failure handling.
             print(f"validation failed: {exc}")
             return 1
         print(f"{result.message}; artifacts: {result.result_dir}")
