@@ -138,7 +138,7 @@ def write_config(
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
-    mode: str = "validate",
+    mode: str = "gate",
     artifact_profile: str = "full",
     row_contract: str | None = None,
 ) -> Path:
@@ -521,7 +521,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
 
 def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, mode="validate")
+    config_path = write_config(tmp_path, mode="gate")
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -529,7 +529,7 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "validate"
+    assert summary["mode"] == "gate"
     assert summary["stage"] == "completed"
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False
@@ -548,7 +548,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
-    config_path = write_config(tmp_path, mode="validate")
+    config_path = write_config(tmp_path, mode="gate")
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -556,7 +556,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "validate"
+    assert summary["mode"] == "gate"
     assert summary["stage"] == "completed"
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False

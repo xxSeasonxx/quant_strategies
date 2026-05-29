@@ -339,7 +339,7 @@ def test_build_request_accepts_zero_decisions_as_no_op():
         "sum_signed_trade_activity_cost": 0.0,
         "sum_signed_trade_activity_net": 0.0,
     }
-    validate_run = evaluate_request(request, mode="validate")
+    validate_run = evaluate_request(request, mode="gate")
     assert validate_run.passed is False
     assert validate_run.validate_summary["screening_result"]["trade_count"] == 0
 
@@ -496,7 +496,7 @@ def test_evaluate_request_runs_screen_and_validate_apis():
     )
 
     screen_run = evaluate_request(request, mode="screen")
-    validate_run = evaluate_request(request, mode="validate")
+    validate_run = evaluate_request(request, mode="gate")
 
     assert screen_run.screen_summary["trade_count"] == 1
     assert validate_run.passed is True
@@ -514,7 +514,7 @@ def test_evaluate_request_can_skip_evidence_and_trade_serialization():
     )
 
     screen_run = evaluate_request(request, mode="screen", include_evidence=False)
-    validate_run = evaluate_request(request, mode="validate", include_evidence=False)
+    validate_run = evaluate_request(request, mode="gate", include_evidence=False)
 
     assert screen_run.evidence_json == ""
     assert "trades" not in screen_run.screen_summary

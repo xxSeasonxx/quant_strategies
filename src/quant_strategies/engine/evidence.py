@@ -11,7 +11,7 @@ def build_evidence_packet(
     screening_result: ScreeningResult | None = None,
     validation_report: GatingReport | None = None,
 ) -> EvidencePacket:
-    mode = "validate" if validation_report is not None else "screen"
+    mode = "gate" if validation_report is not None else "screen"
     return EvidencePacket(
         mode=mode,
         strategy_id=request.spec.strategy_id,

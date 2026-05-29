@@ -15,7 +15,7 @@ from quant_strategies.core.config import (
 from quant_strategies.runner.errors import ConfigError
 
 
-RunMode = Literal["screen", "validate"]
+RunMode = Literal["screen", "gate"]
 ArtifactProfile = Literal["full", "summary"]
 # Row-contract strictness is an EXPLICIT run policy, independent of artifact
 # verbosity (`artifact_profile`). The quick-run defaults to the lenient "search"

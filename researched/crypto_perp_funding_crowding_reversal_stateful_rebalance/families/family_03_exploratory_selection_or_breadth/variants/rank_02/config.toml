@@ -56,5 +56,5 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results/researched/crypto_perp_funding_crowding_reversal_stateful_rebalance/family_03_exploratory_selection_or_breadth/rank_02"
-mode = "validate"
+mode = "gate"
 artifact_profile = "full"

@@ -198,7 +198,7 @@ class ValidationConfig(ValidationConfigModel):
     def to_run_config(self, window: ValidationWindow, *, results_dir: Path) -> RunConfig:
         context = {"repo_root": self.base_dir}
         output = RunnerOutputConfig.model_validate(
-            {"results_dir": results_dir, "mode": "validate"},
+            {"results_dir": results_dir, "mode": "gate"},
             context=context,
         )
         return RunConfig.model_validate(

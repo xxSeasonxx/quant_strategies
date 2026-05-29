@@ -160,7 +160,7 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "validate"
+mode = "gate"
 artifact_profile = "summary"
 '''.lstrip()
     )

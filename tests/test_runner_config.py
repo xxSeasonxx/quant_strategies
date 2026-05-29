@@ -25,7 +25,7 @@ def write_config(
     strategy_path: str = "tested/demo.py",
     data_kind: str = "bars",
     dataset: str | None = "equity_1min",
-    output_mode: str = "validate",
+    output_mode: str = "gate",
     results_dir: str = "results",
     fill_price: str = "close",
     entry_lag_bars: int = 1,
@@ -145,7 +145,7 @@ def test_unknown_output_mode_is_rejected(tmp_path: Path):
 def test_summary_artifact_profile_is_accepted(tmp_path: Path):
     write_strategy(tmp_path)
     path = write_config(tmp_path)
-    path.write_text(path.read_text().replace('mode = "validate"\n', 'mode = "validate"\nartifact_profile = "summary"\n'))
+    path.write_text(path.read_text().replace('mode = "gate"\n', 'mode = "gate"\nartifact_profile = "summary"\n'))
 
     config = load_config(path, repo_root=tmp_path)
 
@@ -162,7 +162,7 @@ def test_full_artifact_profile_is_accepted_with_explicit_opt_in(tmp_path: Path):
 def test_unknown_artifact_profile_is_rejected(tmp_path: Path):
     write_strategy(tmp_path)
     path = write_config(tmp_path)
-    path.write_text(path.read_text().replace('mode = "validate"\n', 'mode = "validate"\nartifact_profile = "compact"\n'))
+    path.write_text(path.read_text().replace('mode = "gate"\n', 'mode = "gate"\nartifact_profile = "compact"\n'))
 
     with pytest.raises(ConfigError, match="artifact_profile"):
         load_config(path, repo_root=tmp_path)

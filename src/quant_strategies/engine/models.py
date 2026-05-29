@@ -159,7 +159,7 @@ class GateResult(EngineModel):
 
 
 class GatingReport(EngineModel):
-    mode: Literal["validate"] = "validate"
+    mode: Literal["gate"] = "gate"
     strategy_id: str
     passed: bool
     gates: tuple[GateResult, ...]
@@ -168,7 +168,7 @@ class GatingReport(EngineModel):
 
 class EvidencePacket(EngineModel):
     schema_version: Literal["quant_strategies.engine.evidence/v3"] = EVIDENCE_SCHEMA_VERSION
-    mode: Literal["screen", "validate"]
+    mode: Literal["screen", "gate"]
     strategy_id: str
     screening_result: ScreeningResult | None = None
     validation_report: GatingReport | None = None

@@ -87,7 +87,7 @@ the decisions, fill model, cost model, and exit policy. It reports
 screen still completes with `trade_count = 0` and zero smoke scores; this is a
 zero-opportunity search signal, not a runner infrastructure failure.
 
-With `[output] mode = "validate"`, the engine runs the same screen and applies
+With `[output] mode = "gate"`, the engine runs the same screen and applies
 smoke gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and
 `positive_net`. Passing gates produce `assessment_status = "smoke_passed"` only
 when hidden-lookahead replay passes and all rows carry `available_at`. Passing
@@ -96,7 +96,7 @@ gates with missing or partial `available_at` produce `assessment_status =
 gates are mechanical checks only; they do not test statistical significance,
 regime robustness, capacity, or execution quality.
 
-A `mode = "validate"` run with no decisions also completes normally, but fails
+A `mode = "gate"` run with no decisions also completes normally, but fails
 the smoke gates as `assessment_status = "smoke_failed"` because `min_trades`
 is not met.
 

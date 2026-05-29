@@ -243,15 +243,15 @@ is never a side effect of asking for richer artifacts.
 | Surface / knob | Values | Controls | Notes |
 |---|---|---|---|
 | quick run | `quant-strategies run` / `run_config` | the fast `search_only` quick-run | iterate and rank here |
-| validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | **distinct from `mode = "validate"`** |
-| `[output] mode` | `screen` \| `validate` | engine quick-run scoring (`screen`) vs engine smoke-**gating** (`validate`) — NOT the validation run | `validate` mode only applies `valid_inputs`/`min_trades` gates to the quick run |
+| validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
+| `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs engine smoke-**gating** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` gates to the quick run |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
 | `artifact_profile` | `summary` \| `full` | artifact verbosity | never changes pass/fail |
 | `artifact_trust_tier` | `search_only` \| `audit_replayable` | derived replayability label | follows `artifact_profile`; not set directly |
 
-Note the two senses of "validate": the `quant-strategies validate` command runs
-the validation package (windows, scenarios, verdict), while `[output] mode =
-"validate"` only asks the engine to apply smoke gates during a quick run.
+The quick-run mode that applies smoke gates is named `gate` (not `validate`), so
+"validate" now refers only to the validation package (`quant-strategies validate`
+/ `run_validation`) — the quick run never uses the word.
 
 Smoke scores are activity sums, not portfolio returns. The runner reports them
 under `smoke_score.sum_signed_trade_activity_gross`,
@@ -263,7 +263,7 @@ code does not compare smoke activity sums to NAV-path backend returns by name
 alone.
 
 A strategy may return `[]` when it finds no opportunity. In `screen` mode this
-is a completed zero-trade result with zero smoke scores. In `validate` mode it
+is a completed zero-trade result with zero smoke scores. In `gate` mode it
 is a completed `smoke_failed` result because the `min_trades` gate fails. Treat
 that as search evidence about the candidate, not as a runner failure.
 

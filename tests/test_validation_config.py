@@ -288,7 +288,7 @@ def test_validation_config_converts_to_run_config_with_config_base_dir(tmp_path:
     run_config = config.to_run_config(config.windows[0], results_dir=results_dir)
 
     assert isinstance(run_config, RunConfig)
-    assert run_config.output.mode == "validate"
+    assert run_config.output.mode == "gate"
     assert run_config.output.results_dir == results_dir
     assert run_config.data.start == date(2026, 1, 1)
     assert run_config.data.end == date(2026, 6, 30)

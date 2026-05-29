@@ -25,7 +25,7 @@ from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.errors import EvaluationRunError, RequestBuildError
 
 
-EngineMode = Literal["screen", "validate"]
+EngineMode = Literal["screen", "gate"]
 
 
 @dataclass(frozen=True)
@@ -89,7 +89,7 @@ def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_ev
             else None
         )
         return EngineRun(
-            mode="validate",
+            mode="gate",
             screen_summary=(
                 _screen_summary(report.screening_result, include_trades=include_evidence)
                 if report.screening_result is not None
