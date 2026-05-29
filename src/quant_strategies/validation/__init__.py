@@ -130,12 +130,12 @@ def run_validation(
         )
 
     state = _ValidationState()
-    backend_name = config.backend
+    backend_name = config.verdict_source
 
     try:
-        with events.stage("backend_selection", backend=config.backend):
-            selected_backend = backend or get_backend(config.backend)
-            backend_name = _backend_name(selected_backend, config.backend)
+        with events.stage("backend_selection", backend=config.verdict_source):
+            selected_backend = backend or get_backend(config.verdict_source)
+            backend_name = _backend_name(selected_backend, config.verdict_source)
     except Exception as exc:
         return _failure_result(
             result_dir=result_dir,
@@ -436,9 +436,28 @@ def _run_window_scenarios(
     )
     state.required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
     for scenario in scenarios:
-        state.backend_results.append(
-            _run_scenario_backend(context, window, run_config, execution, scenario)
-        )
+        scenario_result = _run_scenario_backend(context, window, run_config, execution, scenario)
+        state.backend_results.append(scenario_result)
+        _record_agreement_failure(state, scenario_result)
+
+
+def _record_agreement_failure(
+    state: _ValidationState,
+    scenario_result: ScenarioBackendRunResult,
+) -> None:
+    agreement = scenario_result.agreement
+    if agreement is None or agreement.status != "fail":
+        return
+    state.failure_reasons.append(
+        "backend_agreement_failed:"
+        f"scenario={scenario_result.scenario_id}:"
+        f"engine_return={agreement.engine_return}:"
+        f"vbt_return={agreement.vbt_return}:"
+        f"abs_dev={agreement.abs_deviation}:"
+        f"tol_abs={agreement.tolerance_abs}:tol_rel={agreement.tolerance_rel}"
+    )
+    if state.failure_stage is None:
+        state.failure_stage = "agreement_oracle"
 
 
 def _run_scenario_backend(
@@ -493,6 +512,9 @@ def _run_scenario_backend(
                     "invalid_backend_result: expected BackendRunResult, "
                     f"got {type(raw_backend_result).__name__}",
                 )
+    agreement = _run_agreement_oracle(
+        context, scenario_config, decision_outcome, execution, backend_result
+    )
     return ScenarioBackendRunResult(
         window_id=window.id,
         scenario_id=scenario.id,
@@ -505,7 +527,41 @@ def _run_scenario_backend(
         decision_count=len(decision_outcome.decisions),
         decision_records_path=decision_records_path,
         decision_records_sha256=decision_records_sha256,
+        agreement=agreement,
     )
+
+
+def _run_agreement_oracle(
+    context: _ValidationContext,
+    scenario_config: ScenarioRunConfig,
+    decision_outcome: _ScenarioDecisionOutcome,
+    execution: _StrategyExecutionResult,
+    backend_result: BackendRunResult,
+):
+    """Opt-in cross-check of the engine verdict against VectorBT Pro.
+
+    Off by default. Runs only when the backend completed, reusing the verdict's
+    already-computed metrics (no re-screen). A divergence becomes a hard_no via
+    state.failure_reasons (see _record_agreement_failure). Any oracle error is
+    recorded as inconclusive and never crashes the run.
+    """
+    oracle = context.config.agreement_oracle
+    if not oracle.enabled or backend_result.status != "completed":
+        return None
+
+    from quant_strategies.validation.agreement import AgreementResult, evaluate_agreement
+
+    try:
+        return evaluate_agreement(
+            engine_metrics=backend_result.metrics,
+            decisions=list(decision_outcome.decisions),
+            rows=execution.normalized_rows.projection_rows(),
+            config=scenario_config,
+            tolerance_abs=oracle.tolerance_abs,
+            tolerance_rel=oracle.tolerance_rel,
+        )
+    except Exception as exc:  # never let the cross-check crash the verdict
+        return AgreementResult(status="inconclusive", note=f"agreement_oracle_error:{exc}")
 
 
 def _classify_validation_state(
@@ -830,6 +886,13 @@ def _safe_scenario_artifact_path(scenario_id: str) -> str:
     return "/".join(safe_parts)
 
 
+def _agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
+    # Emitted only when the opt-in oracle ran, so default artifacts are unchanged.
+    if item.agreement is None:
+        return {}
+    return {"agreement": item.agreement.as_dict()}
+
+
 def _backend_name(backend: ValidationBackend, fallback: str) -> str:
     name = getattr(backend, "name", fallback)
     return str(name) if name else fallback
@@ -899,6 +962,7 @@ def _write_validation_artifacts(
                         "decision_records_path": item.decision_records_path,
                         "decision_records_sha256": item.decision_records_sha256,
                         "result": item.result.model_dump(mode="json"),
+                        **_agreement_payload(item),
                     }
                     for item in backend_results
                 ]
@@ -927,6 +991,7 @@ def _write_validation_artifacts(
                         "warnings": item.result.warnings,
                         "unsupported_semantics": item.result.unsupported_semantics,
                         "classification_reasons": _scenario_classification_reasons(item),
+                        **_agreement_payload(item),
                     }
                     for item in backend_results
                 ],

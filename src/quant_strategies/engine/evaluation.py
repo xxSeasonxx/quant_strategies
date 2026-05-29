@@ -12,7 +12,7 @@ from quant_strategies.engine.bar_index import (
     attached_bar_index,
     build_bar_index,
 )
-from quant_strategies.funding import funding_rates_match
+from quant_strategies.funding import funding_return_over_window
 from quant_strategies.engine.models import (
     Bar,
     EvaluationRequest,
@@ -305,16 +305,22 @@ def _funding_return(
     if not indexed.has_funding_events:
         return 0.0
 
-    rates_by_timestamp: dict[datetime, float] = {}
-    for bar in indexed.funding_events_by_symbol.get(symbol, ()):
-        if bar.funding_timestamp is None or bar.funding_rate is None:
-            raise EvaluationError(f"incomplete funding event: {bar.symbol} at {bar.timestamp.isoformat()}")
-        if not entry_time < bar.funding_timestamp <= exit_time:
-            continue
-        existing = rates_by_timestamp.get(bar.funding_timestamp)
-        if existing is not None and not funding_rates_match(existing, bar.funding_rate):
-            raise EvaluationError(f"conflicting funding rates at {bar.funding_timestamp.isoformat()}")
-        rates_by_timestamp[bar.funding_timestamp] = bar.funding_rate
+    def _events():
+        for bar in indexed.funding_events_by_symbol.get(symbol, ()):
+            if bar.funding_timestamp is None or bar.funding_rate is None:
+                raise EvaluationError(
+                    f"incomplete funding event: {bar.symbol} at {bar.timestamp.isoformat()}"
+                )
+            yield bar.funding_timestamp, bar.funding_rate
 
-    direction = 1.0 if side is Side.LONG else -1.0
-    return sum(-direction * rate for rate in rates_by_timestamp.values()) * weight
+    direction_sign = 1.0 if side is Side.LONG else -1.0
+    return funding_return_over_window(
+        _events(),
+        entry_time=entry_time,
+        exit_time=exit_time,
+        direction_sign=direction_sign,
+        weight=weight,
+        conflict_error=lambda ts: EvaluationError(
+            f"conflicting funding rates at {ts.isoformat()}"
+        ),
+    )

@@ -212,18 +212,35 @@ eligibility flags. When non-empty search pressure would otherwise produce a
 `watchlist` and records `multiple_testing_not_corrected_advisory_only` in the
 decision reasons.
 
-The default validation backend is `vectorbtpro`. Install the optional backend
-dependencies before running real validation:
+The verdict PnL source is the engine smoke kernel: the number a human audits is
+the number the verdict is computed from. VectorBT Pro is no longer a co-equal
+verdict backend; it is available only as an opt-in agreement oracle. The legacy
+`backend` config field has been removed, and a config that still sets it fails to
+load with migration guidance.
+
+To cross-check the engine verdict against VectorBT Pro, enable the oracle in the
+validation config and install the optional backend:
+
+```toml
+[agreement_oracle]
+enabled = true
+tolerance_abs = 1e-6
+tolerance_rel = 1e-3
+```
 
 ```bash
 conda run -n quant python -m pip install -e '.[vectorbtpro]'
 ```
 
-VectorBT Pro may require package access or private index configuration outside
-this repository.
-
-If the configured backend cannot be imported, validation records
-`backend_unavailable` as a setup `hard_no`, not as a research `watchlist`.
+When enabled, the oracle cross-checks each applicable scenario's price path
+against VectorBT Pro and fails the run with `backend_agreement_failed` if they
+diverge beyond tolerance. It compares the engine's `gross_return` (which feeds
+the gated `net_return`) against vbt's zero-cost total return, and is sound only
+where the engine's linear per-trade sum equals a NAV path — a single-trade,
+close-fill, threshold-free scenario; it reports `skipped` otherwise. If the
+oracle is enabled but VectorBT Pro cannot be imported, the cross-check is
+recorded as unavailable and the engine verdict stands. VectorBT Pro may require
+package access or private index configuration outside this repository.
 
 ## Validation Runs
 
@@ -243,12 +260,17 @@ a strategy that suppresses an otherwise emitted decision by peeking at future
 rows fails with `hidden_lookahead_suppression_detected`.
 
 For each validation window, the validator expands required and diagnostic
-scenarios, runs the configured backend, and classifies the candidate as
+scenarios, runs the engine verdict kernel (and, when enabled, the agreement
+oracle), and classifies the candidate as
 `hard_no`, `mechanical_pass`, `watchlist`, or `mechanical_review_candidate`. A
 `mechanical_pass` requires passing data audits, required backend scenarios,
 valid backend metrics, and at least `10` trades per required scenario. A
 required backend scenario with unsupported execution semantics is a `hard_no`
-because the mechanical check did not execute. With paper-readiness enabled,
+because the mechanical check did not execute. Because the engine is the verdict
+kernel, threshold exits and quote/open fills are now executed rather than
+rejected; the unsupported cases are decisions the engine ontology cannot
+represent (flat targets, non-`target_weight` sizing, options/futures/multi-leg).
+With paper-readiness enabled,
 nonpositive realistic-cost evidence is also a `hard_no`. A `watchlist` captures
 positive evidence that misses paper-readiness gates or carries uncorrected
 search pressure. A `mechanical_review_candidate` requires mechanical validation,
@@ -258,17 +280,18 @@ positive-window fraction, stressed-cost and fill-lag loss floors, and empty
 search pressure. Verdict labels are advisory inputs to human review, never
 autonomous promotion signals, and eligibility flags still remain false.
 
-Validation backend summaries include `metric_semantics` for required policy
-metrics such as `net_return` and `trade_count`, plus optional funding metrics
-such as `funding_return` and `linear_funding_adjusted_return`. The metric
-payloads stay flat for artifact readability, while policy reads them through a
-typed backend metric schema with declared unit, base, comparability, tolerance,
-and asymmetry. Crypto-perp funding in the VectorBT Pro backend is a linear
-additive diagnostic adjustment: it is reported as
-`linear_funding_adjusted_return`, while policy gates continue to use the
-backend price/cost `net_return`. `net_return` currently declares no
-cross-backend tolerance until a second production backend or explicit agreement
-test exists.
+Validation backend summaries include `metric_semantics` for the engine verdict
+metrics: `net_return`, `trade_count`, `gross_return`, `funding_return`, and
+`cost_return`. The metric payloads stay flat for artifact readability, while
+policy reads them through a typed metric schema with declared unit, base,
+comparability, tolerance, and asymmetry. `net_return` is the engine's
+funding-inclusive signed trade-activity sum — the audited smoke net — so funding
+is part of the gated number, not a side diagnostic (`net_return = gross_return +
+funding_return - cost_return`). `gross_return` is the funding- and cost-exclusive
+price path that the opt-in agreement oracle cross-checks against VectorBT Pro.
+`net_return` declares no cross-backend tolerance because it is a linear per-trade
+sum, not a NAV path; the agreement oracle bounds the price-path divergence
+explicitly when enabled.
 
 ## Artifacts
 

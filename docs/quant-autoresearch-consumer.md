@@ -358,14 +358,19 @@ the emitted-decision replay check and must not be interpreted as a retained-grad
 causality claim.
 
 Validation backend metrics are flat but semantically typed in
-`backend_runs/summary.json`. For crypto-perp funding, the VectorBT Pro backend
-keeps required policy `net_return` scoped to the backend price/cost return path
-and reports the linear funding approximation separately as
-`funding_return` and `linear_funding_adjusted_return`. Do not rank or promote a
-candidate on `linear_funding_adjusted_return` unless a later review explicitly
-accepts that diagnostic model. `net_return` currently declares no cross-backend
-tolerance; compare it only inside matching backend semantics until a second
-production backend or explicit agreement test exists.
+`backend_runs/summary.json`. The verdict PnL source is the engine smoke kernel,
+so `net_return` is the engine's funding-inclusive signed trade-activity sum —
+the same number the runner smoke layer audits — and funding is part of the gated
+number, not a side diagnostic (`net_return = gross_return + funding_return -
+cost_return`). `gross_return` is the funding- and cost-exclusive price path;
+`funding_return` and `cost_return` are the components folded into `net_return`.
+There is no `linear_funding_adjusted_return` and no separate VectorBT Pro verdict
+metric. `net_return` declares no cross-backend tolerance because it is a linear
+per-trade sum, not a NAV path; rank candidates on `net_return`. VectorBT Pro is
+only an opt-in agreement oracle: when enabled it cross-checks the engine price
+path (`gross_return`) on single-trade scenarios and fails the run with
+`backend_agreement_failed` on divergence, but it never produces the verdict
+metrics.
 
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.

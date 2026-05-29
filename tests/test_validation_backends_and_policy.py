@@ -62,24 +62,27 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
     assert set(payload) == {
         "net_return",
         "trade_count",
+        "gross_return",
         "funding_return",
-        "linear_funding_adjusted_return",
+        "cost_return",
     }
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
-    assert net_return["base"] == "backend portfolio price/cost return path"
+    assert net_return["base"] == "engine linear signed trade-activity sum, funding-inclusive"
+    assert net_return["backend"] == "engine"
     assert net_return["tolerance"] is None
-    assert "runner smoke" in net_return["asymmetry"]
+    assert "not a NAV path" in net_return["asymmetry"]
     trade_count = payload["trade_count"]
     assert trade_count["unit"] == "count"
     assert trade_count["tolerance"] == 0.0
+    gross_return = payload["gross_return"]
+    assert gross_return["unit"] == "decimal_fraction"
+    assert "agreement oracle cross-checks" in gross_return["comparability"]
     funding_return = payload["funding_return"]
     assert funding_return["unit"] == "decimal_fraction"
-    assert funding_return["base"] == "linear funding cashflow approximation"
-    adjusted = payload["linear_funding_adjusted_return"]
-    assert adjusted["unit"] == "decimal_fraction"
-    assert adjusted["base"] == "backend net_return plus linear funding_return"
-    assert "not a NAV-path funding return" in adjusted["asymmetry"]
+    assert "included in net_return" in funding_return["base"]
+    cost_return = payload["cost_return"]
+    assert cost_return["unit"] == "decimal_fraction"
 
 
 def completed_scenario(
@@ -269,6 +272,48 @@ def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
     assert_advisory_only(decision)
+
+
+def test_policy_gates_on_engine_funding_inclusive_net_return():
+    # F2: the engine verdict source emits a funding-inclusive net_return. The
+    # positive-evidence gate must key on that funding-inclusive number, not on the
+    # price/cost-only path -- a perp that is price/cost-positive but funding-negative
+    # must not clear the gate (this is the perp economics the old vbt "net" omitted).
+    def realistic(net_return: float, gross_return: float) -> tuple[ScenarioBackendRunResult, ...]:
+        return tuple(
+            completed_scenario(
+                window_id,
+                "cost",
+                net_return=net_return,
+                trade_count=20,
+                extra_metrics={"gross_return": gross_return},
+            )
+            for window_id in ("validation_2026_h1", "validation_2026_h2")
+        )
+
+    floors = tuple(
+        completed_scenario(window_id, scenario_kind, net_return=net, trade_count=20)
+        for window_id in ("validation_2026_h1", "validation_2026_h2")
+        for scenario_kind, net in (("cost_stress", -0.005), ("fill_lag", -0.004))
+    )
+
+    # Price path positive, but funding drags the funding-inclusive net negative.
+    funding_negative = classify_validation(
+        data_passed=True,
+        backend_results=realistic(net_return=-0.01, gross_return=0.03) + floors,
+        min_trades=10,
+    )
+    assert "compounded_realistic_net_positive" in funding_negative.failed_gates
+    assert funding_negative.decision != "mechanical_review_candidate"
+
+    # Same price path, funding-inclusive net positive -> the gate clears.
+    funding_positive = classify_validation(
+        data_passed=True,
+        backend_results=realistic(net_return=0.02, gross_return=0.03) + floors,
+        min_trades=10,
+    )
+    assert "compounded_realistic_net_positive" in funding_positive.passed_gates
+    assert funding_positive.decision == "mechanical_review_candidate"
 
 
 def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():

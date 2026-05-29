@@ -27,7 +27,6 @@ DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 def write_candidate(
     tmp_path: Path,
     *,
-    backend: str | None = "fake",
     window_ids: tuple[str, ...] = ("validation_2026_h1",),
 ) -> Path:
     candidate = tmp_path / "candidate"
@@ -46,7 +45,6 @@ def write_candidate(
         "    )]\n"
     ).replace("size=1.0", "size=float(params.get('weight', 1.0))")
     (candidate / "strategy.py").write_text(strategy_text)
-    backend_line = f'backend = "{backend}"\n' if backend is not None else ""
     window_blocks = "\n".join(
         f"""
 [[windows]]
@@ -60,7 +58,6 @@ end = "2026-06-30"
         f"""
 strategy_path = "strategy.py"
 strategy_id = "demo"
-{backend_line}
 
 {window_blocks}
 
@@ -227,8 +224,9 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert set(backend_summary["metric_semantics"]) == {
         "net_return",
         "trade_count",
+        "gross_return",
         "funding_return",
-        "linear_funding_adjusted_return",
+        "cost_return",
     }
     assert backend_summary["metric_semantics"]["net_return"]["tolerance"] is None
     assert len(backend_summary["results"]) == 4
@@ -1000,8 +998,11 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
     assert read_jsonl(row_file) == expected_row_records()
 
 
-def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path, monkeypatch):
-    candidate = write_candidate(tmp_path, backend=None)
+def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window(
+    tmp_path: Path, monkeypatch
+):
+    # No backend injected -> the engine is the default (and only) verdict source.
+    candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
         (candidate / "validation.toml").read_text()
         + "\n[paper_readiness]\nenabled = false\n"
@@ -1013,38 +1014,186 @@ def test_run_validation_default_vectorbtpro_backend_fails_closed(tmp_path: Path,
         .replace("as_of_time=rows[0]['timestamp']", "as_of_time=rows[1]['timestamp']")
     )
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows()))
-    monkeypatch.setitem(sys.modules, "vectorbtpro", SimpleNamespace())
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("engine_failed",)
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert backend_summary["results"][0] == {
-        "window_id": "validation_2026_h1",
-        "scenario_id": "validation_2026_h1/base",
-        "scenario_kind": "base",
-        "required": True,
-        "diagnostic_only": False,
-        "decisions_regenerated": False,
-        "decision_generation_status": "base_reused",
-        "decision_count": 1,
-        "decision_records_path": "backend_runs/decision_records/validation_2026_h1/base.jsonl",
-        "decision_records_sha256": file_sha256(
-            result.result_dir / "backend_runs/decision_records/validation_2026_h1/base.jsonl"
-        ),
-        "result": {
-            "backend": "vectorbtpro",
-            "status": "failed",
-            "metrics": {},
-            "warnings": ["unfillable_exit:BTC-PERP:2026-01-01T00:01:00+00:00"],
-            "unsupported_semantics": [],
-        },
-    }
+    base_result = backend_summary["results"][0]
+    assert base_result["result"]["backend"] == "engine"
+    assert base_result["result"]["status"] == "failed"
+    assert base_result["result"]["metrics"] == {}
+    assert base_result["result"]["unsupported_semantics"] == []
+    assert base_result["result"]["warnings"] == ["exit fill is outside available bars: BTC-PERP"]
 
 
-def test_run_validation_passes_valid_flat_decisions_to_backend(tmp_path: Path, monkeypatch):
-    candidate = write_candidate(tmp_path, backend=None)
+def test_run_validation_engine_backend_validates_threshold_exit_strategy(
+    tmp_path: Path, monkeypatch
+):
+    # F7: a strategy with a stop-loss (threshold exit) was un-validatable under the
+    # vbt backend (unsupported -> hard_no). The engine verdict source completes it,
+    # so the validation step no longer forks away from the quick run.
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1, stop_loss_bps=50.0, take_profit_bps=300.0),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    # Enough bars that every matrix scenario (incl. fill_lag_plus_1) is fillable.
+    long_rows = [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "open": 100.0 + minute,
+            "high": 100.0 + minute,
+            "low": 100.0 + minute,
+            "close": 100.0 + minute,
+            "has_funding_event": False,
+        }
+        for minute in range(5)
+    ]
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=long_rows)
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    statuses = {item["result"]["backend"]: item["result"]["status"] for item in backend_summary["results"]}
+    # The capability gap is gone: the engine completes the threshold-exit decision
+    # across every scenario (vbt would have returned unsupported -> hard_no).
+    assert statuses == {"engine": "completed"}
+    assert all(item["result"]["unsupported_semantics"] == [] for item in backend_summary["results"])
+    assert "unsupported_semantics" not in result.decision.reasons
+    assert "engine_failed" not in result.decision.reasons
+
+
+def _long_strategy_text() -> str:
+    return (
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+
+
+def _upward_rows(n: int = 5) -> list[dict[str, Any]]:
+    return [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "open": 100.0 + minute,
+            "high": 100.0 + minute,
+            "low": 100.0 + minute,
+            "close": 100.0 + minute,
+            "has_funding_event": False,
+        }
+        for minute in range(n)
+    ]
+
+
+def _enable_oracle(candidate: Path) -> None:
+    toml = candidate / "validation.toml"
+    toml.write_text(toml.read_text() + "\n[agreement_oracle]\nenabled = true\n")
+
+
+def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path, monkeypatch):
+    pytest.importorskip("vectorbtpro")
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(_long_strategy_text())
+    _enable_oracle(candidate)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=_upward_rows())
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
+    assert statuses == {"pass"}
+    assert result.failure_stage != "agreement_oracle"
+    assert all(not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons)
+
+
+def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, monkeypatch):
+    from quant_strategies.validation.agreement import AgreementResult
+
+    candidate = write_candidate(tmp_path)
+    _enable_oracle(candidate)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=rows())
+    )
+
+    def diverging(**_kwargs):
+        return AgreementResult(
+            status="fail",
+            note="forced divergence",
+            engine_return=0.05,
+            vbt_return=0.20,
+            abs_deviation=0.15,
+            tolerance_abs=1e-6,
+            tolerance_rel=1e-3,
+        )
+
+    monkeypatch.setattr("quant_strategies.validation.agreement.evaluate_agreement", diverging)
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "hard_no"
+    assert result.failure_stage == "agreement_oracle"
+    assert result.decision.reasons[0].startswith("backend_agreement_failed")
+    assert "engine_return=0.05" in result.decision.reasons[0]
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert backend_summary["results"][0]["agreement"]["status"] == "fail"
+
+
+def test_run_validation_agreement_oracle_skips_threshold_exit(tmp_path: Path, monkeypatch):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        _long_strategy_text().replace(
+            "exit_policy=ExitPolicy(max_hold_bars=1)",
+            "exit_policy=ExitPolicy(max_hold_bars=1, stop_loss_bps=50.0)",
+        )
+    )
+    _enable_oracle(candidate)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data", lambda config: LoadedData(rows=_upward_rows())
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
+    assert statuses == {"skipped"}
+    assert all(not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons)
+
+
+def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
+    tmp_path: Path, monkeypatch
+):
+    # The engine ontology cannot represent a flat (no-position) target, so a flat
+    # decision reaches the engine backend and fails closed (a no-op decision has
+    # no PnL to evaluate). VBT previously reported this as unsupported_semantics.
+    candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
@@ -1078,15 +1227,15 @@ def test_run_validation_passes_valid_flat_decisions_to_backend(tmp_path: Path, m
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     assert result.decision.decision == "hard_no"
-    assert result.decision.reasons == ("unsupported_semantics",)
+    assert result.decision.reasons == ("engine_failed",)
     assert "strategy_generation_failed" not in result.decision.reasons
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     base_result = backend_summary["results"][0]
     assert base_result["decision_generation_status"] == "base_reused"
     assert base_result["decision_count"] == 1
-    assert base_result["result"]["status"] == "unsupported"
-    assert "flat_target" in base_result["result"]["unsupported_semantics"]
+    assert base_result["result"]["status"] == "failed"
+    assert any("flat" in warning for warning in base_result["result"]["warnings"])
 
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):

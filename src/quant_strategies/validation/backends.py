@@ -3,12 +3,15 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.config import ScenarioRunConfig
+
+if TYPE_CHECKING:
+    from quant_strategies.validation.agreement import AgreementResult
 
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
@@ -67,52 +70,67 @@ class BackendMetrics(BaseModel):
 
 
 def backend_metric_semantics() -> dict[str, dict[str, object]]:
+    # The engine smoke kernel is the verdict source, so these semantics describe
+    # the engine's emitted metrics -- the number a human audits IS the gated number.
     semantics = (
         BackendMetricSemantics(
             name="net_return",
             unit="decimal_fraction",
-            base="backend portfolio price/cost return path",
-            aggregation="scenario total over backend-executed decisions",
-            backend="validation_backend",
+            base="engine linear signed trade-activity sum, funding-inclusive",
+            aggregation="scenario total over engine-screened per-trade net returns",
+            backend="engine",
             comparability=(
-                "backend-specific; no cross-backend tolerance is declared until "
-                "a second production backend or explicit agreement test exists"
+                "the audited smoke net; cross-checked against VectorBT Pro on the "
+                "price path by the opt-in agreement oracle"
             ),
             tolerance=None,
             asymmetry=(
-                "may differ from runner smoke signed trade-activity sums, "
-                "other backend return paths, and linear funding adjustments"
+                "a linear per-trade sum, not a NAV path; differs from a compounded "
+                "portfolio return for multi-trade scenarios"
             ),
         ),
         BackendMetricSemantics(
             name="trade_count",
             unit="count",
-            base="backend-executed closed trades",
+            base="engine-screened closed trades",
             aggregation="scenario total",
-            backend="validation_backend",
+            backend="engine",
             comparability="exact integer agreement expected for equivalent execution assumptions",
             tolerance=0.0,
-            asymmetry="backend trade grouping may differ when execution semantics are not equivalent",
+            asymmetry="trade grouping may differ when execution semantics are not equivalent",
+        ),
+        BackendMetricSemantics(
+            name="gross_return",
+            unit="decimal_fraction",
+            base="engine price path, funding- and cost-exclusive",
+            aggregation="scenario total over engine-screened trades",
+            backend="engine",
+            comparability=(
+                "the price path the agreement oracle cross-checks against VectorBT Pro "
+                "(single-trade scenarios only)"
+            ),
+            tolerance=None,
+            asymmetry="excludes funding and cost; not the gated number (net_return is)",
         ),
         BackendMetricSemantics(
             name="funding_return",
             unit="decimal_fraction",
-            base="linear funding cashflow approximation",
-            aggregation="scenario total over backend-executed decision windows",
-            backend="validation_backend",
-            comparability="compare only across matching funding event models and execution windows",
+            base="engine funding cashflow component included in net_return",
+            aggregation="scenario total over engine-screened decision windows",
+            backend="engine",
+            comparability="single shared funding-window function; no second implementation to reconcile",
             tolerance=1e-9,
-            asymmetry="linear cashflow approximation outside the backend NAV path",
+            asymmetry="linear funding accrual folded into net_return",
         ),
         BackendMetricSemantics(
-            name="linear_funding_adjusted_return",
+            name="cost_return",
             unit="decimal_fraction",
-            base="backend net_return plus linear funding_return",
-            aggregation="scenario total over backend-executed decisions",
-            backend="validation_backend",
-            comparability="diagnostic only unless the funding model is explicitly accepted",
-            tolerance=1e-9,
-            asymmetry="not a NAV-path funding return; policy gates use backend net_return",
+            base="engine round-trip cost deduction folded into net_return",
+            aggregation="scenario total over engine-screened trades",
+            backend="engine",
+            comparability="flat 2*(fee+slippage) bps per trade; deterministic from the cost model",
+            tolerance=0.0,
+            asymmetry="linear cost deduction; excluded from the agreement cross-check",
         ),
     )
     return {item.name: item.model_dump(mode="json") for item in semantics}
@@ -153,6 +171,8 @@ class ScenarioBackendRunResult:
     decision_count: int = 0
     decision_records_path: str | None = None
     decision_records_sha256: str | None = None
+    # Set only when the opt-in agreement oracle ran for this scenario.
+    agreement: "AgreementResult | None" = None
 
 
 class ValidationBackend(Protocol):
@@ -191,6 +211,10 @@ class FakeBackend:
 
 
 def get_backend(name: str) -> ValidationBackend:
+    if name == "engine":
+        from quant_strategies.validation.engine_backend import EngineBackend
+
+        return EngineBackend()
     if name == "fake":
         return FakeBackend()
     if name == "vectorbtpro":

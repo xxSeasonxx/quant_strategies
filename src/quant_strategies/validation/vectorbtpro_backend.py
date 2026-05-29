@@ -8,11 +8,6 @@ from typing import Any
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.backends import BackendRunResult
 from quant_strategies.validation.config import ScenarioRunConfig
-from quant_strategies.validation.funding import (
-    FundingEventError,
-    funding_return_for_window,
-    has_funding_cashflow_rows,
-)
 
 
 class VectorBTProBackend:
@@ -131,10 +126,8 @@ class VectorBTProBackend:
             return _failed(self.name, f"metric_extraction_failed:{exc}")
         if metrics["trade_count"] != len(windows):
             return _failed(self.name, f"unexpected_trade_count:{metrics['trade_count']}:{len(windows)}")
-        try:
-            metrics = _funding_adjusted_metrics(metrics, rows, windows, config)
-        except FundingEventError as exc:
-            return _failed(self.name, f"invalid_funding_events:{exc}")
+        # Funding is owned by the engine verdict kernel; vbt is a price-path
+        # cross-check only and deliberately reports no funding metrics.
         metrics = {
             **metrics,
             "portfolio_target_weight_model": "vectorbtpro_valuepercent_cash_sharing",
@@ -398,39 +391,6 @@ def _optional_float_metric(value: Any) -> float | None:
     if not math.isfinite(metric):
         return None
     return metric
-
-
-def _funding_adjusted_metrics(
-    metrics: dict[str, float | int],
-    rows: Sequence[Mapping[str, Any]],
-    windows: list[dict[str, Any]],
-    config: Any,
-) -> dict[str, float | int | str]:
-    data_kind = _config_value(config, "data", "kind", default=None)
-    if data_kind != "crypto_perp_funding" and not has_funding_cashflow_rows(rows):
-        return metrics
-
-    funding_return = 0.0
-    for window in windows:
-        decision = window["decision"]
-        if decision.target.direction == "flat":
-            continue
-        funding_return += funding_return_for_window(
-            rows,
-            symbol=window["symbol"],
-            entry_time=window["entry_time"],
-            exit_time=window["exit_time"],
-            direction=decision.target.direction,
-            weight=decision.target.size,
-        )
-
-    price_cost_return = float(metrics["net_return"])
-    return {
-        **metrics,
-        "funding_return": funding_return,
-        "funding_model": "linear_additive_adjustment",
-        "linear_funding_adjusted_return": price_cost_return + funding_return,
-    }
 
 
 def _float_metric(value: Any) -> float:

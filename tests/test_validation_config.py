@@ -55,7 +55,6 @@ required_observation_fields = ["close"]
         f"""
 strategy_path = "{strategy_path}"
 strategy_id = "demo"
-backend = "fake"
 
 [[windows]]
 id = "validation_2026_h1"
