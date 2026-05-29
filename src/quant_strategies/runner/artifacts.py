@@ -13,6 +13,7 @@ from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
     artifact_trust_tier_for_profile,
     causality_evidence_fields,
+    runner_evidence_semantics,
     smoke_score_metric_semantics,
 )
 from quant_strategies.provenance import (
@@ -22,6 +23,7 @@ from quant_strategies.provenance import (
 )
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.artifact_profiles import canonical_row_line
+from quant_strategies.runner.engine_runner import EngineRun
 
 
 ROW_CONTRACT_ISSUE_SAMPLE_SIZE = 25
@@ -296,3 +298,162 @@ def _artifact_names(result_dir: Path, *, include_summary: bool) -> list[str]:
 def _safe_name(value: str) -> str:
     name = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip()).strip("-")
     return name or "strategy"
+
+
+# --- result/summary/notes shaping (relocated out of the runner orchestrator) ---
+
+
+def run_result_evidence_fields(evidence_quality: dict[str, object] | None) -> dict[str, object]:
+    if evidence_quality is None:
+        return {}
+    return {
+        "data_availability_status": _optional_str(evidence_quality.get("data_availability_status")),
+        "availability_coverage": _optional_dict(evidence_quality.get("availability_coverage")),
+        "row_contract": _optional_dict(evidence_quality.get("row_contract")),
+        "causality_verified": bool(evidence_quality.get("causality_verified")),
+        "emitted_replay_verified": bool(evidence_quality.get("emitted_replay_verified")),
+        "strict_no_emission_verified": bool(evidence_quality.get("strict_no_emission_verified")),
+        "evidence_quality_warnings": _string_tuple(evidence_quality.get("evidence_quality_warnings")),
+    }
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _optional_dict(value: object) -> dict[str, object] | None:
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value)
+    return (str(value),)
+
+
+def summary_payload(
+    config: RunConfig,
+    *,
+    status: str,
+    stage: str,
+    failure_stage: str | None,
+    message: str,
+    engine: dict[str, object],
+    assessment_status: str,
+    evidence_quality: dict[str, object],
+) -> dict[str, object]:
+    semantics = runner_evidence_semantics(config.data.kind)
+    engine_payload = dict(engine)
+    return {
+        "strategy_id": config.strategy_id,
+        "mode": config.output.mode,
+        "artifact_profile": config.output.artifact_profile,
+        "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
+        "status": status,
+        "stage": stage,
+        "failure_stage": failure_stage,
+        "message": message,
+        "artifacts": [],
+        "engine": engine_payload,
+        "run_completed": True,
+        "assessment_status": assessment_status,
+        **semantics,
+        **evidence_quality,
+    }
+
+
+def _trade_count(engine_run: EngineRun) -> int | None:
+    if engine_run.screen_summary is not None:
+        value = engine_run.screen_summary.get("trade_count")
+        return int(value) if value is not None else None
+    if engine_run.validate_summary is not None:
+        screening_result = engine_run.validate_summary.get("screening_result")
+        if isinstance(screening_result, dict):
+            value = screening_result.get("trade_count")
+            return int(value) if value is not None else None
+    return None
+
+
+def compact_engine_summary(engine_run: EngineRun) -> dict[str, object]:
+    source = engine_run.screen_summary
+    if source is None and engine_run.validate_summary is not None:
+        screening_result = engine_run.validate_summary.get("screening_result")
+        source = screening_result if isinstance(screening_result, dict) else None
+
+    summary: dict[str, object] = {"passed": engine_run.passed, "trade_count": _trade_count(engine_run)}
+    smoke_score = source.get("smoke_score") if isinstance(source, dict) else None
+    if isinstance(smoke_score, dict):
+        summary["smoke_score"] = {
+            "sum_signed_trade_activity_gross": smoke_score.get("sum_signed_trade_activity_gross"),
+            "sum_signed_trade_activity_funding": smoke_score.get("sum_signed_trade_activity_funding"),
+            "sum_signed_trade_activity_cost": smoke_score.get("sum_signed_trade_activity_cost"),
+            "sum_signed_trade_activity_net": smoke_score.get("sum_signed_trade_activity_net"),
+        }
+    else:
+        summary["smoke_score"] = {
+            "sum_signed_trade_activity_gross": None,
+            "sum_signed_trade_activity_funding": None,
+            "sum_signed_trade_activity_cost": None,
+            "sum_signed_trade_activity_net": None,
+        }
+    if engine_run.validate_summary is not None:
+        gates = engine_run.validate_summary.get("gates")
+        if isinstance(gates, list):
+            summary["gates"] = [
+                {"name": gate.get("name"), "passed": gate.get("passed"), "detail": gate.get("detail")}
+                for gate in gates
+                if isinstance(gate, dict)
+            ]
+    return summary
+
+
+def failure_notes(stage: str, message: str) -> str:
+    return f"# Run Failed\n\nstage: {stage}\nmessage: {message}\n"
+
+
+def result_status(engine_run: EngineRun) -> str:
+    if engine_run.mode == "screen":
+        return "screened"
+    return "passed" if engine_run.passed else "failed"
+
+
+def assessment_status(
+    engine_run: EngineRun,
+    *,
+    evidence_quality: dict[str, object],
+) -> str:
+    if engine_run.mode == "screen":
+        return "screened"
+    if engine_run.passed and not evidence_quality.get("causality_verified"):
+        return "smoke_unverified"
+    return "smoke_passed" if engine_run.passed else "smoke_failed"
+
+
+def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
+    lines = [
+        "# Run Complete",
+        "",
+        f"strategy_id: {config.strategy_id}",
+        f"mode: {engine_run.mode}",
+    ]
+    if engine_run.mode == "screen":
+        lines.append("status: screened")
+        interpretation = (
+            "runner screen evidence only; not validation pass, market robustness, "
+            "or promotion evidence."
+        )
+    else:
+        status = "passed" if engine_run.passed else "failed validation gates"
+        lines.append(f"status: {status}")
+        interpretation = "runner smoke evidence only; not market robustness or promotion evidence."
+    if config.data.kind == "crypto_perp_funding":
+        lines.append(
+            "return_scope: price-and-funding; supplied funding events are included "
+            "when they fall inside engine-held intervals."
+        )
+    lines.append(f"interpretation: {interpretation}")
+    return "\n".join(lines) + "\n"
