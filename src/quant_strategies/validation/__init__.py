@@ -19,8 +19,10 @@ from quant_strategies.runner.execution import (
     execute_strategy_run,
 )
 from quant_strategies.validation.artifacts import (
+    backend_runs_payload,
     canonical_jsonl_lines,
     create_validation_result_dir,
+    robustness_matrix_payload,
     write_json_artifact,
     write_text_artifact,
 )
@@ -29,7 +31,6 @@ from quant_strategies.validation.backends import (
     DecisionGenerationStatus,
     ScenarioBackendRunResult,
     ValidationBackend,
-    backend_metric_semantics,
     get_backend,
 )
 from quant_strategies.validation.config import ScenarioRunConfig
@@ -824,13 +825,6 @@ def _safe_scenario_artifact_path(scenario_id: str) -> str:
     return "/".join(safe_parts)
 
 
-def _agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
-    # Emitted only when the opt-in oracle ran, so default artifacts are unchanged.
-    if item.agreement is None:
-        return {}
-    return {"agreement": item.agreement.as_dict()}
-
-
 def _backend_name(backend: ValidationBackend, fallback: str) -> str:
     name = getattr(backend, "name", fallback)
     return str(name) if name else fallback
@@ -885,56 +879,16 @@ def _write_validation_artifacts(
         write_json_artifact(
             result_dir,
             "backend_runs/summary.json",
-            {
-                "metric_semantics": backend_metric_semantics(),
-                "results": [
-                    {
-                        "window_id": item.window_id,
-                        "scenario_id": item.scenario_id,
-                        "scenario_kind": item.scenario_kind,
-                        "required": item.required,
-                        "diagnostic_only": item.diagnostic_only,
-                        "decisions_regenerated": item.decisions_regenerated,
-                        "decision_generation_status": item.decision_generation_status,
-                        "decision_count": item.decision_count,
-                        "decision_records_path": item.decision_records_path,
-                        "decision_records_sha256": item.decision_records_sha256,
-                        "result": item.result.model_dump(mode="json"),
-                        **_agreement_payload(item),
-                    }
-                    for item in backend_results
-                ]
-            },
+            backend_runs_payload(backend_results),
         )
         write_json_artifact(
             result_dir,
             "robustness_matrix.json",
-            {
-                "decision": decision.model_dump(mode="json"),
-                "scenarios": [
-                    {
-                        "window_id": item.window_id,
-                        "scenario_id": item.scenario_id,
-                        "scenario_kind": item.scenario_kind,
-                        "required": item.required,
-                        "diagnostic_only": item.diagnostic_only,
-                        "decisions_regenerated": item.decisions_regenerated,
-                        "decision_generation_status": item.decision_generation_status,
-                        "decision_count": item.decision_count,
-                        "decision_records_path": item.decision_records_path,
-                        "decision_records_sha256": item.decision_records_sha256,
-                        "backend": item.result.backend,
-                        "status": item.result.status,
-                        "metrics": item.result.metrics,
-                        "warnings": item.result.warnings,
-                        "unsupported_semantics": item.result.unsupported_semantics,
-                        "classification_reasons": _scenario_classification_reasons(item),
-                        **_agreement_payload(item),
-                    }
-                    for item in backend_results
-                ],
-                "failure_details": failure_details,
-            },
+            robustness_matrix_payload(
+                decision=decision,
+                backend_results=backend_results,
+                failure_details=failure_details,
+            ),
         )
         decision_payload = decision.model_dump(mode="json")
         decision_payload["failure_details"] = failure_details
@@ -971,12 +925,3 @@ def _write_validation_artifacts(
         )
 
 
-def _scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str, ...]:
-    result = item.result
-    if result.status == "failed":
-        return (f"{result.backend}_failed",)
-    if result.status == "unavailable":
-        return ("backend_unavailable",)
-    if result.status == "unsupported" or result.unsupported_semantics:
-        return ("unsupported_semantics",)
-    return ()

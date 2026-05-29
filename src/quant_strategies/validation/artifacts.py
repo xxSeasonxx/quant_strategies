@@ -10,6 +10,9 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from quant_strategies.validation.backends import ScenarioBackendRunResult, backend_metric_semantics
+from quant_strategies.validation.policy import ValidationPolicyDecision
+
 
 def create_validation_result_dir(results_root: Path, strategy_id: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
@@ -90,3 +93,78 @@ def _json_value(value: Any) -> Any:
     except (TypeError, ValueError):
         return str(value)
     return value
+
+
+def agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
+    # Emitted only when the opt-in oracle ran, so default artifacts are unchanged.
+    if item.agreement is None:
+        return {}
+    return {"agreement": item.agreement.as_dict()}
+
+
+def scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str, ...]:
+    result = item.result
+    if result.status == "failed":
+        return (f"{result.backend}_failed",)
+    if result.status == "unavailable":
+        return ("backend_unavailable",)
+    if result.status == "unsupported" or result.unsupported_semantics:
+        return ("unsupported_semantics",)
+    return ()
+
+
+def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dict[str, Any]:
+    return {
+        "metric_semantics": backend_metric_semantics(),
+        "results": [
+            {
+                "window_id": item.window_id,
+                "scenario_id": item.scenario_id,
+                "scenario_kind": item.scenario_kind,
+                "required": item.required,
+                "diagnostic_only": item.diagnostic_only,
+                "decisions_regenerated": item.decisions_regenerated,
+                "decision_generation_status": item.decision_generation_status,
+                "decision_count": item.decision_count,
+                "decision_records_path": item.decision_records_path,
+                "decision_records_sha256": item.decision_records_sha256,
+                "result": item.result.model_dump(mode="json"),
+                **agreement_payload(item),
+            }
+            for item in backend_results
+        ],
+    }
+
+
+def robustness_matrix_payload(
+    *,
+    decision: ValidationPolicyDecision,
+    backend_results: list[ScenarioBackendRunResult],
+    failure_details: list[dict[str, str]],
+) -> dict[str, Any]:
+    return {
+        "decision": decision.model_dump(mode="json"),
+        "scenarios": [
+            {
+                "window_id": item.window_id,
+                "scenario_id": item.scenario_id,
+                "scenario_kind": item.scenario_kind,
+                "required": item.required,
+                "diagnostic_only": item.diagnostic_only,
+                "decisions_regenerated": item.decisions_regenerated,
+                "decision_generation_status": item.decision_generation_status,
+                "decision_count": item.decision_count,
+                "decision_records_path": item.decision_records_path,
+                "decision_records_sha256": item.decision_records_sha256,
+                "backend": item.result.backend,
+                "status": item.result.status,
+                "metrics": item.result.metrics,
+                "warnings": item.result.warnings,
+                "unsupported_semantics": item.result.unsupported_semantics,
+                "classification_reasons": scenario_classification_reasons(item),
+                **agreement_payload(item),
+            }
+            for item in backend_results
+        ],
+        "failure_details": failure_details,
+    }

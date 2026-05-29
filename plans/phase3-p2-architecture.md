@@ -22,12 +22,38 @@ review's "subtract, don't add" theme. Behavior-preserving; suite green throughou
 - Remove the `RETAINED` enum value; collapse `RowContractMode` to `search|validation`. Simplify `_validation_row_contract_mode` (paper_readiness no longer changes row-contract mode). Update the `mode="retained"` test.
 - **Defer (documented):** the bespoke issue sampler (`_IssueAccumulator`, working, low value) and deferring OHLC/quote structural validation to `engine.Bar` (correctness-adjacent; risky). Note as recommendations.
 
-### 3c — F9 neutral execution spec (assess + attempt)
-- Goal: validation no longer imports `runner.config`/`runner.execution` for execution. Extract a neutral `StrategyExecutionSpec` (strategy path/id, data, params, fill, cost — no output policy) that both runner and validation adapt into. Add a test asserting validation does not import `runner.config` for execution.
-- Risk: architectural; attempt only with the suite green at each step.
+### 3c — F10 god-module serialization split — DONE (validation payload builders)
+Extracted the two inline artifact payload builders the review specifically cited
+("hand-builds four artifact payloads inline at :863-968") out of the
+`validation/__init__.py` orchestrator into `validation/artifacts.py`:
+`backend_runs_payload`, `robustness_matrix_payload`, plus the `agreement_payload`
+and `scenario_classification_reasons` shapers. The orchestrator now calls these
+builders; output is byte-identical (test-guarded, 619 green; no import cycle —
+`artifacts.py` imports only the lower-level `backends`/`policy` types).
 
-### 3d — F10 god-module serialization split (assess + attempt)
-- Mechanically relocate artifact/JSON dict-building out of the `validation/__init__.py` and `runner/__init__.py` orchestrators into the existing `artifacts` modules (orchestrators call writers). No new abstractions; pure relocation.
+**Deferred remainder (documented recommendation):** the same pattern applies to
+`runner/__init__.py` (its `_summary_payload`/notes builders → `runner/artifacts.py`)
+and to splitting `data_contract.py`'s normalization vs serialization. These are
+further mechanical relocations; left as a follow-up to keep this change bounded
+and individually reviewable.
+
+### 3d — F9 neutral execution spec — DEFERRED (decision recorded)
+**Not executed overnight.** Validation threads `run_config` (a runner `RunConfig`)
+and `StrategyExecutionResult` through ~10 functions and calls the shared
+`execute_strategy_run`; the clean fix (a neutral `StrategyExecutionSpec` both
+sides adapt into) changes that **shared function's signature on the
+verdict-producing path** and rewires the whole validation execution flow. That is
+a deep refactor of trust-critical code whose benefit is maintainability (a
+boundary smell), not correctness — best done with real-run validation and Season's
+architectural review, not forced unattended.
+
+**Ready-to-run recommendation:** define `StrategyExecutionSpec(strategy_path,
+strategy_id, data, params, fill_model, cost_model)` in a neutral module (e.g.
+`core/`); give `execute_strategy_run` a spec-based entry; have `RunConfig` and the
+validation config each expose `to_execution_spec()`; replace validation's
+`to_run_config()` usage and the `run_config.*` field reads with the spec; add a
+test asserting `quant_strategies.validation` does not import `runner.config` for
+execution. Keep the public `run_config`/`run_validation` APIs stable.
 
 ## Discipline
 - `conda run -n quant pytest -q` green after each sub-step; ruff clean.
