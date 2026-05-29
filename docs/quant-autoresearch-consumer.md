@@ -408,6 +408,15 @@ path (`gross_return`) on single-trade scenarios and fails the run with
 `backend_agreement_failed` on divergence, but it never produces the verdict
 metrics.
 
+The engine verdict `net_return` is audit-replayable: each scenario emits a
+per-trade ledger at `backend_runs/trade_ledgers/<scenario_id>.jsonl` (one `Trade`
+per line) referenced by `trade_ledger_path`/`trade_ledger_sha256` in
+`backend_runs/summary.json`, `robustness_matrix.json`, and the manifest, and
+hash-pinned under manifest `artifacts`. Recompute the gated metric by summing
+`net_return` over the ledger; `validation_manifest.json` sets
+`verdict_replayable = true` and `verdict_replay_basis = "engine_trade_ledger"`
+when a ledger was emitted.
+
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.
 

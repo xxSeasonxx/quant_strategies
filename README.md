@@ -362,9 +362,13 @@ its canonical JSON-safe row snapshot with `rows_path`, `row_count`, and
 `rows_sha256`, and row snapshots are included in manifest `core_hashes` and
 `artifacts`. Non-finite numeric or otherwise non-JSON ancillary row values are
 normalized to JSON-safe values in the snapshot; data-load failures leave row
-snapshot fields null. Backend summaries still report aggregate backend metrics
-and scenario decision records; per-backend fill, trade, funding, and cost ledgers
-require a backend artifact contract and are not emitted yet.
+snapshot fields null. The engine verdict backend emits a per-scenario per-trade
+ledger at `backend_runs/trade_ledgers/<scenario_id>.jsonl` (one `Trade` record per
+line, with entry/exit prices and gross/funding/cost/net returns), hash-pinned in
+the manifest. The gated `net_return` is therefore recomputable from artifacts as
+`sum(trade.net_return)` per scenario; the manifest sets `verdict_replayable` and
+`verdict_replay_basis = "engine_trade_ledger"`. The opt-in VectorBT Pro agreement
+oracle is a price-path cross-check and emits no ledger of its own.
 `validation_decision.json` and `robustness_matrix.json` include
 `failure_details` for fatal setup failures that validation catches, while stable
 policy reason strings remain unchanged.

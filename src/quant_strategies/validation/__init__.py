@@ -523,6 +523,14 @@ def _run_scenario_backend(
                     "invalid_backend_result: expected BackendRunResult, "
                     f"got {type(raw_backend_result).__name__}",
                 )
+    trade_ledger_path = None
+    trade_ledger_sha256 = None
+    if backend_result is not None and backend_result.trades:
+        trade_ledger_path, trade_ledger_sha256 = _write_scenario_trade_ledger(
+            result_dir=context.result_dir,
+            scenario_id=scenario.id,
+            trades=backend_result.trades,
+        )
     agreement = _run_agreement_oracle(
         context, scenario_config, decision_outcome, execution, backend_result
     )
@@ -538,6 +546,8 @@ def _run_scenario_backend(
         decision_count=len(decision_outcome.decisions),
         decision_records_path=decision_records_path,
         decision_records_sha256=decision_records_sha256,
+        trade_ledger_path=trade_ledger_path,
+        trade_ledger_sha256=trade_ledger_sha256,
         agreement=agreement,
     )
 
@@ -821,6 +831,19 @@ def _write_scenario_decision_records(
 ) -> tuple[str, str]:
     artifact_name = f"backend_runs/decision_records/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
     path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(decisions))
+    return path.relative_to(result_dir).as_posix(), file_sha256(path)
+
+
+def _write_scenario_trade_ledger(
+    *,
+    result_dir: Path,
+    scenario_id: str,
+    trades: Sequence[Any],
+) -> tuple[str, str]:
+    # Per-scenario engine trade ledger: each line is a Trade record. The gated
+    # net_return is recomputable as sum(trade.net_return) over this file.
+    artifact_name = f"backend_runs/trade_ledgers/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
+    path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(trades)))
     return path.relative_to(result_dir).as_posix(), file_sha256(path)
 
 

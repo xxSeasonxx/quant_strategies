@@ -128,6 +128,8 @@ def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dic
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,
+                "trade_ledger_path": item.trade_ledger_path,
+                "trade_ledger_sha256": item.trade_ledger_sha256,
                 "result": item.result.model_dump(mode="json"),
                 **agreement_payload(item),
             }
@@ -156,6 +158,8 @@ def robustness_matrix_payload(
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,
+                "trade_ledger_path": item.trade_ledger_path,
+                "trade_ledger_sha256": item.trade_ledger_sha256,
                 "backend": item.result.backend,
                 "status": item.result.status,
                 "metrics": item.result.metrics,

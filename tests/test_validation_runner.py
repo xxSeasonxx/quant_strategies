@@ -253,6 +253,8 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
         "decision_count": 1,
         "decision_records_path": base_decision_path,
         "decision_records_sha256": file_sha256(base_decision_file),
+        "trade_ledger_path": None,
+        "trade_ledger_sha256": None,
         "result": {
             "backend": "fake",
             "status": "completed",
@@ -1886,3 +1888,34 @@ def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkey
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert "validate_params" in audit["windows"][0]["violations"][0]
+
+
+def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, monkeypatch):
+    # F16: the gated net_return is recomputable from the emitted per-trade ledger.
+    # No backend injected -> the engine is the verdict source and emits the ledger.
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=_upward_rows(5)),
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.result_dir is not None
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    assert manifest["validation"]["verdict_replayable"] is True
+    assert manifest["validation"]["verdict_replay_basis"] == "engine_trade_ledger"
+
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    ledgered = [item for item in backend_summary["results"] if item["trade_ledger_path"]]
+    assert ledgered  # the engine emitted at least one per-trade ledger
+    for item in ledgered:
+        ledger_file = result.result_dir / item["trade_ledger_path"]
+        assert item["trade_ledger_sha256"] == file_sha256(ledger_file)
+        # the ledger is hash-pinned as an audit artifact in the manifest
+        assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(ledger_file)
+        trades = read_jsonl(ledger_file)
+        metrics = item["result"]["metrics"]
+        assert len(trades) == metrics["trade_count"]
+        # the verdict net_return is exactly the sum of the emitted per-trade net returns
+        assert sum(t["net_return"] for t in trades) == pytest.approx(metrics["net_return"], abs=1e-9)

@@ -62,4 +62,7 @@ class EngineBackend:
             backend=self.name,
             status="completed",
             metrics=metrics,
+            # The trades that produced the scalar metrics; emitted as a per-scenario
+            # ledger so the gated net_return is recomputable from artifacts.
+            trades=tuple(result.trades),
         )

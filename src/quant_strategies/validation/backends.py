@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.engine.models import Trade
 from quant_strategies.validation.config import ScenarioRunConfig
 
 if TYPE_CHECKING:
@@ -156,6 +157,11 @@ class BackendRunResult(BaseModel):
     metrics: dict[str, MetricValue]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
+    # Per-trade ledger backing the scalar metrics. Excluded from model_dump so the
+    # backend_runs summary stays scalar; it is written to its own JSONL artifact
+    # (the verdict net_return is recomputable as sum(trade.net_return)). Only the
+    # engine verdict backend populates it; the agreement-oracle vbt leaves it empty.
+    trades: tuple[Trade, ...] = Field(default=(), exclude=True)
 
 
 @dataclass(frozen=True)
@@ -171,6 +177,10 @@ class ScenarioBackendRunResult:
     decision_count: int = 0
     decision_records_path: str | None = None
     decision_records_sha256: str | None = None
+    # Per-trade ledger for the engine verdict backend; net_return is recomputable
+    # as sum(trade.net_return). None when the backend emitted no trades.
+    trade_ledger_path: str | None = None
+    trade_ledger_sha256: str | None = None
     # Set only when the opt-in agreement oracle ran for this scenario.
     agreement: "AgreementResult | None" = None
 

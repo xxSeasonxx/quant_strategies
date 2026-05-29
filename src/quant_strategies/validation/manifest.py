@@ -32,6 +32,10 @@ def write_validation_manifest(
             "backend": backend_name,
             "config_path": _relative_path(config_path, path_base),
             "config_sha256": _optional_hash(config_path),
+            # True when the verdict backend emitted a per-trade ledger: the gated
+            # net_return is then recomputable as sum(trade.net_return) per scenario.
+            "verdict_replayable": any(item.trade_ledger_path for item in backend_results),
+            "verdict_replay_basis": "engine_trade_ledger",
         },
         "strategy": {
             "path": _relative_path(Path(config.strategy_path), path_base),
@@ -88,6 +92,8 @@ def _backend_summary(
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,
+                "trade_ledger_path": item.trade_ledger_path,
+                "trade_ledger_sha256": item.trade_ledger_sha256,
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),
