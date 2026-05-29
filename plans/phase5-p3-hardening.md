@@ -1,5 +1,27 @@
 # Phase 5 — P3 Auditability & Misuse Prevention (F16/F17/F18/F19)
 
+## Status: COMPLETED
+
+All four findings closed, on branch `phase5-p3-hardening` (one commit per
+sub-step plus a follow-up and a review-fixes commit):
+
+- **5a (F17)** purity lint extended to data-loading reads + best-effort docs + escape tests.
+- **5b (F19)** artifact init/final/failure-path writes routed to structured `failure_stage`
+  results; CLI `OSError` backstop. (Residual: mid-pipeline success-path writes — see `TODOS.md`.)
+- **5c (F18)** validation requires `validate_params` (`hard_no`/`param_validation`); quick-run
+  flags `param_contract` (`validated`/`unvalidated_passthrough`/`unknown`).
+- **5d (F16)** engine per-trade ledger emitted per scenario (`backend_runs/trade_ledgers/*.jsonl`),
+  hash-pinned; verdict `net_return` recomputable as `sum(trade.net_return)`; manifest
+  `verdict_replayable`. Replay test asserts the multi-trade summation invariant.
+
+A `/code-review` pass on the phase diff drove a follow-up commit: a multi-trade
+replay test (the original was single-trade/tautological), guarded `_failure_result`
+writes on both sides, a purity over-ban trim (`read_sql`/`read_table`), consumer-doc
+failure-stage enumeration, and a shared `_write_scenario_jsonl` helper.
+
+Suite green throughout; final `643 passed`. Pre-existing `ruff` F401s in unrelated
+files (`extended_ontology.py`, two unrelated test files) were left untouched.
+
 ## Context
 
 `review-claude.md` §15 item #9 (priority **P3**) bundles the last four open
