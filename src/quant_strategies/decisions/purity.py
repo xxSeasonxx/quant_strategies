@@ -1,3 +1,14 @@
+"""Best-effort static purity lint for strategy files.
+
+This is an AST denylist, **not** a runtime sandbox. It rejects the common ways a
+strategy could load data or cause side effects (file reads/writes, dynamic
+imports, network, non-deterministic clocks/RNG), but a determined strategy can
+still escape it (e.g. ``getattr``-based or computed attribute access). The real
+guarantee is the contract — strategies are pure ``generate_decisions(rows,
+params)`` and load data only via ``quant_data`` upstream — plus human review;
+this lint is the cheap first line of defense, not a security boundary.
+"""
+
 from __future__ import annotations
 
 import ast
@@ -26,6 +37,20 @@ BANNED_CALL_ATTRIBUTES = {
     "unlink",
     "remove",
     "rmdir",
+    # Reads are data loading too (AGENTS.md: strategies must not load data; use the
+    # quant_data loader, not files). Attribute-form bans are alias-proof: they catch
+    # Path(...).read_text(), pd.read_csv(...), and pandas.read_csv(...) alike.
+    "read_text",
+    "read_bytes",
+    "read_csv",
+    "read_parquet",
+    "read_json",
+    "read_excel",
+    "read_feather",
+    "read_pickle",
+    "read_hdf",
+    "read_sql",
+    "read_table",
 }
 BANNED_MODULE_CALLS = {
     ("datetime", "now"),
@@ -46,6 +71,9 @@ BANNED_MODULE_CALLS = {
     ("subprocess", "run"),
     ("time", "time"),
     ("numpy.random", "*"),
+    # Dynamic import and network access are import/data-loading escapes.
+    ("importlib", "*"),
+    ("urllib", "*"),
 }
 
 

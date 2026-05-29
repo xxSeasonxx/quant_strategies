@@ -17,6 +17,15 @@ to them, but they must not load data, call engines, write artifacts, run loops,
 or mutate their inputs. Each strategy module documents thesis, observables,
 rule, assumptions, provenance, and falsifier in its module docstring.
 
+Purity is enforced at load time by a **best-effort static AST lint**
+(`decisions/purity.py`), not a runtime sandbox. It rejects the common ways a
+strategy could load data or cause side effects — file reads/writes (including
+`read_text`/`read_csv` and friends), dynamic imports, network calls, and
+non-deterministic clocks/RNG — but a determined strategy can still escape it.
+The real guarantee is the contract plus review; the lint is the cheap first
+line of defense. Compute on the rows you were handed (e.g. pandas math) is fine;
+loading new data is not.
+
 The canonical default output is `StrategyDecision`. Decisions carry a stable
 `decision_id`, instrument, open intent, decision time, as-of time, target,
 `ExitPolicy(max_hold_bars=...)`, optional exit controls, metadata, and

@@ -157,3 +157,52 @@ def test_load_decision_strategy_allows_explicit_purity_opt_out(tmp_path: Path):
 
     assert callable(generate_decisions)
     assert marker.read_text() == "boom"
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        # File reads are data loading just as much as writes are.
+        ("from pathlib import Path\nPath('x').read_text()\n", r"\.read_text\(\)"),
+        ("from pathlib import Path\nPath('x').read_bytes()\n", r"\.read_bytes\(\)"),
+        # Dataframe readers (alias-resolved or attribute-form).
+        ("import pandas as pd\npd.read_csv('x.csv')\n", r"\.read_csv\(\)"),
+        ("import pandas as pd\npd.read_parquet('x')\n", r"\.read_parquet\(\)"),
+        ("import pandas\npandas.read_json('x')\n", r"\.read_json\(\)"),
+        # Dynamic import can reach any banned module at runtime.
+        ("import importlib\nimportlib.import_module('os')\n", r"importlib\.import_module\(\)"),
+        ("from importlib import import_module\nimport_module('os')\n", r"importlib\.import_module\(\)"),
+        # Network access.
+        ("from urllib.request import urlopen\nurlopen('http://x')\n", r"urllib\.request\.urlopen\(\)"),
+        ("import urllib.request\nurllib.request.urlopen('http://x')\n", r"urllib"),
+    ],
+)
+def test_load_decision_strategy_rejects_data_loading_escapes(
+    tmp_path: Path,
+    source: str,
+    message: str,
+):
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        source
+        + "def generate_decisions(rows, params):\n"
+        + "    return []\n"
+    )
+
+    with pytest.raises(DecisionStrategyLoadError, match=message):
+        load_decision_strategy(strategy, repo_root=tmp_path)
+
+
+def test_load_decision_strategy_allows_pandas_compute(tmp_path: Path):
+    # Computing on the rows already passed in is fine; only *loading* data is banned.
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        "import pandas as pd\n"
+        "def generate_decisions(rows, params):\n"
+        "    frame = pd.DataFrame(list(rows))\n"
+        "    return [] if frame.empty else []\n"
+    )
+
+    generate_decisions = load_decision_strategy(strategy, repo_root=tmp_path)
+
+    assert generate_decisions([], {}) == []

@@ -13,7 +13,11 @@ runner package for configured experiments.
 - Keep each strategy as one Python file unless Season explicitly approves a folder.
 - Put thesis, observables, rule, and falsifier in the strategy module docstring.
 - Keep strategy code pure: no engine calls, autonomous loops, data loading, or
-artifact writing inside strategy files.
+artifact writing inside strategy files. Purity is checked by a best-effort
+static AST lint (`decisions/purity.py`), not a sandbox — it bans common
+data-loading/side-effect calls (file reads/writes, dynamic imports, network,
+clocks/RNG) but is not exhaustive; the contract plus review are the real
+guarantee.
 - Run explicit experiments through `src/quant_strategies/runner/` using TOML
 configs under `runs/` and generated artifacts under ignored `results/`.
 - `quant_autoresearch` should consume `quant_strategies.runner.run_config`
