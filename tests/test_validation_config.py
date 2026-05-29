@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.runner.config import RunConfig
+from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.validation.config import load_validation_config, resolve_validation_config_path
 from quant_strategies.validation.errors import ValidationConfigError
 
@@ -271,7 +271,7 @@ def test_load_validation_config_rejects_invalid_paper_readiness(
         load_validation_config(config_path)
 
 
-def test_validation_config_converts_to_run_config_with_config_base_dir(tmp_path: Path):
+def test_validation_config_converts_to_execution_spec_with_config_base_dir(tmp_path: Path):
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
@@ -283,15 +283,38 @@ def test_validation_config_converts_to_run_config_with_config_base_dir(tmp_path:
         )
     )
     config = load_validation_config(config_path)
-    results_dir = candidate / "validation_results" / "demo" / "run"
 
-    run_config = config.to_run_config(config.windows[0], results_dir=results_dir)
+    spec = config.to_execution_spec(config.windows[0])
 
-    assert isinstance(run_config, RunConfig)
-    assert run_config.output.mode == "gate"
-    assert run_config.output.results_dir == results_dir
-    assert run_config.data.start == date(2026, 1, 1)
-    assert run_config.data.end == date(2026, 6, 30)
+    assert isinstance(spec, StrategyExecutionSpec)
+    assert spec.strategy_id == "demo"
+    assert spec.fill_model == config.fill_model
+    assert spec.cost_model == config.cost_model
+    assert spec.data.start == date(2026, 1, 1)
+    assert spec.data.end == date(2026, 6, 30)
+
+
+def test_validation_does_not_import_runner_config_for_execution():
+    # F9: validation adapts into the neutral StrategyExecutionSpec and must never
+    # import the runner's RunConfig for execution.
+    import ast
+    import inspect
+
+    import quant_strategies.validation as validation_pkg
+    import quant_strategies.validation.config as validation_config
+
+    def imported_modules(module: object) -> set[str]:
+        tree = ast.parse(inspect.getsource(module))
+        modules: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                modules.add(node.module)
+            elif isinstance(node, ast.Import):
+                modules.update(alias.name for alias in node.names)
+        return modules
+
+    for module in (validation_pkg, validation_config):
+        assert "quant_strategies.runner.config" not in imported_modules(module)
 
 
 def test_load_validation_config_rejects_strategy_path_outside_config_directory(tmp_path: Path):

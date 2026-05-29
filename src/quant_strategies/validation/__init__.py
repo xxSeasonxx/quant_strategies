@@ -13,7 +13,7 @@ from quant_strategies.runner.artifact_profiles import (
     canonical_rows_jsonl,
     normalized_rows_sha256,
 )
-from quant_strategies.runner.config import default_repo_root
+from quant_strategies.core.config import default_repo_root
 from quant_strategies.runner.execution import (
     StrategyExecutionError,
     execute_strategy_run,
@@ -190,10 +190,7 @@ def _run_validation_window(
     state: _ValidationState,
     window: Any,
 ) -> ValidationRunResult | None:
-    run_config = context.config.to_run_config(
-        window,
-        results_dir=context.result_dir / "runner_smoke" / window.id,
-    )
+    execution_spec = context.config.to_execution_spec(window)
     try:
         with context.event_emitter.stage(
             "window_execution",
@@ -202,12 +199,12 @@ def _run_validation_window(
             row_contract_mode=context.row_contract_mode.value,
         ):
             execution = execute_strategy_run(
-                run_config,
+                execution_spec,
                 repo_root=context.path_base,
                 row_contract_mode=context.row_contract_mode,
             )
     except StrategyExecutionError as exc:
-        return _handle_window_execution_error(context, state, window, run_config, exc)
+        return _handle_window_execution_error(context, state, window, execution_spec, exc)
 
     rows_path, rows_hash = _write_window_rows(
         result_dir=context.result_dir,
@@ -217,7 +214,7 @@ def _run_validation_window(
     state.data_provenance.append(
         _data_provenance(
             window.id,
-            run_config,
+            execution_spec,
             status="loaded",
             rows=execution.loaded_rows,
             rows_path=rows_path,
@@ -229,7 +226,7 @@ def _run_validation_window(
     audit_payload = _audit_window_execution(context, state, window, execution)
     state.data_audits.append(audit_payload)
     if audit_payload["passed"]:
-        _run_window_scenarios(context, state, window, run_config, execution)
+        _run_window_scenarios(context, state, window, execution_spec, execution)
     return None
 
 
@@ -237,7 +234,7 @@ def _handle_window_execution_error(
     context: _ValidationContext,
     state: _ValidationState,
     window: Any,
-    run_config: Any,
+    execution_spec: Any,
     exc: StrategyExecutionError,
 ) -> ValidationRunResult | None:
     if exc.stage == "strategy_import":
@@ -270,7 +267,7 @@ def _handle_window_execution_error(
         state.data_provenance.append(
             _data_provenance(
                 window.id,
-                run_config,
+                execution_spec,
                 status="failed",
                 rows=None,
                 message=str(exc),
@@ -297,7 +294,7 @@ def _handle_window_execution_error(
             state.data_provenance.append(
                 _data_provenance(
                     window.id,
-                    run_config,
+                    execution_spec,
                     status="loaded",
                     rows=exc.loaded_rows,
                     rows_path=rows_path,
@@ -415,7 +412,7 @@ def _run_window_scenarios(
     context: _ValidationContext,
     state: _ValidationState,
     window: Any,
-    run_config: Any,
+    execution_spec: Any,
     execution: _StrategyExecutionResult,
 ) -> None:
     scenarios = expand_validation_matrix(
@@ -426,7 +423,7 @@ def _run_window_scenarios(
     )
     state.required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
     for scenario in scenarios:
-        scenario_result = _run_scenario_backend(context, window, run_config, execution, scenario)
+        scenario_result = _run_scenario_backend(context, window, execution_spec, execution, scenario)
         state.backend_results.append(scenario_result)
         _record_agreement_failure(state, scenario_result)
 
@@ -453,7 +450,7 @@ def _record_agreement_failure(
 def _run_scenario_backend(
     context: _ValidationContext,
     window: Any,
-    run_config: Any,
+    execution_spec: Any,
     execution: _StrategyExecutionResult,
     scenario: MatrixScenario,
 ) -> ScenarioBackendRunResult:
@@ -461,7 +458,7 @@ def _run_scenario_backend(
         config=context.config,
         scenario=scenario,
         base_params=execution.validated_params,
-        data=run_config.data,
+        data=execution_spec.data,
     )
     decision_outcome = _scenario_decision_outcome(
         base_decisions=execution.decisions,
@@ -707,7 +704,7 @@ def _failed_data_audit(
 
 def _data_provenance(
     window_id: str,
-    run_config: Any,
+    execution_spec: Any,
     *,
     status: str,
     rows: Sequence[Mapping[str, Any]] | None,
@@ -721,12 +718,12 @@ def _data_provenance(
         "window_id": window_id,
         "status": status,
         "data": {
-            "kind": run_config.data.kind,
-            "dataset": run_config.data.dataset,
-            "symbols": list(run_config.data.symbols),
-            "start": run_config.data.start.isoformat(),
-            "end": run_config.data.end.isoformat(),
-            "strict": run_config.data.strict,
+            "kind": execution_spec.data.kind,
+            "dataset": execution_spec.data.dataset,
+            "symbols": list(execution_spec.data.symbols),
+            "start": execution_spec.data.start.isoformat(),
+            "end": execution_spec.data.end.isoformat(),
+            "strict": execution_spec.data.strict,
         },
         "row_count": row_count,
         "rows_path": None if rows is None else rows_path,

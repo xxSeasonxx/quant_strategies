@@ -79,7 +79,7 @@ def run_config(
     try:
         with events.stage("strategy_execution", strategy_id=config.strategy_id):
             execution = execute_strategy_run(
-                config,
+                config.to_execution_spec(),
                 repo_root=effective_repo_root,
                 row_contract_mode=_runner_row_contract_mode(config),
             )

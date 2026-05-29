@@ -16,10 +16,11 @@ from pydantic import (
     model_validator,
 )
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
-from quant_strategies.runner.config import (
-    OutputConfig as RunnerOutputConfig,
-    RunConfig,
+from quant_strategies.core.config import (
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+    StrategyExecutionSpec,
 )
 from quant_strategies.validation.errors import ValidationConfigError
 
@@ -195,23 +196,16 @@ class ValidationConfig(ValidationConfigModel):
             raise ValueError("strategy_id cannot be empty")
         return strategy_id
 
-    def to_run_config(self, window: ValidationWindow, *, results_dir: Path) -> RunConfig:
-        context = {"repo_root": self.base_dir}
-        output = RunnerOutputConfig.model_validate(
-            {"results_dir": results_dir, "mode": "gate"},
-            context=context,
-        )
-        return RunConfig.model_validate(
-            {
-                "strategy_path": self.strategy_path,
-                "strategy_id": self.strategy_id,
-                "data": self.data.model_copy(update={"start": window.start, "end": window.end}),
-                "params": self.params,
-                "fill_model": self.fill_model,
-                "cost_model": self.cost_model,
-                "output": output,
-            },
-            context=context,
+    def to_execution_spec(self, window: ValidationWindow) -> StrategyExecutionSpec:
+        # Validation adapts directly into the neutral execution kernel input — it
+        # never builds a runner RunConfig (no output policy, no runner.config import).
+        return StrategyExecutionSpec(
+            strategy_path=self.strategy_path,
+            strategy_id=self.strategy_id,
+            data=self.data.model_copy(update={"start": window.start, "end": window.end}),
+            params=self.params,
+            fill_model=self.fill_model,
+            cost_model=self.cost_model,
         )
 
 

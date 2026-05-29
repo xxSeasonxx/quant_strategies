@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 DataKind = Literal["bars", "crypto_perp_funding", "forex_with_quotes"]
+
+
+def default_repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
 
 
 class SharedConfigModel(BaseModel):
@@ -57,3 +63,21 @@ class FillModelConfig(SharedConfigModel):
 class CostModelConfig(SharedConfigModel):
     fee_bps_per_side: float = Field(default=0.0, ge=0)
     slippage_bps_per_side: float = Field(default=0.0, ge=0)
+
+
+@dataclass(frozen=True)
+class StrategyExecutionSpec:
+    """Neutral inputs to the shared execution kernel — no output/artifact policy.
+
+    Both the runner quick-run and the validation run adapt their own config into
+    this, so neither owns the other's execution surface and execution carries no
+    output concerns (the runner manages `[output]`; validation manages its own
+    artifacts).
+    """
+
+    strategy_path: Path
+    strategy_id: str
+    data: DataConfig
+    params: dict[str, Any] = field(default_factory=dict)
+    fill_model: FillModelConfig = field(default_factory=FillModelConfig)
+    cost_model: CostModelConfig = field(default_factory=CostModelConfig)

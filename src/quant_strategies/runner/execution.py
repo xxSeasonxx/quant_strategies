@@ -14,8 +14,8 @@ from quant_strategies.decisions import (
     validate_strategy_params,
 )
 from quant_strategies.decisions.models import StrategyDecision
+from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.runner.artifacts import compact_evidence_quality
-from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.data_loader import load_data
 from quant_strategies.runner.errors import RunnerError, StrategyLoadError
 
@@ -71,7 +71,7 @@ class StrategyExecutionError(RunnerError):
 
 
 def execute_strategy_run(
-    config: RunConfig,
+    config: StrategyExecutionSpec,
     *,
     repo_root: Path,
     row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,

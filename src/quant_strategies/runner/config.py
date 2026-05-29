@@ -11,6 +11,8 @@ from quant_strategies.core.config import (
     DataConfig,
     FillModelConfig,
     SharedConfigModel,
+    StrategyExecutionSpec,
+    default_repo_root,
 )
 from quant_strategies.runner.errors import ConfigError
 
@@ -25,10 +27,6 @@ RowContractStrictness = Literal["search", "validation"]
 
 class RunnerConfigModel(SharedConfigModel):
     pass
-
-
-def default_repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
 
 
 def _repo_root(info: ValidationInfo) -> Path:
@@ -87,6 +85,16 @@ class RunConfig(RunnerConfigModel):
         if not stripped:
             raise ValueError("strategy_id cannot be empty")
         return stripped
+
+    def to_execution_spec(self) -> StrategyExecutionSpec:
+        return StrategyExecutionSpec(
+            strategy_path=self.strategy_path,
+            strategy_id=self.strategy_id,
+            data=self.data,
+            params=self.params,
+            fill_model=self.fill_model,
+            cost_model=self.cost_model,
+        )
 
 
 def load_config(path: str | Path, *, repo_root: Path | None = None) -> RunConfig:

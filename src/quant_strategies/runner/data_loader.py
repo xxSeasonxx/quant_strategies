@@ -7,7 +7,7 @@ from typing import Any
 
 from quant_strategies.data_contract import NormalizedRows, RowContractMode, json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.runner.config import RunConfig
+from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.runner.errors import DataLoadError
 
 _UNSET = object()
@@ -52,7 +52,7 @@ class LoadedData:
 
 
 def load_data(
-    config: RunConfig,
+    config: StrategyExecutionSpec,
     *,
     engine: object | None = None,
     row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
@@ -92,7 +92,7 @@ def _json_sort_value(value: Any) -> str:
     )
 
 
-def _load_rows(config: RunConfig, engine: object) -> list[dict[str, Any]]:
+def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, Any]]:
     data = config.data
     quant_data_loader = _loader()
     if data.kind == "bars":
