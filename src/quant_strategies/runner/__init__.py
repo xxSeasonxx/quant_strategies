@@ -38,7 +38,9 @@ class RunResult:
     failure_stage: str | None = None
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
-    param_contract: str = "validated"
+    # "validated" / "unvalidated_passthrough" on a completed run; "unknown" on a
+    # run that failed before the param contract was conclusively determined.
+    param_contract: str = "unknown"
     artifact_trust_tier: str | None = None
     data_availability_status: str | None = None
     availability_coverage: dict[str, object] | None = None

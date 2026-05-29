@@ -30,7 +30,8 @@ Strategies may define an optional `validate_params(params) -> Mapping` hook that
 validates and normalizes params before a run. It is optional for the quick run: a
 schema-less strategy still runs, but the result is flagged
 `param_contract = "unvalidated_passthrough"` (on `RunResult` and in `summary.json`)
-so the run is visibly exploratory. The validation run **requires** it — a candidate
+so the run is visibly exploratory (a run that fails before the contract is
+determined reports `param_contract = "unknown"`). The validation run **requires** it — a candidate
 without `validate_params` is refused (`hard_no`, `failure_stage = "param_validation"`),
 because a paper-readiness verdict must not rest on params that were never
 schema-checked (a typo'd or stale knob would otherwise pass through silently).

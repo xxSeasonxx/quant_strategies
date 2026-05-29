@@ -346,7 +346,7 @@ def summary_payload(
     engine: dict[str, object],
     assessment_status: str,
     evidence_quality: dict[str, object],
-    param_contract: str = "validated",
+    param_contract: str = "unknown",
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)

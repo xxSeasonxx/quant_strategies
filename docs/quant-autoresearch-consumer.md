@@ -293,7 +293,8 @@ machine interface. The evidence-quality fields exposed on `RunResult` are also
 written to `summary.json` and `data_manifest.json` for audit and replay.
 
 `param_contract` is `"validated"` when the strategy defines a `validate_params`
-hook and `"unvalidated_passthrough"` when it does not. A schema-less quick run
+hook and `"unvalidated_passthrough"` when it does not (and `"unknown"` on a run
+that failed before the contract was determined). A schema-less quick run
 still completes, but treat `"unvalidated_passthrough"` as exploratory evidence:
 typo'd or stale params pass through unchecked. The validation run is stricter —
 a candidate without `validate_params` is refused with `hard_no` and
