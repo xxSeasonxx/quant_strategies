@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.data_contract import json_safe_value
+from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
 from quant_strategies.runner.config import RunConfig

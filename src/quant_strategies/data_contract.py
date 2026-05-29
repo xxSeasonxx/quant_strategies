@@ -6,12 +6,12 @@ import math
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from decimal import Decimal
+from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.evidence_semantics import causality_evidence_fields
 
@@ -482,30 +482,6 @@ def required_row_fields(
     return tuple(fields)
 
 
-def json_safe_value(value: Any) -> Any:
-    if isinstance(value, datetime | date):
-        return value.isoformat()
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, Decimal):
-        numeric = float(value)
-        return numeric if math.isfinite(numeric) else None
-    if hasattr(value, "item") and callable(value.item):
-        try:
-            return json_safe_value(value.item())
-        except (TypeError, ValueError):
-            pass
-    if isinstance(value, Mapping):
-        return {str(key): json_safe_value(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [json_safe_value(item) for item in value]
-    try:
-        json.dumps(value, allow_nan=False)
-    except (TypeError, ValueError):
-        return str(value)
-    return value
-
-
 def _coerce_mode(mode: RowContractMode | str) -> RowContractMode:
     if isinstance(mode, RowContractMode):
         return mode
@@ -909,5 +885,4 @@ __all__ = [
     "RowContractReason",
     "RowContractSeverity",
     "required_row_fields",
-    "json_safe_value",
 ]

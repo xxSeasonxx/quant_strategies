@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.data_contract import NormalizedRows, RowContractMode, json_safe_value
+from quant_strategies.core.serialization import json_safe_value
+from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
     artifact_trust_tier_for_profile,
