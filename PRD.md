@@ -272,10 +272,10 @@ A consumer should be able to say "yes" to all of these without qualification.
   strategies and rerunning configs.
 - **C-9.** Artifact production is tiered and format-disciplined. The consumer requests
   either `search_only` (statistics + manifest, default) or `audit_replayable` (full
-  audit chain) per run. Bulk per-row artifacts in `audit_replayable` runs (input rows,
-  trades, fills) use an efficient columnar format (parquet). Control-plane artifacts
-  (manifest, summary, config, evidence) stay sort-keys JSON. JSONL is reserved for
-  human-streaming debug, not for primary audit data.
+  audit chain) per run. V1 audit row, decision, and trade-ledger artifacts use
+  deterministic JSONL; control-plane artifacts (manifest, summary, config, evidence)
+  stay sort-keys JSON. Move to columnar storage only after a benchmark shows JSONL is
+  inadequate.
 
 ---
 

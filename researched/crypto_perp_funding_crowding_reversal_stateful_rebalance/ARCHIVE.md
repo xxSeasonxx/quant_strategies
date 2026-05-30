@@ -10,6 +10,6 @@ layout. To validate a candidate, copy the selected `strategy.py` and a matching
 `validation.toml` into a normal candidate workspace and run validation on that
 explicit TOML file.
 
-Directories named `evidence/legacy_selection` are retained only to explain the
-old selection path. They must not be treated as current contracts or promotion
-evidence.
+Old selection evidence has been removed from this package. Use only the compact
+`new_15_locked_recent_2026` rerun evidence for archive context, and rerun a
+candidate from its tracked config before drawing any new conclusion.

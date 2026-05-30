@@ -1,10 +1,8 @@
 {
   "attempt": 17,
   "commit": "4ac5d5b",
-  "config_path": "results/selected_15/family_01_primary_time_only_exit/rank_02/config.toml",
   "family": "time_only_exit",
   "rank": 2,
-  "source_result_dir": "results/selected_15/family_01_primary_time_only_exit/rank_02",
   "symbol_count": 5,
   "variant_id": "5f8b4712ddd104b85a1a2548f403265b678c6c1f19c8a1a1c00e6566c7e7346f",
   "window_days": 180,

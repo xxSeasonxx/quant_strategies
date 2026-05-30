@@ -1,10 +1,8 @@
 {
   "attempt": 21,
   "commit": "4ac5d5b",
-  "config_path": "results/selected_15/family_02_secondary_entry_filter/rank_01/config.toml",
   "family": "entry_filter",
   "rank": 1,
-  "source_result_dir": "results/selected_15/family_02_secondary_entry_filter/rank_01",
   "symbol_count": 5,
   "variant_id": "54ecf8dbf13f26fdeff95f264ea98f0ad6e06d8bc1e90a6721b07a9e44a33166",
   "window_days": 180,

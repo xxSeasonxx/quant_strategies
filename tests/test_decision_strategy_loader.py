@@ -169,12 +169,21 @@ def test_load_decision_strategy_allows_explicit_purity_opt_out(tmp_path: Path):
         ("import pandas as pd\npd.read_csv('x.csv')\n", r"\.read_csv\(\)"),
         ("import pandas as pd\npd.read_parquet('x')\n", r"\.read_parquet\(\)"),
         ("import pandas\npandas.read_json('x')\n", r"\.read_json\(\)"),
+        ("import pandas as pd\npd.DataFrame().to_csv('x.csv')\n", r"\.to_csv\(\)"),
+        ("import pandas as pd\npd.DataFrame().to_parquet('x')\n", r"\.to_parquet\(\)"),
+        ("from pathlib import Path\nlist(Path('.').glob('*.csv'))\n", r"\.glob\(\)"),
+        ("from pathlib import Path\nlist(Path('.').iterdir())\n", r"\.iterdir\(\)"),
         # Dynamic import can reach any banned module at runtime.
         ("import importlib\nimportlib.import_module('os')\n", r"importlib\.import_module\(\)"),
         ("from importlib import import_module\nimport_module('os')\n", r"importlib\.import_module\(\)"),
         # Network access.
         ("from urllib.request import urlopen\nurlopen('http://x')\n", r"urllib\.request\.urlopen\(\)"),
         ("import urllib.request\nurllib.request.urlopen('http://x')\n", r"urllib"),
+        ("import requests\nrequests.put('http://x')\n", r"requests\.put\(\)"),
+        ("import httpx\nhttpx.get('http://x')\n", r"httpx\.get\(\)"),
+        # Shell escapes.
+        ("import os\nos.system('echo unsafe')\n", r"os\.system\(\)"),
+        ("from os import popen\npopen('echo unsafe')\n", r"os\.popen\(\)"),
     ],
 )
 def test_load_decision_strategy_rejects_data_loading_escapes(

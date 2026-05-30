@@ -135,6 +135,8 @@ construction also write `decision_records.jsonl`, `engine_request.json`, and
 `run_manifest.json` keeps deterministic research identity (source commit, config, data,
 decisions, artifact hashes); Python version, package versions, git dirty status, and
 tracked diff hashes go to `environment.json` (excluded from manifest artifact hashes).
+V1 row, decision, and trade-ledger artifacts use deterministic JSONL. Columnar storage
+is not a current runner artifact format.
 
 ## Engine and execution boundary
 
@@ -147,3 +149,7 @@ Runner and validation share one internal execution boundary for strategy import,
 parameter validation, data loading, frozen strategy execution, decision validation, row
 hashing, and evidence-quality context. The runner remains the owner of smoke-engine
 request construction and engine artifacts.
+
+Stop-loss, take-profit, and trailing-stop thresholds are evaluated on the engine's
+selected fill price series (`open`, `close`, or quote side from the fill model). The
+engine does not simulate intrabar high/low stop paths.

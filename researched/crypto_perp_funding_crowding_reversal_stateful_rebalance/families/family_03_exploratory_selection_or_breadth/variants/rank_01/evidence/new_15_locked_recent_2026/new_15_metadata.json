@@ -1,10 +1,8 @@
 {
   "attempt": 26,
   "commit": "4ac5d5b",
-  "config_path": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_01/config.toml",
   "family": "selection_or_breadth",
   "rank": 1,
-  "source_result_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_01",
   "symbol_count": 5,
   "variant_id": "87f30746c574e1417ed8ab56f8d4cd7daef9f05fbca82b9e3ab54a55b34d8387",
   "window_days": 180,

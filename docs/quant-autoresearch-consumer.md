@@ -429,6 +429,10 @@ hash-pinned under manifest `artifacts`. Recompute the gated metric by summing
 replayability and sets global `verdict_replayable = true` only when all required
 completed verdict scenarios have ledgers.
 
+Stop-loss, take-profit, and trailing-stop exits are checked against the engine's
+selected fill price series, not intrabar high/low paths. V1 audit artifacts use
+deterministic JSONL for rows, decisions, and trade ledgers.
+
 The autoresearch output should be the selected `strategy.py`, selected
 `experiment.toml`, and the runner artifacts that explain why it was selected.
 

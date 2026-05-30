@@ -171,6 +171,10 @@ per-trade sum, not a NAV path. Validation therefore does not compound `net_retur
 future true NAV-path portfolio metrics must be added as separate metrics with separate
 semantics.
 
+Stop-loss, take-profit, and trailing-stop exits use the shared engine convention:
+thresholds are checked against the selected fill price series, not intrabar high/low
+paths.
+
 ## Artifacts
 
 Validation artifacts (under ignored result directories):
@@ -201,3 +205,6 @@ trade ledgers; `verdict_replay_basis = "engine_trade_ledger"` names the basis. T
 opt-in VectorBT Pro check emits no ledger of its own. `validation_decision.json` and
 `robustness_matrix.json` include `failure_details` for fatal setup failures, while
 stable policy reason strings remain unchanged.
+
+V1 validation row, decision, and trade-ledger artifacts use deterministic JSONL.
+Columnar storage is not part of the current validation artifact contract.

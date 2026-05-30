@@ -121,6 +121,37 @@ def test_prd_keeps_output_contract_precise():
     assert "example configs are templates" in prd
 
 
+def test_phase4_cleanup_contracts_stay_current():
+    prd = _flat(_read("PRD.md"))
+    runner = _flat(_read("docs/runner.md"))
+    validation = _flat(_read("docs/validation.md"))
+    consumer = _flat(_read("docs/quant-autoresearch-consumer.md"))
+    researched = Path("researched/crypto_perp_funding_crowding_reversal_stateful_rebalance")
+    manifest = _read(str(researched / "manifest.json"))
+
+    assert "efficient columnar format (parquet)" not in prd
+    assert "deterministic JSONL" in prd
+    assert "Columnar storage is not a current runner artifact format" in runner
+    assert "Columnar storage is not part of the current validation artifact contract" in validation
+
+    for doc in (runner, validation, consumer):
+        assert "selected fill price series" in doc
+        assert "intrabar high/low" in doc
+
+    assert not list(Path(".").glob("review-*.md"))
+    assert Path("docs/reviews/2026-05-29-foundation-codex.md").is_file()
+    assert Path("docs/reviews/2026-05-29-foundation-claude-v2.md").is_file()
+    assert Path("docs/reviews/2026-05-29-review-convergence.md").is_file()
+
+    assert not list(researched.rglob("legacy_selection"))
+    assert not list(researched.rglob("selected_source_summary.json"))
+    assert not (researched / "selection" / "selected_15_manifest.json").exists()
+    assert "legacy_selection" not in manifest
+    assert "selected_source_summary" not in manifest
+    assert "legacy_" not in manifest
+    assert "selected_15" not in manifest
+
+
 def test_runner_docs_describe_normalized_row_contract():
     runner = _flat(_read("docs/runner.md"))
     consumer = _flat(_read("docs/quant-autoresearch-consumer.md"))

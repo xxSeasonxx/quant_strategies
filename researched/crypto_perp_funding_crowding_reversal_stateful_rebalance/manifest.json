@@ -19,7 +19,7 @@
   "family_count": 3,
   "generated_at": "2026-05-27T04:41:06.846031+00:00",
   "notes": "Research handoff package. Not market validation.",
-  "ranking_method_version": "research_handoff_rank_v1_selected_15",
+  "ranking_method_version": "research_handoff_rank_v1_new_15",
   "selected_family_ids": [
     "time_only_exit",
     "entry_filter",
@@ -36,8 +36,6 @@
       "config_sha256": "0ba2574bbfeff898928f004184de476366c242618d3c8e9ead00a845e344068b",
       "directory": "families/family_01_primary_time_only_exit/variants/rank_01",
       "evidence_files": [
-        "families/family_01_primary_time_only_exit/variants/rank_01/evidence/legacy_selection/attempt_0053_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_01/evidence/legacy_selection/attempt_0054_validation_2025_h1_score.json",
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -48,12 +46,9 @@
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/score.json",
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_01_primary_time_only_exit/variants/rank_01/evidence/selected_source_summary.json"
+        "families/family_01_primary_time_only_exit/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "time_only_exit",
-      "legacy_blended_score": 0.00261950820891126,
-      "legacy_trade_count": 1902,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -65,7 +60,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 909,
       "source_new_15_result_dir": "results/new_15/family_01_primary_time_only_exit/rank_01/2026-05-27T034043Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_01_primary_time_only_exit/rank_01",
       "variant_id": "496d46b1bb2776816039d2ee182099b4e65bcf13f48e4e25a98e35fcd195f710"
     },
     {
@@ -73,8 +67,6 @@
       "config_sha256": "ca4d5f8e51e6e486ddfdc0fa571fcad41e4ecf1bf7fe262df9752aef52ecf9e2",
       "directory": "families/family_01_primary_time_only_exit/variants/rank_02",
       "evidence_files": [
-        "families/family_01_primary_time_only_exit/variants/rank_02/evidence/legacy_selection/attempt_0099_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_02/evidence/legacy_selection/attempt_0100_validation_2025_h1_score.json",
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -85,12 +77,9 @@
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/score.json",
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_01_primary_time_only_exit/variants/rank_02/evidence/selected_source_summary.json"
+        "families/family_01_primary_time_only_exit/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "time_only_exit",
-      "legacy_blended_score": 0.0025430737412407427,
-      "legacy_trade_count": 1426,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -102,7 +91,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 697,
       "source_new_15_result_dir": "results/new_15/family_01_primary_time_only_exit/rank_02/2026-05-27T034310Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_01_primary_time_only_exit/rank_02",
       "variant_id": "5f8b4712ddd104b85a1a2548f403265b678c6c1f19c8a1a1c00e6566c7e7346f"
     },
     {
@@ -110,8 +98,6 @@
       "config_sha256": "d8802d03aef437e87ebf366980ef513ac286fa84713bb57d7f8306c813735072",
       "directory": "families/family_01_primary_time_only_exit/variants/rank_03",
       "evidence_files": [
-        "families/family_01_primary_time_only_exit/variants/rank_03/evidence/legacy_selection/attempt_0031_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_03/evidence/legacy_selection/attempt_0032_validation_2025_h1_score.json",
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -122,12 +108,9 @@
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/score.json",
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_01_primary_time_only_exit/variants/rank_03/evidence/selected_source_summary.json"
+        "families/family_01_primary_time_only_exit/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "time_only_exit",
-      "legacy_blended_score": 0.0024428962809179217,
-      "legacy_trade_count": 1137,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -139,7 +122,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 551,
       "source_new_15_result_dir": "results/new_15/family_01_primary_time_only_exit/rank_03/2026-05-27T034536Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_01_primary_time_only_exit/rank_03",
       "variant_id": "8b0b8ac447e6dcea8ad3d5ae389f3d20feb3b9884be60d420d255eb7c4aa7f0e"
     },
     {
@@ -147,15 +129,6 @@
       "config_sha256": "69cf38d09448fc63d3686663e79ca251e046ac408768f1b3f6821d662bfa650b",
       "directory": "families/family_01_primary_time_only_exit/variants/rank_04",
       "evidence_files": [
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/attempt_0038_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/attempt_0039_validation_2025_h1_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/attempt_0040_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/attempt_0045_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/promotion_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/promotion_source_01_stateful_rebalance_bold_100_2026-05-26T062227Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/promotion_source_02_validation_2025_h1_2026-05-26T062354Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/promotion_source_03_validation_2025_h2_2026-05-26T062520Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/legacy_selection/promotion_summary.json",
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -166,12 +139,9 @@
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/score.json",
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/selected_source_summary.json"
+        "families/family_01_primary_time_only_exit/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "time_only_exit",
-      "legacy_blended_score": 0.0023227208646000347,
-      "legacy_trade_count": 4723,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -183,7 +153,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 666,
       "source_new_15_result_dir": "results/new_15/family_01_primary_time_only_exit/rank_04/2026-05-27T034801Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_01_primary_time_only_exit/rank_04",
       "variant_id": "4a2f211e60f0747431569a779164916f612e7f4e76ab5bfd4eba1db087589412"
     },
     {
@@ -191,8 +160,6 @@
       "config_sha256": "594b8192829591acd90695e466802c0bbb63850d7240ac0df37022a0d86a5168",
       "directory": "families/family_01_primary_time_only_exit/variants/rank_05",
       "evidence_files": [
-        "families/family_01_primary_time_only_exit/variants/rank_05/evidence/legacy_selection/attempt_0092_locked_recent_2026_score.json",
-        "families/family_01_primary_time_only_exit/variants/rank_05/evidence/legacy_selection/attempt_0094_validation_2025_h1_score.json",
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -203,12 +170,9 @@
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/score.json",
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_01_primary_time_only_exit/variants/rank_05/evidence/selected_source_summary.json"
+        "families/family_01_primary_time_only_exit/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "time_only_exit",
-      "legacy_blended_score": 0.002263961051919883,
-      "legacy_trade_count": 1228,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -220,7 +184,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 666,
       "source_new_15_result_dir": "results/new_15/family_01_primary_time_only_exit/rank_05/2026-05-27T035027Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_01_primary_time_only_exit/rank_05",
       "variant_id": "f3b09718252ac04bf5048419ddc30ad21a5975ae873d1b2dc6a7a6dbe160d064"
     },
     {
@@ -228,8 +191,6 @@
       "config_sha256": "8ad5a31e06694c7f1c511791e59d1b55915d3289e429299e132faf3607247e9e",
       "directory": "families/family_02_secondary_entry_filter/variants/rank_01",
       "evidence_files": [
-        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/legacy_selection/attempt_0016_locked_recent_2026_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/legacy_selection/attempt_0017_validation_2025_h1_score.json",
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -240,12 +201,9 @@
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/score.json",
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/selected_source_summary.json"
+        "families/family_02_secondary_entry_filter/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "entry_filter",
-      "legacy_blended_score": 0.0022299049202795487,
-      "legacy_trade_count": 1056,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -257,7 +215,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 510,
       "source_new_15_result_dir": "results/new_15/family_02_secondary_entry_filter/rank_01/2026-05-27T035259Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_02_secondary_entry_filter/rank_01",
       "variant_id": "54ecf8dbf13f26fdeff95f264ea98f0ad6e06d8bc1e90a6721b07a9e44a33166"
     },
     {
@@ -265,13 +222,6 @@
       "config_sha256": "30d7e6c93b90e3a32d93a24d2740769978fba10de2826ba2cddff03003a732a2",
       "directory": "families/family_02_secondary_entry_filter/variants/rank_02",
       "evidence_files": [
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/attempt_0001_locked_recent_2026_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/attempt_0002_locked_recent_2026_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/promotion_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/promotion_source_01_stateful_rebalance_bold_100_2026-05-26T045359Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/promotion_source_02_validation_2025_h1_2026-05-26T045522Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/promotion_source_03_validation_2025_h2_2026-05-26T045641Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/legacy_selection/promotion_summary.json",
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -282,12 +232,9 @@
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/score.json",
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/selected_source_summary.json"
+        "families/family_02_secondary_entry_filter/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "entry_filter",
-      "legacy_blended_score": 0.0020954766780930793,
-      "legacy_trade_count": 2755,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -299,7 +246,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 525,
       "source_new_15_result_dir": "results/new_15/family_02_secondary_entry_filter/rank_02/2026-05-27T035523Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_02_secondary_entry_filter/rank_02",
       "variant_id": "5bb02cc0632bad6b561e94d40991d776595a7f23901903a64ea6dcd6f5f6a57f"
     },
     {
@@ -307,14 +253,6 @@
       "config_sha256": "8752c779f26f06072ab40e5b7fd6f0a1c6aa04105dda07c38997ae425a4f8449",
       "directory": "families/family_02_secondary_entry_filter/variants/rank_03",
       "evidence_files": [
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/attempt_0018_locked_recent_2026_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/attempt_0019_validation_2025_h1_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/attempt_0020_locked_recent_2026_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/promotion_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/promotion_source_01_stateful_rebalance_bold_100_2026-05-26T053011Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/promotion_source_02_validation_2025_h1_2026-05-26T053130Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/promotion_source_03_validation_2025_h2_2026-05-26T053251Z-crypto_perp_funding_crowding_reversal_stateful_rebalance_score.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/legacy_selection/promotion_summary.json",
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -325,12 +263,9 @@
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/score.json",
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/selected_source_summary.json"
+        "families/family_02_secondary_entry_filter/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "entry_filter",
-      "legacy_blended_score": 0.002049820792791366,
-      "legacy_trade_count": 3374,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -342,7 +277,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 533,
       "source_new_15_result_dir": "results/new_15/family_02_secondary_entry_filter/rank_03/2026-05-27T035748Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_02_secondary_entry_filter/rank_03",
       "variant_id": "ffe9b872bde8623e55248bb459869cd4da02838880e7b75ef079fb0f0483ba67"
     },
     {
@@ -350,7 +284,6 @@
       "config_sha256": "63676bdbc724d3c7268ebf05a990f25c50ade838b0462d1dede4d5fc2e17b068",
       "directory": "families/family_02_secondary_entry_filter/variants/rank_04",
       "evidence_files": [
-        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/legacy_selection/attempt_0096_locked_recent_2026_score.json",
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -361,12 +294,9 @@
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/score.json",
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/selected_source_summary.json"
+        "families/family_02_secondary_entry_filter/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "entry_filter",
-      "legacy_blended_score": 0.0015849635665211048,
-      "legacy_trade_count": 657,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -378,7 +308,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 657,
       "source_new_15_result_dir": "results/new_15/family_02_secondary_entry_filter/rank_04/2026-05-27T040014Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_02_secondary_entry_filter/rank_04",
       "variant_id": "046c6d8329274cf189f7eaae66c8265cb4619d5ce99073d1b72d116370327cd3"
     },
     {
@@ -386,7 +315,6 @@
       "config_sha256": "0efd97e14f3fed97fbc912201bb576362fefcd65574a3a00136d434e3a7a069c",
       "directory": "families/family_02_secondary_entry_filter/variants/rank_05",
       "evidence_files": [
-        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/legacy_selection/attempt_0015_locked_recent_2026_score.json",
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -397,12 +325,9 @@
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/score.json",
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/selected_source_summary.json"
+        "families/family_02_secondary_entry_filter/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "entry_filter",
-      "legacy_blended_score": 0.0013988701462868203,
-      "legacy_trade_count": 526,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -414,7 +339,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 526,
       "source_new_15_result_dir": "results/new_15/family_02_secondary_entry_filter/rank_05/2026-05-27T040240Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_02_secondary_entry_filter/rank_05",
       "variant_id": "1879f0a53807a4a2ecc72c949e12d55804a11ba208934eadd342cfaecc8cca47"
     },
     {
@@ -422,7 +346,6 @@
       "config_sha256": "4b4dd0cc680b77ab4834c59d81a75993133f48e3dbce61d10e9130ae55ed52ab",
       "directory": "families/family_03_exploratory_selection_or_breadth/variants/rank_01",
       "evidence_files": [
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/legacy_selection/attempt_0048_locked_recent_2026_score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -433,12 +356,9 @@
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/selected_source_summary.json"
+        "families/family_03_exploratory_selection_or_breadth/variants/rank_01/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "selection_or_breadth",
-      "legacy_blended_score": 0.0016449770596589806,
-      "legacy_trade_count": 666,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -450,7 +370,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 666,
       "source_new_15_result_dir": "results/new_15/family_03_exploratory_selection_or_breadth/rank_01/2026-05-27T040500Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_01",
       "variant_id": "87f30746c574e1417ed8ab56f8d4cd7daef9f05fbca82b9e3ab54a55b34d8387"
     },
     {
@@ -458,7 +377,6 @@
       "config_sha256": "7fdebe274ca88719d045e735c35c0353d3ffda2bcc4e3df8ab292960d29ea7f7",
       "directory": "families/family_03_exploratory_selection_or_breadth/variants/rank_02",
       "evidence_files": [
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/legacy_selection/attempt_0049_locked_recent_2026_score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -469,12 +387,9 @@
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/selected_source_summary.json"
+        "families/family_03_exploratory_selection_or_breadth/variants/rank_02/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "selection_or_breadth",
-      "legacy_blended_score": 0.0016449770596589806,
-      "legacy_trade_count": 666,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -486,7 +401,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 666,
       "source_new_15_result_dir": "results/new_15/family_03_exploratory_selection_or_breadth/rank_02/2026-05-27T040723Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_02",
       "variant_id": "ebc4269f22d8ce0a18c8a74360a66b6ea86ae5cd5a624ff084ae275babb67ba0"
     },
     {
@@ -494,7 +408,6 @@
       "config_sha256": "77b63753f601ecde852afdb6a1f19e7ce98b8c543f307478210059898512cfb8",
       "directory": "families/family_03_exploratory_selection_or_breadth/variants/rank_03",
       "evidence_files": [
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/legacy_selection/attempt_0050_locked_recent_2026_score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -505,12 +418,9 @@
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/selected_source_summary.json"
+        "families/family_03_exploratory_selection_or_breadth/variants/rank_03/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "selection_or_breadth",
-      "legacy_blended_score": 0.0016109688216524413,
-      "legacy_trade_count": 665,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -522,7 +432,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 665,
       "source_new_15_result_dir": "results/new_15/family_03_exploratory_selection_or_breadth/rank_03/2026-05-27T040946Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_03",
       "variant_id": "f68711226abaa3b05166cf0cf9b063fd9418beeaa3fef975727e79a65e66252d"
     },
     {
@@ -530,7 +439,6 @@
       "config_sha256": "3222828cb4dc9ad9ce3ce481d7af3a81d446f4eed7355f644020a97a9acbb924",
       "directory": "families/family_03_exploratory_selection_or_breadth/variants/rank_04",
       "evidence_files": [
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/legacy_selection/attempt_0078_locked_recent_2026_score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -541,12 +449,9 @@
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/selected_source_summary.json"
+        "families/family_03_exploratory_selection_or_breadth/variants/rank_04/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "selection_or_breadth",
-      "legacy_blended_score": 0.00148906602239065,
-      "legacy_trade_count": 658,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -558,7 +463,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 658,
       "source_new_15_result_dir": "results/new_15/family_03_exploratory_selection_or_breadth/rank_04/2026-05-27T041208Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_04",
       "variant_id": "955ac18b0ecb99266174273d73c182b06e39122ccd4c7d8a606dda5dfe8f3127"
     },
     {
@@ -566,7 +470,6 @@
       "config_sha256": "b84352cd5d3f0b07fec857b220429880e7e8cc64901224948ce955430247a469",
       "directory": "families/family_03_exploratory_selection_or_breadth/variants/rank_05",
       "evidence_files": [
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/legacy_selection/attempt_0079_locked_recent_2026_score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/artifact_policy.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/data_manifest.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/decision_records.jsonl",
@@ -577,12 +480,9 @@
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/score.json",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/signals.csv",
         "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/strategy_snapshot.py",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json",
-        "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/selected_source_summary.json"
+        "families/family_03_exploratory_selection_or_breadth/variants/rank_05/evidence/new_15_locked_recent_2026/summary.json"
       ],
       "family": "selection_or_breadth",
-      "legacy_blended_score": 0.0011045898579057386,
-      "legacy_trade_count": 608,
       "omitted_large_artifacts": [
         "new_15/engine_request.json",
         "new_15/strategy_input_rows.csv",
@@ -594,7 +494,6 @@
       "rerun_status": "scored",
       "rerun_trade_count": 608,
       "source_new_15_result_dir": "results/new_15/family_03_exploratory_selection_or_breadth/rank_05/2026-05-27T041431Z-crypto_perp_funding_crowding_reversal_stateful_rebalance",
-      "source_selected_dir": "results/selected_15/family_03_exploratory_selection_or_breadth/rank_05",
       "variant_id": "6ab0f5592ae055c10c5c19cc821aa7ba1e4e9d88094eecb25d832697de12f5b7"
     }
   ]

@@ -3,13 +3,8 @@
 Use this directory for dated review artifacts after an active review is
 published or archived.
 
-The current foundation-review inputs remain at the repository root because they
-are active working inputs for `progress.md`:
-
-- `review-codex.md`
-- `review-claude.md`
-
-When a review is no longer an active input, archive it here with a dated name:
+Root-level `review-*.md` files are working notes only. Commit review artifacts
+here with a dated name:
 
 ```text
 YYYY-MM-DD-<topic>-<reviewer>.md
