@@ -448,6 +448,16 @@ def test_load_validation_config_rejects_absolute_results_dir_outside_config_dire
         load_validation_config(config_path)
 
 
+def test_example_validation_config_keeps_candidate_local_results_dir():
+    config_path = Path("examples/strategies/simple_momentum_spy_daily_validation.toml")
+
+    config = load_validation_config(config_path)
+
+    assert config.output.results_dir == (
+        config_path.parent / "validation_results" / "simple_momentum"
+    ).resolve()
+
+
 def test_load_validation_config_rejects_missing_windows(tmp_path: Path):
     candidate = tmp_path / "candidate"
     config_path = candidate / "validation.toml"

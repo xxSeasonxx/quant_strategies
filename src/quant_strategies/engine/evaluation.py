@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
-from quant_strategies.decisions import InstrumentRef, StrategyDecision
+from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine.bar_index import (
     IndexedBars,
     attach_bar_index,
     attached_bar_index,
     build_bar_index,
+)
+from quant_strategies.engine.executable import (
+    ExecutableDecision as _ExecutableDecision,
+    executable_decision,
 )
 from quant_strategies.funding import funding_return_over_window
 from quant_strategies.engine.models import (
@@ -36,15 +38,6 @@ class EvaluationError(ValueError):
 class _ExitSelection:
     exit_bar: Bar
     reason: ExitReason
-
-
-@dataclass(frozen=True)
-class _ExecutableDecision:
-    decision: StrategyDecision
-    symbol: str
-    side: Side
-    weight: float
-    metadata: dict[str, Any]
 
 
 def screen(request: EvaluationRequest) -> ScreeningResult:
@@ -254,31 +247,7 @@ def _exit_reason(decision: StrategyDecision, side_return_bps: float, best_return
 
 
 def _executable_decision(decision: StrategyDecision) -> _ExecutableDecision:
-    symbol = decision.instrument.symbol
-    if decision.intent.action != "open":
-        raise EvaluationError(f"smoke engine supports open intent only: {symbol}")
-    if not isinstance(decision.instrument, InstrumentRef):
-        raise EvaluationError(f"smoke engine cannot represent {decision.instrument.kind} instrument: {symbol}")
-    if decision.target.direction == "flat":
-        raise EvaluationError(f"smoke engine cannot represent flat target for {symbol}")
-    if decision.target.sizing_kind != "target_weight":
-        raise EvaluationError(f"smoke engine requires target_weight sizing: {symbol}")
-    side = Side.LONG if decision.target.direction == "long" else Side.SHORT
-    return _ExecutableDecision(
-        decision=decision,
-        symbol=symbol,
-        side=side,
-        weight=decision.target.size,
-        metadata=_jsonable_metadata_value(decision.metadata),
-    )
-
-
-def _jsonable_metadata_value(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _jsonable_metadata_value(item) for key, item in value.items()}
-    if isinstance(value, tuple | list):
-        return [_jsonable_metadata_value(item) for item in value]
-    return value
+    return executable_decision(decision, error_factory=EvaluationError)
 
 
 def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:

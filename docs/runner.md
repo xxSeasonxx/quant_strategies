@@ -117,12 +117,15 @@ number from artifacts alone. Full-profile runs (`artifact_profile = "full"`) are
 `audit_replayable`: they include the row, decision, engine-request, and evidence
 artifacts needed for audit replay of runner smoke metrics.
 
-Artifacts are written under ignored result directories. After config loading succeeds,
-result dirs include `config.toml`; `strategy_snapshot.py` is copied when the strategy
-file is available. Runs that reach data loading include `data_manifest.json` and, for
+Artifacts are written under ignored result directories. `output.results_dir` must stay
+inside the repository and outside source/input roots such as `src/`, `tests/`, `docs/`,
+`runs/`, `examples/`, `tested/`, `untested/`, and `researched/`; write generated output
+under `results/` instead. After config loading succeeds, result dirs include
+`config.toml`; `strategy_snapshot.py` is copied when the strategy file is available.
+Runs that reach data loading include `data_manifest.json` and, for
 `artifact_profile = "full"`, `strategy_input_rows.jsonl` even if decision generation
-later fails (a JSON-safe canonical serialization of the normalized projection;
-non-finite ancillary values are written as `null`, and its file hash matches
+later fails (a JSON-safe canonical serialization of the normalized projection; non-finite
+ancillary values are written as `null`, and its file hash matches
 `normalized_rows_sha256`). Failures still write `run_manifest.json`, `environment.json`,
 `summary.json`, and `notes.md`. Successful default `summary` runs also write
 `artifact_profile_summary.json`; completed `full` runs that reach engine request

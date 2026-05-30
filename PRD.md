@@ -252,15 +252,18 @@ A consumer should be able to say "yes" to all of these without qualification.
 ## 7. Constraints
 
 - **C-1.** Python ≥ 3.12; pydantic ≥ 2.10; `quant-data` for data loading. Optional
-  `vectorbtpro` for one validation backend.
+  `vectorbtpro` only for the explicitly enabled single-trade agreement check; it
+  is not a validation backend or verdict source.
 - **C-2.** Conda environment `quant`. All Python commands run via `conda run -n quant`.
 - **C-3.** `quant_data` is the only source of market data. The foundation does not load
   CSVs, fetch APIs, or maintain caches.
 - **C-4.** Strategy files live flat under `untested/` or `tested/` directories or inside
   candidate workspaces driven by consumers. No nested strategy "framework" hierarchies
   inside strategies.
-- **C-5.** Results are written under ignored `results/` directories (per config). No
-  results land in `src/` or in version-controlled trees.
+- **C-5.** Runner results are written under ignored `results/` directories (per
+  config). Validation outputs remain candidate-local; generated artifacts should
+  not be written under source or input directories, and example configs are
+  templates.
 - **C-6.** Promotion into `tested/` from `untested/` or `researched/` is a separate
   human process. The foundation never auto-promotes.
 - **C-7.** No network IO in the engine or kernel. All data comes from `quant_data`

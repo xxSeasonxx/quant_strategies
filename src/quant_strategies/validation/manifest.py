@@ -32,9 +32,9 @@ def write_validation_manifest(
             "backend": backend_name,
             "config_path": _relative_path(config_path, path_base),
             "config_sha256": _optional_hash(config_path),
-            # True when the verdict backend emitted a per-trade ledger: the gated
-            # net_return is then recomputable as sum(trade.net_return) per scenario.
-            "verdict_replayable": any(item.trade_ledger_path for item in backend_results),
+            # True only when every required completed verdict scenario emitted a
+            # per-trade ledger; one ledger must not make mixed evidence look replayable.
+            "verdict_replayable": _verdict_replayable(backend_results),
             "verdict_replay_basis": "engine_trade_ledger",
         },
         "strategy": {
@@ -94,6 +94,7 @@ def _backend_summary(
                 "decision_records_sha256": item.decision_records_sha256,
                 "trade_ledger_path": item.trade_ledger_path,
                 "trade_ledger_sha256": item.trade_ledger_sha256,
+                "replayable_from_trade_ledger": _scenario_replayable(item),
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),
@@ -105,6 +106,19 @@ def _backend_summary(
         "unsupported_semantics": sorted(unsupported),
         "scenarios": scenarios,
     }
+
+
+def _verdict_replayable(backend_results: list[ScenarioBackendRunResult]) -> bool:
+    required_completed = [
+        item
+        for item in backend_results
+        if item.required and not item.diagnostic_only and item.result.status == "completed"
+    ]
+    return bool(required_completed) and all(_scenario_replayable(item) for item in required_completed)
+
+
+def _scenario_replayable(item: ScenarioBackendRunResult) -> bool:
+    return bool(item.trade_ledger_path)
 
 
 def _core_hashes(result_dir: Path) -> dict[str, str | None]:

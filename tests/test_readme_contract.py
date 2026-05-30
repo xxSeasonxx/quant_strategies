@@ -93,6 +93,34 @@ def test_contract_detail_is_documented_in_the_doc_set():
     assert "backend_capability_matrix.json" not in docs
 
 
+def test_docs_demote_vectorbt_to_single_trade_agreement_check():
+    readme = _flat(_read("README.md"))
+    docs = _doc_set()
+    prd = _flat(_read("PRD.md"))
+
+    assert "VectorBT Pro<br/>agreement oracle" not in readme
+    assert "single-trade" in readme
+    assert "never produces verdict metrics" in readme
+
+    assert "no separate VectorBT Pro verdict metric" in docs
+    assert "single-trade" in docs
+    assert "fails the run with `backend_agreement_failed`" in docs
+    assert "co-equal validation backend" not in docs
+
+    assert "one validation backend" not in prd
+    assert "single-trade agreement check" in prd
+    assert "not a validation backend or verdict source" in prd
+
+
+def test_prd_keeps_output_contract_precise():
+    prd = _flat(_read("PRD.md"))
+
+    assert "No results land in `src/` or in version-controlled trees" not in prd
+    assert "Runner results are written under ignored `results/` directories" in prd
+    assert "Validation outputs remain candidate-local" in prd
+    assert "example configs are templates" in prd
+
+
 def test_runner_docs_describe_normalized_row_contract():
     runner = _flat(_read("docs/runner.md"))
     consumer = _flat(_read("docs/quant-autoresearch-consumer.md"))

@@ -18,7 +18,7 @@ flowchart TD
     pnl["one PnL contract — engine.screen()<br/>per-trade ledger · funding-aware net"]
     pnl --> quick["quant-strategies run<br/>quick run · search-only · rank and iterate"]
     pnl --> valid["quant-strategies validate<br/>windows × scenarios → advisory verdict + audit ledgers"]
-    valid -. "opt-in cross-check" .-> oracle["VectorBT Pro<br/>agreement oracle"]
+    valid -. "opt-in single-trade check" .-> oracle["VectorBT Pro<br/>single-trade check"]
     valid --> human["human promotion review<br/>(outside the code)"]
 ```
 
@@ -32,8 +32,8 @@ The design has one spine:
 - **One PnL contract.** The engine's `screen()` is the single source of trade-level
   PnL, so **the number a human audits is the number the verdict is computed from.**
 - **Two steps on top.** A fast *quick run* for ranking, and an *advisory validation
-  run* for a verdict plus audit-replayable artifacts. VectorBT Pro is only an
-  opt-in agreement oracle, never a co-equal verdict source.
+  run* for a verdict plus audit-replayable artifacts. VectorBT Pro is optional,
+  single-trade only, and never produces verdict metrics.
 
 Promotion is always a separate human decision, outside this code.
 

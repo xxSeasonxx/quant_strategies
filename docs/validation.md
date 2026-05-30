@@ -19,7 +19,8 @@ candidate_workspace/
 Relative paths in `validation.toml` resolve from the config file directory.
 `strategy_path` and `[output] results_dir` must stay inside that directory. The
 validator does not special-case `researched/`, package manifests, family/variant
-directories, or any repository layout.
+directories, or any repository layout. Example validation configs are templates; copy
+them into a candidate workspace before producing generated artifacts.
 
 Every config includes minimal readiness metadata:
 
@@ -89,9 +90,10 @@ or change eligibility flags. Known prior search downgrades an otherwise
 ## Verdict PnL source and the agreement oracle
 
 The verdict PnL source is the engine smoke kernel: the number a human audits is the
-number the verdict is computed from. VectorBT Pro is not a co-equal verdict backend; it
-is available only as an opt-in agreement oracle. (The legacy `backend` config field has
-been removed; a config that still sets it fails to load with migration guidance.)
+number the verdict is computed from. VectorBT Pro is not a validation backend and never
+produces verdict metrics; it is available only as an explicitly enabled single-trade
+agreement check. (The legacy `backend` config field has been removed; a config that
+still sets it fails to load with migration guidance.)
 
 To cross-check the engine verdict against VectorBT Pro:
 
@@ -110,8 +112,8 @@ When enabled, the oracle cross-checks each applicable scenario's price path agai
 VectorBT Pro and fails the run with `backend_agreement_failed` if they diverge beyond
 tolerance. It compares the engine's `gross_return` (which feeds the gated `net_return`)
 against vbt's zero-cost total return, and is sound only where the engine's linear
-per-trade sum equals a NAV path — a single-trade, close-fill, threshold-free scenario;
-it reports `skipped` otherwise. If the oracle is enabled but VectorBT Pro cannot be
+per-trade sum equals a NAV path: a single-trade, close-fill, threshold-free scenario.
+It reports `skipped` otherwise. If the oracle is enabled but VectorBT Pro cannot be
 imported, the cross-check is recorded as unavailable and the engine verdict stands.
 
 ## What a validation run checks
@@ -193,8 +195,9 @@ The engine verdict backend emits a per-scenario per-trade ledger
 (`backend_runs/trade_ledgers/<scenario_id>.jsonl`, one `Trade` record per line with
 entry/exit prices and gross/funding/cost/net returns), hash-pinned in the manifest. The
 gated `net_return` is therefore recomputable from artifacts as `sum(trade.net_return)`
-per scenario; the manifest sets `verdict_replayable` and
-`verdict_replay_basis = "engine_trade_ledger"`. The opt-in VectorBT Pro oracle is a
-price-path cross-check and emits no ledger of its own. `validation_decision.json` and
-`robustness_matrix.json` include `failure_details` for fatal setup failures, while stable
-policy reason strings remain unchanged.
+per scenario. The manifest records replayability per scenario and sets global
+`verdict_replayable = true` only when all required completed verdict scenarios have
+trade ledgers; `verdict_replay_basis = "engine_trade_ledger"` names the basis. The
+opt-in VectorBT Pro check emits no ledger of its own. `validation_decision.json` and
+`robustness_matrix.json` include `failure_details` for fatal setup failures, while
+stable policy reason strings remain unchanged.

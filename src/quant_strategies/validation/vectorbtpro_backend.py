@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.engine.executable import base_unsupported_semantics
 from quant_strategies.validation.backends import BackendRunResult
 from quant_strategies.validation.config import ScenarioRunConfig
 
@@ -147,20 +148,9 @@ class VectorBTProBackend:
 def _structural_unsupported_semantics(decisions: list[StrategyDecision]) -> tuple[str, ...]:
     unsupported: list[str] = []
     for item in decisions:
-        if item.intent.action != "open":
-            unsupported.append("non_open_intent")
-        if item.instrument.kind == "future":
-            unsupported.append("future_instrument")
-        elif item.instrument.kind == "option":
-            unsupported.append("option_instrument")
-        elif item.instrument.kind == "multi_leg":
-            unsupported.append("multi_leg_decision")
-        if item.target.sizing_kind != "target_weight":
-            unsupported.append("non_target_weight_sizing")
-        elif item.target.size > 1.0:
+        unsupported.extend(base_unsupported_semantics(item))
+        if item.target.sizing_kind == "target_weight" and item.target.size > 1.0:
             unsupported.append("leveraged_target_weight")
-        if item.target.direction == "flat":
-            unsupported.append("flat_target")
     return tuple(dict.fromkeys(unsupported))
 
 

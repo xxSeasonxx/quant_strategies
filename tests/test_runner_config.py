@@ -189,6 +189,34 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         load_config(write_config(tmp_path, results_dir="../results"), repo_root=tmp_path)
 
 
+@pytest.mark.parametrize(
+    "results_dir",
+    [
+        "src/results",
+        "tests/results",
+        "docs/results",
+        "runs/results",
+        "examples/results",
+        "tested/results",
+        "untested/results",
+        "researched/results",
+    ],
+)
+def test_output_path_under_source_like_roots_is_rejected(tmp_path: Path, results_dir: str):
+    write_strategy(tmp_path)
+
+    with pytest.raises(ConfigError, match="output.results_dir must not resolve inside source"):
+        load_config(write_config(tmp_path, results_dir=results_dir), repo_root=tmp_path)
+
+
+def test_output_path_under_results_subdir_named_like_source_is_accepted(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    config = load_config(write_config(tmp_path, results_dir="results/researched/demo"), repo_root=tmp_path)
+
+    assert config.output.results_dir == tmp_path / "results" / "researched" / "demo"
+
+
 def test_missing_relative_config_reports_resolved_path(tmp_path: Path):
     missing = tmp_path / "runs" / "missing.toml"
 

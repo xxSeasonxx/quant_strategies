@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import InstrumentRef, StrategyDecision
+from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine import (
     Bar,
     CostModel,
@@ -20,6 +20,7 @@ from quant_strategies.engine import (
     screen,
 )
 from quant_strategies.engine.bar_index import IndexedBars, attach_bar_index, build_bar_index
+from quant_strategies.engine.executable import executable_decision
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.runner.errors import EvaluationRunError, RequestBuildError
@@ -217,16 +218,7 @@ def _decision_index(indexed: IndexedBars, decision: StrategyDecision) -> int:
 
 
 def _decision_symbol(decision: StrategyDecision) -> str:
-    symbol = decision.instrument.symbol
-    if decision.intent.action != "open":
-        raise RequestBuildError(f"smoke engine supports open intent only: {symbol}")
-    if not isinstance(decision.instrument, InstrumentRef):
-        raise RequestBuildError(f"smoke engine cannot represent {decision.instrument.kind} instrument: {symbol}")
-    if decision.target.direction == "flat":
-        raise RequestBuildError(f"smoke engine cannot represent flat target for {symbol}")
-    if decision.target.sizing_kind != "target_weight":
-        raise RequestBuildError(f"smoke engine requires target_weight sizing: {symbol}")
-    return symbol
+    return executable_decision(decision, error_factory=RequestBuildError).symbol
 
 
 def _assert_quote_fill_bar(bar: Bar, fill_name: str) -> None:

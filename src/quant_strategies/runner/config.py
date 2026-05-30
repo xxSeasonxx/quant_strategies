@@ -24,6 +24,19 @@ ArtifactProfile = Literal["full", "summary"]
 # contract; set "validation" to make missing/invalid `available_at` fail the run.
 RowContractStrictness = Literal["search", "validation"]
 
+_SOURCE_LIKE_OUTPUT_ROOTS = frozenset(
+    {
+        "src",
+        "tests",
+        "docs",
+        "runs",
+        "examples",
+        "tested",
+        "untested",
+        "researched",
+    }
+)
+
 
 class RunnerConfigModel(SharedConfigModel):
     pass
@@ -44,6 +57,18 @@ def _resolve_inside_repo(value: Path, repo_root: Path, field_name: str) -> Path:
     return resolved
 
 
+def _reject_source_like_output_dir(path: Path, repo_root: Path, field_name: str) -> None:
+    for name in sorted(_SOURCE_LIKE_OUTPUT_ROOTS):
+        source_root = repo_root / name
+        try:
+            path.relative_to(source_root)
+        except ValueError:
+            continue
+        raise ValueError(
+            f"{field_name} must not resolve inside source or input directory: {name}/"
+        )
+
+
 def resolve_config_path(path: str | Path, *, repo_root: Path | None = None) -> Path:
     root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
     config_path = Path(path)
@@ -60,7 +85,10 @@ class OutputConfig(RunnerConfigModel):
     @field_validator("results_dir")
     @classmethod
     def validate_results_dir(cls, value: Path, info: ValidationInfo) -> Path:
-        return _resolve_inside_repo(value, _repo_root(info), "output.results_dir")
+        repo_root = _repo_root(info)
+        resolved = _resolve_inside_repo(value, repo_root, "output.results_dir")
+        _reject_source_like_output_dir(resolved, repo_root, "output.results_dir")
+        return resolved
 
 
 class RunConfig(RunnerConfigModel):
