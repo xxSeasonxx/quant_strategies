@@ -88,7 +88,8 @@ See [docs/validation.md](docs/validation.md).
   only and does not discover upstream `.env` files.
 - **The engine reports activity sums, not NAV.** Smoke metrics live under
   `smoke_score.sum_signed_trade_activity_*` and are linear per-trade sums, not
-  portfolio/NAV-path returns.
+  portfolio/NAV-path returns. Validation gates the linear activity sum directly;
+  it does not compound that metric as if it were a NAV path.
 - **`researched/` is not market-validated.** It may hold frozen packages from
   upstream research; validation does not treat it as special.
 
@@ -111,8 +112,9 @@ conda run -n quant quant-strategies validate path/to/candidate/validation.toml
   metric semantics, and the replayable trade ledger.
 - **[docs/quant-autoresearch-consumer.md](docs/quant-autoresearch-consumer.md)** —
   the stable Python consumer contract: `quant_strategies.runner.run_config` →
-  `quant_strategies.runner.RunResult`, and `run_validation` → `ValidationRunResult`.
-  No top-level facade is promised.
+  `quant_strategies.runner.RunResult`, and
+  `quant_strategies.validation.run_validation` → `ValidationRunResult`. No top-level
+  facade is promised.
 
 ## Promotion discipline
 

@@ -33,6 +33,9 @@ required_observation_fields = ["close"]
 
 [output]
 results_dir = "validation_results/candidate"
+
+[search_pressure]
+prior_search = "none"
 ```
 
 This proves the strategy declared enough local row lineage for backend execution. It
@@ -51,14 +54,18 @@ max_fill_lag_net_loss = -0.02
 ```
 
 The stress and fill-lag loss floors apply to the worst required scenario net return
-across validation windows. `[paper_readiness] enabled = true` also applies the retained
-row-contract mode. It no longer governs replay strictness — strict replay is always on
-(see below).
+across validation windows. The positive realistic gate is
+`realistic_net_activity_positive`: it sums the realistic-cost scenario `net_return`
+linearly across windows because `net_return` is a signed trade-activity metric, not a
+NAV-path portfolio return. Validation runs always use the validation row contract;
+`[paper_readiness] enabled = true` controls only the paper-readiness gates. It no
+longer governs replay strictness — strict replay is always on (see below).
 
 ## Search pressure
 
 ```toml
 [search_pressure]
+prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { lookback = [12, 24, 48] }
@@ -66,11 +73,18 @@ selection_rule = "top risk-adjusted smoke score"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
 ```
 
-These fields are artifact metadata only — they make missing overfit/search context
-explicit; they do not compute statistical corrections or change eligibility flags.
-When non-empty search pressure would otherwise produce a `mechanical_review_candidate`,
-validation downgrades the verdict to `watchlist` and records
-`multiple_testing_not_corrected_advisory_only` in the reasons.
+Every validation config must disclose prior search explicitly:
+
+- `prior_search = "none"` means no prior search; do not include search metadata.
+- `prior_search = "known"` requires `candidate_count`, `trial_count`, and
+  `selection_rule`; optional fields provide audit context.
+- `prior_search = "unknown"` is allowed, but remains advisory.
+
+These fields are artifact metadata only. They do not compute statistical corrections
+or change eligibility flags. Known prior search downgrades an otherwise
+`mechanical_review_candidate` verdict to `watchlist` with
+`multiple_testing_not_corrected_advisory_only`; unknown prior search downgrades it with
+`search_pressure_unknown_advisory_only`.
 
 ## Verdict PnL source and the agreement oracle
 
@@ -113,7 +127,11 @@ a mismatch becomes `hidden_lookahead_detected`, replay errors become
 `hidden_lookahead_check_failed`. Strict replay runs by default (for both the quick run
 and validation): it also checks no-emission row-grid boundaries, so a strategy that
 suppresses an otherwise-emitted decision by peeking at future rows fails with
-`hidden_lookahead_suppression_detected`.
+`hidden_lookahead_suppression_detected`. If a pure suppression probe is skipped because
+the strategy cannot run on that short prefix, validation records
+`strict_suppression_replay_not_verified` rather than claiming strict evidence. The same
+causality boundary also repeats full strategy generation on the same rows and params;
+a mismatch fails with `strategy_generation_not_deterministic`.
 
 ## The verdict ladder
 
@@ -122,11 +140,11 @@ engine verdict kernel (and, when enabled, the agreement oracle), and classifies:
 
 - **`mechanical_pass`** — passing data audits, required backend scenarios, valid backend
   metrics, and at least `10` trades per required scenario. With paper-readiness enabled,
-  nonpositive realistic-cost evidence is a `hard_no`.
+  nonpositive realistic net activity is a `hard_no`.
 - **`mechanical_review_candidate`** — mechanical validation plus paper-readiness gates:
   multiple windows, enough realistic-cost trades, no zero-trade windows, positive
-  realistic-cost evidence, sufficient positive-window fraction, stressed-cost and
-  fill-lag loss floors, and empty search pressure.
+  realistic net activity, sufficient positive-window fraction, stressed-cost and
+  fill-lag loss floors, and `prior_search = "none"`.
 - **`watchlist`** — positive evidence that misses paper-readiness gates or carries
   uncorrected search pressure.
 - **`hard_no`** — failed audits, or a required scenario the engine ontology cannot
@@ -147,7 +165,9 @@ smoke net — so funding is part of the gated number, not a side diagnostic
 (`net_return = gross_return + funding_return - cost_return`). `gross_return` is the
 funding- and cost-exclusive price path the agreement oracle cross-checks against
 VectorBT Pro. `net_return` declares no cross-backend tolerance because it is a linear
-per-trade sum, not a NAV path.
+per-trade sum, not a NAV path. Validation therefore does not compound `net_return`;
+future true NAV-path portfolio metrics must be added as separate metrics with separate
+semantics.
 
 ## Artifacts
 

@@ -39,6 +39,7 @@ def write_config(
     strategy_path: str = "strategy.py",
     *,
     include_readiness: bool = True,
+    search_pressure: str | None = 'prior_search = "none"',
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     readiness = (
@@ -49,6 +50,15 @@ min_observations_per_decision = 1
 required_observation_fields = ["close"]
 """
         if include_readiness
+        else ""
+    )
+    search_pressure_section = (
+        f"""
+
+[search_pressure]
+{search_pressure}
+"""
+        if search_pressure is not None
         else ""
     )
     path.write_text(
@@ -83,6 +93,7 @@ slippage_bps_per_side = 0.5
 
 [output]
 results_dir = "validation_results/demo"
+{search_pressure_section}
 """.lstrip()
     )
 
@@ -148,6 +159,7 @@ def test_load_validation_config_resolves_paths_from_config_directory(tmp_path: P
     assert config.paper_readiness.min_positive_window_fraction == 0.5
     assert config.paper_readiness.max_stressed_net_loss == -0.02
     assert config.paper_readiness.max_fill_lag_net_loss == -0.02
+    assert config.search_pressure.prior_search == "none"
 
 
 def test_load_validation_config_accepts_paper_readiness_overrides(tmp_path: Path):
@@ -183,22 +195,21 @@ def test_load_validation_config_accepts_search_pressure_metadata(tmp_path: Path)
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
-    write_config(config_path)
-    config_path.write_text(
-        config_path.read_text()
-        + """
-
-[search_pressure]
+    write_config(
+        config_path,
+        search_pressure="""
+prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { lookback = [12, 24, 48], threshold = [0.5, 1.0] }
 selection_rule = "top risk-adjusted smoke score"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
-"""
+""".strip(),
     )
 
     config = load_validation_config(config_path)
 
+    assert config.search_pressure.prior_search == "known"
     assert config.search_pressure.candidate_count == 120
     assert config.search_pressure.trial_count == 18
     assert config.search_pressure.parameter_search_space == {
@@ -207,6 +218,86 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     }
     assert config.search_pressure.selection_rule == "top risk-adjusted smoke score"
     assert config.search_pressure.split_ids == ("validation_2026_h1", "validation_2026_h2")
+
+
+def test_load_validation_config_accepts_unknown_search_pressure_disclosure(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path, search_pressure='prior_search = "unknown"')
+
+    config = load_validation_config(config_path)
+
+    assert config.search_pressure.prior_search == "unknown"
+    assert config.search_pressure.candidate_count is None
+
+
+def test_load_validation_config_requires_search_pressure_disclosure(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path, search_pressure=None)
+
+    with pytest.raises(ValidationConfigError, match=r"requires \[search_pressure\]"):
+        load_validation_config(config_path)
+
+
+def test_load_validation_config_requires_prior_search_field(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path, search_pressure="candidate_count = 12")
+
+    with pytest.raises(ValidationConfigError, match="search_pressure.prior_search is required"):
+        load_validation_config(config_path)
+
+
+@pytest.mark.parametrize("prior_search", ["none", "unknown"])
+def test_load_validation_config_rejects_search_metadata_without_known_prior_search(
+    tmp_path: Path,
+    prior_search: str,
+):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(
+        config_path,
+        search_pressure=f"""
+prior_search = "{prior_search}"
+candidate_count = 120
+""".strip(),
+    )
+
+    with pytest.raises(ValidationConfigError, match=f"prior_search='{prior_search}'"):
+        load_validation_config(config_path)
+
+
+@pytest.mark.parametrize(
+    ("search_pressure", "message"),
+    [
+        ('prior_search = "known"', "requires: candidate_count, trial_count, selection_rule"),
+        (
+            'prior_search = "known"\ncandidate_count = 10\nselection_rule = "best score"',
+            "requires: trial_count",
+        ),
+        (
+            'prior_search = "known"\ncandidate_count = 10\ntrial_count = 3',
+            "requires: selection_rule",
+        ),
+    ],
+)
+def test_load_validation_config_rejects_incomplete_known_search_pressure(
+    tmp_path: Path,
+    search_pressure: str,
+    message: str,
+):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path, search_pressure=search_pressure)
+
+    with pytest.raises(ValidationConfigError, match=message):
+        load_validation_config(config_path)
 
 
 @pytest.mark.parametrize(

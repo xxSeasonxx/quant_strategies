@@ -29,6 +29,7 @@ from quant_strategies.validation.errors import ValidationConfigError
 # longer a co-equal verdict backend; it is only available as an opt-in agreement
 # oracle (see AgreementOracleConfig).
 VerdictSource = Literal["engine"]
+PriorSearch = Literal["none", "known", "unknown"]
 
 
 class ValidationConfigModel(BaseModel):
@@ -122,6 +123,7 @@ class PaperReadinessConfig(ValidationConfigModel):
 
 
 class SearchPressureConfig(ValidationConfigModel):
+    prior_search: PriorSearch
     candidate_count: int | None = Field(default=None, ge=1)
     trial_count: int | None = Field(default=None, ge=1)
     parameter_search_space: dict[str, Any] = Field(default_factory=dict)
@@ -148,6 +150,46 @@ class SearchPressureConfig(ValidationConfigModel):
             raise ValueError("search_pressure.split_ids cannot contain duplicates")
         return split_ids
 
+    @model_validator(mode="after")
+    def validate_disclosure(self) -> SearchPressureConfig:
+        populated_fields = tuple(
+            field
+            for field, populated in (
+                ("candidate_count", self.candidate_count is not None),
+                ("trial_count", self.trial_count is not None),
+                ("parameter_search_space", bool(self.parameter_search_space)),
+                ("selection_rule", self.selection_rule is not None),
+                ("split_ids", bool(self.split_ids)),
+            )
+            if populated
+        )
+        if self.prior_search == "none" and populated_fields:
+            raise ValueError(
+                "search_pressure.prior_search='none' cannot include search metadata: "
+                + ", ".join(populated_fields)
+            )
+        if self.prior_search == "unknown" and populated_fields:
+            raise ValueError(
+                "search_pressure.prior_search='unknown' cannot include search metadata: "
+                + ", ".join(populated_fields)
+            )
+        if self.prior_search == "known":
+            missing = tuple(
+                field
+                for field, value in (
+                    ("candidate_count", self.candidate_count),
+                    ("trial_count", self.trial_count),
+                    ("selection_rule", self.selection_rule),
+                )
+                if value is None
+            )
+            if missing:
+                raise ValueError(
+                    "search_pressure.prior_search='known' requires: "
+                    + ", ".join(missing)
+                )
+        return self
+
 
 class ScenarioRunConfig(ValidationConfigModel):
     scenario_id: str = Field(min_length=1)
@@ -172,7 +214,7 @@ class ValidationConfig(ValidationConfigModel):
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig
     paper_readiness: PaperReadinessConfig = Field(default_factory=PaperReadinessConfig)
-    search_pressure: SearchPressureConfig = Field(default_factory=SearchPressureConfig)
+    search_pressure: SearchPressureConfig
 
     def model_post_init(self, context: Any, /) -> None:
         base = context.get("base_dir") if isinstance(context, dict) else None
@@ -238,6 +280,17 @@ def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -
             "kernel is now the sole verdict PnL source, so the verdict number is the "
             "audited number. To cross-check the verdict against VectorBT Pro, add an "
             "[agreement_oracle] section with enabled = true. Remove the 'backend' key."
+        )
+    if isinstance(payload, dict) and "search_pressure" not in payload:
+        raise ValidationConfigError(
+            "validation config requires [search_pressure] with "
+            'prior_search = "none", "known", or "unknown"'
+        )
+    search_pressure_payload = payload.get("search_pressure") if isinstance(payload, dict) else None
+    if isinstance(search_pressure_payload, dict) and "prior_search" not in search_pressure_payload:
+        raise ValidationConfigError(
+            "search_pressure.prior_search is required; set it to "
+            '"none", "known", or "unknown"'
         )
 
     try:

@@ -21,7 +21,7 @@ def test_policy_declares_paper_readiness_gates_in_order():
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "compounded_realistic_net_positive",
+        "realistic_net_activity_positive",
         "positive_window_fraction",
         "stressed_net_floor",
         "fill_lag_net_floor",
@@ -40,6 +40,7 @@ def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
     assert isinstance(decision.failed_gates, tuple)
     assert isinstance(decision.gate_details, dict)
     assert decision.overfit_controls == {
+        "prior_search": "none",
         "candidate_count": None,
         "trial_count": None,
         "parameter_search_space": {},
@@ -267,7 +268,7 @@ def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
     assert "min_windows" in decision.passed_gates
     assert "min_total_trades" in decision.passed_gates
     assert "no_zero_trade_windows" in decision.passed_gates
-    assert "compounded_realistic_net_positive" in decision.passed_gates
+    assert "realistic_net_activity_positive" in decision.passed_gates
     assert "positive_window_fraction" in decision.passed_gates
     assert "stressed_net_floor" in decision.passed_gates
     assert "fill_lag_net_floor" in decision.passed_gates
@@ -303,7 +304,7 @@ def test_policy_gates_on_engine_funding_inclusive_net_return():
         backend_results=realistic(net_return=-0.01, gross_return=0.03) + floors,
         min_trades=10,
     )
-    assert "compounded_realistic_net_positive" in funding_negative.failed_gates
+    assert "realistic_net_activity_positive" in funding_negative.failed_gates
     assert funding_negative.decision != "mechanical_review_candidate"
 
     # Same price path, funding-inclusive net positive -> the gate clears.
@@ -312,7 +313,7 @@ def test_policy_gates_on_engine_funding_inclusive_net_return():
         backend_results=realistic(net_return=0.02, gross_return=0.03) + floors,
         min_trades=10,
     )
-    assert "compounded_realistic_net_positive" in funding_positive.passed_gates
+    assert "realistic_net_activity_positive" in funding_positive.passed_gates
     assert funding_positive.decision == "mechanical_review_candidate"
 
 
@@ -373,7 +374,7 @@ def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
 
     assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert "realistic_net_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -386,7 +387,7 @@ def test_policy_hard_no_for_zero_realistic_cost_evidence_when_paper_enabled():
 
     assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert "realistic_net_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -395,6 +396,7 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
         "SearchPressure",
         (),
         {
+            "prior_search": "known",
             "candidate_count": 120,
             "trial_count": 18,
             "parameter_search_space": {"lookback": [12, 24, 48]},
@@ -414,6 +416,7 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
     assert decision.decision == "watchlist"
     assert decision.reasons == ("multiple_testing_not_corrected_advisory_only",)
     assert decision.overfit_controls == {
+        "prior_search": "known",
         "candidate_count": 120,
         "trial_count": 18,
         "parameter_search_space": {"lookback": [12, 24, 48]},
@@ -422,6 +425,34 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
     }
     assert decision.evidence_class == "validation_advisory"
     assert decision.requires_manual_approval is True
+    assert decision.paper_trade_eligible is False
+
+
+def test_policy_unknown_search_pressure_downgrades_review_candidate():
+    search_pressure = type(
+        "SearchPressure",
+        (),
+        {
+            "prior_search": "unknown",
+            "candidate_count": None,
+            "trial_count": None,
+            "parameter_search_space": {},
+            "selection_rule": None,
+            "split_ids": (),
+        },
+    )()
+
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=paper_ready_scenarios(),
+        min_trades=10,
+        paper_readiness=PaperReadinessConfig(),
+        search_pressure=search_pressure,
+    )
+
+    assert decision.decision == "watchlist"
+    assert decision.reasons == ("search_pressure_unknown_advisory_only",)
+    assert decision.overfit_controls["prior_search"] == "unknown"
     assert decision.paper_trade_eligible is False
 
 
@@ -667,7 +698,7 @@ def test_policy_hard_no_for_negative_realistic_cost_evidence():
 
     assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert "realistic_net_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -687,22 +718,23 @@ def test_policy_hard_no_for_zero_realistic_cost_evidence():
 
     assert decision.decision == "hard_no"
     assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "compounded_realistic_net_positive" in decision.failed_gates
+    assert "realistic_net_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_uses_compounded_realistic_return_not_arithmetic_sum():
+def test_policy_uses_linear_realistic_net_activity_not_compounded_return():
+    scenarios = paper_ready_scenarios(cost_returns=(1.0, -0.5))
+
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(cost_returns=(1.0, -0.5)),
+        backend_results=scenarios,
         min_trades=10,
-        required_scenario_ids=tuple(item.scenario_id for item in paper_ready_scenarios()),
+        required_scenario_ids=tuple(item.scenario_id for item in scenarios),
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "compounded_realistic_net_positive" in decision.failed_gates
-    assert decision.gate_details["compounded_realistic_net_positive"] == "0.0 > 0.0"
+    assert decision.decision == "mechanical_review_candidate"
+    assert "realistic_net_activity_positive" in decision.passed_gates
+    assert decision.gate_details["realistic_net_activity_positive"] == "0.5 > 0.0"
     assert_advisory_only(decision)
 
 
@@ -845,7 +877,7 @@ def test_policy_marks_missing_paper_scenario_group_details_as_missing():
 
     assert decision.decision == "hard_no"
     assert decision.gate_details["no_zero_trade_windows"] == "missing cost scenarios"
-    assert decision.gate_details["compounded_realistic_net_positive"] == "missing cost scenarios"
+    assert decision.gate_details["realistic_net_activity_positive"] == "missing cost scenarios"
     assert decision.gate_details["stressed_net_floor"] == "missing cost_stress scenarios"
     assert decision.gate_details["fill_lag_net_floor"] == "missing fill_lag scenarios"
     assert_advisory_only(decision)

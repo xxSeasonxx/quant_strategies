@@ -82,6 +82,7 @@ def test_contract_detail_is_documented_in_the_doc_set():
         "target_contracts",
         "target_vol",
         "multiple_testing_not_corrected_advisory_only",
+        "search_pressure_unknown_advisory_only",
         "Explicitly extended decisions are rejected by unsupported",
     )
     for token in required:
@@ -135,14 +136,18 @@ def test_runner_public_api_is_documented():
 
     assert "`quant_strategies.runner.run_config`" in readme
     assert "`quant_strategies.runner.RunResult`" in readme
+    assert "`quant_strategies.validation.run_validation`" in readme
     assert "`quant_strategies.runner.run_config`" in consumer
     assert "`quant_strategies.runner.RunResult`" in consumer
+    assert "from quant_strategies.validation import run_validation" in consumer
+    assert 'prior_search = "none"' in consumer
+    assert "`prior_search = \"none\"`, `\"known\"`, or `\"unknown\"`" in consumer
     assert "decisions.extended_ontology" in consumer
-    assert "multiple_testing_not_corrected_advisory_only" in consumer
 
     import quant_strategies
 
     assert not hasattr(quant_strategies, "run_config")
+    assert not hasattr(quant_strategies, "run_validation")
 
 
 def test_docs_keep_validation_layout_agnostic_and_promotion_human_controlled():

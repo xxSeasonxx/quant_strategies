@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import math
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -29,6 +28,7 @@ class ValidationPolicyDecision(BaseModel):
     gate_details: dict[str, str] = Field(default_factory=dict)
     overfit_controls: dict[str, Any | None] = Field(
         default_factory=lambda: {
+            "prior_search": "none",
             "candidate_count": None,
             "trial_count": None,
             "parameter_search_space": {},
@@ -75,11 +75,10 @@ def classify_validation(
     def finish(decision: ValidationPolicyDecision) -> ValidationPolicyDecision:
         reasons = decision.reasons
         verdict = decision.decision
-        if decision.decision == "mechanical_review_candidate" and _has_search_pressure(overfit_controls):
+        search_pressure_reason = _search_pressure_downgrade_reason(overfit_controls)
+        if decision.decision == "mechanical_review_candidate" and search_pressure_reason:
             verdict = "watchlist"
-            reasons = tuple(
-                dict.fromkeys((*reasons, "multiple_testing_not_corrected_advisory_only"))
-            )
+            reasons = tuple(dict.fromkeys((*reasons, search_pressure_reason)))
         return decision.model_copy(
             update={
                 "decision": verdict,
@@ -137,6 +136,7 @@ def overfit_controls_from_search_pressure(search_pressure: object | None) -> dic
     parameter_search_space = _settings_value(search_pressure, "parameter_search_space", {})
     split_ids = _settings_value(search_pressure, "split_ids", ())
     return {
+        "prior_search": _settings_value(search_pressure, "prior_search", "none"),
         "candidate_count": _settings_value(search_pressure, "candidate_count", None),
         "trial_count": _settings_value(search_pressure, "trial_count", None),
         "parameter_search_space": dict(parameter_search_space or {}),
@@ -145,16 +145,13 @@ def overfit_controls_from_search_pressure(search_pressure: object | None) -> dic
     }
 
 
-def _has_search_pressure(overfit_controls: dict[str, Any | None]) -> bool:
-    return any(
-        (
-            overfit_controls.get("candidate_count") is not None,
-            overfit_controls.get("trial_count") is not None,
-            bool(overfit_controls.get("parameter_search_space")),
-            overfit_controls.get("selection_rule") is not None,
-            bool(overfit_controls.get("split_ids")),
-        )
-    )
+def _search_pressure_downgrade_reason(overfit_controls: dict[str, Any | None]) -> str | None:
+    prior_search = overfit_controls.get("prior_search")
+    if prior_search == "known":
+        return "multiple_testing_not_corrected_advisory_only"
+    if prior_search == "unknown":
+        return "search_pressure_unknown_advisory_only"
+    return None
 
 
 def _scenario_result(
@@ -327,7 +324,7 @@ _PAPER_READINESS_GATES: tuple[str, ...] = (
     "min_windows",
     "min_total_trades",
     "no_zero_trade_windows",
-    "compounded_realistic_net_positive",
+    "realistic_net_activity_positive",
     "positive_window_fraction",
     "stressed_net_floor",
     "fill_lag_net_floor",
@@ -388,8 +385,8 @@ def _paper_readiness_decision(
         for item in realistic
         if complete_metrics[item.scenario_id].trade_count == 0
     ]
-    compounded_realistic_net = _compounded_return(metrics.net_return for metrics in realistic_metrics)
-    positive_realistic_evidence = compounded_realistic_net > 0.0
+    realistic_net_activity = sum(metrics.net_return for metrics in realistic_metrics)
+    positive_realistic_evidence = realistic_net_activity > 0.0
     positive_windows = sum(
         1 for item in realistic if complete_metrics[item.scenario_id].net_return > 0.0
     )
@@ -420,9 +417,9 @@ def _paper_readiness_decision(
                 else "passed"
             ),
         ),
-        "compounded_realistic_net_positive": (
+        "realistic_net_activity_positive": (
             positive_realistic_evidence,
-            _gate_detail(compounded_realistic_net, ">", 0.0)
+            _gate_detail(realistic_net_activity, ">", 0.0)
             if has_realistic
             else _missing_scenario_detail("cost"),
         ),
@@ -487,10 +484,6 @@ def _settings_value(settings: object | None, name: str, default: object) -> obje
     if settings is None:
         return default
     return getattr(settings, name, default)
-
-
-def _compounded_return(returns: Iterable[float]) -> float:
-    return math.prod(1.0 + value for value in returns) - 1.0
 
 
 def _paper_enabled(settings: object | None) -> bool:

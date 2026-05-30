@@ -350,7 +350,8 @@ from artifact identity; those values live in `environment.json` for audit only.
 - copy or reimplement the runner,
 - import `quant_strategies.engine`,
 - import private `quant_strategies.runner` modules,
-- import `quant_strategies.validation`,
+- call validation from the quick-run search loop,
+- import private `quant_strategies.validation` modules,
 - write into `src/`, `tested/`, or validation artifacts,
 - mutate files beyond the candidate `strategy.py` and `experiment.toml` during
   the search loop,
@@ -371,14 +372,18 @@ candidate workspace with `strategy.py` and `validation.toml`.
 Use `--events-jsonl` when a supervising process needs stage-level validation
 progress without parsing the human-readable CLI stdout.
 
-For retained candidates, include `[search_pressure]` in `validation.toml` when
-available so validation artifacts carry candidate counts, trial counts,
-parameter search space, selection rule, and split identities. These fields are
-metadata, not statistical proof. Non-empty search pressure downgrades an
-otherwise `mechanical_review_candidate` verdict to `watchlist` with
-`multiple_testing_not_corrected_advisory_only` in its reasons so reviewers do
-not mistake the metadata for deflated, Monte Carlo, or otherwise corrected
-evidence.
+Programmatic retained-candidate handoff may call the stable validation API:
+
+```python
+from quant_strategies.validation import run_validation
+```
+
+Every retained-candidate `validation.toml` must include `[search_pressure]` with
+`prior_search = "none"`, `"known"`, or `"unknown"`. Known prior search records
+candidate counts, trial counts, selection rule, and optional search metadata. These
+fields are metadata, not statistical proof. Known prior search downgrades an otherwise
+`mechanical_review_candidate` verdict to `watchlist`; unknown prior search is also
+kept advisory.
 
 Treat validation verdicts as advisory routing labels only:
 
@@ -393,13 +398,12 @@ trading.
 Strict suppression replay is always on, for both the quick run and the validation
 run. It re-runs the strategy at row-grid boundaries where the baseline emitted no
 decision; a future-dependent suppression trick fails with
-`hidden_lookahead_suppression_detected`. Only a strict run sets
-`strict_no_emission_verified = true` (and therefore `causality_verified = true`);
-runner evidence also exposes `emitted_replay_verified` so a quick run cannot claim
-verification it did not perform. `[paper_readiness] enabled = true` additionally
-applies the paper-readiness gates (window count, trade floors, stressed and
-fill-lag net floors) and the retained row-contract mode — it no longer governs
-replay strictness.
+`hidden_lookahead_suppression_detected`. Runner and validation evidence expose whether
+replay was fully verified, and validation may `hard_no` incomplete or failed replay
+evidence in `data_audit.json`. Validation runs always use the validation row contract.
+`[paper_readiness] enabled = true` controls the paper-readiness gates (window count,
+trade floors, stressed and fill-lag net floors) — it no longer governs replay
+strictness.
 
 Validation backend metrics are flat but semantically typed in
 `backend_runs/summary.json`. The verdict PnL source is the engine smoke kernel,
@@ -410,7 +414,9 @@ cost_return`). `gross_return` is the funding- and cost-exclusive price path;
 `funding_return` and `cost_return` are the components folded into `net_return`.
 There is no `linear_funding_adjusted_return` and no separate VectorBT Pro verdict
 metric. `net_return` declares no cross-backend tolerance because it is a linear
-per-trade sum, not a NAV path; rank candidates on `net_return`. VectorBT Pro is
+per-trade sum, not a NAV path; validation sums it linearly for the
+`realistic_net_activity_positive` gate rather than compounding it. Rank candidates on
+`net_return`. VectorBT Pro is
 only an opt-in agreement oracle: when enabled it cross-checks the engine price
 path (`gross_return`) on single-trade scenarios and fails the run with
 `backend_agreement_failed` on divergence, but it never produces the verdict

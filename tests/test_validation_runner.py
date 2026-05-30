@@ -35,6 +35,7 @@ def write_candidate(
     tmp_path: Path,
     *,
     window_ids: tuple[str, ...] = ("validation_2026_h1",),
+    search_pressure: str = 'prior_search = "none"',
 ) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir(parents=True)
@@ -63,6 +64,10 @@ end = "2026-06-30"
 """.strip()
         for window_id in window_ids
     )
+    search_pressure_section = f"""
+[search_pressure]
+{search_pressure}
+"""
     (candidate / "validation.toml").write_text(
         f"""
 strategy_path = "strategy.py"
@@ -95,6 +100,7 @@ required_observation_fields = ["close"]
 
 [output]
 results_dir = "validation_results/demo"
+{search_pressure_section}
 """.lstrip()
     )
     return candidate
@@ -218,7 +224,7 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert result.decision.reasons == ("paper_readiness_gates_failed",)
     assert "min_windows" in result.decision.failed_gates
     assert "min_total_trades" in result.decision.failed_gates
-    assert "compounded_realistic_net_positive" in result.decision.passed_gates
+    assert "realistic_net_activity_positive" in result.decision.passed_gates
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
     assert decision_payload["decision"] == "watchlist"
@@ -364,15 +370,7 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
         "quant_strategies.runner.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=rows()),
     )
-    backend = FakeBackend(
-        BackendRunResult(
-            backend="fake",
-            status="completed",
-            metrics={"net_return": 0.02, "trade_count": 20},
-            warnings=(),
-            unsupported_semantics=(),
-        )
-    )
+    backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
@@ -381,6 +379,86 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
     assert result.failure_stage == "data_audit"
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert audit["windows"][0]["violations"] == ["hidden_lookahead_suppression_detected"]
+
+
+def test_validation_marks_skipped_strict_probe_as_incomplete_evidence(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    if not any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
+        "        raise RuntimeError('prefix too short')\n"
+        "    return []\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strict_suppression_replay_not_verified",)
+    assert result.failure_stage == "data_audit"
+    assert backend.calls == 0
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    window = audit["windows"][0]
+    assert window["violations"] == ["strict_suppression_replay_not_verified"]
+    assert window["deterministic_replay_verified"] is True
+    assert window["emitted_replay_verified"] is True
+    assert window["strict_suppression_verified"] is False
+    assert window["skipped_probe_count"] > 0
+    assert "RuntimeError: prefix too short" in window["skipped_probe_reasons"]
+
+
+def test_validation_rejects_nondeterministic_strategy_generation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "CALLS = 0\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    global CALLS\n"
+        "    CALLS += 1\n"
+        "    size = 1.0 if CALLS % 2 else 0.5\n"
+        "    return [StrategyDecision(\n"
+        "        decision_id='demo:stable-id',\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=size),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "hard_no"
+    assert result.decision.reasons == ("strategy_generation_not_deterministic",)
+    assert result.failure_stage == "data_audit"
+    assert backend.calls == 0
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    window = audit["windows"][0]
+    assert window["violations"] == ["strategy_generation_not_deterministic"]
+    assert window["deterministic_replay_verified"] is False
+    assert window["emitted_replay_verified"] is False
+    assert window["strict_suppression_verified"] is False
 
 
 def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_disabled(
@@ -579,18 +657,14 @@ def test_run_validation_downgrades_search_pressure_candidate_artifacts(
     candidate = write_candidate(
         tmp_path,
         window_ids=("validation_2026_h1", "validation_2026_h2"),
-    )
-    (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml").read_text()
-        + """
-
-[search_pressure]
+        search_pressure="""
+prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { weight = [0.5, 1.0, 1.5] }
 selection_rule = "top risk-adjusted smoke score"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
-"""
+""".strip(),
     )
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
@@ -675,6 +749,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["failed_gates"] == []
     assert decision_payload["failure_details"] == []
     assert decision_payload["overfit_controls"] == {
+        "prior_search": "known",
         "candidate_count": 120,
         "trial_count": 18,
         "parameter_search_space": {"weight": [0.5, 1.0, 1.5]},
@@ -686,7 +761,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "compounded_realistic_net_positive",
+        "realistic_net_activity_positive",
         "positive_window_fraction",
         "stressed_net_floor",
         "fill_lag_net_floor",
@@ -770,18 +845,19 @@ def test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot(
 
 
 def test_run_validation_records_strategy_import_failure_details(tmp_path: Path):
-    candidate = write_candidate(tmp_path)
+    candidate = write_candidate(
+        tmp_path,
+        search_pressure="""
+prior_search = "known"
+candidate_count = 20
+trial_count = 5
+selection_rule = "manual shortlist"
+""".strip(),
+    )
     (candidate / "validation.toml").write_text(
         (candidate / "validation.toml")
         .read_text()
         .replace('strategy_path = "strategy.py"', 'strategy_path = "missing.py"')
-        + """
-
-[search_pressure]
-candidate_count = 20
-trial_count = 5
-selection_rule = "manual shortlist"
-"""
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
@@ -794,6 +870,7 @@ selection_rule = "manual shortlist"
     assert decision_payload["failure_details"][0]["type"] == "StrategyLoadError"
     assert decision_payload["failure_details"][0]["type"] != "StrategyExecutionError"
     assert "missing.py" in decision_payload["failure_details"][0]["message"]
+    assert decision_payload["overfit_controls"]["prior_search"] == "known"
     assert decision_payload["overfit_controls"]["candidate_count"] == 20
     assert decision_payload["overfit_controls"]["trial_count"] == 5
     assert decision_payload["overfit_controls"]["selection_rule"] == "manual shortlist"
@@ -1075,6 +1152,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
     (candidate / "strategy.py").write_text(
         (candidate / "strategy.py")
         .read_text()
+        .replace("def generate_decisions(rows, params):\n", "def generate_decisions(rows, params):\n    if len(rows) < 2:\n        return []\n")
         .replace("decision_time=rows[0]['timestamp']", "decision_time=rows[1]['timestamp']")
         .replace("as_of_time=rows[0]['timestamp']", "as_of_time=rows[1]['timestamp']")
     )

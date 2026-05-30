@@ -148,7 +148,8 @@ watchlist | mechanical_review_candidate`) summarizing mechanical and paper-readi
 gates. **Verdict labels are advisory inputs to human review**, not autonomous
 promotion signals — they MUST NOT be used by downstream automation to flip
 eligibility bits. The verdict's `reasons` field carries the qualifying context (e.g.,
-`no_positive_realistic_cost_evidence`, `multiple_testing_not_corrected_advisory_only`);
+`no_positive_realistic_cost_evidence`, `multiple_testing_not_corrected_advisory_only`,
+`search_pressure_unknown_advisory_only`);
 consumers ranking on the label alone without reading reasons are operating outside
 the contract.
 

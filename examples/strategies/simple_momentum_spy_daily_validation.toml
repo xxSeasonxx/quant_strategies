@@ -1,0 +1,38 @@
+strategy_path = "simple_momentum.py"
+strategy_id = "simple_momentum"
+
+[[windows]]
+id = "validation_2024_01"
+start = "2024-01-01"
+end = "2024-01-31"
+
+[data]
+kind = "bars"
+dataset = "equity_1min"
+symbols = ["SPY"]
+start = "2024-01-01"
+end = "2024-01-31"
+strict = true
+
+[params]
+weight = 1.0
+max_hold_bars = 1
+
+[fill_model]
+price = "close"
+entry_lag_bars = 1
+exit_lag_bars = 0
+
+[cost_model]
+fee_bps_per_side = 0.0
+slippage_bps_per_side = 0.0
+
+[readiness]
+min_observations_per_decision = 2
+required_observation_fields = ["close"]
+
+[output]
+results_dir = "validation_results/simple_momentum"
+
+[search_pressure]
+prior_search = "none"
