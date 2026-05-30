@@ -293,8 +293,11 @@ def test_strict_replay_is_default_and_reports_split_flags():
 
     assert result.mode == "strict"
     assert result.passed is True
+    assert result.deterministic_replay_verified is True
     assert result.emitted_replay_verified is True
     assert result.strict_suppression_verified is True
+    assert result.skipped_probe_count == 0
+    assert result.skipped_probe_reasons == ()
 
 
 def test_strict_replay_auto_derived_boundaries_catch_suppression():
@@ -392,7 +395,68 @@ def test_strict_hidden_lookahead_allows_legitimate_no_emission_boundary():
     )
 
     assert result.passed is True
-    assert calls == 1
+    assert result.strict_suppression_verified is True
+    assert calls == 2
+
+
+def test_strict_hidden_lookahead_reports_skipped_probe_as_incomplete_evidence():
+    rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+
+    def prefix_fragile_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        if all(item.get("timestamp") != FUTURE for item in rows):
+            raise RuntimeError("prefix too short")
+        return []
+
+    result = check_hidden_lookahead(
+        prefix_fragile_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=prefix_fragile_strategy(rows, {}),
+        strategy_id="demo",
+        mode="strict",
+        boundaries=(
+            ReplayBoundary(
+                as_of_time=AS_OF,
+                decision_time=DECISION,
+                expected_decision_ids=frozenset(),
+                symbols=frozenset({"BTC-PERP"}),
+            ),
+        ),
+    )
+
+    assert result.passed is True
+    assert result.deterministic_replay_verified is True
+    assert result.emitted_replay_verified is True
+    assert result.strict_suppression_verified is False
+    assert result.skipped_probe_count == 1
+    assert result.skipped_probe_reasons == ("RuntimeError: prefix too short",)
+
+
+def test_hidden_lookahead_rejects_nondeterministic_full_replay():
+    rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+    calls = 0
+
+    def nondeterministic_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        nonlocal calls
+        calls += 1
+        return [decision(float(calls))]
+
+    result = check_hidden_lookahead(
+        nondeterministic_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=nondeterministic_strategy(rows, {}),
+        strategy_id="demo",
+    )
+
+    assert result.passed is False
+    assert result.violations == ("strategy_generation_not_deterministic",)
+    assert result.deterministic_replay_verified is False
+    assert result.emitted_replay_verified is False
+    assert result.strict_suppression_verified is False
 
 
 def test_strict_hidden_lookahead_replays_unique_boundaries_once():
@@ -421,7 +485,7 @@ def test_strict_hidden_lookahead_replays_unique_boundaries_once():
     )
 
     assert result.passed is True
-    assert calls == 1
+    assert calls == 2
 
 
 def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
@@ -459,7 +523,7 @@ def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
     )
 
     assert result.passed is True
-    assert len(replay_row_ids) == 1
+    assert len(replay_row_ids) == 2
 
 
 def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
@@ -472,8 +536,11 @@ def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
     def boundary_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
         closes = tuple(float(item["close"]) for item in rows)
         visible_closes_by_call.append(closes)
+        decisions = []
+        if 100.0 in closes:
+            decisions.append(decision())
         if 101.0 in closes:
-            return [
+            decisions.append(
                 StrategyDecision(
                     decision_id="demo:late",
                     strategy_id="demo",
@@ -483,8 +550,8 @@ def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
                     target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
                     exit_policy=ExitPolicy(max_hold_bars=1),
                 )
-            ]
-        return [decision()]
+            )
+        return decisions
 
     baseline = [
         decision(),
@@ -509,4 +576,4 @@ def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
     )
 
     assert result.passed is True
-    assert visible_closes_by_call == [(100.0,), (100.0, 101.0)]
+    assert visible_closes_by_call == [(100.0, 101.0), (100.0,), (100.0, 101.0)]

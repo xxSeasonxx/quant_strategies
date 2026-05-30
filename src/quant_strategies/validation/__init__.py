@@ -398,28 +398,19 @@ def _audit_window_execution(
                 baseline_decisions=decisions,
                 strategy_id=context.config.strategy_id,
             )
-            if not lookahead.passed:
+            causality_violations = _validation_causality_violations(lookahead)
+            if causality_violations:
                 causality_event.fail(
-                    _event_failure_message(lookahead.violations, "hidden_lookahead_check_failed")
+                    _event_failure_message(causality_violations, "hidden_lookahead_check_failed")
                 )
-        if not lookahead.passed:
-            reason = (
-                "hidden_lookahead_check_failed"
-                if any(
-                    item.startswith("hidden_lookahead_check_failed")
-                    for item in lookahead.violations
-                )
-                else (
-                    "hidden_lookahead_suppression_detected"
-                    if "hidden_lookahead_suppression_detected" in lookahead.violations
-                    else "hidden_lookahead_detected"
-                )
-            )
+        audit_payload.update(_lookahead_audit_payload(lookahead))
+        if causality_violations:
+            reason = _causality_failure_reason(causality_violations)
             state.failure_reasons.append(reason)
             if state.failure_stage is None:
                 state.failure_stage = "data_audit"
             audit_payload["passed"] = False
-            audit_payload["violations"] = list(audit.violations) + list(lookahead.violations)
+            audit_payload["violations"] = list(audit.violations) + list(causality_violations)
 
     if audit_payload["passed"]:
         readiness_violations = check_validation_readiness(decisions, context.config.readiness)
@@ -430,6 +421,44 @@ def _audit_window_execution(
             audit_payload["passed"] = False
             audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
     return audit_payload
+
+
+def _validation_causality_violations(lookahead: Any) -> tuple[str, ...]:
+    violations = list(lookahead.violations)
+    if lookahead.passed and not lookahead.deterministic_replay_verified:
+        violations.append("determinism_replay_not_verified")
+    if lookahead.passed and not lookahead.emitted_replay_verified:
+        violations.append("emitted_replay_not_verified")
+    if lookahead.passed and not lookahead.strict_suppression_verified:
+        violations.append("strict_suppression_replay_not_verified")
+    return tuple(dict.fromkeys(violations))
+
+
+def _lookahead_audit_payload(lookahead: Any) -> dict[str, Any]:
+    return {
+        "deterministic_replay_verified": lookahead.deterministic_replay_verified,
+        "emitted_replay_verified": lookahead.emitted_replay_verified,
+        "strict_suppression_verified": lookahead.strict_suppression_verified,
+        "skipped_probe_count": lookahead.skipped_probe_count,
+        "skipped_probe_reasons": list(lookahead.skipped_probe_reasons),
+    }
+
+
+def _causality_failure_reason(violations: Sequence[str]) -> str:
+    ordered_reasons = (
+        "strategy_generation_not_deterministic",
+        "strict_suppression_replay_not_verified",
+        "hidden_lookahead_suppression_detected",
+        "hidden_lookahead_detected",
+    )
+    for reason in ordered_reasons:
+        if reason in violations:
+            return reason
+    if any(item.startswith("determinism_check_failed") for item in violations):
+        return "determinism_check_failed"
+    if any(item.startswith("hidden_lookahead_check_failed") for item in violations):
+        return "hidden_lookahead_check_failed"
+    return violations[0] if violations else "causality_check_failed"
 
 
 def _run_window_scenarios(
@@ -985,5 +1014,4 @@ def _write_validation_artifacts(
             data_provenance=data_provenance,
             backend_results=backend_results,
         )
-
 

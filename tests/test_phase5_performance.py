@@ -223,5 +223,5 @@ def test_hidden_lookahead_grouped_replay_completes_under_runtime_budget():
     elapsed = time.perf_counter() - start
 
     assert result.passed is True
-    assert calls == 1
+    assert calls == 2
     assert elapsed < 1.0

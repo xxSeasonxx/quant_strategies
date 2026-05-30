@@ -20,8 +20,11 @@ class LookaheadCheckResult:
     passed: bool
     violations: tuple[str, ...] = ()
     mode: ReplayMode = "emitted"
+    deterministic_replay_verified: bool = False
     emitted_replay_verified: bool = False
     strict_suppression_verified: bool = False
+    skipped_probe_count: int = 0
+    skipped_probe_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -73,7 +76,10 @@ def check_hidden_lookahead(
 
     ``mode="strict"`` is the default and the only mode that may set
     ``strict_suppression_verified``; it auto-derives row-grid boundaries when none
-    are supplied.
+    are supplied. The check also repeats full generation once on the same rows and
+    params. Strict probes that cannot run on short prefixes are counted as skipped
+    probes; they do not fail replay, but they keep strict suppression evidence
+    incomplete.
     """
     if boundaries is not None:
         replay_boundaries = tuple(boundaries)
@@ -82,11 +88,24 @@ def check_hidden_lookahead(
     else:
         replay_boundaries = _emitted_boundaries(baseline_decisions)
 
+    replay_params = frozen_params(params)
+    deterministic_failure = _deterministic_replay_failure(
+        generate_decisions,
+        rows=rows,
+        params=replay_params,
+        baseline_decisions=baseline_decisions,
+        strategy_id=strategy_id,
+        mode=mode,
+    )
+    if deterministic_failure is not None:
+        return deterministic_failure
+
     if not replay_boundaries:
         # Nothing to replay (no rows and no decisions): vacuously verified.
         return LookaheadCheckResult(
             passed=True,
             mode=mode,
+            deterministic_replay_verified=True,
             emitted_replay_verified=True,
             strict_suppression_verified=mode == "strict",
         )
@@ -95,7 +114,7 @@ def check_hidden_lookahead(
     visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]] = {}
     replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
     replay_decisions_cache: dict[tuple[datetime, datetime], tuple[StrategyDecision, ...]] = {}
-    replay_params = frozen_params(params)
+    skipped_probe_reasons: list[str] = []
     for boundary in replay_boundaries:
         cache_key = (boundary.as_of_time, boundary.decision_time)
         replay_decisions = replay_decisions_cache.get(cache_key)
@@ -112,19 +131,28 @@ def check_hidden_lookahead(
                     return LookaheadCheckResult(
                         passed=False,
                         mode=mode,
+                        deterministic_replay_verified=True,
                         violations=(f"hidden_lookahead_check_failed: SystemExit: {exc}",),
+                        skipped_probe_count=len(skipped_probe_reasons),
+                        skipped_probe_reasons=tuple(skipped_probe_reasons),
                     )
                 # Pure probe boundary (no emitted decision to reproduce): a strategy
                 # that cannot run on this prefix did not suppress a trade here, so
-                # skip rather than fail. Strategies need not handle every short prefix.
+                # skip rather than fail. The skipped probe still means strict
+                # suppression evidence was incomplete.
+                skipped_probe_reasons.append(_exception_reason(exc))
                 continue
             except Exception as exc:
                 if boundary.expected_decision_ids:
                     return LookaheadCheckResult(
                         passed=False,
                         mode=mode,
+                        deterministic_replay_verified=True,
                         violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
+                        skipped_probe_count=len(skipped_probe_reasons),
+                        skipped_probe_reasons=tuple(skipped_probe_reasons),
                     )
+                skipped_probe_reasons.append(_exception_reason(exc))
                 continue
 
             parsed_decisions, violations = validate_decision_output(
@@ -135,7 +163,10 @@ def check_hidden_lookahead(
                 return LookaheadCheckResult(
                     passed=False,
                     mode=mode,
+                    deterministic_replay_verified=True,
                     violations=(f"hidden_lookahead_check_failed: {'; '.join(violations)}",),
+                    skipped_probe_count=len(skipped_probe_reasons),
+                    skipped_probe_reasons=tuple(skipped_probe_reasons),
                 )
             replay_decisions = tuple(parsed_decisions)
             replay_decisions_cache[cache_key] = replay_decisions
@@ -149,7 +180,10 @@ def check_hidden_lookahead(
             return LookaheadCheckResult(
                 passed=False,
                 mode=mode,
+                deterministic_replay_verified=True,
                 violations=("hidden_lookahead_detected",),
+                skipped_probe_count=len(skipped_probe_reasons),
+                skipped_probe_reasons=tuple(skipped_probe_reasons),
             )
         if mode == "strict":
             scoped_decision_ids = frozenset(
@@ -161,17 +195,84 @@ def check_hidden_lookahead(
                 return LookaheadCheckResult(
                     passed=False,
                     mode="strict",
+                    deterministic_replay_verified=True,
                     emitted_replay_verified=True,
                     strict_suppression_verified=False,
                     violations=("hidden_lookahead_suppression_detected",),
+                    skipped_probe_count=len(skipped_probe_reasons),
+                    skipped_probe_reasons=tuple(skipped_probe_reasons),
                 )
 
+    skipped_probe_count = len(skipped_probe_reasons)
     return LookaheadCheckResult(
         passed=True,
         mode=mode,
+        deterministic_replay_verified=True,
         emitted_replay_verified=True,
-        strict_suppression_verified=mode == "strict",
+        strict_suppression_verified=mode == "strict" and skipped_probe_count == 0,
+        skipped_probe_count=skipped_probe_count,
+        skipped_probe_reasons=tuple(skipped_probe_reasons),
     )
+
+
+def _deterministic_replay_failure(
+    generate_decisions: DecisionGenerator,
+    *,
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+    params: Mapping[str, Any],
+    baseline_decisions: Sequence[StrategyDecision],
+    strategy_id: str,
+    mode: ReplayMode,
+) -> LookaheadCheckResult | None:
+    full_rows = frozen_rows(_projection_rows(rows))
+    try:
+        replay_output = generate_decisions(full_rows, params)
+    except SystemExit as exc:
+        return LookaheadCheckResult(
+            passed=False,
+            mode=mode,
+            violations=(f"determinism_check_failed: SystemExit: {exc}",),
+        )
+    except Exception as exc:
+        return LookaheadCheckResult(
+            passed=False,
+            mode=mode,
+            violations=(f"determinism_check_failed: {type(exc).__name__}: {exc}",),
+        )
+
+    replay_decisions, violations = validate_decision_output(
+        replay_output,
+        strategy_id=strategy_id,
+    )
+    if violations:
+        return LookaheadCheckResult(
+            passed=False,
+            mode=mode,
+            violations=(f"determinism_check_failed: {'; '.join(violations)}",),
+        )
+    if _decision_payloads(replay_decisions) != _decision_payloads(baseline_decisions):
+        return LookaheadCheckResult(
+            passed=False,
+            mode=mode,
+            violations=("strategy_generation_not_deterministic",),
+        )
+    return None
+
+
+def _projection_rows(
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+) -> Sequence[Mapping[str, Any]]:
+    return rows.projection_rows() if isinstance(rows, NormalizedRows) else rows
+
+
+def _decision_payloads(
+    decisions: Sequence[StrategyDecision],
+) -> tuple[dict[str, Any], ...]:
+    return tuple(decision.model_dump(mode="json") for decision in decisions)
+
+
+def _exception_reason(exc: BaseException) -> str:
+    return f"{type(exc).__name__}: {exc}"
 
 
 def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBoundary, ...]:

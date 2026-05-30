@@ -85,9 +85,11 @@ Runner summaries and data manifests include evidence-quality fields:
 Strict suppression replay runs by default; only a strict run sets
 `strict_no_emission_verified` (and therefore `causality_verified`), while
 `emitted_replay_verified` records the weaker subset check — so a run never claims
-verification it did not perform. Hidden-lookahead replay failures stop the run as
-`runner_failed`. Missing or partial availability is recorded as uncertainty with
-`smoke_unverified` and does not set `causality_verified`.
+verification it did not perform. If strict suppression probes are skipped, the run can
+continue only as unverified evidence: `strict_no_emission_verified` and
+`causality_verified` remain false. Hidden-lookahead replay and deterministic full-replay
+failures stop the run as `runner_failed`. Missing or partial availability is recorded as
+uncertainty with `smoke_unverified` and does not set `causality_verified`.
 
 ## Row contract
 

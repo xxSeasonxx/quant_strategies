@@ -105,6 +105,8 @@ def write_strategy(repo_root: Path, *, fixed_quote_signal: bool = False) -> None
         strategy.write_text(
             "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
             "def generate_decisions(rows, params):\n"
+            "    if len(rows) < 2:\n"
+            "        return []\n"
             "    return [StrategyDecision(\n"
             "        strategy_id='demo',\n"
             "        instrument=InstrumentRef(kind='fx_pair', symbol='EURUSD'),\n"
@@ -118,6 +120,8 @@ def write_strategy(repo_root: Path, *, fixed_quote_signal: bool = False) -> None
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
         "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
@@ -1589,7 +1593,7 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
     assert not (result.result_dir / "engine_request.json").exists()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "causality"
-    assert summary["message"].startswith("hidden_lookahead_check_failed:")
+    assert summary["message"] == "hidden_lookahead_detected"
     assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
         "field": "available_at",
