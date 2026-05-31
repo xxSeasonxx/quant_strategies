@@ -25,7 +25,12 @@ validation run -> advisory triage for a retained candidate
 - PR 0 is complete as of 2026-05-31. The hard vocabulary cutover was
   implemented with no compatibility aliases, active-surface legacy grep clean,
   full suite passing, and code review completed.
-- Next open item: PR 1, Diagnostic Quick Run Profile.
+- PR 1 is complete as of 2026-05-31. `diagnostic` is now the default quick-run
+  artifact profile, `diagnostics.json` is bounded and schema-whitelisted, sample
+  winner/loser counts are configurable in TOML, full replay artifacts remain
+  full-profile only, full suite passed on `main`, and code review feedback was
+  implemented.
+- Next open item: PR 2, Artifact Replayability Simplification.
 
 ## PR 0: Project-Wide Research Vocabulary Cleanup (Complete)
 
@@ -145,7 +150,7 @@ artifact keys:
 conda run -n quant pytest -q
 ```
 
-## PR 1: Diagnostic Quick Run Profile
+## PR 1: Diagnostic Quick Run Profile (Complete)
 
 **Goal:** make the default one-strategy research loop return useful diagnostic
 evidence without writing full audit/replay artifacts every time.
@@ -156,6 +161,15 @@ explain the current strategy version's behavior: where PnL came from, what costs
 or funding did, whether trades cluster by symbol/window/direction, and which
 trades are representative. Current `summary` is too thin for strategy
 improvement, while `full` is too large and audit-shaped.
+
+**Completion note:** implemented as a hard root-contract cutover with no legacy
+compatibility shim. Omitted `artifact_profile` now defaults to `diagnostic`;
+canonical configs explicitly use `artifact_profile = "diagnostic"` and
+`diagnostic_sample_trades = 5`; `diagnostics.json` includes bounded aggregate
+slices, cost/funding breakdown, concentration, holding-period stats, and
+schema-whitelisted largest winner/loser samples. `summary` remains compact,
+`full` remains audit/replay output, and diagnostic runs do not write full replay
+artifacts.
 
 ### Tasks
 
