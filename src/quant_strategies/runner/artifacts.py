@@ -12,8 +12,8 @@ from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
-    artifact_trust_tier_for_profile,
     causality_evidence_fields,
+    replayable_from_artifacts_for_profile,
     runner_evidence_semantics,
     trade_result_metric_semantics,
 )
@@ -23,7 +23,6 @@ from quant_strategies.provenance import (
     source_identity,
 )
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.artifact_profiles import canonical_row_line
 from quant_strategies.runner.engine_runner import EngineRun
 
 
@@ -183,7 +182,7 @@ def write_data_manifest(
     )
     payload = {
         "artifact_profile": config.output.artifact_profile,
-        "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile(config.output.artifact_profile),
         "data": {
             "kind": config.data.kind,
             "dataset": config.data.dataset,
@@ -215,7 +214,7 @@ def write_run_manifest(
         "repository": source_identity(repo_root),
         "engine": {"evidence_schema": EVIDENCE_SCHEMA_VERSION},
         "artifact_profile": artifact_profile,
-        "artifact_trust_tier": artifact_trust_tier_for_profile(artifact_profile),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile(artifact_profile),
         "evidence": evidence,
         "artifacts": _artifact_hashes(result_dir),
     }
@@ -238,7 +237,7 @@ def write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> str:
     digest = hashlib.sha256()
     with path.open("wb") as handle:
         for row in rows:
-            line = canonical_row_line(row)
+            line = _canonical_json_line(row)
             payload = f"{line}\n".encode("utf-8")
             handle.write(payload)
             digest.update(payload)
@@ -354,7 +353,7 @@ def summary_payload(
         "strategy_id": config.strategy_id,
         "mode": config.output.mode,
         "artifact_profile": config.output.artifact_profile,
-        "artifact_trust_tier": artifact_trust_tier_for_profile(config.output.artifact_profile),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile(config.output.artifact_profile),
         "status": status,
         "stage": stage,
         "failure_stage": failure_stage,

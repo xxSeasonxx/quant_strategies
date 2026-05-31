@@ -8,7 +8,7 @@ from typing import Any
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, runner_evidence_semantics
+from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, runner_evidence_semantics
 from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
@@ -17,10 +17,8 @@ from quant_strategies.runner import (
     artifacts,
     config as config_module,
     data_readiness,
-    diagnostics,
     engine_runner,
 )
-from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 from quant_strategies.runner.errors import RunnerError
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 from quant_strategies.runner.execution import (
@@ -42,7 +40,7 @@ class RunResult:
     # "validated" / "unvalidated_passthrough" on a completed run; "unknown" on a
     # run that failed before the param contract was conclusively determined.
     param_contract: str = "unknown"
-    artifact_trust_tier: str | None = None
+    replayable_from_artifacts: bool | None = None
     data_availability_status: str | None = None
     availability_coverage: dict[str, object] | None = None
     row_contract: dict[str, object] | None = None
@@ -190,7 +188,7 @@ def run_config(
         assessment_status=assessment_status,
         promotion_eligible=False,
         param_contract=execution.param_contract,
-        artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
+        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
         **artifacts.run_result_evidence_fields(evidence_quality),
     )
 
@@ -453,6 +451,8 @@ def _write_completion_artifacts(
         if config.output.artifact_profile == "full" and engine_run.evidence_json:
             artifacts.write_evidence(result_dir, engine_run.evidence_json)
         if config.output.artifact_profile == "summary":
+            from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
+
             write_summary_profile_artifact(
                 result_dir,
                 config=config,
@@ -463,6 +463,8 @@ def _write_completion_artifacts(
                 row_ranges=execution.normalized_rows.ranges_by_symbol,
             )
         if config.output.artifact_profile == "diagnostic":
+            from quant_strategies.runner import diagnostics
+
             diagnostics.write_diagnostics(
                 result_dir,
                 diagnostics.diagnostic_payload(
@@ -618,7 +620,7 @@ def _failure_result(
         failure_stage=stage,
         assessment_status="runner_failed",
         promotion_eligible=False,
-        artifact_trust_tier=artifact_trust_tier_for_profile(config.output.artifact_profile),
+        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
         **artifacts.run_result_evidence_fields(quality),
     )
 

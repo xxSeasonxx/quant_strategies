@@ -12,7 +12,7 @@ import pytest
 from quant_strategies.data_contract import NormalizedRows
 import quant_strategies.runner.artifacts as artifacts
 import quant_strategies.runner.execution as execution
-from quant_strategies.runner import RunResult, cli, config as config_module, engine_runner, run_config
+from quant_strategies.runner import RunResult, config as config_module, engine_runner, run_config
 from quant_strategies.runner.data_loader import LoadedData
 from quant_strategies.runner.errors import DataLoadError, EvaluationRunError, RunnerError
 
@@ -30,7 +30,7 @@ SUMMARY_KEYS = {
     "assessment_status",
     "param_contract",
     "artifact_profile",
-    "artifact_trust_tier",
+    "replayable_from_artifacts",
     "evidence_class",
     "strategy_contract",
     "return_model",
@@ -212,12 +212,12 @@ def assert_assessment(
     artifact_profile: str = "full",
     failure_stage: str | None = None,
 ) -> None:
-    expected_trust = "audit_replayable" if artifact_profile == "full" else "search_only"
+    expected_replayable = artifact_profile == "full"
     assert result.run_completed is run_completed
     assert result.failure_stage == failure_stage
     assert result.assessment_status == assessment_status
     assert result.promotion_eligible is promotion_eligible
-    assert result.artifact_trust_tier == expected_trust
+    assert result.replayable_from_artifacts is expected_replayable
     assert result.data_availability_status == summary["data_availability_status"]
     assert result.availability_coverage == summary["availability_coverage"]
     assert result.row_contract == summary["row_contract"]
@@ -227,7 +227,7 @@ def assert_assessment(
     assert summary["failure_stage"] == failure_stage
     assert summary["assessment_status"] == assessment_status
     assert summary["artifact_profile"] == artifact_profile
-    assert summary["artifact_trust_tier"] == expected_trust
+    assert summary["replayable_from_artifacts"] is expected_replayable
     assert summary["evidence_class"] == "quick_run_diagnostic"
     assert summary["strategy_contract"] == "decision"
     assert summary["return_model"] == "trade_result.sum_signed_trade_activity_net"
@@ -264,7 +264,7 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["asymmetry"]
 
 
-def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
@@ -327,7 +327,8 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
     assert summary["causality_verified"] is True
     assert summary["evidence_quality_warnings"] == []
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert data_manifest["artifact_trust_tier"] == "audit_replayable"
+    assert data_manifest["replayable_from_artifacts"] is True
+    assert "artifact_trust_tier" not in data_manifest
     assert_trade_result_metric_semantics(data_manifest)
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
@@ -711,6 +712,8 @@ def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    import quant_strategies.runner.cli as cli
+
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
 
@@ -1307,7 +1310,8 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert LEGACY_DISTRIBUTION not in environment["packages"]
     assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v4"}
     assert run_manifest["artifact_profile"] == "full"
-    assert run_manifest["artifact_trust_tier"] == "audit_replayable"
+    assert run_manifest["replayable_from_artifacts"] is True
+    assert "artifact_trust_tier" not in run_manifest
     assert run_manifest["evidence"] == {
         "evidence_class": "quick_run_diagnostic",
         "strategy_contract": "decision",
@@ -1335,7 +1339,8 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
         "strict": True,
     }
     assert data_manifest["artifact_profile"] == "full"
-    assert data_manifest["artifact_trust_tier"] == "audit_replayable"
+    assert data_manifest["replayable_from_artifacts"] is True
+    assert "artifact_trust_tier" not in data_manifest
     assert_trade_result_metric_semantics(data_manifest)
     assert data_manifest["rows"]["total"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
@@ -2019,6 +2024,8 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
+    import quant_strategies.runner.cli as cli
+
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     write_strategy(repo_root)
@@ -2038,6 +2045,8 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
+    import quant_strategies.runner.cli as cli
+
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
@@ -2064,6 +2073,8 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
+    import quant_strategies.runner.cli as cli
+
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
@@ -2077,6 +2088,8 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
 
 
 def test_cli_reports_failure_with_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+    import quant_strategies.runner.cli as cli
+
     notes = tmp_path / "results" / "run" / "notes.md"
     notes.parent.mkdir(parents=True)
     notes.write_text("failed")
@@ -2103,6 +2116,8 @@ def test_cli_returns_three_for_data_readiness_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
+    import quant_strategies.runner.cli as cli
+
     notes = tmp_path / "results" / "run" / "notes.md"
     notes.parent.mkdir(parents=True)
     notes.write_text("failed")
@@ -2156,8 +2171,8 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
 
     assert first.run_completed is True
     assert second.run_completed is True
-    assert first.artifact_trust_tier == "audit_replayable"
-    assert second.artifact_trust_tier == "audit_replayable"
+    assert first.replayable_from_artifacts is True
+    assert second.replayable_from_artifacts is True
     assert first.result_dir is not None
     assert second.result_dir is not None
     assert first.result_dir != second.result_dir
@@ -2218,6 +2233,8 @@ def test_run_config_completion_write_failure_returns_structured_result(
 
 
 def test_run_cli_backstops_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
+    import quant_strategies.runner.cli as cli
+
     def raise_oserror(path, repo_root=None, **_kwargs):
         raise PermissionError("results dir not writable")
 
