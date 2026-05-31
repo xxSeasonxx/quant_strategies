@@ -34,7 +34,8 @@ validation run -> advisory triage for a retained candidate
   `replayable_from_artifacts` as derived metadata, active output no longer emits
   the legacy replayability-tier field or retired tier values, compact profiles remain
   non-replayable, full profile remains replayable from emitted artifacts, and
-  code/docs/tests were updated with full suite passing.
+  implementation/docs/tests were updated. Final verification is handled by the
+  implementation closeout.
 - Next open item: PR 3, Return Surface Honesty And Naming Cleanup.
 
 ## PR 0: Project-Wide Research Vocabulary Cleanup (Complete)
@@ -275,7 +276,7 @@ conda run -n quant pytest -q
 ## PR 2: Artifact Replayability Simplification
 
 **Goal:** remove retired tier labels as product vocabulary and replace the extra
-artifact trust tier with one derived replayability flag.
+legacy replayability label with one derived replayability flag.
 
 **Why this matters:** artifact profiles already answer the operational question:
 compact output for everyday research versus full output for audit. A second
@@ -290,7 +291,7 @@ or old replayability-tier key remains in the active surface.
 
 ### Tasks
 
-- **Replace artifact trust tier with replayability metadata.**
+- **Replace legacy replayability labels with factual metadata.**
   - Remove or deprecate the legacy replayability-tier field from public `RunResult` and
     artifact payloads.
   - Add `replayable_from_artifacts: bool` as derived metadata.
@@ -299,7 +300,7 @@ or old replayability-tier key remains in the active surface.
     - `diagnostic` -> `replayable_from_artifacts = false` unless it writes the
       full replay chain
     - `full` -> `replayable_from_artifacts = true`
-  - Do not ask the user to choose a trust tier.
+  - Do not ask the user to choose replayability metadata directly.
 
 - **Remove stale tier strings from active output.**
   - Stop emitting the retired tier values in new runner artifacts.
@@ -318,7 +319,7 @@ or old replayability-tier key remains in the active surface.
 
 - **Keep validation replayability explicit.**
   - Validation already has `verdict_replayable` / `verdict_replay_basis`.
-  - Do not introduce a second validation trust tier.
+  - Do not introduce a second validation replayability label.
   - If names are aligned, prefer factual replayability fields over tier labels.
 
 - **Update docs and tests.**
@@ -347,8 +348,10 @@ or old replayability-tier key remains in the active surface.
 
 ### Suggested Verification
 
+Implementation closeout also runs the active retired-vocabulary grep from the
+implementation plan.
+
 ```bash
-rg -n "<retired artifact replayability vocabulary>" PRD.md README.md docs src tests
 conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py -q
 ```
 
