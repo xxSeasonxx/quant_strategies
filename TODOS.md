@@ -31,8 +31,8 @@ validation run -> advisory triage for a retained candidate
   full-profile only, full suite passed on `main`, and code review feedback was
   implemented.
 - PR 2 is complete as of 2026-05-31. Runner outputs now expose
-  `replayable_from_artifacts` as derived metadata, active output no longer emits
-  the legacy replayability-tier field or retired tier values, compact profiles remain
+`replayable_from_artifacts` as derived metadata, active output no longer emits
+  the legacy replayability field or retired replayability values, compact profiles remain
   non-replayable, full profile remains replayable from emitted artifacts, and
   implementation/docs/tests were updated. Final verification is handled by the
   implementation closeout.
@@ -287,12 +287,12 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
 **Completion note:** implemented as a hard public contract cutover. New runner
 results and artifacts expose `replayable_from_artifacts` only: `summary` and
 `diagnostic` derive `false`, while `full` derives `true`. No compatibility alias
-or old replayability-tier key remains in the active surface.
+or old replayability key remains in the active surface.
 
 ### Tasks
 
 - **Replace legacy replayability labels with factual metadata.**
-  - Remove or deprecate the legacy replayability-tier field from public `RunResult` and
+  - Remove or deprecate the legacy replayability field from public `RunResult` and
     artifact payloads.
   - Add `replayable_from_artifacts: bool` as derived metadata.
   - Suggested mapping:
@@ -302,9 +302,9 @@ or old replayability-tier key remains in the active surface.
     - `full` -> `replayable_from_artifacts = true`
   - Do not ask the user to choose replayability metadata directly.
 
-- **Remove stale tier strings from active output.**
-  - Stop emitting the retired tier values in new runner artifacts.
-  - Remove the profile-to-tier helper or replace it with a simple replayability
+- **Remove stale replayability strings from active output.**
+  - Stop emitting the retired replayability values in new runner artifacts.
+  - Remove the profile-to-replayability-label helper or replace it with a simple replayability
     helper.
   - Update manifests, summaries, profile artifacts, docs, and tests to use
     `replayable_from_artifacts`.

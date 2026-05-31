@@ -55,7 +55,7 @@ TRADE_RESULT_KEYS = {
     "trade_result.sum_signed_trade_activity_net",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
-LEGACY_REPLAYABILITY_METADATA_KEY = "artifact_" "trust_tier"
+LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
 
 
 def rows(

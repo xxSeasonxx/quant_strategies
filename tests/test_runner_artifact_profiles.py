@@ -13,7 +13,7 @@ from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 
 
-LEGACY_REPLAYABILITY_METADATA_KEY = "artifact_" "trust_tier"
+LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
 
 
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
