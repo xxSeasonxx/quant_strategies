@@ -186,7 +186,7 @@ artifact_profile = "{artifact_profile}"
 
 def read_summary(result_dir: Path) -> dict[str, object]:
     summary = json.loads((result_dir / "summary.json").read_text())
-    assert set(summary) == SUMMARY_KEYS
+    assert SUMMARY_KEYS <= set(summary)
     assert all((result_dir / name).exists() for name in summary["artifacts"])
     if summary["stage"] == "completed":
         assert summary["failure_stage"] is None

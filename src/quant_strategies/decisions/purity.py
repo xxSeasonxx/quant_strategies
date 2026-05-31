@@ -17,9 +17,12 @@ from pathlib import Path
 
 
 BANNED_IMPORT_ROOTS = {
+    "multiprocessing",
     "quant_data",
     "quant_strategies.engine",
     "quant_strategies.runner",
+    "quant_strategies.validation",
+    "threading",
 }
 BANNED_CALL_NAMES = {
     "__import__",

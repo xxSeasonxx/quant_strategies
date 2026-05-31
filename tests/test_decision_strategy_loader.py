@@ -184,6 +184,16 @@ def test_load_decision_strategy_allows_explicit_purity_opt_out(tmp_path: Path):
         # Shell escapes.
         ("import os\nos.system('echo unsafe')\n", r"os\.system\(\)"),
         ("from os import popen\npopen('echo unsafe')\n", r"os\.popen\(\)"),
+        # Process/threading escapes and runner/validation internals.
+        ("import threading\nthreading.Thread(target=lambda: None).start()\n", r"import threading"),
+        (
+            "from multiprocessing import Process\nProcess(target=lambda: None).start()\n",
+            r"from multiprocessing import \.\.\.",
+        ),
+        (
+            "from quant_strategies.validation import run_validation\n",
+            r"from quant_strategies.validation import \.\.\.",
+        ),
     ],
 )
 def test_load_decision_strategy_rejects_data_loading_escapes(

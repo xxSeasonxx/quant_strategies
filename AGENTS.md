@@ -20,22 +20,11 @@ clocks/RNG) but is not exhaustive; the contract plus review are the real
 guarantee.
 - Run explicit experiments through `src/quant_strategies/runner/` using TOML
 configs under `runs/` and generated artifacts under ignored `results/`.
-- `quant_autoresearch` should consume `quant_strategies.runner.run_config`
+- `quant_autoresearch` should consume `quant_strategies.runner.run_config`  
 instead of owning a separate runner harness.
-- Keep `researched/` for frozen bench-promoted packages from
-`quant_autoresearch`. Do not treat `researched/` as market validated.
-- Move from `researched/` to `tested/` only through the separate validation
-process Season approves.
-- Use public `quant_data` loader APIs only. Data materialization, refresh,
-backfill, repair, and source joining belong upstream in `quant-data`.
+- Use public `quant_data` loader APIs only. Data materialization, refresh,  
+backfill, repair, and source joining belong upstream in `quant-data`.  
 Document and provide feedback to Season on any limitation of `quant_data`.
-- A strategy may define an optional `validate_params` hook. It is optional for
-quick runs (a schema-less run still completes but is flagged
-`param_contract="unvalidated_passthrough"`), but **required** for validation
-runs — a candidate without `validate_params` is refused with
-`failure_stage="param_validation"`. Define a real schema before validation-running
-an agent-generated candidate.
-- Write or update tests before moving a strategy from `untested/` to `tested/`.
 - Every strategy needs a short rationale docstring covering the actual strategy
 source/provenance, market
 rationale, required data/observables, executable rule, key proxy/data
@@ -63,3 +52,4 @@ auditability, and research discipline.
 - Stale docs are worse than no docs. Any implementation that changes behavior,
 commands, workflow, artifact semantics, validation interpretation, or agent
 instructions must update the corresponding docs before completion.
+

@@ -2,9 +2,10 @@
 
 **Status:** Draft v1
 **Owner:** Season Yang
-**Last updated:** 2026-05-28
+**Last updated:** 2026-05-31
 **Companion documents:** `AGENTS.md` (agent contract), `README.md` (current state),
-`docs/quant-autoresearch-consumer.md` (consumer contract).
+`docs/quant-autoresearch-consumer.md` (consumer contract),
+`docs/research-process.md` (research return surfaces).
 
 This PRD is the source of truth for **why** `quant_strategies` exists and **what** it must
 provide. `README.md` describes the current implementation; this PRD describes the target
@@ -15,10 +16,9 @@ the work to be done.
 
 ## 1. One-Line Summary
 
-`quant_strategies` is the **execution and paper-readiness foundation** for a small, focused
-quant research lifecycle: a senior quant researcher (Season) and an autonomous research
-agent (`quant_autoresearch`) iterate on strategies efficiently, with explicit position
-semantics, mathematically correct PnL, hidden-lookahead protection, and auditable artifacts.
+`quant_strategies` is a **two-step research foundation** for a small, focused quant
+research lifecycle: diagnostic quick runs for one-strategy iteration, and advisory
+validation runs for retained-candidate triage.
 
 ---
 
@@ -31,9 +31,11 @@ A disciplined Python library and CLI that:
 1. Defines a **declarative strategy contract** (pure function → typed decisions).
 2. Provides a **mathematically explicit execution kernel** that turns decisions into
   trade-level PnL with declared assumptions.
-3. Provides an **advisory validation harness** that runs the strategy across windows and
+3. Provides a **diagnostic quick-run harness** that computes quick-run evidence, causality
+  hygiene, and bounded behavior diagnostics for one strategy version.
+4. Provides an **advisory validation harness** that runs the strategy across windows and
   scenarios with hidden-lookahead protection and writes mechanically-auditable artifacts.
-4. Exposes a **stable, minimal consumer surface** for `quant_autoresearch` to drive
+5. Exposes a **stable, minimal consumer surface** for `quant_autoresearch` to drive
   strategy iteration without touching internals.
 
 ### What the project is not
@@ -53,11 +55,11 @@ human-led process.
 ### Primary users
 
 
-| User                                         | Role                                                           | What they need                                                                                                                                      |
-| -------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop; consumes runner artifacts for search ranking and validation verdicts for retained-candidate triage | Stable, typed Python API for both `runner.run_config` and `validation.run_validation`; declarative strategy contract; deterministic artifacts; clear "good vs bad" ranking signals from runner; advisory verdict labels from validation; small surface area to misuse |
-| **Senior quant researcher (Season)**         | Designs strategies, audits research, makes promotion decisions | Math correctness; explicit ontology; ability to investigate any trade end-to-end; ability to add new strategy axes without rewriting the harness    |
-| **Future strategy authors** (human or agent) | Write new strategy files                                       | One-page contract; obvious where to put thesis/observables/rule/falsifier; impossible to accidentally introduce lookahead                           |
+| User                                         | Role                                                                                                                                                                | What they need                                                                                                                                                                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop; consumes quick-run diagnostics for one-version improvement and validation verdicts for retained-candidate triage | Stable, typed Python API for both `runner.run_config` and `validation.run_validation`; declarative strategy contract; deterministic artifacts; bounded behavior diagnostics; advisory verdict labels from validation; small surface area to misuse |
+| **Senior quant researcher (Season)**         | Designs strategies, audits research, makes promotion decisions                                                                                                      | Math correctness; explicit ontology; ability to understand behavior slices and investigate trades end-to-end; ability to add new strategy axes without rewriting the harness                                                                       |
+| **Future strategy authors** (human or agent) | Write new strategy files                                                                                                                                            | One-page contract; obvious where to put thesis/observables/rule/falsifier; impossible to accidentally introduce lookahead                                                                                                                          |
 
 
 ### Secondary stakeholders
@@ -95,15 +97,14 @@ not imply that unsupported execution semantics are executable.
 **G2. Math correctness adequate for paper-readiness research.**
 Every numeric quantity emitted by the foundation MUST:
 
-- Carry a declared **unit** and **base** (e.g., "fraction of entry notional", "percentage
-points of signed trade activity", "NAV-path total return").
-- Be reproducible by reading the artifact set without re-running the code **when the
-consumer requested an `audit_replayable` run**. `search_only` runs MUST be explicitly
-marked as not reproducible from artifacts alone.
+- Carry a declared **unit** and **base** (e.g., "fraction of entry notional",
+"percentage points of signed per-trade result", "NAV-path total return").
+- Declare whether the reported metric is replayable from artifacts alone. Compact
+quick-run profiles are not required to be replayable; full artifact output is.
 - Declare backend-specific comparability and asymmetry explicitly. If multiple
-  production backends exist later, cross-backend comparisons need a declared tolerance.
+production backends exist later, cross-backend comparisons need a declared tolerance.
 - Be **named in a way that does not overstate what it computes** (no "paper_candidate"
-without statistical evidence; no "return" for a sum-of-trade-activity figure).
+without statistical evidence; no "return" for a linear sum of per-trade results).
 
 **G3. Modular code with explicit ontology and the right abstractions.**
 
@@ -119,18 +120,41 @@ reach into runner internals.
 
 - `quant_autoresearch` writes exactly two files per candidate (`strategy.py`,
 `experiment.toml`).
-- It reads exactly one typed result object and structured artifacts.
+- For quick runs, it uses the result object and structured artifacts to diagnose one
+strategy version, explain behavior, compare against prior versions, and decide
+whether the candidate is worth retaining.
+- For validation runs, it uses the result object and structured artifacts as advisory
+retained-candidate triage.
 - The public consumer surface is intentionally narrow:
-  `quant_strategies.runner.run_config` returns
-  `quant_strategies.runner.RunResult`, and no top-level facade is promised.
-  Strategy generation and backend extension points are Protocol-typed;
-  internals are private.
+`quant_strategies.runner.run_config` returns
+`quant_strategies.runner.RunResult`, and no top-level facade is promised.
+Strategy generation and backend extension points are Protocol-typed;
+internals are private.
+- User-facing workflow vocabulary MUST remain small. Daily research language centers
+on `quick run`, `validation run`, and advisory validation verdicts. Terms such as
+`screen`, `gate`, artifact profile internals, replayability metadata, and `row_contract`
+are reference-level vocabulary, not the normal research workflow.
 - Misusing the surface (returning the wrong shape, importing private modules, etc.)
 produces a clear error, not a silent miscalculation.
 
-**G5. Trade-level auditability when the consumer asks for it.**
-For any reported metric in an `audit_replayable` run, a reviewer MUST be able to trace
-it to:
+**G5. Tiered artifacts, bounded diagnostics, and auditability when requested.**
+Quick-run artifact production has three profiles:
+
+- `summary`: compact aggregate quick-run evidence.
+- `diagnostic`: bounded behavior diagnostics for active strategy improvement.
+- `full`: audit/replay artifacts.
+
+A `diagnostic` profile may still have `replayable_from_artifacts = false` unless it
+writes enough evidence to replay the run from artifacts alone. Replayability is derived
+metadata, not a separate user-facing workflow concept.
+
+`diagnostic` quick runs MUST explain strategy behavior without dumping every raw row or
+trade by default. Diagnostics SHOULD include aggregate slices, cost/funding contribution,
+concentration, holding-period summaries, and bounded trade samples sufficient for a
+researcher or agent to improve the current strategy version.
+
+For any reported metric in a `full` run, a reviewer MUST be able to trace it from
+artifacts alone to:
 
 - the strategy file snapshot,
 - the input row set (hashed and reproducible),
@@ -139,19 +163,24 @@ it to:
 - the funding/cost contributions,
 - the configuration that produced them.
 
-`search_only` runs intentionally omit the trade-level chain. Consumers that need to
-investigate a candidate rerun it under `audit_replayable`. The foundation never auto-
-promotes a run to `audit_replayable`; the consumer chooses the tier.
+Compact quick-run profiles intentionally omit the full trade-level chain. Consumers that
+need complete audit replay rerun under the `full` profile. The foundation never
+auto-promotes a run to full audit output; the consumer chooses the artifact profile.
 
-Validation runs additionally emit a **verdict label** (`hard_no | mechanical_pass |
-watchlist | mechanical_review_candidate`) summarizing mechanical and paper-readiness
-gates. **Verdict labels are advisory inputs to human review**, not autonomous
-promotion signals — they MUST NOT be used by downstream automation to flip
-eligibility bits. The verdict's `reasons` field carries the qualifying context (e.g.,
+Validation runs additionally emit an advisory verdict from a small closed vocabulary.
+The vocabulary SHOULD distinguish:
+
+- failed required mechanical checks,
+- mechanically executable but not review-ready,
+- positive evidence with caveats,
+- manual-review candidate.
+
+Verdict labels MUST be self-explanatory without implementation history and MUST NOT
+imply promotion, paper trading, live trading, statistical significance, or market
+validation. The verdict's `reasons` field carries qualifying context (e.g.,
 `no_positive_realistic_cost_evidence`, `multiple_testing_not_corrected_advisory_only`,
-`search_pressure_unknown_advisory_only`);
-consumers ranking on the label alone without reading reasons are operating outside
-the contract.
+`search_pressure_unknown_advisory_only`). Consumers ranking on the label alone without
+reading reasons are operating outside the contract.
 
 **G6. Good performance code — decent, not microsecond-optimal.**
 The foundation is written with performance discipline. The code:
@@ -160,12 +189,12 @@ The foundation is written with performance discipline. The code:
 - MUST NOT do redundant work: deepcopying already-frozen data, hashing the same payload
 twice, reconnecting to the database per run when the engine can be cached, walking row
 lists more than once when one pass suffices.
-- MUST NOT serialize or write artifacts the consumer did not request — `search_only`
-runs do not produce audit-replay artifacts.
+- MUST NOT serialize or write artifacts the consumer did not request. Summary and
+diagnostic quick runs do not produce full audit-replay artifacts.
 - MUST use efficient formats for bulk per-row data (see C-9).
 
-A typical search-scale run (≤1M rows, single strategy, `search_only` tier) completes in
-seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vectorized-
+A typical diagnostic quick run (≤1M rows, single strategy, bounded diagnostics) completes
+in seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vectorized-
 engine inner-loop tuning are explicitly out of scope (§8). The goal is good performance
 code, not benchmark-chasing.
 
@@ -198,29 +227,32 @@ are updated and re-run. The foundation does not carry shims for old shapes.
 ## 5. Non-Functional Requirements
 
 - **NFR-RIGOR.** Math is correct first, fast second. Any optimization that changes
-  numerical results requires an explicit decision record.
+numerical results requires an explicit decision record.
 - **NFR-DETERMINISM.** Given the same source, config, and data, deterministic
-  runner and validation manifests keep research identity focused on source commit,
-  inputs, decisions, and artifact hashes. Python build, installed package versions,
-  git dirty status, and tracked diff hashes are audit context only and live in
-  `environment.json`, which manifest artifact hashes exclude.
+runner and validation manifests keep research identity focused on source commit,
+inputs, decisions, and artifact hashes. Python build, installed package versions,
+git dirty status, and tracked diff hashes are audit context only and live in
+`environment.json`, which manifest artifact hashes exclude.
 - **NFR-IMMUTABILITY.** No artifact is mutated after write. Re-runs go to new
-  directories.
+directories.
 - **NFR-CAUSALITY.** The lookahead invariant is foundational: no run completes with
-  `assessment_status` other than `runner_failed` if any decision violates it.
+usable quick-run evidence if any decision violates it. Quick runs always compute
+quick-run evidence and causality hygiene. Optional quick checks may classify the
+quick-run result, but this is not validation.
 - **NFR-SIMPLICITY.** New strategy authors can read one Protocol + one decision schema
-  and write a working strategy quickly.
+and write a working strategy quickly. Researchers can understand the daily workflow
+as quick run followed, when warranted, by validation run.
 - **NFR-ROOT-CAUSE.** When a bug is fixed, the fix lands at the boundary or contract that
-  produced it. Wrappers, guards, adapters, and "the new code path" are anti-patterns
-  unless explicitly justified.
+produced it. Wrappers, guards, adapters, and "the new code path" are anti-patterns
+unless explicitly justified.
 - **NFR-NO-LEGACY.** Old strategies, configs, and artifacts that depend on retired
-  shapes are re-generated, not back-compat'd. Migration documents live in the relevant
-  decision records, not in code.
+shapes are re-generated, not back-compat'd. Migration documents live in the relevant
+decision records, not in code.
 - **NFR-OBSERVABILITY.** Structured logging is emitted at stage boundaries. Stage names
-  match artifact taxonomy.
+match artifact taxonomy.
 - **NFR-AGENT-FRIENDLY.** Strategy and config shapes are LLM-friendly (small, typed,
-  documented in module docstrings + Protocols), so `quant_autoresearch` can generate
-  them reliably.
+documented in module docstrings + Protocols), so `quant_autoresearch` can generate
+them reliably.
 
 ---
 
@@ -229,53 +261,60 @@ are updated and re-run. The foundation does not carry shims for old shapes.
 A consumer should be able to say "yes" to all of these without qualification.
 
 - **Expressiveness.** A quant can use the default executable ontology without ambiguity,
-  and can opt into extended vocabulary for put/call, buy/sell, long/short/flat,
-  single-leg and multi-leg research without monkey-patching the foundation.
+and can opt into extended vocabulary for put/call, buy/sell, long/short/flat,
+single-leg and multi-leg research without monkey-patching the foundation.
 - **Math correctness.** Every emitted metric is unit-tagged, named consistently with
-  what it actually computes, and either agrees across backends within a declared
-  tolerance or has the asymmetry declared explicitly. `audit_replayable` runs are fully
-  reproducible from artifacts; `search_only` runs are explicitly marked as not
-  reproducible.
+what it actually computes, and either agrees across backends within a declared
+tolerance or has the asymmetry declared explicitly. Each run declares whether its
+reported metrics are replayable from artifacts alone.
 - **Consumer integration.** `quant_autoresearch` drives iteration end-to-end using only
-  the public surface; misuse fails fast and clearly.
-- **Auditability.** Any reported number in an `audit_replayable` run is back-traceable
-  from artifacts alone to the decisions, fills, and config that produced it.
-  `search_only` runs intentionally omit the trade-level chain.
-- **Performance.** Typical search-scale runs complete in seconds, not minutes. Overhead
-  the strategy did not request (eager imports, redundant deepcopies, per-run database
-  reconnects, unwanted artifact writes) does not dominate wall-clock time.
+the public surface; misuse fails fast and clearly.
+- **Diagnostic usefulness.** A quick run explains one strategy version with bounded
+behavior diagnostics: aggregate metrics, slices, cost/funding contribution,
+concentration, holding-period summaries, and representative trade samples.
+- **Auditability.** Any reported number in a `full` run is back-traceable from artifacts
+alone to the decisions, fills, and config that produced it. Compact quick-run profiles
+intentionally omit the full trade-level chain.
+- **Workflow simplicity.** A user can distinguish quick run from validation run without
+knowing implementation vocabulary such as screen/gate modes or replayability metadata.
+- **Performance.** Typical diagnostic quick runs complete in seconds, not minutes. Overhead
+the strategy did not request (eager imports, redundant deepcopies, per-run database
+reconnects, unwanted artifact writes) does not dominate wall-clock time.
 - **Code quality.** A single ontology, a single execution-model contract, a single shared
-  kernel between runner and validation, and no orchestrator god-functions.
+kernel between runner and validation, and no orchestrator god-functions.
 
 ---
 
 ## 7. Constraints
 
 - **C-1.** Python ≥ 3.12; pydantic ≥ 2.10; `quant-data` for data loading. Optional
-  `vectorbtpro` only for the explicitly enabled single-trade agreement check; it
-  is not a validation backend or verdict source.
+`vectorbtpro` only for the explicitly enabled single-trade agreement check; it
+is not a validation backend or verdict source.
 - **C-2.** Conda environment `quant`. All Python commands run via `conda run -n quant`.
 - **C-3.** `quant_data` is the only source of market data. The foundation does not load
-  CSVs, fetch APIs, or maintain caches.
+CSVs, fetch APIs, or maintain caches.
 - **C-4.** Strategy files live flat under `untested/` or `tested/` directories or inside
-  candidate workspaces driven by consumers. No nested strategy "framework" hierarchies
-  inside strategies.
+candidate workspaces driven by consumers. No nested strategy "framework" hierarchies
+inside strategies.
 - **C-5.** Runner results are written under ignored `results/` directories (per
-  config). Validation outputs remain candidate-local; generated artifacts should
-  not be written under source or input directories, and example configs are
-  templates.
+config). Validation outputs remain candidate-local; generated artifacts should
+not be written under source or input directories, and example configs are
+templates.
 - **C-6.** Promotion into `tested/` from `untested/` or `researched/` is a separate
-  human process. The foundation never auto-promotes.
+human process. The foundation never auto-promotes.
 - **C-7.** No network IO in the engine or kernel. All data comes from `quant_data`
-  loaders called from the runner.
+loaders called from the runner.
 - **C-8.** No legacy compatibility shims. Contract changes require regenerating
-  strategies and rerunning configs.
+strategies and rerunning configs.
 - **C-9.** Artifact production is tiered and format-disciplined. The consumer requests
-  either `search_only` (statistics + manifest, default) or `audit_replayable` (full
-  audit chain) per run. V1 audit row, decision, and trade-ledger artifacts use
-  deterministic JSONL; control-plane artifacts (manifest, summary, config, evidence)
-  stay sort-keys JSON. Move to columnar storage only after a benchmark shows JSONL is
-  inadequate.
+a quick-run artifact profile: `summary` (compact aggregate quick-run evidence),
+`diagnostic` (bounded behavior diagnostics for active strategy improvement), or
+`full` (audit/replay artifacts). Replayability is emitted as derived metadata, e.g.
+`replayable_from_artifacts = true | false`; there is no separate user-facing artifact
+tier. V1 audit row, decision, and trade-ledger artifacts use deterministic JSONL;
+control-plane artifacts (manifest, summary, config, evidence, diagnostics) stay
+sort-keys JSON. Move to columnar storage only after a benchmark shows JSONL is
+inadequate.
 
 ---
 
@@ -283,16 +322,17 @@ A consumer should be able to say "yes" to all of these without qualification.
 
 - Live trading, paper trading, order routing, broker integration.
 - Real-time market data feeds.
-- A general-purpose backtesting framework. The smoke engine is a *screening primitive*;
-  the vbt backend is a *validation primitive*. Neither is a backtester for free
-  composition.
+- A general-purpose backtesting framework. The execution kernel produces quick-run and
+validation evidence; the optional VectorBT Pro integration is only a single-trade
+agreement check, not a validation backend or verdict source. Neither is a backtester
+for free composition.
 - Strategy generation. (Owned by `quant_autoresearch`.)
 - Data acquisition / repair / join. (Owned by `quant_data`.)
 - Promotion automation. (Human-led process.)
 - Statistical gating beyond advisory metrics.
 - Micro-latency optimization (sub-100ms per run) and vectorized-engine inner-loop
-  tuning. Performance discipline (no eager imports, no redundant work, no unrequested
-  artifact writes) is in scope under G6; benchmark-chasing is not.
+tuning. Performance discipline (no eager imports, no redundant work, no unrequested
+artifact writes) is in scope under G6; benchmark-chasing is not.
 - A web UI, dashboard, or notebook integration.
 
 ---
@@ -301,9 +341,9 @@ A consumer should be able to say "yes" to all of these without qualification.
 
 - This PRD is updated when a Goal, Non-Goal, or Constraint changes.
 - `README.md` describes current behavior. When PRD and `README.md` diverge, PRD wins for
-  intent; `README.md` is a bug to be fixed.
+intent; `README.md` is a bug to be fixed.
 - `AGENTS.md` governs how agents operate inside this repo and is consistent with this
-  PRD; if they conflict, the more specific instruction wins (per `CLAUDE.md` global
-  policy).
+PRD; if they conflict, the more specific instruction wins (per `CLAUDE.md` global
+policy).
 
 *End of PRD v1.*
