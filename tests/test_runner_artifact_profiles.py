@@ -312,7 +312,8 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
     )
 
     assert payload["artifact_profile"] == "summary"
-    assert payload["artifact_trust_tier"] == "search_only"
+    assert payload["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in payload
     assert payload["rows"]["row_count"] == 3
     assert payload["rows"]["sample_count"] == 3
     assert payload["rows"]["by_symbol"]["SPY"]["count"] == 2
@@ -386,7 +387,8 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
 
     parsed = json.loads(path.read_text())
     assert path == result_dir / "artifact_profile_summary.json"
-    assert parsed["artifact_trust_tier"] == "search_only"
+    assert parsed["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in parsed
     assert parsed["rows"]["row_count"] == 1
     assert parsed["rows"]["normalized_rows_sha256"] == normalized_rows_sha256([row("SPY", timestamp, 100.0)])
     assert_trade_result_metric_semantics(parsed)
@@ -471,7 +473,8 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
     )
 
     assert payload["artifact_profile"] == "diagnostic"
-    assert payload["artifact_trust_tier"] == "search_only"
+    assert payload["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in payload
     assert payload["trade_count"] == 3
     assert payload["trade_result"] == engine["trade_result"]
     assert payload["assessment_status"] == "quick_check_passed"

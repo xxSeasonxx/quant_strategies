@@ -10,7 +10,7 @@ from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, trade_result_metric_semantics
+from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, trade_result_metric_semantics
 from quant_strategies.runner.config import RunConfig
 
 
@@ -54,7 +54,7 @@ def summary_profile_payload(
 ) -> dict[str, Any]:
     return {
         "artifact_profile": "summary",
-        "artifact_trust_tier": artifact_trust_tier_for_profile("summary"),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile("summary"),
         "strategy_id": config.strategy_id,
         "rows": _rows_profile_payload(
             config,

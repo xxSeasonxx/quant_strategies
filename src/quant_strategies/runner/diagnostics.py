@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value
-from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile
+from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 from quant_strategies.runner.config import RunConfig
 
 
@@ -40,7 +40,7 @@ def diagnostic_payload(
     return {
         "strategy_id": config.strategy_id,
         "artifact_profile": "diagnostic",
-        "artifact_trust_tier": artifact_trust_tier_for_profile("diagnostic"),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile("diagnostic"),
         "trade_count": engine.get("trade_count"),
         "trade_result": trade_result,
         "assessment_status": assessment_status,

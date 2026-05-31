@@ -382,7 +382,8 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
     assert profile["artifact_profile"] == "summary"
-    assert profile["artifact_trust_tier"] == "search_only"
+    assert profile["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in profile
     assert profile["rows"]["row_count"] == 6
     assert profile["rows"]["sample_count"] == 5
     assert profile["decisions"]["count"] == 1
@@ -396,7 +397,8 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
-    assert data_manifest["artifact_trust_tier"] == "search_only"
+    assert data_manifest["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in data_manifest
     assert "strategy_input_rows_jsonl_sha256" not in data_manifest
     assert len(data_manifest["normalized_rows_sha256"]) == 64
     assert profile["rows"]["normalized_rows_sha256"] == data_manifest["normalized_rows_sha256"]
@@ -404,7 +406,8 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
 
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["artifact_profile"] == "summary"
-    assert run_manifest["artifact_trust_tier"] == "search_only"
+    assert run_manifest["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in run_manifest
     assert run_manifest["evidence"]["metric_semantics"] == profile["metric_semantics"]
     assert "artifact_profile_summary.json" in run_manifest["artifacts"]
     assert "engine_request.json" not in run_manifest["artifacts"]
@@ -457,7 +460,8 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
 
     diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
     assert diagnostics["artifact_profile"] == "diagnostic"
-    assert diagnostics["artifact_trust_tier"] == "search_only"
+    assert diagnostics["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in diagnostics
     assert diagnostics["assessment_status"] == summary["assessment_status"]
     assert diagnostics["trade_count"] == 1
     assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
@@ -467,11 +471,13 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "diagnostic"
-    assert data_manifest["artifact_trust_tier"] == "search_only"
+    assert data_manifest["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in data_manifest
 
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["artifact_profile"] == "diagnostic"
-    assert run_manifest["artifact_trust_tier"] == "search_only"
+    assert run_manifest["replayable_from_artifacts"] is False
+    assert "artifact_trust_tier" not in run_manifest
     assert "diagnostics.json" in run_manifest["artifacts"]
     assert "engine_request.json" not in run_manifest["artifacts"]
 
