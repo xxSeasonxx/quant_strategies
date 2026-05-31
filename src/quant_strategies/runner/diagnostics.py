@@ -12,6 +12,22 @@ from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile
 from quant_strategies.runner.config import RunConfig
 
 
+SAMPLE_TRADE_FIELDS = (
+    "decision_id",
+    "symbol",
+    "side",
+    "decision_time",
+    "entry_time",
+    "exit_time",
+    "exit_reason",
+    "weight",
+    "gross_return",
+    "funding_return",
+    "cost_return",
+    "net_return",
+)
+
+
 def diagnostic_payload(
     *,
     config: RunConfig,
@@ -161,9 +177,13 @@ def _sample_trades(trades: Sequence[Mapping[str, Any]], cap: int) -> dict[str, l
     winners = sorted(trades, key=lambda item: _float_value(item.get("net_return")), reverse=True)
     losers = sorted(trades, key=lambda item: _float_value(item.get("net_return")))
     return {
-        "largest_winners": [dict(item) for item in winners[:cap]],
-        "largest_losers": [dict(item) for item in losers[:cap]],
+        "largest_winners": [_sample_trade_payload(item) for item in winners[:cap]],
+        "largest_losers": [_sample_trade_payload(item) for item in losers[:cap]],
     }
+
+
+def _sample_trade_payload(trade: Mapping[str, Any]) -> dict[str, Any]:
+    return {field: trade.get(field) for field in SAMPLE_TRADE_FIELDS}
 
 
 def _float_value(value: object) -> float:

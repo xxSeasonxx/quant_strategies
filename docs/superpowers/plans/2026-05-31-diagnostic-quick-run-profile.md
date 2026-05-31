@@ -22,10 +22,10 @@
 
 ## Tasks
 
-- [ ] Add the root config contract for `diagnostic` and `diagnostic_sample_trades`.
-- [ ] Add the diagnostic payload builder and focused unit coverage.
-- [ ] Integrate diagnostics into runner completion artifacts.
-- [ ] Update docs, committed run configs, and verification checks.
+- [x] Add the root config contract for `diagnostic` and `diagnostic_sample_trades`.
+- [x] Add the diagnostic payload builder and focused unit coverage.
+- [x] Integrate diagnostics into runner completion artifacts.
+- [x] Update docs, committed run configs, and verification checks.
 
 ## Verification
 

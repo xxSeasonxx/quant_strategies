@@ -470,3 +470,18 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         "loser",
         "costly",
     ]
+    assert set(payload["sample_trades"]["largest_winners"][0]) == {
+        "decision_id",
+        "symbol",
+        "side",
+        "decision_time",
+        "entry_time",
+        "exit_time",
+        "exit_reason",
+        "weight",
+        "gross_return",
+        "funding_return",
+        "cost_return",
+        "net_return",
+    }
+    assert "decision_metadata" not in payload["sample_trades"]["largest_winners"][0]
