@@ -218,15 +218,18 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results/<run-id>"
 mode = "screen"
-artifact_profile = "summary"
+artifact_profile = "diagnostic"
+diagnostic_sample_trades = 5
 ```
 
 `artifact_profile` controls **verbosity only** — which artifacts are written —
-and never changes pass/fail. `summary` (the default, for large search sweeps)
-writes `summary.json` plus `artifact_profile_summary.json` and marks the result
-`artifact_trust_tier = "search_only"`. `full` (for retained or debug runs)
-additionally writes input rows, decision records, engine request JSON, and full
-evidence artifacts, and marks the result `artifact_trust_tier = "audit_replayable"`.
+and never changes pass/fail. `diagnostic` is the default for one-strategy
+iteration: it writes bounded `diagnostics.json` behavior slices and marks the
+result `artifact_trust_tier = "search_only"`. `summary` is the compact sweep
+profile and writes `summary.json` plus `artifact_profile_summary.json`. `full`
+(for retained or debug runs) additionally writes input rows, decision records,
+engine request JSON, and full evidence artifacts, and marks the result
+`artifact_trust_tier = "audit_replayable"`.
 In full-profile runs, `strategy_input_rows.jsonl` contains a JSON-safe canonical
 serialization of the normalized projection used for strategy input; non-finite
 ancillary values are written as `null`, and its file hash matches
@@ -246,7 +249,8 @@ is never a side effect of asking for richer artifacts.
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
 | `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs quick-**checking** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` checks to the quick run |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
-| `artifact_profile` | `summary` \| `full` | artifact verbosity | never changes pass/fail |
+| `artifact_profile` | `diagnostic` \| `summary` \| `full` | artifact verbosity | never changes pass/fail |
+| `diagnostic_sample_trades` | integer 1-20 | largest winners/losers per side in `diagnostics.json` | only affects diagnostic artifact size |
 | `artifact_trust_tier` | `search_only` \| `audit_replayable` | derived replayability label | follows `artifact_profile`; not set directly |
 
 The quick-run mode that applies quick checks is named `gate` (not `validate`), so
@@ -287,10 +291,11 @@ result.causality_verified
 result.evidence_quality_warnings
 ```
 
-For ranking, read structured artifacts from `result.result_dir`, especially
-`summary.json` for summary-profile runs. Do not parse `notes.md` as the primary
-machine interface. The evidence-quality fields exposed on `RunResult` are also
-written to `summary.json` and `data_manifest.json` for audit and replay.
+For ranking and iteration, read structured artifacts from `result.result_dir`,
+especially `diagnostics.json` for diagnostic-profile runs and `summary.json` for
+all completed runs. Do not parse `notes.md` as the primary machine interface.
+The evidence-quality fields exposed on `RunResult` are also written to
+`summary.json` and `data_manifest.json` for audit and replay.
 
 `param_contract` is `"validated"` when the strategy defines a `validate_params`
 hook and `"unvalidated_passthrough"` when it does not (and `"unknown"` on a run

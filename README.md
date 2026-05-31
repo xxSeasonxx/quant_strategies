@@ -70,7 +70,9 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 
 Loads rows, runs the pure strategy, validates the decision contract, replays for
 hidden lookahead, and screens the decisions through the engine. Fast, deterministic
-`search_only` evidence for ranking and iteration. See [docs/runner.md](docs/runner.md).
+`search_only` diagnostic evidence for ranking and iteration. The default quick-run
+profile writes bounded `diagnostics.json` behavior slices without full replay/audit
+artifacts. See [docs/runner.md](docs/runner.md).
 
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 

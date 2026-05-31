@@ -111,11 +111,13 @@ Artifacts may sample or compact `row_contract.issues`, while `issue_count` and
 
 ## Trust tiers and artifacts
 
-Runner artifacts declare `artifact_trust_tier`. Summary-profile runs are the default
-and are `search_only`: useful for fast ranking but not enough to replay every reported
-number from artifacts alone. Full-profile runs (`artifact_profile = "full"`) are
-`audit_replayable`: they include the row, decision, engine-request, and evidence
-artifacts needed for audit replay of runner trade-result metrics.
+Runner artifacts declare `artifact_trust_tier`. Diagnostic-profile runs are the
+default and are `search_only`: useful for one-strategy iteration, but not enough
+to replay every reported number from artifacts alone. Summary-profile runs are
+also `search_only` and keep compact sweep output. Full-profile runs
+(`artifact_profile = "full"`) are `audit_replayable`: they include the row,
+decision, engine-request, and evidence artifacts needed for audit replay of
+runner trade-result metrics.
 
 Artifacts are written under ignored result directories. `output.results_dir` must stay
 inside the repository and outside source/input roots such as `src/`, `tests/`, `docs/`,
@@ -127,10 +129,10 @@ Runs that reach data loading include `data_manifest.json` and, for
 later fails (a JSON-safe canonical serialization of the normalized projection; non-finite
 ancillary values are written as `null`, and its file hash matches
 `normalized_rows_sha256`). Failures still write `run_manifest.json`, `environment.json`,
-`summary.json`, and `notes.md`. Successful default `summary` runs also write
-`artifact_profile_summary.json`; completed `full` runs that reach engine request
-construction also write `decision_records.jsonl`, `engine_request.json`, and
-`evidence.json`.
+`summary.json`, and `notes.md`. Successful diagnostic runs write `diagnostics.json`;
+successful summary runs write `artifact_profile_summary.json`; completed `full` runs
+that reach engine request construction also write `decision_records.jsonl`,
+`engine_request.json`, and `evidence.json`.
 
 `run_manifest.json` keeps deterministic research identity (source commit, config, data,
 decisions, artifact hashes); Python version, package versions, git dirty status, and

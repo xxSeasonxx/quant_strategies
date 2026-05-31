@@ -1030,7 +1030,7 @@ def test_row_contract_strictness_is_independent_of_artifact_profile(
         result = run_config(config_path, repo_root=tmp_path)
         return json.loads((result.result_dir / "summary.json").read_text())["row_contract"]
 
-    # Verbose ("full") and terse ("summary") profiles agree under the default contract.
+    # Verbose ("full") and terse ("summary") profiles agree under the search row contract.
     full_status = row_contract_status(write_config(tmp_path, artifact_profile="full"))
     summary_status = row_contract_status(
         write_config(tmp_path, relative_path="run_summary.toml", artifact_profile="summary")

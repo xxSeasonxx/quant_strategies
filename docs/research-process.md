@@ -92,6 +92,7 @@ Common quick-run artifact files:
 | `summary.json`                  | run artifacts are finalized                          |
 | `notes.md`                      | run artifacts are finalized                          |
 | `data_manifest.json`            | data loading is reached                              |
+| `diagnostics.json`              | completed diagnostic-profile run                     |
 | `artifact_profile_summary.json` | completed summary-profile run                        |
 | `strategy_input_rows.jsonl`     | full-profile run reaches data loading                |
 | `decision_records.jsonl`        | full-profile run reaches decision output             |

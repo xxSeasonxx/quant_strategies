@@ -4,7 +4,7 @@
 
 **Goal:** Add `diagnostic` as the default quick-run artifact profile with bounded diagnostics and configurable top win/loss samples.
 
-**Architecture:** Make `diagnostic` a root runner contract, not a compatibility layer. Keep artifact verbosity separate from pass/fail logic: `summary` stays compact, `diagnostic` writes bounded `diagnostics.json`, and `full` remains audit/replayable.
+**Architecture:** Make `diagnostic` a root runner contract, not a transitional layer. Keep artifact verbosity separate from pass/fail logic: `summary` stays compact, `diagnostic` writes bounded `diagnostics.json`, and `full` remains audit/replayable.
 
 **Tech Stack:** Python 3.12, Pydantic v2, pytest, TOML configs, `conda run -n quant`.
 
@@ -31,5 +31,5 @@
 
 - `conda run -n quant pytest tests/test_runner_config.py tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py -q`
 - `conda run -n quant pytest -q`
-- `rg -n "default .*summary|summary.*default|artifact_profile = \"summary\"" README.md docs runs src tests`
-- `rg -n "compat|legacy|alias|deprecated|backward|backwards" src/quant_strategies tests README.md docs`
+- `rg -n "default .*summary|summary.*default|artifact_profile = \"summary\"" README.md docs/runner.md docs/research-process.md docs/quant-autoresearch-consumer.md runs src tests`
+- `rg -n "compat|legacy|alias|deprecated|backward|backwards" src/quant_strategies tests README.md docs/runner.md docs/research-process.md docs/quant-autoresearch-consumer.md`
