@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
 import quant_strategies.runner as runner_package
 import quant_strategies.runner.artifacts as artifacts
 import quant_strategies.runner.execution as runner_execution
@@ -19,6 +21,7 @@ from quant_strategies.runner.artifact_profiles import (
 )
 from quant_strategies.runner.artifacts import write_jsonl
 from quant_strategies.runner.config import load_config
+from quant_strategies.runner.diagnostics import diagnostic_payload
 
 
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
@@ -129,13 +132,23 @@ def decision(symbol: str, timestamp: datetime, direction: str = "long") -> Strat
     )
 
 
-def config(tmp_path: Path):
+def config(
+    tmp_path: Path,
+    *,
+    artifact_profile: str = "summary",
+    diagnostic_sample_trades: int | None = None,
+):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = tmp_path / "run.toml"
+    diagnostic_sample_trades_line = (
+        f"diagnostic_sample_trades = {diagnostic_sample_trades}\n"
+        if diagnostic_sample_trades is not None
+        else ""
+    )
     config_path.write_text(
-        '''
+        f'''
 strategy_path = "tested/demo.py"
 strategy_id = "demo"
 
@@ -161,7 +174,8 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results"
 mode = "gate"
-artifact_profile = "summary"
+artifact_profile = "{artifact_profile}"
+{diagnostic_sample_trades_line}
 '''.lstrip()
     )
     return load_config(config_path, repo_root=tmp_path)
@@ -332,3 +346,127 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
     assert parsed["rows"]["row_count"] == 1
     assert parsed["rows"]["normalized_rows_sha256"] == normalized_rows_sha256([row("SPY", timestamp, 100.0)])
     assert_trade_result_metric_semantics(parsed)
+
+
+def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
+    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    run_config = config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        diagnostic_sample_trades=2,
+    )
+    engine = {
+        "passed": True,
+        "trade_count": 3,
+        "trade_result": {
+            "sum_signed_trade_activity_gross": 0.06,
+            "sum_signed_trade_activity_funding": -0.01,
+            "sum_signed_trade_activity_cost": 0.03,
+            "sum_signed_trade_activity_net": 0.02,
+        },
+        "diagnostic_trades": [
+            {
+                "decision_id": "winner",
+                "symbol": "SPY",
+                "side": "long",
+                "decision_time": timestamp.isoformat(),
+                "entry_time": timestamp.isoformat(),
+                "exit_time": timestamp.replace(day=2).isoformat(),
+                "entry_price": 100.0,
+                "exit_price": 105.0,
+                "exit_reason": "take_profit",
+                "weight": 1.0,
+                "gross_return": 0.05,
+                "funding_return": 0.0,
+                "cost_return": 0.0,
+                "net_return": 0.05,
+                "decision_metadata": {"family": "test"},
+            },
+            {
+                "decision_id": "loser",
+                "symbol": "SPY",
+                "side": "short",
+                "decision_time": timestamp.isoformat(),
+                "entry_time": timestamp.replace(day=2).isoformat(),
+                "exit_time": timestamp.replace(day=4).isoformat(),
+                "entry_price": 105.0,
+                "exit_price": 107.1,
+                "exit_reason": "stop_loss",
+                "weight": 1.0,
+                "gross_return": -0.02,
+                "funding_return": -0.01,
+                "cost_return": 0.0,
+                "net_return": -0.03,
+                "decision_metadata": {"family": "test"},
+            },
+            {
+                "decision_id": "costly",
+                "symbol": "QQQ",
+                "side": "long",
+                "decision_time": timestamp.isoformat(),
+                "entry_time": timestamp.replace(day=3).isoformat(),
+                "exit_time": timestamp.replace(day=4).isoformat(),
+                "entry_price": 200.0,
+                "exit_price": 206.0,
+                "exit_reason": "max_hold",
+                "weight": 1.0,
+                "gross_return": 0.03,
+                "funding_return": 0.0,
+                "cost_return": 0.03,
+                "net_return": 0.0,
+                "decision_metadata": {"family": "test"},
+            },
+        ],
+    }
+
+    payload = diagnostic_payload(
+        config=run_config,
+        engine=engine,
+        assessment_status="quick_check_passed",
+        evidence_quality={"causality_verified": True, "evidence_quality_warnings": []},
+    )
+
+    assert payload["artifact_profile"] == "diagnostic"
+    assert payload["artifact_trust_tier"] == "search_only"
+    assert payload["trade_count"] == 3
+    assert payload["trade_result"] == engine["trade_result"]
+    assert payload["assessment_status"] == "quick_check_passed"
+    assert payload["evidence_quality"]["causality_verified"] is True
+    assert payload["by_symbol"]["SPY"] == {
+        "count": 2,
+        "gross": pytest.approx(0.03),
+        "funding": pytest.approx(-0.01),
+        "cost": pytest.approx(0.0),
+        "net": pytest.approx(0.02),
+    }
+    assert payload["by_direction"]["long"]["count"] == 2
+    assert payload["by_direction"]["long"]["net"] == pytest.approx(0.05)
+    assert payload["by_exit_reason"]["take_profit"]["count"] == 1
+    assert payload["holding_period"] == {
+        "count": 3,
+        "min_seconds": 86400.0,
+        "median_seconds": 86400.0,
+        "max_seconds": 172800.0,
+        "average_seconds": 115200.0,
+    }
+    assert payload["concentration"] == {
+        "top_winner_net": 0.05,
+        "top_loser_net": -0.03,
+        "top_5_winners_net": pytest.approx(0.02),
+        "top_5_losers_net": pytest.approx(0.02),
+    }
+    assert payload["cost_funding_breakdown"] == {
+        "gross": 0.06,
+        "funding": -0.01,
+        "cost": 0.03,
+        "net": 0.02,
+        "cost_fraction_of_abs_gross": pytest.approx(0.5),
+    }
+    assert [item["decision_id"] for item in payload["sample_trades"]["largest_winners"]] == [
+        "winner",
+        "costly",
+    ]
+    assert [item["decision_id"] for item in payload["sample_trades"]["largest_losers"]] == [
+        "loser",
+        "costly",
+    ]
