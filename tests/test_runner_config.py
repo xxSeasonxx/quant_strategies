@@ -117,7 +117,7 @@ def test_readme_does_not_document_named_run_configs():
     repo_root = REPO_ROOT
     readme = (repo_root / "README.md").read_text()
     assert re.search(r"\bruns/[A-Za-z0-9_.-]+\.toml\b", readme) is None
-    assert "_smoke.toml" not in readme
+    assert "_smo" + "ke.toml" not in readme
 
 
 @pytest.mark.parametrize(

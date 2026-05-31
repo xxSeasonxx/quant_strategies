@@ -662,7 +662,7 @@ prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { weight = [0.5, 1.0, 1.5] }
-selection_rule = "top risk-adjusted smoke score"
+selection_rule = "top risk-adjusted trade result"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
 """.strip(),
     )
@@ -753,7 +753,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "candidate_count": 120,
         "trial_count": 18,
         "parameter_search_space": {"weight": [0.5, 1.0, 1.5]},
-        "selection_rule": "top risk-adjusted smoke score",
+        "selection_rule": "top risk-adjusted trade result",
         "split_ids": ["validation_2026_h1", "validation_2026_h2"],
     }
     assert set(decision_payload["passed_gates"]) >= {

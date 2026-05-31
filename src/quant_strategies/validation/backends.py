@@ -71,7 +71,7 @@ class BackendMetrics(BaseModel):
 
 
 def backend_metric_semantics() -> dict[str, dict[str, object]]:
-    # The engine smoke kernel is the verdict source, so these semantics describe
+    # The execution kernel is the verdict source, so these semantics describe
     # the engine's emitted metrics -- the number a human audits IS the gated number.
     semantics = (
         BackendMetricSemantics(
@@ -81,7 +81,7 @@ def backend_metric_semantics() -> dict[str, dict[str, object]]:
             aggregation="scenario total over engine-screened per-trade net returns",
             backend="engine",
             comparability=(
-                "the audited smoke net; cross-checked against VectorBT Pro on the "
+                "the audited trade-result net; cross-checked against VectorBT Pro on the "
                 "price path by the opt-in agreement oracle"
             ),
             tolerance=None,

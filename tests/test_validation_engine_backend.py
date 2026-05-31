@@ -73,7 +73,7 @@ def scenario_config(*, fee_bps: float = 0.0, slippage_bps: float = 0.0):
     )
 
 
-def test_engine_backend_maps_smoke_net_to_net_return():
+def test_engine_backend_maps_trade_result_net_to_net_return():
     result = EngineBackend().run(decisions=[decision()], rows=rows(), config=scenario_config())
 
     assert result.backend == "engine"

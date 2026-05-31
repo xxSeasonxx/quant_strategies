@@ -18,27 +18,27 @@ model objects.
 
 **`[output] mode = "screen"`** — the engine simulates entries and exits from the
 decisions, fill model, cost model, and exit policy. It reports `trade_count` plus
-`smoke_score.sum_signed_trade_activity_gross`, `sum_signed_trade_activity_funding`,
+`trade_result.sum_signed_trade_activity_gross`, `sum_signed_trade_activity_funding`,
 `sum_signed_trade_activity_cost`, and `sum_signed_trade_activity_net`. A completed
 screen has `assessment_status = "screened"`. If a strategy returns no decisions, the
-screen still completes with `trade_count = 0` and zero smoke scores — a
+screen still completes with `trade_count = 0` and zero trade-result metrics — a
 zero-opportunity search signal, not an infrastructure failure.
 
-**`[output] mode = "gate"`** — the engine runs the same screen and applies smoke
-gates: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and `positive_net`.
-Passing gates produce `assessment_status = "smoke_passed"` only when hidden-lookahead
-replay passes and all rows carry `available_at`. Passing gates with missing or
-partial `available_at` produce `assessment_status = "smoke_unverified"`. Invalid
+**`[output] mode = "gate"`** — the engine runs the same screen and applies quick
+checks: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and `positive_net`.
+Passing checks produce `assessment_status = "quick_check_passed"` only when hidden-lookahead
+replay passes and all rows carry `available_at`. Passing checks with missing or
+partial `available_at` produce `assessment_status = "quick_check_unverified"`. Invalid
 `available_at` is a row contract failure. A `gate` run with no decisions completes
-normally but fails as `smoke_failed` because `min_trades` is not met. These gates are
+normally but fails as `quick_check_failed` because `min_trades` is not met. These checks are
 mechanical checks only; they do not test statistical significance, regime robustness,
 capacity, or execution quality.
 
 ## Decision support
 
-Runner smoke execution supports only single-leg equity/ETF, FX, and crypto-perp
+Quick-run diagnostic execution supports only single-leg equity/ETF, FX, and crypto-perp
 `open` decisions with non-flat `target_weight` sizing. Explicitly extended decisions
-are rejected by unsupported smoke or backend paths instead of approximating their
+are rejected by unsupported quick-run or backend paths instead of approximating their
 PnL — the extended vocabulary (futures, options, multi-leg instruments, buy/sell book
 side, close/adjust/roll actions, and `target_notional`, `target_contracts`, or
 `target_vol` sizing) lives behind explicit imports from
@@ -67,7 +67,7 @@ CLI exit codes are part of the public contract:
 
 Programmatic callers should use `run_completed`, `failure_stage`,
 `assessment_status`, verdicts, trust tier, causality/data fields, row contract, and
-smoke metrics rather than any single completion flag.
+trade-result metrics rather than any single completion flag.
 
 Artifact I/O errors are routed to structured results rather than raw exceptions:
 result-directory creation, the final artifact write, and failure-result writes return
@@ -89,7 +89,7 @@ verification it did not perform. If strict suppression probes are skipped, the r
 continue only as unverified evidence: `strict_no_emission_verified` and
 `causality_verified` remain false. Hidden-lookahead replay and deterministic full-replay
 failures stop the run as `runner_failed`. Missing or partial availability is recorded as
-uncertainty with `smoke_unverified` and does not set `causality_verified`.
+uncertainty with `quick_check_unverified` and does not set `causality_verified`.
 
 ## Row contract
 
@@ -115,7 +115,7 @@ Runner artifacts declare `artifact_trust_tier`. Summary-profile runs are the def
 and are `search_only`: useful for fast ranking but not enough to replay every reported
 number from artifacts alone. Full-profile runs (`artifact_profile = "full"`) are
 `audit_replayable`: they include the row, decision, engine-request, and evidence
-artifacts needed for audit replay of runner smoke metrics.
+artifacts needed for audit replay of runner trade-result metrics.
 
 Artifacts are written under ignored result directories. `output.results_dir` must stay
 inside the repository and outside source/input roots such as `src/`, `tests/`, `docs/`,
@@ -147,7 +147,7 @@ an explicit engine at the data-loader boundary; otherwise the runner reuses one 
 
 Runner and validation share one internal execution boundary for strategy import,
 parameter validation, data loading, frozen strategy execution, decision validation, row
-hashing, and evidence-quality context. The runner remains the owner of smoke-engine
+hashing, and evidence-quality context. The runner remains the owner of execution-kernel
 request construction and engine artifacts.
 
 Stop-loss, take-profit, and trailing-stop thresholds are evaluated on the engine's

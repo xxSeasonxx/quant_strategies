@@ -1,5 +1,5 @@
 strategy_path = "untested/crypto_perp_autoresearch_ensemble.py"
-strategy_id = "crypto_perp_autoresearch_ensemble_smoke"
+strategy_id = "crypto_perp_autoresearch_ensemble"
 
 [data]
 kind = "crypto_perp_funding"

@@ -2,7 +2,7 @@
 
 Source / provenance:
 internal_note: examples/strategies/simple_momentum.py documents this internal
-runner smoke strategy. It is a deterministic test fixture, not an external
+quick-run diagnostic strategy. It is a deterministic test fixture, not an external
 paper or production alpha source.
 
 Market rationale:

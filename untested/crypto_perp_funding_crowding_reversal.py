@@ -310,7 +310,7 @@ def _decision(
     exit_controls: Mapping[str, object],
 ) -> StrategyDecision:
     return StrategyDecision(
-        strategy_id="crypto_perp_funding_crowding_reversal_smoke",
+        strategy_id="crypto_perp_funding_crowding_reversal",
         instrument=InstrumentRef(kind="crypto_perp", symbol=str(candidate["symbol"])),
         decision_time=decision_time,
         as_of_time=as_of_time,

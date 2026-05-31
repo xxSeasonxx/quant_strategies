@@ -13,7 +13,7 @@ from quant_strategies.validation.config import ScenarioRunConfig
 
 
 class EngineBackend:
-    """The engine smoke kernel as the single verdict PnL source.
+    """The execution kernel as the single verdict PnL source.
 
     Runs the same `screen()` path the runner quick-run audits, so the number the
     verdict is computed from *is* the number a human audits. `net_return` is the
@@ -48,15 +48,15 @@ class EngineBackend:
                 warnings=(str(exc),),
             )
 
-        smoke = result.smoke_score
+        trade_result = result.trade_result
         metrics = {
-            # funding-inclusive net == the audited smoke net; this is the gated number.
-            "net_return": smoke.sum_signed_trade_activity_net,
+            # funding-inclusive net == the audited trade-result net; this is the gated number.
+            "net_return": trade_result.sum_signed_trade_activity_net,
             "trade_count": result.trade_count,
             # gross price path: the agreement oracle cross-checks this against vbt.
-            "gross_return": smoke.sum_signed_trade_activity_gross,
-            "funding_return": smoke.sum_signed_trade_activity_funding,
-            "cost_return": smoke.sum_signed_trade_activity_cost,
+            "gross_return": trade_result.sum_signed_trade_activity_gross,
+            "funding_return": trade_result.sum_signed_trade_activity_funding,
+            "cost_return": trade_result.sum_signed_trade_activity_cost,
         }
         return BackendRunResult(
             backend=self.name,

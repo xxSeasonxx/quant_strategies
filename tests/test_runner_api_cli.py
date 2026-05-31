@@ -48,11 +48,11 @@ SUMMARY_KEYS = {
     "strict_no_emission_verified",
     "evidence_quality_warnings",
 }
-SMOKE_SCORE_KEYS = {
-    "smoke_score.sum_signed_trade_activity_gross",
-    "smoke_score.sum_signed_trade_activity_funding",
-    "smoke_score.sum_signed_trade_activity_cost",
-    "smoke_score.sum_signed_trade_activity_net",
+TRADE_RESULT_KEYS = {
+    "trade_result.sum_signed_trade_activity_gross",
+    "trade_result.sum_signed_trade_activity_funding",
+    "trade_result.sum_signed_trade_activity_cost",
+    "trade_result.sum_signed_trade_activity_net",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
 
@@ -221,21 +221,21 @@ def assert_assessment(
     assert summary["assessment_status"] == assessment_status
     assert summary["artifact_profile"] == artifact_profile
     assert summary["artifact_trust_tier"] == expected_trust
-    assert summary["evidence_class"] == "runner_smoke"
+    assert summary["evidence_class"] == "quick_run_diagnostic"
     assert summary["strategy_contract"] == "decision"
-    assert summary["return_model"] == "smoke_score.sum_signed_trade_activity_net"
+    assert summary["return_model"] == "trade_result.sum_signed_trade_activity_net"
     assert summary["funding_model"] == "none"
-    assert_smoke_metric_semantics(summary)
+    assert_trade_result_metric_semantics(summary)
     assert summary["promotion_eligible"] is promotion_eligible
     assert summary["paper_trade_eligible"] is False
     assert summary["live_eligible"] is False
     assert summary["requires_manual_approval"] is True
 
 
-def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
+def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
     metric_semantics = payload["metric_semantics"]
-    assert set(metric_semantics) == SMOKE_SCORE_KEYS
-    for name in SMOKE_SCORE_KEYS:
+    assert set(metric_semantics) == TRADE_RESULT_KEYS
+    for name in TRADE_RESULT_KEYS:
         semantics = metric_semantics[name]
         assert set(semantics) == {
             "name",
@@ -251,7 +251,7 @@ def assert_smoke_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["name"] == name
         assert semantics["unit"] == "decimal_fraction"
         assert semantics["base"] == "signed target-weighted trade activity; not portfolio NAV"
-        assert semantics["backend"] == "smoke_engine"
+        assert semantics["backend"] == "execution_kernel"
         assert semantics["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
         assert semantics["tolerance"] is None
         assert semantics["asymmetry"]
@@ -293,10 +293,10 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
     assert summary["status"] == "passed"
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] > 0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] > 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] > 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] > 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
@@ -321,14 +321,14 @@ def test_run_config_writes_completed_artifacts(tmp_path: Path, monkeypatch: pyte
     assert summary["evidence_quality_warnings"] == []
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_trust_tier"] == "audit_replayable"
-    assert_smoke_metric_semantics(data_manifest)
+    assert_trade_result_metric_semantics(data_manifest)
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["row_contract"] == summary["row_contract"]
     assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert_assessment(result, summary, assessment_status="smoke_passed")
-    assert "runner smoke evidence only" in (result.result_dir / "notes.md").read_text()
+    assert_assessment(result, summary, assessment_status="quick_check_passed")
+    assert "runner quick-run evidence only" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -363,13 +363,13 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert "evidence.json" not in names
 
     summary = read_summary(result.result_dir)
-    assert_assessment(result, summary, assessment_status="smoke_passed", artifact_profile="summary")
+    assert_assessment(result, summary, assessment_status="quick_check_passed", artifact_profile="summary")
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] is not None
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
@@ -381,10 +381,10 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert "signals" not in profile
     assert profile["engine"]["passed"] is True
     assert profile["engine"]["trade_count"] == 1
-    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] is not None
-    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] is not None
-    assert profile["engine"]["smoke_score"]["sum_signed_trade_activity_net"] is not None
-    assert_smoke_metric_semantics(profile)
+    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
+    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_cost"] is not None
+    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
+    assert_trade_result_metric_semantics(profile)
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["artifact_profile"] == "summary"
@@ -392,7 +392,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert "strategy_input_rows_jsonl_sha256" not in data_manifest
     assert len(data_manifest["normalized_rows_sha256"]) == 64
     assert profile["rows"]["normalized_rows_sha256"] == data_manifest["normalized_rows_sha256"]
-    assert_smoke_metric_semantics(data_manifest)
+    assert_trade_result_metric_semantics(data_manifest)
 
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["artifact_profile"] == "summary"
@@ -434,10 +434,10 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert summary["status"] == "screened"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] < 0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] < 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
     assert_assessment(result, summary, assessment_status="screened")
     notes = (result.result_dir / "notes.md").read_text()
     assert "status: screened" in notes
@@ -465,7 +465,7 @@ def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
     assert summary["status"] == "screened"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 0
-    assert summary["engine"]["smoke_score"] == {
+    assert summary["engine"]["trade_result"] == {
         "sum_signed_trade_activity_gross": 0.0,
         "sum_signed_trade_activity_funding": 0.0,
         "sum_signed_trade_activity_cost": 0.0,
@@ -514,7 +514,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     decision_payload = request["spec"]["decisions"][0]
     trade = evidence["screening_result"]["trades"][0]
 
-    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v3"
+    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v4"
     assert decision_payload["exit_policy"]["max_hold_bars"] == 2
     assert decision_payload["exit_policy"]["take_profit_bps"] == 50.0
     assert decision_payload["metadata"]["funding_pressure_bps"] == 3.25
@@ -539,14 +539,14 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_gross"] < 0
-    assert summary["engine"]["smoke_score"]["sum_signed_trade_activity_net"] < 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
+    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
-    assert_assessment(result, summary, assessment_status="smoke_failed")
-    assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
+    assert_assessment(result, summary, assessment_status="quick_check_failed")
+    assert "status: failed quick checks" in (result.result_dir / "notes.md").read_text()
 
 
-def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
+def test_run_config_treats_empty_decisions_as_zero_trade_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -566,7 +566,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
     assert summary["status"] == "failed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 0
-    assert summary["engine"]["smoke_score"] == {
+    assert summary["engine"]["trade_result"] == {
         "sum_signed_trade_activity_gross": 0.0,
         "sum_signed_trade_activity_funding": 0.0,
         "sum_signed_trade_activity_cost": 0.0,
@@ -578,7 +578,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
         "positive_gross": False,
         "positive_net": False,
     }
-    assert_assessment(result, summary, assessment_status="smoke_failed")
+    assert_assessment(result, summary, assessment_status="quick_check_failed")
 
     assert (result.result_dir / "decision_records.jsonl").read_text() == ""
     request = json.loads((result.result_dir / "engine_request.json").read_text())
@@ -586,7 +586,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_smoke_result(
     assert request["spec"]["decisions"] == []
     assert evidence["validation_report"]["screening_result"]["trade_count"] == 0
     assert evidence["validation_report"]["screening_result"]["trades"] == []
-    assert "status: failed validation gates" in (result.result_dir / "notes.md").read_text()
+    assert "status: failed quick checks" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_writes_data_failure_summary(
@@ -610,7 +610,7 @@ def test_run_config_writes_data_failure_summary(
     assert "strict data window failed" in (result.result_dir / "notes.md").read_text()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "data_load"
-    assert "smoke_score" not in summary["engine"]
+    assert "trade_result" not in summary["engine"]
     assert summary["data_availability_status"] == "missing"
     assert summary["availability_coverage"] == {
         "field": "available_at",
@@ -765,8 +765,8 @@ def test_run_config_marks_complete_available_at_coverage(
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert result.assessment_status == "smoke_passed"
-    assert summary["assessment_status"] == "smoke_passed"
+    assert result.assessment_status == "quick_check_passed"
+    assert summary["assessment_status"] == "quick_check_passed"
 
 
 def test_run_config_reuses_execution_evidence_quality_after_causality(
@@ -829,8 +829,8 @@ def test_run_config_marks_partial_available_at_coverage(
     assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(3 / 4)
     assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert result.assessment_status == "smoke_unverified"
-    assert summary["assessment_status"] == "smoke_unverified"
+    assert result.assessment_status == "quick_check_unverified"
+    assert summary["assessment_status"] == "quick_check_unverified"
 
 
 def test_run_config_rejects_invalid_available_at_for_causality_claim(
@@ -1202,7 +1202,7 @@ def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     row_contract = summary["row_contract"]
     assert summary["stage"] == "request_build"
-    assert summary["assessment_status"] != "smoke_passed"
+    assert summary["assessment_status"] != "quick_check_passed"
     assert "row_contract_failed: row_invalid_funding_fields:has_funding_event:1" in summary["message"]
     assert row_contract["status"] == "failed"
     assert row_contract["issue_reasons"] == {"row_invalid_funding_fields": 1}
@@ -1232,13 +1232,13 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert environment["python"]["version"]
     assert {"quant-strategies", "quant-data", "pydantic"}.issubset(environment["packages"])
     assert LEGACY_DISTRIBUTION not in environment["packages"]
-    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v3"}
+    assert run_manifest["engine"] == {"evidence_schema": "quant_strategies.engine.evidence/v4"}
     assert run_manifest["artifact_profile"] == "full"
     assert run_manifest["artifact_trust_tier"] == "audit_replayable"
     assert run_manifest["evidence"] == {
-        "evidence_class": "runner_smoke",
+        "evidence_class": "quick_run_diagnostic",
         "strategy_contract": "decision",
-        "return_model": "smoke_score.sum_signed_trade_activity_net",
+        "return_model": "trade_result.sum_signed_trade_activity_net",
         "funding_model": "none",
         "metric_semantics": run_manifest["evidence"]["metric_semantics"],
         "promotion_eligible": False,
@@ -1246,7 +1246,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
         "live_eligible": False,
         "requires_manual_approval": True,
     }
-    assert_smoke_metric_semantics(run_manifest["evidence"])
+    assert_trade_result_metric_semantics(run_manifest["evidence"])
     assert run_manifest["artifacts"]["config.toml"]["sha256"]
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
@@ -1263,7 +1263,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     }
     assert data_manifest["artifact_profile"] == "full"
     assert data_manifest["artifact_trust_tier"] == "audit_replayable"
-    assert_smoke_metric_semantics(data_manifest)
+    assert_trade_result_metric_semantics(data_manifest)
     assert data_manifest["rows"]["total"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["count"] == 4
     assert data_manifest["rows"]["by_symbol"]["SPY"]["min_timestamp"] == "2024-01-01T00:00:00+00:00"
@@ -1377,7 +1377,7 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     ]
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
-    assert "smoke_score" not in summary["engine"]
+    assert "trade_result" not in summary["engine"]
     assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
@@ -1670,7 +1670,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
 
 
-def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
+def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1701,7 +1701,7 @@ def test_unsupported_smoke_decision_keeps_loaded_data_and_decision_artifacts(
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "request_build"
-    assert "smoke engine cannot represent flat target for SPY" in summary["message"]
+    assert "execution kernel cannot represent flat target for SPY" in summary["message"]
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
@@ -1839,7 +1839,7 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     assert summary["funding_model"] == "linear_additive_adjustment"
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["evidence"]["funding_model"] == "linear_additive_adjustment"
-    funding = run_manifest["evidence"]["metric_semantics"]["smoke_score.sum_signed_trade_activity_funding"]
+    funding = run_manifest["evidence"]["metric_semantics"]["trade_result.sum_signed_trade_activity_funding"]
     assert funding["return_path_model"] == "linear_additive_adjustment"
     notes = (result.result_dir / "notes.md").read_text()
     assert "return_scope: price-and-funding" in notes
@@ -1986,7 +1986,7 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     )
 
 
-def test_cli_smoke_uses_runner_and_prints_result_dir(
+def test_cli_quick_run_uses_runner_and_prints_result_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

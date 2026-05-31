@@ -15,7 +15,7 @@ from quant_strategies.engine.models import (
     GateResult,
     ScreeningResult,
     Side,
-    SmokeScore,
+    TradeResult,
     StrategySpec,
     Trade,
 )
@@ -33,7 +33,7 @@ __all__ = [
     "GateResult",
     "ScreeningResult",
     "Side",
-    "SmokeScore",
+    "TradeResult",
     "StrategySpec",
     "Trade",
     "build_evidence_packet",

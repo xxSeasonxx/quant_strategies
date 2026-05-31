@@ -63,7 +63,7 @@ __all__ = ["generate_decisions"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "open", "high", "low", "close"}
 _DEFAULT_SYMBOLS = ("BTC-PERP", "ETH-PERP", "SOL-PERP")
-_DEFAULT_STRATEGY_ID = "crypto_perp_autoresearch_ensemble_smoke"
+_DEFAULT_STRATEGY_ID = "crypto_perp_autoresearch_ensemble"
 _SIGNAL_FAMILY = "crypto_perp_autoresearch_ensemble"
 _UPSTREAM_DEFAULTS = {
     "BASE_POSITION_PCT": 0.08,

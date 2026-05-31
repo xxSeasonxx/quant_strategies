@@ -333,7 +333,7 @@ def test_build_request_accepts_zero_decisions_as_no_op():
     screen_run = evaluate_request(request, mode="screen")
     assert screen_run.screen_summary["trade_count"] == 0
     assert screen_run.screen_summary["trades"] == []
-    assert screen_run.screen_summary["smoke_score"] == {
+    assert screen_run.screen_summary["trade_result"] == {
         "sum_signed_trade_activity_gross": 0.0,
         "sum_signed_trade_activity_funding": 0.0,
         "sum_signed_trade_activity_cost": 0.0,

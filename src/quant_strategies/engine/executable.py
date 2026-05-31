@@ -59,19 +59,19 @@ def _instrument_semantic(kind: str) -> str:
 def _unsupported_message(decision: StrategyDecision, semantic: str) -> str:
     symbol = decision.instrument.symbol
     if semantic == "non_open_intent":
-        return f"smoke engine supports open intent only: {symbol}"
+        return f"execution kernel supports open intent only: {symbol}"
     if semantic in {
         "future_instrument",
         "option_instrument",
         "multi_leg_decision",
         "unsupported_instrument",
     }:
-        return f"smoke engine cannot represent {decision.instrument.kind} instrument: {symbol}"
+        return f"execution kernel cannot represent {decision.instrument.kind} instrument: {symbol}"
     if semantic == "flat_target":
-        return f"smoke engine cannot represent flat target for {symbol}"
+        return f"execution kernel cannot represent flat target for {symbol}"
     if semantic == "non_target_weight_sizing":
-        return f"smoke engine requires target_weight sizing: {symbol}"
-    return f"smoke engine cannot represent decision: {symbol}"
+        return f"execution kernel requires target_weight sizing: {symbol}"
+    return f"execution kernel cannot represent decision: {symbol}"
 
 
 def _jsonable_metadata_value(value: Any) -> Any:

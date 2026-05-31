@@ -29,7 +29,7 @@ quant_autoresearch
 ```
 
 The loop belongs in `quant_autoresearch`. The runner semantics, input freezing,
-data loading boundary, smoke engine, and artifact schema belong in
+data loading boundary, execution kernel, and artifact schema belong in
 `quant_strategies`.
 
 ## Setup
@@ -158,7 +158,7 @@ Extended vocabulary for futures, options, multi-leg instruments, book side,
 close/adjust/roll actions, and `target_notional`, `target_contracts`, or
 `target_vol` sizing is available only through explicit imports from
 `quant_strategies.decisions.extended_ontology`. Extended shapes are useful for
-manual review, but runner smoke and validation backends reject unsupported
+manual review, but quick-run and validation backends reject unsupported
 execution semantics instead of approximating their PnL.
 
 Strategy code must stay pure:
@@ -244,27 +244,27 @@ is never a side effect of asking for richer artifacts.
 |---|---|---|---|
 | quick run | `quant-strategies run` / `run_config` | the fast `search_only` quick-run | iterate and rank here |
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
-| `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs engine smoke-**gating** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` gates to the quick run |
+| `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs quick-**checking** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` checks to the quick run |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
 | `artifact_profile` | `summary` \| `full` | artifact verbosity | never changes pass/fail |
 | `artifact_trust_tier` | `search_only` \| `audit_replayable` | derived replayability label | follows `artifact_profile`; not set directly |
 
-The quick-run mode that applies smoke gates is named `gate` (not `validate`), so
+The quick-run mode that applies quick checks is named `gate` (not `validate`), so
 "validate" now refers only to the validation package (`quant-strategies validate`
 / `run_validation`) — the quick run never uses the word.
 
-Smoke scores are activity sums, not portfolio returns. The runner reports them
-under `smoke_score.sum_signed_trade_activity_gross`,
+Trade results are activity sums, not portfolio returns. The runner reports them
+under `trade_result.sum_signed_trade_activity_gross`,
 `sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
 `sum_signed_trade_activity_net`. Runner artifacts include `metric_semantics` for
-each smoke score field. These records declare the unit, base, aggregation,
+each trade-result field. These records declare the unit, base, aggregation,
 backend, return path model, comparability, tolerance, and asymmetry so ranking
-code does not compare smoke activity sums to NAV-path backend returns by name
+code does not compare trade-result activity sums to NAV-path backend returns by name
 alone.
 
 A strategy may return `[]` when it finds no opportunity. In `screen` mode this
-is a completed zero-trade result with zero smoke scores. In `gate` mode it
-is a completed `smoke_failed` result because the `min_trades` gate fails. Treat
+is a completed zero-trade result with zero trade-result metrics. In `gate` mode it
+is a completed `quick_check_failed` result because the `min_trades` check fails. Treat
 that as search evidence about the candidate, not as a runner failure.
 
 ## What autoresearch Reads
@@ -308,18 +308,18 @@ and `artifact_write` (result-directory creation or artifact writes failing) — 
 to exit `1`. Artifact I/O failures on the result-directory, final-write, and
 failure-result paths are returned as structured results, not raised.
 
-Treat all runner output as smoke evidence for search. It is not market
+Treat all runner output as quick-run evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
 Use `assessment_status`, `causality_verified`, `data_availability_status`,
 `availability_coverage`, `row_contract`, `artifact_trust_tier`, and
-`evidence_quality_warnings` as ranking filters before comparing smoke scores;
+`evidence_quality_warnings` as ranking filters before comparing trade results;
 never rank from `run_completed` alone.
-Treat `smoke_passed` as stronger mechanical evidence than `smoke_unverified`;
-`smoke_unverified` means the smoke gates passed but row availability coverage
+Treat `quick_check_passed` as stronger mechanical evidence than `quick_check_unverified`;
+`quick_check_unverified` means the quick checks passed but row availability coverage
 was missing or partial, so the runner could not claim causality verification.
 Missing `available_at` in search mode is warning evidence: non-fatal, but
-`causality_verified` remains false and the assessment stays `smoke_unverified`
-when smoke gates otherwise pass. Invalid `available_at` is a row contract failure.
+`causality_verified` remains false and the assessment stays `quick_check_unverified`
+when quick checks otherwise pass. Invalid `available_at` is a row contract failure.
 Set `row_contract = "validation"` to also make missing `available_at` a row
 contract failure. Treat `search_only` artifacts as ranking evidence only; rerun
 retained candidates with `artifact_profile = "full"` before audit handoff to
@@ -406,9 +406,9 @@ trade floors, stressed and fill-lag net floors) — it no longer governs replay
 strictness.
 
 Validation backend metrics are flat but semantically typed in
-`backend_runs/summary.json`. The verdict PnL source is the engine smoke kernel,
+`backend_runs/summary.json`. The verdict PnL source is the execution kernel,
 so `net_return` is the engine's funding-inclusive signed trade-activity sum —
-the same number the runner smoke layer audits — and funding is part of the gated
+the same number the quick-run diagnostic layer audits — and funding is part of the gated
 number, not a side diagnostic (`net_return = gross_return + funding_return -
 cost_return`). `gross_return` is the funding- and cost-exclusive price path;
 `funding_return` and `cost_return` are the components folded into `net_return`.
@@ -447,7 +447,7 @@ A downstream setup is correctly aligned when:
 - search modifies only `strategy.py` and `experiment.toml`,
 - ranking reads structured artifacts under `results/`,
 - ranking treats `causality_verified` and `assessment_status` as evidence
-  quality filters before comparing smoke activity scores,
+  quality filters before comparing trade-result activity scores,
 - retained candidates are rerun with `artifact_profile = "full"` before audit
   handoff,
 - no autoresearch code imports engine or validation internals.

@@ -1,5 +1,5 @@
 strategy_path = "untested/krohn_mueller_whelan_fix_reversal.py"
-strategy_id = "krohn_mueller_whelan_fix_reversal_smoke"
+strategy_id = "krohn_mueller_whelan_fix_reversal"
 
 [data]
 kind = "forex_with_quotes"

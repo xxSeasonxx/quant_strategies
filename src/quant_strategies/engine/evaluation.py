@@ -25,7 +25,7 @@ from quant_strategies.engine.models import (
     GateResult,
     ScreeningResult,
     Side,
-    SmokeScore,
+    TradeResult,
     Trade,
 )
 
@@ -106,7 +106,7 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
     return ScreeningResult(
         strategy_id=request.spec.strategy_id,
         trade_count=len(trades),
-        smoke_score=SmokeScore(
+        trade_result=TradeResult(
             sum_signed_trade_activity_gross=gross_total,
             sum_signed_trade_activity_funding=funding_total,
             sum_signed_trade_activity_cost=cost_total,
@@ -144,10 +144,10 @@ def gate_screen(
         gates.append(
             GateResult(
                 name="positive_gross",
-                passed=screening_result.smoke_score.sum_signed_trade_activity_gross > 0,
+                passed=screening_result.trade_result.sum_signed_trade_activity_gross > 0,
                 detail=(
                     "sum_signed_trade_activity_gross="
-                    f"{screening_result.smoke_score.sum_signed_trade_activity_gross:.12g}"
+                    f"{screening_result.trade_result.sum_signed_trade_activity_gross:.12g}"
                 ),
             )
         )
@@ -155,10 +155,10 @@ def gate_screen(
         gates.append(
             GateResult(
                 name="positive_net",
-                passed=screening_result.smoke_score.sum_signed_trade_activity_net > 0,
+                passed=screening_result.trade_result.sum_signed_trade_activity_net > 0,
                 detail=(
                     "sum_signed_trade_activity_net="
-                    f"{screening_result.smoke_score.sum_signed_trade_activity_net:.12g}"
+                    f"{screening_result.trade_result.sum_signed_trade_activity_net:.12g}"
                 ),
             )
         )

@@ -25,7 +25,7 @@ from quant_strategies.core.config import (
 from quant_strategies.validation.errors import ValidationConfigError
 
 
-# The engine smoke kernel is the single verdict PnL source. VectorBT Pro is no
+# The execution kernel is the single verdict PnL source. VectorBT Pro is no
 # longer a co-equal verdict backend; it is only available as an opt-in agreement
 # oracle (see AgreementOracleConfig).
 VerdictSource = Literal["engine"]
@@ -276,7 +276,7 @@ def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -
 
     if isinstance(payload, dict) and "backend" in payload:
         raise ValidationConfigError(
-            "validation config field 'backend' has been removed: the engine smoke "
+            "validation config field 'backend' has been removed: the execution kernel "
             "kernel is now the sole verdict PnL source, so the verdict number is the "
             "audited number. To cross-check the verdict against VectorBT Pro, add an "
             "[agreement_oracle] section with enabled = true. Remove the 'backend' key."

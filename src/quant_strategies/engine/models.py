@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from quant_strategies.decisions import StrategyDecision
 
 
-EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v3"
+EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v4"
 
 
 class EngineModel(BaseModel):
@@ -131,7 +131,7 @@ class Trade(EngineModel):
     decision_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SmokeScore(EngineModel):
+class TradeResult(EngineModel):
     sum_signed_trade_activity_gross: float
     sum_signed_trade_activity_funding: float = 0.0
     sum_signed_trade_activity_cost: float
@@ -142,7 +142,7 @@ class ScreeningResult(EngineModel):
     mode: Literal["screen"] = "screen"
     strategy_id: str
     trade_count: int
-    smoke_score: SmokeScore
+    trade_result: TradeResult
     trades: tuple[Trade, ...]
 
 
@@ -167,7 +167,7 @@ class GatingReport(EngineModel):
 
 
 class EvidencePacket(EngineModel):
-    schema_version: Literal["quant_strategies.engine.evidence/v3"] = EVIDENCE_SCHEMA_VERSION
+    schema_version: Literal["quant_strategies.engine.evidence/v4"] = EVIDENCE_SCHEMA_VERSION
     mode: Literal["screen", "gate"]
     strategy_id: str
     screening_result: ScreeningResult | None = None

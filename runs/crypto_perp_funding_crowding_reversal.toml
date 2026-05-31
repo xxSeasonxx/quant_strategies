@@ -1,5 +1,5 @@
 strategy_path = "untested/crypto_perp_funding_crowding_reversal.py"
-strategy_id = "crypto_perp_funding_crowding_reversal_smoke"
+strategy_id = "crypto_perp_funding_crowding_reversal"
 
 [data]
 kind = "crypto_perp_funding"

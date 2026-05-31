@@ -20,7 +20,14 @@ quick run      -> diagnose one strategy version and decide whether to keep itera
 validation run -> advisory triage for a retained candidate
 ```
 
-## PR 0: Project-Wide Research Vocabulary Cleanup
+## Status
+
+- PR 0 is complete as of 2026-05-31. The hard vocabulary cutover was
+  implemented with no compatibility aliases, active-surface legacy grep clean,
+  full suite passing, and code review completed.
+- Next open item: PR 1, Diagnostic Quick Run Profile.
+
+## PR 0: Project-Wide Research Vocabulary Cleanup (Complete)
 
 **Goal:** remove the engineering term `smoke` from the active project surface and
 replace it with quant-research vocabulary that says what the system actually
@@ -30,6 +37,11 @@ returns.
 runs feel like an internal CI concept instead of a research artifact. The
 foundation should speak in terms of quick-run evidence, diagnostic metrics,
 trade results, and quick checks.
+
+**Completion note:** implemented as a hard cutover. Active docs/code/tests/configs
+use `trade_result`, `quick_check_*`, `quick_run_diagnostic`, and
+`execution_kernel`; evidence schema was bumped to v4; `tests/test_readme_contract.py`
+was removed by explicit direction.
 
 ### Target Vocabulary
 
@@ -123,7 +135,7 @@ metrics; it does not return an objective strategy ranking score.
 
 ```bash
 rg -n "smoke|Smoke" PRD.md README.md docs src tests runs examples untested tested AGENTS.md
-conda run -n quant pytest tests/test_engine_screen.py tests/test_runner_api_cli.py tests/test_runner_artifact_profiles.py tests/test_validation_backends_and_policy.py tests/test_readme_contract.py -q
+conda run -n quant pytest tests/test_engine_screen.py tests/test_engine_validate_and_evidence.py tests/test_runner_api_cli.py tests/test_runner_artifact_profiles.py tests/test_validation_backends_and_policy.py tests/test_validation_engine_backend.py -q
 ```
 
 Run a full suite before merging because this renames public result fields and
@@ -232,7 +244,7 @@ improvement, while `full` is too large and audit-shaped.
 ### Suggested Verification
 
 ```bash
-conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q
+conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py -q
 ```
 
 Run the full suite before changing the default profile:
@@ -297,7 +309,6 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
   - `src/quant_strategies/runner/artifact_profiles.py`
   - `tests/test_runner_artifact_profiles.py`
   - `tests/test_runner_api_cli.py`
-  - `tests/test_readme_contract.py`
 
 ### Acceptance Criteria
 
@@ -314,7 +325,7 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
 
 ```bash
 rg -n "search_only|audit_replayable|artifact_trust_tier" PRD.md README.md docs src tests
-conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py tests/test_readme_contract.py -q
+conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py -q
 ```
 
 Run the full suite before merging because this changes public result and artifact
@@ -401,7 +412,7 @@ that sound stronger than the implemented checks.
     `tests/test_runner_config.py`
   - relevant tests in `tests/test_validation_runner.py`,
     `tests/test_validation_backends_and_policy.py`,
-    `tests/test_validation_manifest.py`, and `tests/test_readme_contract.py`
+    `tests/test_validation_manifest.py`
 
 ### Acceptance Criteria
 
@@ -420,7 +431,7 @@ that sound stronger than the implemented checks.
 ### Suggested Verification
 
 ```bash
-conda run -n quant pytest tests/test_runner_config.py tests/test_runner_api_cli.py tests/test_validation_backends_and_policy.py tests/test_validation_runner.py tests/test_validation_manifest.py tests/test_readme_contract.py -q
+conda run -n quant pytest tests/test_runner_config.py tests/test_runner_api_cli.py tests/test_validation_backends_and_policy.py tests/test_validation_runner.py tests/test_validation_manifest.py -q
 ```
 
 Run the full suite before merging if labels/artifact filenames change broadly:
@@ -504,7 +515,7 @@ belong in reference docs and artifacts.
 ### Suggested Verification
 
 ```bash
-conda run -n quant pytest tests/test_readme_contract.py tests/test_simple_momentum.py tests/test_validation_config.py tests/test_validation_runner.py -q
+conda run -n quant pytest tests/test_simple_momentum.py tests/test_validation_config.py tests/test_validation_runner.py -q
 ```
 
 Run a docs grep before merging:
@@ -551,10 +562,9 @@ raise regressions and new issues, but do not rediscover every known tradeoff.
     - `false_positive`
     - `superseded`
 
-- **Remove or adjust process-artifact assertions if they block normal work.**
-  - `tests/test_readme_contract.py` currently encodes some review artifact
-    location rules. Keep only rules that are actually product/process
-    contracts.
+- **Keep process-artifact assertions out of broad contract tests.**
+  - Do not recreate the deleted README contract test file just to encode review
+    artifact location rules.
   - Root-level `review-*.md` files should remain working notes only; archive or
     delete them before completion.
 

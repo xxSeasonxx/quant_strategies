@@ -222,7 +222,7 @@ def test_quote_fill_timing_enters_before_and_exits_after_fix():
     decisions = generate_decisions(rows, {"max_hold_bars": 2})
 
     request = build_request(
-        strategy_id="krohn_mueller_whelan_fix_reversal_smoke",
+        strategy_id="krohn_mueller_whelan_fix_reversal",
         rows=rows,
         decisions=decisions,
         fill_model=FillModelConfig(price="quote", entry_lag_bars=1, exit_lag_bars=0),

@@ -131,7 +131,7 @@ def generate_decisions(
         decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
         decisions.append(
             StrategyDecision(
-                strategy_id="fx_triangular_residual_quote_smoke",
+                strategy_id="fx_triangular_residual_quote",
                 instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
                 decision_time=decision_time,
                 as_of_time=as_of_time,

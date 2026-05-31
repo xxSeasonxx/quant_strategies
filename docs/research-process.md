@@ -57,7 +57,7 @@ Fields:
 | `message`                     | `str`             | Human-readable run message.                                                                                             |
 | `run_completed`               | `bool`            | Whether the run completed as a structured run.                                                                          |
 | `failure_stage`               | `str or None`     | Structured stage name when the run failed.                                                                              |
-| `assessment_status`           | `str`             | Quick-run assessment label, such as `screened`, `smoke_passed`, `smoke_failed`, `smoke_unverified`, or `runner_failed`. |
+| `assessment_status`           | `str`             | Quick-run assessment label, such as `screened`, `quick_check_passed`, `quick_check_failed`, `quick_check_unverified`, or `runner_failed`. |
 | `promotion_eligible`          | `bool`            | Always false for quick-run output.                                                                                      |
 | `param_contract`              | `str`             | `validated`, `unvalidated_passthrough`, or `unknown`.                                                                   |
 | `artifact_trust_tier`         | `str or None`     | Artifact replayability tier.                                                                                            |
@@ -105,9 +105,9 @@ Important quick-run output values:
 | Value                                        | What it is                                                               |
 | -------------------------------------------- | ------------------------------------------------------------------------ |
 | `assessment_status`                          | Quick-run assessment, not validation verdict.                            |
-| `smoke_score.sum_signed_trade_activity_*`    | Linear signed trade-activity sums, not NAV returns.                      |
-| `artifact_trust_tier = "search_only"`        | Compact smoke evidence; not fully replayable from artifacts alone.       |
-| `artifact_trust_tier = "audit_replayable"`   | Fuller artifact set intended for replay/audit of smoke metrics.          |
+| `trade_result.sum_signed_trade_activity_*`    | Linear signed trade-activity sums, not NAV returns.                      |
+| `artifact_trust_tier = "search_only"`        | Compact quick-run evidence; not fully replayable from artifacts alone.       |
+| `artifact_trust_tier = "audit_replayable"`   | Fuller artifact set intended for replay/audit of trade-result metrics.          |
 | `param_contract = "unvalidated_passthrough"` | Strategy did not define `validate_params`; quick run still completed.    |
 
 

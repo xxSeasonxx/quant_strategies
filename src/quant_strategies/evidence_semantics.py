@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 ArtifactTrustTier = Literal["search_only", "audit_replayable"]
-EvidenceClass = Literal["runner_smoke", "validation_advisory"]
+EvidenceClass = Literal["quick_run_diagnostic", "validation_advisory"]
 StrategyContract = Literal["decision"]
-RunnerReturnModel = Literal["smoke_score.sum_signed_trade_activity_net"]
+RunnerReturnModel = Literal["trade_result.sum_signed_trade_activity_net"]
 FundingModel = Literal["none", "linear_additive_adjustment"]
 
 
@@ -40,26 +40,26 @@ def funding_model_for_data_kind(data_kind: str) -> FundingModel:
     return "none"
 
 
-def smoke_score_metric_semantics(data_kind: str) -> dict[str, dict[str, object]]:
+def trade_result_metric_semantics(data_kind: str) -> dict[str, dict[str, object]]:
     funding_model = funding_model_for_data_kind(data_kind)
     base = "signed target-weighted trade activity; not portfolio NAV"
     shared = {
         "unit": "decimal_fraction",
         "base": base,
-        "backend": "smoke_engine",
+        "backend": "execution_kernel",
         "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
         "tolerance": None,
     }
     semantics = (
         MetricSemantics(
-            name="smoke_score.sum_signed_trade_activity_gross",
+            name="trade_result.sum_signed_trade_activity_gross",
             aggregation="sum over trades of signed target-weighted price return",
             return_path_model="linear_per_trade_price_return",
             asymmetry="not comparable to NAV-path total return without an explicit backend agreement test",
             **shared,
         ),
         MetricSemantics(
-            name="smoke_score.sum_signed_trade_activity_funding",
+            name="trade_result.sum_signed_trade_activity_funding",
             aggregation="sum over engine-held intervals of supplied funding adjustments",
             return_path_model=funding_model,
             asymmetry=(
@@ -69,14 +69,14 @@ def smoke_score_metric_semantics(data_kind: str) -> dict[str, dict[str, object]]
             **shared,
         ),
         MetricSemantics(
-            name="smoke_score.sum_signed_trade_activity_cost",
+            name="trade_result.sum_signed_trade_activity_cost",
             aggregation="sum over trades of target-weighted round-trip fee and slippage cost",
             return_path_model="linear_round_trip_bps_cost",
             asymmetry="linear cost approximation; not venue-specific execution cost accounting",
             **shared,
         ),
         MetricSemantics(
-            name="smoke_score.sum_signed_trade_activity_net",
+            name="trade_result.sum_signed_trade_activity_net",
             aggregation="gross plus funding minus cost, summed over trades",
             return_path_model="linear_trade_activity_sum",
             asymmetry="not comparable to NAV-path total return without an explicit backend agreement test",
@@ -88,11 +88,11 @@ def smoke_score_metric_semantics(data_kind: str) -> dict[str, dict[str, object]]
 
 def runner_evidence_semantics(data_kind: str) -> dict[str, object]:
     return {
-        "evidence_class": "runner_smoke",
+        "evidence_class": "quick_run_diagnostic",
         "strategy_contract": "decision",
-        "return_model": "smoke_score.sum_signed_trade_activity_net",
+        "return_model": "trade_result.sum_signed_trade_activity_net",
         "funding_model": funding_model_for_data_kind(data_kind),
-        "metric_semantics": smoke_score_metric_semantics(data_kind),
+        "metric_semantics": trade_result_metric_semantics(data_kind),
         "promotion_eligible": False,
         "paper_trade_eligible": False,
         "live_eligible": False,

@@ -39,7 +39,7 @@ def test_evidence_json_is_deterministic_for_screening_result():
     second = evidence_json(build_evidence_packet(request, screening_result=screen(request)))
 
     assert first == second
-    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v3"
+    assert json.loads(first)["schema_version"] == "quant_strategies.engine.evidence/v4"
 
 
 def test_engine_public_api_uses_gating_names():
@@ -63,7 +63,7 @@ def test_gate_screen_passes_profitable_frozen_candidate():
     }
 
 
-def test_gate_screen_empty_decision_set_fails_smoke_gates_not_inputs():
+def test_gate_screen_empty_decision_set_fails_quick_checks_not_inputs():
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id="no_op", decisions=()),
         bars=bars_for("BTC", [100.0, 101.0, 102.0]),

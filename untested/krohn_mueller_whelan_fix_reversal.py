@@ -21,7 +21,7 @@ use a short fixed holding window to exit just after the fix.
 
 Assumptions:
 Input timestamps are timezone-aware and represent UTC-compatible bar times;
-quote fill timing is controlled by the runner config, and the smoke envelope
+quote fill timing is controlled by the runner config, and the quick-run envelope
 uses a one-minute observation lag plus one-bar entry lag so decisions two
 minutes before the fix enter one minute before the fix.
 
@@ -197,7 +197,7 @@ def _decision(
     fix_utc: datetime,
 ) -> StrategyDecision:
     return StrategyDecision(
-        strategy_id="krohn_mueller_whelan_fix_reversal_smoke",
+        strategy_id="krohn_mueller_whelan_fix_reversal",
         instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
         decision_time=decision_time,
         as_of_time=as_of_time,

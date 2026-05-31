@@ -202,7 +202,7 @@ prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { lookback = [12, 24, 48], threshold = [0.5, 1.0] }
-selection_rule = "top risk-adjusted smoke score"
+selection_rule = "top risk-adjusted trade result"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
 """.strip(),
     )
@@ -216,7 +216,7 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "lookback": [12, 24, 48],
         "threshold": [0.5, 1.0],
     }
-    assert config.search_pressure.selection_rule == "top risk-adjusted smoke score"
+    assert config.search_pressure.selection_rule == "top risk-adjusted trade result"
     assert config.search_pressure.split_ids == ("validation_2026_h1", "validation_2026_h2")
 
 

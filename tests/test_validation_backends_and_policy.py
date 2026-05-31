@@ -400,7 +400,7 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
             "candidate_count": 120,
             "trial_count": 18,
             "parameter_search_space": {"lookback": [12, 24, 48]},
-            "selection_rule": "top risk-adjusted smoke score",
+            "selection_rule": "top risk-adjusted trade result",
             "split_ids": ("validation_2026_h1", "validation_2026_h2"),
         },
     )()
@@ -420,7 +420,7 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
         "candidate_count": 120,
         "trial_count": 18,
         "parameter_search_space": {"lookback": [12, 24, 48]},
-        "selection_rule": "top risk-adjusted smoke score",
+        "selection_rule": "top risk-adjusted trade result",
         "split_ids": ["validation_2026_h1", "validation_2026_h2"],
     }
     assert decision.evidence_class == "validation_advisory"

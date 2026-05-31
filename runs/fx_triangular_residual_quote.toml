@@ -1,5 +1,5 @@
 strategy_path = "untested/fx_triangular_residual_reversion.py"
-strategy_id = "fx_triangular_residual_quote_smoke"
+strategy_id = "fx_triangular_residual_quote"
 
 [data]
 kind = "forex_with_quotes"

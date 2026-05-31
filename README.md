@@ -1,7 +1,7 @@
 # quant_strategies
 
 A disciplined research harness for **pure strategy functions**, deterministic
-**smoke runs**, and **advisory validation**.
+**quick runs**, and **advisory validation**.
 
 It is *not* a trading system and does not imply paper or live readiness. Its one
 job is to take a strategy idea from "pure function" to "auditable advisory
@@ -86,8 +86,8 @@ See [docs/validation.md](docs/validation.md).
 - **`quant-data` owns data.** Materialization, refresh, backfill, repair, and
   source joining belong upstream. This repo uses public `quant_data` loader APIs
   only and does not discover upstream `.env` files.
-- **The engine reports activity sums, not NAV.** Smoke metrics live under
-  `smoke_score.sum_signed_trade_activity_*` and are linear per-trade sums, not
+- **The engine reports activity sums, not NAV.** Trade-result metrics live under
+  `trade_result.sum_signed_trade_activity_*` and are linear per-trade sums, not
   portfolio/NAV-path returns. Validation gates the linear activity sum directly;
   it does not compound that metric as if it were a NAV path.
 - **`researched/` is not market-validated.** It may hold frozen packages from

@@ -10,7 +10,7 @@ from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, smoke_score_metric_semantics
+from quant_strategies.evidence_semantics import artifact_trust_tier_for_profile, trade_result_metric_semantics
 from quant_strategies.runner.config import RunConfig
 
 
@@ -64,7 +64,7 @@ def summary_profile_payload(
         ),
         "decisions": _decision_summary(decisions),
         "engine": json_safe_value(engine),
-        "metric_semantics": smoke_score_metric_semantics(config.data.kind),
+        "metric_semantics": trade_result_metric_semantics(config.data.kind),
     }
 
 

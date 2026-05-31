@@ -70,7 +70,7 @@ prior_search = "known"
 candidate_count = 120
 trial_count = 18
 parameter_search_space = { lookback = [12, 24, 48] }
-selection_rule = "top risk-adjusted smoke score"
+selection_rule = "top risk-adjusted trade result"
 split_ids = ["validation_2026_h1", "validation_2026_h2"]
 ```
 
@@ -89,7 +89,7 @@ or change eligibility flags. Known prior search downgrades an otherwise
 
 ## Verdict PnL source and the agreement oracle
 
-The verdict PnL source is the engine smoke kernel: the number a human audits is the
+The verdict PnL source is the execution kernel: the number a human audits is the
 number the verdict is computed from. VectorBT Pro is not a validation backend and never
 produces verdict metrics; it is available only as an explicitly enabled single-trade
 agreement check. (The legacy `backend` config field has been removed; a config that
@@ -163,7 +163,7 @@ payloads stay flat for artifact readability, while policy reads them through a t
 metric schema with declared unit, base, comparability, tolerance, and asymmetry.
 
 `net_return` is the engine's funding-inclusive signed trade-activity sum — the audited
-smoke net — so funding is part of the gated number, not a side diagnostic
+trade-result net — so funding is part of the gated number, not a side diagnostic
 (`net_return = gross_return + funding_return - cost_return`). `gross_return` is the
 funding- and cost-exclusive price path the agreement oracle cross-checks against
 VectorBT Pro. `net_return` declares no cross-backend tolerance because it is a linear

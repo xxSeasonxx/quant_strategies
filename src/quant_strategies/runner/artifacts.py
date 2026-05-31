@@ -15,7 +15,7 @@ from quant_strategies.evidence_semantics import (
     artifact_trust_tier_for_profile,
     causality_evidence_fields,
     runner_evidence_semantics,
-    smoke_score_metric_semantics,
+    trade_result_metric_semantics,
 )
 from quant_strategies.provenance import (
     artifact_hashes,
@@ -197,7 +197,7 @@ def write_data_manifest(
             "by_symbol": normalized.ranges_by_symbol,
         },
         "normalized_rows_sha256": normalized.normalized_rows_sha256,
-        "metric_semantics": smoke_score_metric_semantics(config.data.kind),
+        "metric_semantics": trade_result_metric_semantics(config.data.kind),
         **quality,
     }
     _write_json(result_dir / "data_manifest.json", payload)
@@ -390,16 +390,16 @@ def compact_engine_summary(engine_run: EngineRun) -> dict[str, object]:
         source = screening_result if isinstance(screening_result, dict) else None
 
     summary: dict[str, object] = {"passed": engine_run.passed, "trade_count": _trade_count(engine_run)}
-    smoke_score = source.get("smoke_score") if isinstance(source, dict) else None
-    if isinstance(smoke_score, dict):
-        summary["smoke_score"] = {
-            "sum_signed_trade_activity_gross": smoke_score.get("sum_signed_trade_activity_gross"),
-            "sum_signed_trade_activity_funding": smoke_score.get("sum_signed_trade_activity_funding"),
-            "sum_signed_trade_activity_cost": smoke_score.get("sum_signed_trade_activity_cost"),
-            "sum_signed_trade_activity_net": smoke_score.get("sum_signed_trade_activity_net"),
+    trade_result = source.get("trade_result") if isinstance(source, dict) else None
+    if isinstance(trade_result, dict):
+        summary["trade_result"] = {
+            "sum_signed_trade_activity_gross": trade_result.get("sum_signed_trade_activity_gross"),
+            "sum_signed_trade_activity_funding": trade_result.get("sum_signed_trade_activity_funding"),
+            "sum_signed_trade_activity_cost": trade_result.get("sum_signed_trade_activity_cost"),
+            "sum_signed_trade_activity_net": trade_result.get("sum_signed_trade_activity_net"),
         }
     else:
-        summary["smoke_score"] = {
+        summary["trade_result"] = {
             "sum_signed_trade_activity_gross": None,
             "sum_signed_trade_activity_funding": None,
             "sum_signed_trade_activity_cost": None,
@@ -434,8 +434,8 @@ def assessment_status(
     if engine_run.mode == "screen":
         return "screened"
     if engine_run.passed and not evidence_quality.get("causality_verified"):
-        return "smoke_unverified"
-    return "smoke_passed" if engine_run.passed else "smoke_failed"
+        return "quick_check_unverified"
+    return "quick_check_passed" if engine_run.passed else "quick_check_failed"
 
 
 def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
@@ -452,9 +452,9 @@ def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
             "or promotion evidence."
         )
     else:
-        status = "passed" if engine_run.passed else "failed validation gates"
+        status = "passed" if engine_run.passed else "failed quick checks"
         lines.append(f"status: {status}")
-        interpretation = "runner smoke evidence only; not market robustness or promotion evidence."
+        interpretation = "runner quick-run evidence only; not market robustness or promotion evidence."
     if config.data.kind == "crypto_perp_funding":
         lines.append(
             "return_scope: price-and-funding; supplied funding events are included "
