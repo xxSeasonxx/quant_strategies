@@ -383,7 +383,11 @@ def _trade_count(engine_run: EngineRun) -> int | None:
     return None
 
 
-def compact_engine_summary(engine_run: EngineRun) -> dict[str, object]:
+def compact_engine_summary(
+    engine_run: EngineRun,
+    *,
+    include_diagnostic_trades: bool = False,
+) -> dict[str, object]:
     source = engine_run.screen_summary
     if source is None and engine_run.validate_summary is not None:
         screening_result = engine_run.validate_summary.get("screening_result")
@@ -405,6 +409,9 @@ def compact_engine_summary(engine_run: EngineRun) -> dict[str, object]:
             "sum_signed_trade_activity_cost": None,
             "sum_signed_trade_activity_net": None,
         }
+    trades = source.get("trades") if isinstance(source, dict) else None
+    if include_diagnostic_trades and isinstance(trades, list):
+        summary["diagnostic_trades"] = trades
     if engine_run.validate_summary is not None:
         gates = engine_run.validate_summary.get("gates")
         if isinstance(gates, list):

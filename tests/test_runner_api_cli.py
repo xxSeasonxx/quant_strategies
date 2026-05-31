@@ -144,12 +144,19 @@ def write_config(
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
     mode: str = "gate",
-    artifact_profile: str = "full",
+    artifact_profile: str | None = "full",
+    diagnostic_sample_trades: int | None = None,
     row_contract: str | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
     row_contract_line = f'row_contract = "{row_contract}"\n' if row_contract else ""
+    artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    diagnostic_sample_trades_line = (
+        f"diagnostic_sample_trades = {diagnostic_sample_trades}\n"
+        if diagnostic_sample_trades is not None
+        else ""
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -178,7 +185,7 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results"
 mode = "{mode}"
-artifact_profile = "{artifact_profile}"
+{artifact_profile_line}{diagnostic_sample_trades_line}
 '''.lstrip()
     )
     return config_path
@@ -399,6 +406,72 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert run_manifest["artifact_trust_tier"] == "search_only"
     assert run_manifest["evidence"]["metric_semantics"] == profile["metric_semantics"]
     assert "artifact_profile_summary.json" in run_manifest["artifacts"]
+    assert "engine_request.json" not in run_manifest["artifacts"]
+
+
+def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile=None,
+        diagnostic_sample_trades=1,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    names = {path.name for path in result.result_dir.iterdir() if path.is_file()}
+    assert names == {
+        "config.toml",
+        "strategy_snapshot.py",
+        "data_manifest.json",
+        "diagnostics.json",
+        "run_manifest.json",
+        "environment.json",
+        "summary.json",
+        "notes.md",
+    }
+    assert "strategy_input_rows.jsonl" not in names
+    assert "decision_records.jsonl" not in names
+    assert "engine_request.json" not in names
+    assert "evidence.json" not in names
+
+    summary = read_summary(result.result_dir)
+    assert_assessment(
+        result,
+        summary,
+        assessment_status="quick_check_failed",
+        artifact_profile="diagnostic",
+    )
+    assert "diagnostic_trades" not in summary["engine"]
+
+    diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
+    assert diagnostics["artifact_profile"] == "diagnostic"
+    assert diagnostics["artifact_trust_tier"] == "search_only"
+    assert diagnostics["assessment_status"] == summary["assessment_status"]
+    assert diagnostics["trade_count"] == 1
+    assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
+    assert diagnostics["by_symbol"]["SPY"]["count"] == 1
+    assert len(diagnostics["sample_trades"]["largest_winners"]) == 1
+    assert len(diagnostics["sample_trades"]["largest_losers"]) == 1
+
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["artifact_profile"] == "diagnostic"
+    assert data_manifest["artifact_trust_tier"] == "search_only"
+
+    run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
+    assert run_manifest["artifact_profile"] == "diagnostic"
+    assert run_manifest["artifact_trust_tier"] == "search_only"
+    assert "diagnostics.json" in run_manifest["artifacts"]
     assert "engine_request.json" not in run_manifest["artifacts"]
 
 
@@ -1877,7 +1950,7 @@ def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
     monkeypatch.setattr(
         engine_runner,
         "evaluate_request",
-        lambda request, *, mode, include_evidence=True: (_ for _ in ()).throw(
+        lambda request, *, mode, include_evidence=True, include_diagnostics=False: (_ for _ in ()).throw(
             EvaluationRunError("engine unavailable")
         ),
     )

@@ -66,14 +66,21 @@ def assert_supported_decisions(decisions: list[StrategyDecision]) -> None:
         _decision_symbol(decision)
 
 
-def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_evidence: bool = True) -> EngineRun:
+def evaluate_request(
+    request: EvaluationRequest,
+    *,
+    mode: EngineMode,
+    include_evidence: bool = True,
+    include_diagnostics: bool = False,
+) -> EngineRun:
+    include_trades = include_evidence or include_diagnostics
     try:
         if mode == "screen":
             screen_result = screen(request)
             packet = build_evidence_packet(request, screening_result=screen_result) if include_evidence else None
             return EngineRun(
                 mode="screen",
-                screen_summary=_screen_summary(screen_result, include_trades=include_evidence),
+                screen_summary=_screen_summary(screen_result, include_trades=include_trades),
                 validate_summary=None,
                 evidence_json=evidence_json(packet) if packet is not None else "",
                 passed=None,
@@ -92,11 +99,11 @@ def evaluate_request(request: EvaluationRequest, *, mode: EngineMode, include_ev
         return EngineRun(
             mode="gate",
             screen_summary=(
-                _screen_summary(report.screening_result, include_trades=include_evidence)
+                _screen_summary(report.screening_result, include_trades=include_trades)
                 if report.screening_result is not None
                 else None
             ),
-            validate_summary=_validation_summary(report, include_trades=include_evidence),
+            validate_summary=_validation_summary(report, include_trades=include_trades),
             evidence_json=evidence_json(packet) if packet is not None else "",
             passed=report.passed,
         )

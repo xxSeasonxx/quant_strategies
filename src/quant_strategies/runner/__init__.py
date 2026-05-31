@@ -17,6 +17,7 @@ from quant_strategies.runner import (
     artifacts,
     config as config_module,
     data_readiness,
+    diagnostics,
     engine_runner,
 )
 from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
@@ -414,6 +415,7 @@ def _evaluate_engine_request(
                     request,
                     mode=config.output.mode,
                     include_evidence=config.output.artifact_profile == "full",
+                    include_diagnostics=config.output.artifact_profile == "diagnostic",
                 ),
                 None,
             )
@@ -442,7 +444,12 @@ def _write_completion_artifacts(
     if engine_run is None:
         raise ValueError("engine_run is required when no failure was returned")
     with event_emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage="completed"):
-        engine_summary = artifacts.compact_engine_summary(engine_run)
+        include_diagnostic_trades = config.output.artifact_profile == "diagnostic"
+        engine_summary = artifacts.compact_engine_summary(
+            engine_run,
+            include_diagnostic_trades=include_diagnostic_trades,
+        )
+        assessment_status = artifacts.assessment_status(engine_run, evidence_quality=evidence_quality)
         if config.output.artifact_profile == "full" and engine_run.evidence_json:
             artifacts.write_evidence(result_dir, engine_run.evidence_json)
         if config.output.artifact_profile == "summary":
@@ -455,6 +462,18 @@ def _write_completion_artifacts(
                 normalized_rows_hash=execution.normalized_rows_sha256,
                 row_ranges=execution.normalized_rows.ranges_by_symbol,
             )
+        if config.output.artifact_profile == "diagnostic":
+            diagnostics.write_diagnostics(
+                result_dir,
+                diagnostics.diagnostic_payload(
+                    config=config,
+                    engine=engine_summary,
+                    assessment_status=assessment_status,
+                    evidence_quality=evidence_quality,
+                ),
+            )
+            engine_summary = dict(engine_summary)
+            engine_summary.pop("diagnostic_trades", None)
         notes = artifacts.completion_notes(config, engine_run)
         artifacts.write_notes(result_dir, notes)
         artifacts.write_run_manifest(
@@ -463,7 +482,6 @@ def _write_completion_artifacts(
             evidence=runner_evidence_semantics(config.data.kind),
             artifact_profile=config.output.artifact_profile,
         )
-        assessment_status = artifacts.assessment_status(engine_run, evidence_quality=evidence_quality)
         artifacts.write_summary(
             result_dir,
             artifacts.summary_payload(
