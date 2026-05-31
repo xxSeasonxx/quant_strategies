@@ -27,7 +27,7 @@ class MetricSemantics(BaseModel):
 
 
 def artifact_trust_tier_for_profile(artifact_profile: str) -> ArtifactTrustTier:
-    if artifact_profile == "summary":
+    if artifact_profile in {"diagnostic", "summary"}:
         return "search_only"
     if artifact_profile == "full":
         return "audit_replayable"

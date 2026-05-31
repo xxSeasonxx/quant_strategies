@@ -78,7 +78,8 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.strategy_id == "demo"
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
-    assert config.output.artifact_profile == "summary"
+    assert config.output.artifact_profile == "diagnostic"
+    assert config.output.diagnostic_sample_trades == 5
     assert config.params == {"weight": 1.0}
 
 
@@ -91,7 +92,7 @@ def test_committed_run_configs_parse_without_live_data_access():
         load_config(path, repo_root=repo_root)
 
 
-def test_committed_run_configs_default_to_summary_profile():
+def test_committed_run_configs_default_to_diagnostic_profile():
     repo_root = REPO_ROOT
     paths = sorted((repo_root / "runs").glob("*.toml"))
     assert paths, "expected at least one committed run config"
@@ -100,7 +101,7 @@ def test_committed_run_configs_default_to_summary_profile():
         text = path.read_text()
         config = load_config(path, repo_root=repo_root)
         if "artifact_profile" not in text:
-            assert config.output.artifact_profile == "summary"
+            assert config.output.artifact_profile == "diagnostic"
 
 
 def test_committed_run_configs_use_decision_strategy_contract():
@@ -142,14 +143,12 @@ def test_unknown_output_mode_is_rejected(tmp_path: Path):
         load_config(write_config(tmp_path, output_mode="paper"), repo_root=tmp_path)
 
 
-def test_summary_artifact_profile_is_accepted(tmp_path: Path):
+@pytest.mark.parametrize("artifact_profile", ["diagnostic", "summary", "full"])
+def test_supported_artifact_profiles_are_accepted(tmp_path: Path, artifact_profile: str):
     write_strategy(tmp_path)
-    path = write_config(tmp_path)
-    path.write_text(path.read_text().replace('mode = "gate"\n', 'mode = "gate"\nartifact_profile = "summary"\n'))
+    config = load_config(write_config(tmp_path, artifact_profile=artifact_profile), repo_root=tmp_path)
 
-    config = load_config(path, repo_root=tmp_path)
-
-    assert config.output.artifact_profile == "summary"
+    assert config.output.artifact_profile == artifact_profile
 
 
 def test_full_artifact_profile_is_accepted_with_explicit_opt_in(tmp_path: Path):
@@ -165,6 +164,37 @@ def test_unknown_artifact_profile_is_rejected(tmp_path: Path):
     path.write_text(path.read_text().replace('mode = "gate"\n', 'mode = "gate"\nartifact_profile = "compact"\n'))
 
     with pytest.raises(ConfigError, match="artifact_profile"):
+        load_config(path, repo_root=tmp_path)
+
+
+@pytest.mark.parametrize("value", [1, 5, 20])
+def test_diagnostic_sample_trades_range_is_accepted(tmp_path: Path, value: int):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    path.write_text(
+        path.read_text().replace(
+            'mode = "gate"\n',
+            f'mode = "gate"\ndiagnostic_sample_trades = {value}\n',
+        )
+    )
+
+    config = load_config(path, repo_root=tmp_path)
+
+    assert config.output.diagnostic_sample_trades == value
+
+
+@pytest.mark.parametrize("value", [0, 21])
+def test_diagnostic_sample_trades_out_of_range_is_rejected(tmp_path: Path, value: int):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    path.write_text(
+        path.read_text().replace(
+            'mode = "gate"\n',
+            f'mode = "gate"\ndiagnostic_sample_trades = {value}\n',
+        )
+    )
+
+    with pytest.raises(ConfigError, match="diagnostic_sample_trades"):
         load_config(path, repo_root=tmp_path)
 
 
