@@ -2213,6 +2213,7 @@ def test_run_config_artifact_initialization_failure_returns_structured_result(
     assert result.failure_stage == "artifact_initialization"
     assert result.result_dir is None
     assert result.run_completed is False
+    assert result.replayable_from_artifacts is True
     assert "artifact initialization failed" in result.message
 
 
@@ -2236,6 +2237,7 @@ def test_run_config_completion_write_failure_returns_structured_result(
     assert result.failure_stage == "artifact_write"
     assert result.run_completed is False
     assert result.result_dir is not None
+    assert result.replayable_from_artifacts is True
     assert "artifact write failed" in result.message
 
 

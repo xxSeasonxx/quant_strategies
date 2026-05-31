@@ -84,6 +84,9 @@ def run_config(
             notes_path=None,
             message=f"artifact initialization failed: {exc}",
             failure_stage="artifact_initialization",
+            replayable_from_artifacts=replayable_from_artifacts_for_profile(
+                config.output.artifact_profile
+            ),
         )
 
     try:
@@ -178,6 +181,9 @@ def run_config(
             notes_path=None,
             message=f"artifact write failed: {exc}",
             failure_stage="artifact_write",
+            replayable_from_artifacts=replayable_from_artifacts_for_profile(
+                config.output.artifact_profile
+            ),
         )
     return RunResult(
         result_dir=result_dir,

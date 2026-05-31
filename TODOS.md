@@ -31,7 +31,7 @@ validation run -> advisory triage for a retained candidate
   full-profile only, full suite passed on `main`, and code review feedback was
   implemented.
 - PR 2 is complete as of 2026-05-31. Runner outputs now expose
-`replayable_from_artifacts` as derived metadata, active output no longer emits
+  `replayable_from_artifacts` as derived metadata, active output no longer emits
   the legacy replayability field or retired replayability values, compact profiles remain
   non-replayable, full profile remains replayable from emitted artifacts, and
   implementation/docs/tests were updated. Final verification is handled by the
