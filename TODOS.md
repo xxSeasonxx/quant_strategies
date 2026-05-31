@@ -32,7 +32,7 @@ validation run -> advisory triage for a retained candidate
   implemented.
 - PR 2 is complete as of 2026-05-31. Runner outputs now expose
   `replayable_from_artifacts` as derived metadata, active output no longer emits
-  the legacy trust-tier field or retired tier values, compact profiles remain
+  the legacy replayability-tier field or retired tier values, compact profiles remain
   non-replayable, full profile remains replayable from emitted artifacts, and
   code/docs/tests were updated with full suite passing.
 - Next open item: PR 3, Return Surface Honesty And Naming Cleanup.
@@ -286,12 +286,12 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
 **Completion note:** implemented as a hard public contract cutover. New runner
 results and artifacts expose `replayable_from_artifacts` only: `summary` and
 `diagnostic` derive `false`, while `full` derives `true`. No compatibility alias
-or old trust-tier key remains in the active surface.
+or old replayability-tier key remains in the active surface.
 
 ### Tasks
 
 - **Replace artifact trust tier with replayability metadata.**
-  - Remove or deprecate the legacy trust-tier field from public `RunResult` and
+  - Remove or deprecate the legacy replayability-tier field from public `RunResult` and
     artifact payloads.
   - Add `replayable_from_artifacts: bool` as derived metadata.
   - Suggested mapping:

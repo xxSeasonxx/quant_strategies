@@ -16,7 +16,7 @@ flowchart TD
     spec["StrategyExecutionSpec<br/>(neutral; runner and validation both adapt into it)"] --> kernel
     kernel["one execution kernel<br/>load rows via quant_data · freeze · strict causal replay"] --> pnl
     pnl["one PnL contract — engine.screen()<br/>per-trade ledger · funding-aware net"]
-    pnl --> quick["quant-strategies run<br/>quick run · search-only · rank and iterate"]
+    pnl --> quick["quant-strategies run<br/>quick run · diagnostic evidence · rank and iterate"]
     pnl --> valid["quant-strategies validate<br/>windows × scenarios → advisory verdict + audit ledgers"]
     valid -. "opt-in single-trade check" .-> oracle["VectorBT Pro<br/>single-trade check"]
     valid --> human["human promotion review<br/>(outside the code)"]
@@ -109,7 +109,7 @@ conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 ## Documentation
 
 - **[docs/runner.md](docs/runner.md)** — quick-run reference: modes, evidence-quality
-  fields, row contract, exit codes, trust tiers, and artifacts.
+  fields, row contract, exit codes, replayability metadata, and artifacts.
 - **[docs/validation.md](docs/validation.md)** — validation reference: config schema,
   paper-readiness gates, search pressure, the agreement oracle, the verdict ladder,
   metric semantics, and the replayable trade ledger.
