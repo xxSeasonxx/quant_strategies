@@ -9,29 +9,35 @@ from pathlib import Path
 
 import pytest
 
-import quant_strategies.runner as runner_package
-import quant_strategies.runner.artifacts as artifacts
-import quant_strategies.runner.execution as runner_execution
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
-from quant_strategies.runner.artifact_profiles import (
-    canonical_rows_jsonl,
-    normalized_rows_sha256,
-    summary_profile_payload,
-    write_summary_profile_artifact,
-)
-from quant_strategies.runner.artifacts import write_jsonl
-from quant_strategies.runner.config import load_config
-from quant_strategies.runner.diagnostics import diagnostic_payload
+from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 
 
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
+    import quant_strategies.runner as runner_package
+    import quant_strategies.runner.artifacts as artifacts
+    import quant_strategies.runner.execution as runner_execution
+
     for module in (artifacts, runner_execution, runner_package):
         assert not hasattr(module, "RowSummary")
     assert "row_summary" not in inspect.signature(artifacts.write_data_manifest).parameters
     assert "row_summary" not in inspect.signature(runner_execution.StrategyExecutionError).parameters
 
 
+def test_replayable_from_artifacts_for_profile_maps_profiles():
+    assert replayable_from_artifacts_for_profile("summary") is False
+    assert replayable_from_artifacts_for_profile("diagnostic") is False
+    assert replayable_from_artifacts_for_profile("full") is True
+
+
+def test_replayable_from_artifacts_for_profile_rejects_unknown_profile():
+    with pytest.raises(ValueError, match="unknown artifact profile: compact"):
+        replayable_from_artifacts_for_profile("compact")
+
+
 def test_row_contract_issue_compaction_samples_each_failure_class():
+    import quant_strategies.runner.artifacts as artifacts
+
     issues = [
         {
             "severity": "warning",
@@ -138,6 +144,8 @@ def config(
     artifact_profile: str = "summary",
     diagnostic_sample_trades: int | None = None,
 ):
+    from quant_strategies.runner.config import load_config
+
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
@@ -179,6 +187,42 @@ artifact_profile = "{artifact_profile}"
 '''.lstrip()
     )
     return load_config(config_path, repo_root=tmp_path)
+
+
+def canonical_rows_jsonl(rows):
+    from quant_strategies.runner.artifact_profiles import canonical_rows_jsonl as impl
+
+    return impl(rows)
+
+
+def normalized_rows_sha256(rows):
+    from quant_strategies.runner.artifact_profiles import normalized_rows_sha256 as impl
+
+    return impl(rows)
+
+
+def summary_profile_payload(*args, **kwargs):
+    from quant_strategies.runner.artifact_profiles import summary_profile_payload as impl
+
+    return impl(*args, **kwargs)
+
+
+def write_summary_profile_artifact(*args, **kwargs):
+    from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact as impl
+
+    return impl(*args, **kwargs)
+
+
+def write_jsonl(*args, **kwargs):
+    from quant_strategies.runner.artifacts import write_jsonl as impl
+
+    return impl(*args, **kwargs)
+
+
+def diagnostic_payload(*args, **kwargs):
+    from quant_strategies.runner.diagnostics import diagnostic_payload as impl
+
+    return impl(*args, **kwargs)
 
 
 def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:

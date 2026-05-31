@@ -5,7 +5,6 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ArtifactTrustTier = Literal["search_only", "audit_replayable"]
 EvidenceClass = Literal["quick_run_diagnostic", "validation_advisory"]
 StrategyContract = Literal["decision"]
 RunnerReturnModel = Literal["trade_result.sum_signed_trade_activity_net"]
@@ -26,11 +25,11 @@ class MetricSemantics(BaseModel):
     asymmetry: str | None = None
 
 
-def artifact_trust_tier_for_profile(artifact_profile: str) -> ArtifactTrustTier:
+def replayable_from_artifacts_for_profile(artifact_profile: str) -> bool:
     if artifact_profile in {"diagnostic", "summary"}:
-        return "search_only"
+        return False
     if artifact_profile == "full":
-        return "audit_replayable"
+        return True
     raise ValueError(f"unknown artifact profile: {artifact_profile}")
 
 
