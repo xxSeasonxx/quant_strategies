@@ -66,8 +66,8 @@ CLI exit codes are part of the public contract:
 | `3` | data readiness or audit failed |
 
 Programmatic callers should use `run_completed`, `failure_stage`,
-`assessment_status`, verdicts, trust tier, causality/data fields, row contract, and
-trade-result metrics rather than any single completion flag.
+`assessment_status`, verdicts, replayability, causality/data fields, row contract,
+and trade-result metrics rather than any single completion flag.
 
 Artifact I/O errors are routed to structured results rather than raw exceptions:
 result-directory creation, the final artifact write, and failure-result writes return
@@ -109,15 +109,15 @@ Artifacts may sample or compact `row_contract.issues`, while `issue_count` and
 `issue_reasons` preserve complete counts and reason summaries. Search-mode missing
 `available_at` warnings are excluded from `quant_data_feedback`.
 
-## Trust tiers and artifacts
+## Replayability and artifacts
 
-Runner artifacts declare `artifact_trust_tier`. Diagnostic-profile runs are the
-default and are `search_only`: useful for one-strategy iteration, but not enough
-to replay every reported number from artifacts alone. Summary-profile runs are
-also `search_only` and keep compact sweep output. Full-profile runs
-(`artifact_profile = "full"`) are `audit_replayable`: they include the row,
-decision, engine-request, and evidence artifacts needed for audit replay of
-runner trade-result metrics.
+Runner artifacts declare `replayable_from_artifacts`. Diagnostic-profile runs are
+the default and set `replayable_from_artifacts = false`: useful for one-strategy
+iteration, but not enough to replay every reported number from artifacts alone.
+Summary-profile runs also set `replayable_from_artifacts = false` and keep compact
+sweep output. Full-profile runs (`artifact_profile = "full"`) set
+`replayable_from_artifacts = true`: they include the row, decision, engine-request,
+and evidence artifacts needed for audit replay of runner trade-result metrics.
 
 Artifacts are written under ignored result directories. `output.results_dir` must stay
 inside the repository and outside source/input roots such as `src/`, `tests/`, `docs/`,

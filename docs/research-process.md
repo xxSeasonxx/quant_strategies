@@ -60,7 +60,7 @@ Fields:
 | `assessment_status`           | `str`             | Quick-run assessment label, such as `screened`, `quick_check_passed`, `quick_check_failed`, `quick_check_unverified`, or `runner_failed`. |
 | `promotion_eligible`          | `bool`            | Always false for quick-run output.                                                                                      |
 | `param_contract`              | `str`             | `validated`, `unvalidated_passthrough`, or `unknown`.                                                                   |
-| `artifact_trust_tier`         | `str or None`     | Artifact replayability tier.                                                                                            |
+| `replayable_from_artifacts`   | `bool or None`    | Whether reported quick-run metrics can be replayed from emitted artifacts alone.                                        |
 | `data_availability_status`    | `str or None`     | Data availability status when data loading is reached.                                                                  |
 | `availability_coverage`       | `dict or None`    | Data coverage payload when data loading is reached.                                                                     |
 | `row_contract`                | `dict or None`    | Row contract payload when row normalization/audit is reached.                                                           |
@@ -107,8 +107,8 @@ Important quick-run output values:
 | -------------------------------------------- | ------------------------------------------------------------------------ |
 | `assessment_status`                          | Quick-run assessment, not validation verdict.                            |
 | `trade_result.sum_signed_trade_activity_*`    | Linear signed trade-activity sums, not NAV returns.                      |
-| `artifact_trust_tier = "search_only"`        | Compact quick-run evidence; not fully replayable from artifacts alone.       |
-| `artifact_trust_tier = "audit_replayable"`   | Fuller artifact set intended for replay/audit of trade-result metrics.          |
+| `replayable_from_artifacts = false`          | Compact quick-run evidence; not fully replayable from artifacts alone.       |
+| `replayable_from_artifacts = true`           | Full artifact set intended for replay/audit of trade-result metrics.         |
 | `param_contract = "unvalidated_passthrough"` | Strategy did not define `validate_params`; quick run still completed.    |
 
 

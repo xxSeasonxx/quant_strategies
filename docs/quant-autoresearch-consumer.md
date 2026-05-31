@@ -224,12 +224,11 @@ diagnostic_sample_trades = 5
 
 `artifact_profile` controls **verbosity only** — which artifacts are written —
 and never changes pass/fail. `diagnostic` is the default for one-strategy
-iteration: it writes bounded `diagnostics.json` behavior slices and marks the
-result `artifact_trust_tier = "search_only"`. `summary` is the compact sweep
-profile and writes `summary.json` plus `artifact_profile_summary.json`. `full`
-(for retained or debug runs) additionally writes input rows, decision records,
-engine request JSON, and full evidence artifacts, and marks the result
-`artifact_trust_tier = "audit_replayable"`.
+iteration: it writes bounded `diagnostics.json` behavior slices and sets
+`replayable_from_artifacts = false`. `summary` is the compact sweep profile and
+writes `summary.json` plus `artifact_profile_summary.json`. `full` (for retained
+or debug runs) additionally writes input rows, decision records, engine request
+JSON, and full evidence artifacts, and sets `replayable_from_artifacts = true`.
 In full-profile runs, `strategy_input_rows.jsonl` contains a JSON-safe canonical
 serialization of the normalized projection used for strategy input; non-finite
 ancillary values are written as `null`, and its file hash matches
@@ -245,13 +244,13 @@ is never a side effect of asking for richer artifacts.
 
 | Surface / knob | Values | Controls | Notes |
 |---|---|---|---|
-| quick run | `quant-strategies run` / `run_config` | the fast `search_only` quick-run | iterate and rank here |
+| quick run | `quant-strategies run` / `run_config` | the fast quick-run | iterate and rank here |
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
 | `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs quick-**checking** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` checks to the quick run |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
 | `artifact_profile` | `diagnostic` \| `summary` \| `full` | artifact verbosity | never changes pass/fail |
 | `diagnostic_sample_trades` | integer 1-20 | largest winners/losers per side in `diagnostics.json` | only affects diagnostic artifact size |
-| `artifact_trust_tier` | `search_only` \| `audit_replayable` | derived replayability label | follows `artifact_profile`; not set directly |
+| `replayable_from_artifacts` | `true` \| `false` | derived replayability flag | follows `artifact_profile`; not set directly |
 
 The quick-run mode that applies quick checks is named `gate` (not `validate`), so
 "validate" now refers only to the validation package (`quant-strategies validate`
@@ -283,7 +282,7 @@ result.run_completed
 result.failure_stage
 result.assessment_status
 result.param_contract
-result.artifact_trust_tier
+result.replayable_from_artifacts
 result.data_availability_status
 result.availability_coverage
 result.row_contract
@@ -316,7 +315,7 @@ failure-result paths are returned as structured results, not raised.
 Treat all runner output as quick-run evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
 Use `assessment_status`, `causality_verified`, `data_availability_status`,
-`availability_coverage`, `row_contract`, `artifact_trust_tier`, and
+`availability_coverage`, `row_contract`, `replayable_from_artifacts`, and
 `evidence_quality_warnings` as ranking filters before comparing trade results;
 never rank from `run_completed` alone.
 Treat `quick_check_passed` as stronger mechanical evidence than `quick_check_unverified`;
@@ -326,9 +325,9 @@ Missing `available_at` in search mode is warning evidence: non-fatal, but
 `causality_verified` remains false and the assessment stays `quick_check_unverified`
 when quick checks otherwise pass. Invalid `available_at` is a row contract failure.
 Set `row_contract = "validation"` to also make missing `available_at` a row
-contract failure. Treat `search_only` artifacts as ranking evidence only; rerun
-retained candidates with `artifact_profile = "full"` before audit handoff to
-obtain `audit_replayable` artifacts.
+contract failure. Treat `replayable_from_artifacts = false` artifacts as ranking
+evidence only; rerun retained candidates with `artifact_profile = "full"` before
+audit handoff to obtain replayable artifacts.
 
 Route from stable row issue reasons and counts, not free-form issue messages.
 Runner `summary.json` and `data_manifest.json` expose reasons such as

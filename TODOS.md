@@ -30,7 +30,12 @@ validation run -> advisory triage for a retained candidate
   winner/loser counts are configurable in TOML, full replay artifacts remain
   full-profile only, full suite passed on `main`, and code review feedback was
   implemented.
-- Next open item: PR 2, Artifact Replayability Simplification.
+- PR 2 is complete as of 2026-05-31. Runner outputs now expose
+  `replayable_from_artifacts` as derived metadata, active output no longer emits
+  the legacy trust-tier field or retired tier values, compact profiles remain
+  non-replayable, full profile remains replayable from emitted artifacts, and
+  code/docs/tests were updated with full suite passing.
+- Next open item: PR 3, Return Surface Honesty And Naming Cleanup.
 
 ## PR 0: Project-Wide Research Vocabulary Cleanup (Complete)
 
@@ -269,19 +274,24 @@ conda run -n quant pytest -q
 
 ## PR 2: Artifact Replayability Simplification
 
-**Goal:** remove `search_only` / `audit_replayable` as product vocabulary and
-replace the extra artifact trust tier with one derived replayability flag.
+**Goal:** remove retired tier labels as product vocabulary and replace the extra
+artifact trust tier with one derived replayability flag.
 
 **Why this matters:** artifact profiles already answer the operational question:
 compact output for everyday research versus full output for audit. A second
-label pair (`search_only`, `audit_replayable`) adds vocabulary without adding a
-decision Season should make. The only durable fact the system needs to expose is
+label pair adds vocabulary without adding a decision Season should make. The
+only durable fact the system needs to expose is
 whether the reported metrics can be replayed from the emitted artifacts alone.
+
+**Completion note:** implemented as a hard public contract cutover. New runner
+results and artifacts expose `replayable_from_artifacts` only: `summary` and
+`diagnostic` derive `false`, while `full` derives `true`. No compatibility alias
+or old trust-tier key remains in the active surface.
 
 ### Tasks
 
 - **Replace artifact trust tier with replayability metadata.**
-  - Remove or deprecate `artifact_trust_tier` from public `RunResult` and
+  - Remove or deprecate the legacy trust-tier field from public `RunResult` and
     artifact payloads.
   - Add `replayable_from_artifacts: bool` as derived metadata.
   - Suggested mapping:
@@ -292,9 +302,9 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
   - Do not ask the user to choose a trust tier.
 
 - **Remove stale tier strings from active output.**
-  - Stop emitting `search_only` and `audit_replayable` in new runner artifacts.
-  - Remove `artifact_trust_tier_for_profile` or replace it with a simple
-    replayability helper.
+  - Stop emitting the retired tier values in new runner artifacts.
+  - Remove the profile-to-tier helper or replace it with a simple replayability
+    helper.
   - Update manifests, summaries, profile artifacts, docs, and tests to use
     `replayable_from_artifacts`.
 
@@ -326,7 +336,7 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
 
 ### Acceptance Criteria
 
-- New runner outputs no longer contain `search_only` or `audit_replayable`.
+- New runner outputs no longer contain retired tier values.
 - Public result/artifact metadata exposes `replayable_from_artifacts`.
 - `summary` and `diagnostic` outputs remain compact by default.
 - `full` output remains sufficient to trace reported runner metrics from
@@ -338,7 +348,7 @@ whether the reported metrics can be replayed from the emitted artifacts alone.
 ### Suggested Verification
 
 ```bash
-rg -n "search_only|audit_replayable|artifact_trust_tier" PRD.md README.md docs src tests
+rg -n "<retired artifact replayability vocabulary>" PRD.md README.md docs src tests
 conda run -n quant pytest tests/test_runner_artifact_profiles.py tests/test_runner_api_cli.py -q
 ```
 
