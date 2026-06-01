@@ -50,7 +50,7 @@ Acceptance criteria for the next C design:
 - clear output contract for NAV/path metrics, drawdown, turnover, exposure,
   concentration, per-asset evidence where supported, and explicit non-claims;
 - no quick-run dependency on VectorBT Pro;
-- no update to `docs/foundation-surfaces.md` until an implemented evaluation
+- no speculative implemented-surface I/O reference docs before the evaluation
   surface exists.
 
 ### B. Quick-run economic diagnostics improvement
@@ -118,9 +118,8 @@ rg -n "FOUNDATION_LOCK|accepted_debt|deferred_until_trigger|broad blind|delta re
 git diff --check
 ```
 
-Also run a stale-reference grep across active docs for the removed dated review
-anchor, the old surface-doc path, and process/guide wording; it should return no
-matches.
+Also run a stale-reference grep across active docs for removed dated review
+anchors and stale process/guide wording; it should return no matches.
 
 Run `conda run -n quant pytest -q` only if a final full-suite confidence check
 is needed; the closeout itself does not change source, tests, public APIs,

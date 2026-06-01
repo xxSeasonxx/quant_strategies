@@ -6,7 +6,7 @@ guide.
 
 ## Package Facts
 
-Local package inspection in the `quant` environment:
+Local package inspection in Season's `quant` environment on 2026-06-01:
 
 | Fact | Value |
 | --- | --- |

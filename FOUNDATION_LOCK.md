@@ -27,8 +27,8 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact
   quick-run artifacts are intentionally not full replay chains.
 - **Current I/O docs boundary:** current implemented-surface references live in
-  `README.md`, `docs/runner.md`, and `docs/validation.md`. Do not add or update
-  `docs/foundation-surfaces.md` speculatively before research evaluation is
+  `README.md`, `docs/runner.md`, and `docs/validation.md`. Do not add
+  speculative I/O reference docs for research evaluation before that surface is
   implemented.
 
 ## Accepted Debt
@@ -42,13 +42,14 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 
 ## Approved Next Direction
 
-- Build contract clarity first: docs should distinguish quick run, mechanical
-  evidence validation, and research evaluation without renaming current code,
-  CLI commands, package paths, artifact names, or public APIs.
-- Then design and implement a stateless research evaluation surface for frozen
-  candidates.
-- Then improve quick-run economic diagnostics from the existing engine trade
-  ledger, without putting VectorBT Pro on the quick-run hot path.
+- Preserve the clarified contract: docs should distinguish quick run,
+  mechanical evidence validation, and research evaluation without renaming
+  current code, CLI commands, package paths, artifact names, or public APIs.
+- Design and implement a stateless research evaluation surface for frozen
+  candidates next.
+- After evaluation is scoped, improve quick-run economic diagnostics from the
+  existing engine trade ledger, without putting VectorBT Pro on the quick-run
+  hot path.
 
 ## Deferred Until Trigger
 
