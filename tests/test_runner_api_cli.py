@@ -19,7 +19,7 @@ from quant_strategies.runner.errors import DataLoadError, EvaluationRunError, Ru
 
 SUMMARY_KEYS = {
     "strategy_id",
-    "mode",
+    "quick_checks",
     "status",
     "stage",
     "failure_stage",
@@ -144,7 +144,7 @@ def write_config(
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
-    mode: str = "gate",
+    quick_checks: bool = True,
     artifact_profile: str | None = "full",
     diagnostic_sample_trades: int | None = None,
     row_contract: str | None = None,
@@ -185,7 +185,7 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "{mode}"
+quick_checks = {str(quick_checks).lower()}
 {artifact_profile_line}{diagnostic_sample_trades_line}
 '''.lstrip()
     )
@@ -265,6 +265,16 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["asymmetry"]
 
 
+def assert_no_mode_fields(value: object) -> None:
+    if isinstance(value, dict):
+        assert "mode" not in value
+        for item in value.values():
+            assert_no_mode_fields(item)
+    elif isinstance(value, list):
+        for item in value:
+            assert_no_mode_fields(item)
+
+
 def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
@@ -298,7 +308,7 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     summary = read_summary(result.result_dir)
     assert "success" not in summary
     assert summary["stage"] == "completed"
-    assert summary["status"] == "passed"
+    assert summary["status"] == "completed"
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] > 0
@@ -336,8 +346,12 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     assert data_manifest["row_contract"] == summary["row_contract"]
     assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
+    evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
+    assert evidence["quick_checks"] is True
+    assert_no_mode_fields(evidence)
     assert_assessment(result, summary, assessment_status="quick_check_passed")
-    assert "runner quick-run evidence only" in (result.result_dir / "notes.md").read_text()
+    assert "runner quick checks only" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -500,9 +514,9 @@ def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monke
     assert not (result.result_dir / "evidence.json").exists()
 
 
-def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_diagnostics_completion_is_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, mode="screen")
+    config_path = write_config(tmp_path, quick_checks=False)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -510,30 +524,31 @@ def test_screen_mode_completion_is_screened_not_validation_pass(tmp_path: Path, 
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "screen"
+    assert summary["quick_checks"] is False
     assert summary["stage"] == "completed"
-    assert summary["status"] == "screened"
+    assert summary["status"] == "completed"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
-    assert_assessment(result, summary, assessment_status="screened")
+    assert_assessment(result, summary, assessment_status="diagnostics_complete")
     notes = (result.result_dir / "notes.md").read_text()
-    assert "status: screened" in notes
+    assert "status: completed" in notes
     assert "status: passed" not in notes
-    assert "not validation pass" in notes
+    assert "diagnostic evidence only" in notes
+    assert "not validation" in notes
 
 
-def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
+def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
-    config_path = write_config(tmp_path, mode="screen")
+    config_path = write_config(tmp_path, quick_checks=False)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -541,9 +556,9 @@ def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "screen"
+    assert summary["quick_checks"] is False
     assert summary["stage"] == "completed"
-    assert summary["status"] == "screened"
+    assert summary["status"] == "completed"
     assert summary["engine"]["passed"] is None
     assert summary["engine"]["trade_count"] == 0
     assert summary["engine"]["trade_result"] == {
@@ -552,9 +567,12 @@ def test_screen_mode_empty_decisions_complete_as_zero_trade_result(
         "sum_signed_trade_activity_cost": 0.0,
         "sum_signed_trade_activity_net": 0.0,
     }
-    assert_assessment(result, summary, assessment_status="screened")
+    assert_assessment(result, summary, assessment_status="diagnostics_complete")
     request = json.loads((result.result_dir / "engine_request.json").read_text())
     evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
+    assert evidence["quick_checks"] is False
+    assert_no_mode_fields(evidence)
     assert request["spec"]["decisions"] == []
     assert evidence["screening_result"]["trade_count"] == 0
     assert evidence["screening_result"]["trades"] == []
@@ -583,7 +601,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "        },\n"
         "    )]\n"
     )
-    config_path = write_config(tmp_path, mode="screen")
+    config_path = write_config(tmp_path, quick_checks=False)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -595,7 +613,9 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     decision_payload = request["spec"]["decisions"][0]
     trade = evidence["screening_result"]["trades"][0]
 
-    assert evidence["schema_version"] == "quant_strategies.engine.evidence/v4"
+    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
+    assert evidence["quick_checks"] is False
+    assert_no_mode_fields(evidence)
     assert decision_payload["exit_policy"]["max_hold_bars"] == 2
     assert decision_payload["exit_policy"]["take_profit_bps"] == 50.0
     assert decision_payload["metadata"]["funding_pressure_bps"] == 3.25
@@ -605,9 +625,9 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     assert trade["decision_metadata"]["funding_pressure_bps"] == 3.25
 
 
-def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_quick_check_failure_keeps_completed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, mode="gate")
+    config_path = write_config(tmp_path, quick_checks=True)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -615,16 +635,16 @@ def test_validation_gate_failure_remains_failed_summary(tmp_path: Path, monkeypa
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "gate"
+    assert summary["quick_checks"] is True
     assert summary["stage"] == "completed"
-    assert summary["status"] == "failed"
+    assert summary["status"] == "completed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
     assert_assessment(result, summary, assessment_status="quick_check_failed")
-    assert "status: failed quick checks" in (result.result_dir / "notes.md").read_text()
+    assert "quick_check_result: failed" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_treats_empty_decisions_as_zero_trade_result(
@@ -634,7 +654,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
     strategy = tmp_path / "tested" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
-    config_path = write_config(tmp_path, mode="gate")
+    config_path = write_config(tmp_path, quick_checks=True)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -642,9 +662,9 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
     assert result.run_completed is True
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["mode"] == "gate"
+    assert summary["quick_checks"] is True
     assert summary["stage"] == "completed"
-    assert summary["status"] == "failed"
+    assert summary["status"] == "completed"
     assert summary["engine"]["passed"] is False
     assert summary["engine"]["trade_count"] == 0
     assert summary["engine"]["trade_result"] == {
@@ -664,10 +684,13 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
     assert (result.result_dir / "decision_records.jsonl").read_text() == ""
     request = json.loads((result.result_dir / "engine_request.json").read_text())
     evidence = json.loads((result.result_dir / "evidence.json").read_text())
+    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
+    assert evidence["quick_checks"] is True
+    assert_no_mode_fields(evidence)
     assert request["spec"]["decisions"] == []
     assert evidence["validation_report"]["screening_result"]["trade_count"] == 0
     assert evidence["validation_report"]["screening_result"]["trades"] == []
-    assert "status: failed quick checks" in (result.result_dir / "notes.md").read_text()
+    assert "quick_check_result: failed" in (result.result_dir / "notes.md").read_text()
 
 
 def test_run_config_writes_data_failure_summary(

@@ -24,6 +24,6 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "gate"
+quick_checks = true
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5

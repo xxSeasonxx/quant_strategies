@@ -27,6 +27,7 @@ from quant_strategies.runner.engine_runner import EngineRun
 
 
 ROW_CONTRACT_ISSUE_SAMPLE_SIZE = 25
+RUNNER_EVIDENCE_SCHEMA_VERSION = "quant_strategies.runner.evidence/v1"
 
 
 def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path:
@@ -65,8 +66,31 @@ def write_engine_request(result_dir: Path, request_json: str) -> None:
     (result_dir / "engine_request.json").write_text(request_json)
 
 
-def write_evidence(result_dir: Path, evidence_json: str) -> None:
-    (result_dir / "evidence.json").write_text(evidence_json)
+def write_evidence(result_dir: Path, evidence_json: str, *, quick_checks: bool) -> None:
+    (result_dir / "evidence.json").write_text(
+        runner_evidence_json(evidence_json, quick_checks=quick_checks)
+    )
+
+
+def runner_evidence_json(evidence_json: str, *, quick_checks: bool) -> str:
+    payload = json.loads(evidence_json)
+    payload["schema_version"] = RUNNER_EVIDENCE_SCHEMA_VERSION
+    payload["quick_checks"] = quick_checks
+    _remove_engine_mode_fields(payload)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+
+
+def _remove_engine_mode_fields(payload: dict[str, Any]) -> None:
+    payload.pop("mode", None)
+    screening_result = payload.get("screening_result")
+    if isinstance(screening_result, dict):
+        screening_result.pop("mode", None)
+    validation_report = payload.get("validation_report")
+    if isinstance(validation_report, dict):
+        validation_report.pop("mode", None)
+        nested_screening_result = validation_report.get("screening_result")
+        if isinstance(nested_screening_result, dict):
+            nested_screening_result.pop("mode", None)
 
 
 def evidence_quality(
@@ -351,7 +375,7 @@ def summary_payload(
     engine_payload = dict(engine)
     return {
         "strategy_id": config.strategy_id,
-        "mode": config.output.mode,
+        "quick_checks": config.output.quick_checks,
         "artifact_profile": config.output.artifact_profile,
         "replayable_from_artifacts": replayable_from_artifacts_for_profile(config.output.artifact_profile),
         "status": status,
@@ -427,18 +451,18 @@ def failure_notes(stage: str, message: str) -> str:
 
 
 def result_status(engine_run: EngineRun) -> str:
-    if engine_run.mode == "screen":
-        return "screened"
-    return "passed" if engine_run.passed else "failed"
+    _ = engine_run
+    return "completed"
 
 
 def assessment_status(
     engine_run: EngineRun,
     *,
+    quick_checks: bool,
     evidence_quality: dict[str, object],
 ) -> str:
-    if engine_run.mode == "screen":
-        return "screened"
+    if not quick_checks:
+        return "diagnostics_complete"
     if engine_run.passed and not evidence_quality.get("causality_verified"):
         return "quick_check_unverified"
     return "quick_check_passed" if engine_run.passed else "quick_check_failed"
@@ -449,18 +473,18 @@ def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
         "# Run Complete",
         "",
         f"strategy_id: {config.strategy_id}",
-        f"mode: {engine_run.mode}",
+        f"quick_checks: {str(config.output.quick_checks).lower()}",
+        "status: completed",
     ]
-    if engine_run.mode == "screen":
-        lines.append("status: screened")
+    if not config.output.quick_checks:
         interpretation = (
-            "runner screen evidence only; not validation pass, market robustness, "
-            "or promotion evidence."
+            "runner diagnostic evidence only; quick checks were not enabled; not validation, "
+            "market robustness, or promotion evidence."
         )
     else:
-        status = "passed" if engine_run.passed else "failed quick checks"
-        lines.append(f"status: {status}")
-        interpretation = "runner quick-run evidence only; not market robustness or promotion evidence."
+        quick_check_status = "passed" if engine_run.passed else "failed"
+        lines.append(f"quick_check_result: {quick_check_status}")
+        interpretation = "runner quick checks only; not market robustness or promotion evidence."
     if config.data.kind == "crypto_perp_funding":
         lines.append(
             "return_scope: price-and-funding; supplied funding events are included "

@@ -412,12 +412,12 @@ def _evaluate_engine_request(
         with event_emitter.stage(
             "engine_evaluation",
             strategy_id=config.strategy_id,
-            mode=config.output.mode,
+            quick_checks=config.output.quick_checks,
         ):
             return (
                 engine_runner.evaluate_request(
                     request,
-                    mode=config.output.mode,
+                    mode=_engine_mode(config),
                     include_evidence=config.output.artifact_profile == "full",
                     include_diagnostics=config.output.artifact_profile == "diagnostic",
                 ),
@@ -453,9 +453,17 @@ def _write_completion_artifacts(
             engine_run,
             include_diagnostic_trades=include_diagnostic_trades,
         )
-        assessment_status = artifacts.assessment_status(engine_run, evidence_quality=evidence_quality)
+        assessment_status = artifacts.assessment_status(
+            engine_run,
+            quick_checks=config.output.quick_checks,
+            evidence_quality=evidence_quality,
+        )
         if config.output.artifact_profile == "full" and engine_run.evidence_json:
-            artifacts.write_evidence(result_dir, engine_run.evidence_json)
+            artifacts.write_evidence(
+                result_dir,
+                engine_run.evidence_json,
+                quick_checks=config.output.quick_checks,
+            )
         if config.output.artifact_profile == "summary":
             from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 
@@ -505,6 +513,10 @@ def _write_completion_artifacts(
             ),
         )
     return assessment_status, notes.strip()
+
+
+def _engine_mode(config: config_module.RunConfig) -> engine_runner.EngineMode:
+    return "gate" if config.output.quick_checks else "screen"
 
 
 def _check_causality(

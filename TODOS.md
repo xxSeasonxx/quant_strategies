@@ -139,7 +139,7 @@ metrics; it does not return an objective strategy ranking score.
 - Tests prove the renamed fields/statuses/artifacts are emitted.
 - Any remaining old term is either:
   - in an intentionally documented compatibility alias with removal criteria, or
-  - inside frozen generated evidence that will be regenerated/archived before
+  - inside frozen generated evidence that will be re-created/archived before
     declaring repo-wide vocabulary cleanup complete.
 
 ### Suggested Verification
@@ -364,95 +364,31 @@ conda run -n quant pytest -q
 
 ## PR 3: Return Surface Honesty And Naming Cleanup
 
-**Goal:** remove the remaining ways quick-run and validation labels/artifacts can
-overstate or confuse what was actually tested.
+**Status:** complete. Focused PR3 tests and the full suite pass after the
+hard cutover.
 
-**Why this matters:** Season's main concern is that the process is too
-complicated and can create false confidence. The current surface still exposes
-engine implementation words (`screen`/`gate`) and validation labels/artifacts
-that sound stronger than the implemented checks.
+**Implemented contract:**
 
-### Tasks
+- Runner configs use `[output] quick_checks = true | false`, defaulting to
+  `false`; the previous output-mode key is rejected.
+- Runner summaries and auxiliary artifacts expose `quick_checks`, not a run mode.
+  Diagnostic-only runs report `assessment_status = "diagnostics_complete"`, and
+  successful runner summaries use `status = "completed"`.
+- Validation uses `mechanical_complete` as the weak mechanical verdict. It remains
+  advisory only and does not imply promotion, paper trading, or live eligibility.
+- Validation writes `cost_fill_sensitivity.json` for cost/fill scenario evidence.
+- Validation scenario configs vary cost/fill/data settings only; parameter-axis
+  decision re-generation is intentionally not part of PR 3.
+- Backend summaries, sensitivity artifacts, and manifests no longer emit dead
+  decision-generation metadata.
 
-- **Rename or hide quick-run `screen` / `gate` vocabulary.**
-  - Current risk: `[output] mode = "screen" | "gate"` makes quick run sound like
-    two workflows, and `gate` sounds too close to validation.
-  - Current truth:
-    - `screen` means "compute diagnostic metrics without quick checks";
-    - `gate` means "compute diagnostic metrics and apply quick checks";
-    - both are quick-run modes, not validation;
-    - causality is already checked by default in quick run.
-  - Preferred user-facing names:
-    - `diagnostics_only` instead of `screen`;
-    - `with_quick_checks` or `quick_check` instead of `gate`.
-  - Alternative config shape:
-    - keep one quick-run mode and add `quick_checks = true | false`;
-    - or keep `[output]` but rename `mode` values.
-  - Backward compatibility:
-    - temporarily accept `screen` and `gate`;
-    - normalize internally to the new names;
-    - update docs/tests to use the new names;
-    - optionally emit deprecation guidance if config loading supports it.
-  - Do not remove causality from quick run. It is evidence hygiene, not
-    validation.
+**Verification before closeout:**
 
-- **Fix or rename `mechanical_pass`.**
-  - Current risk: with `[paper_readiness] enabled = false`, the policy can emit
-    `mechanical_pass` after required scenarios execute with enough trades, even
-    if realistic-cost result is negative.
-  - Preferred fix: rename to a weaker label such as `mechanical_executed` or
-    `mechanical_complete`.
-  - Alternative fix: keep `mechanical_pass`, but require positive realistic-cost
-    net result even when paper-readiness gates are disabled.
-  - Also apply search-pressure downgrade logic consistently if the label remains
-    meaningfully positive.
-
-- **Rename `robustness_matrix.json` to a cost/fill-specific artifact.**
-  - Current risk: the artifact name implies parameter robustness, but current
-    scenarios vary cost and fill lag while reusing the same base decisions.
-  - Preferred name: `cost_fill_sensitivity.json`.
-  - Keep backwards compatibility only if required by tests/consumers; otherwise
-    update docs/tests directly and let old artifacts be stale.
-
-- **Remove dead decision-regeneration vocabulary unless true parameter
-  regeneration is implemented now.**
-  - Candidates to remove or stop emitting:
-    - `_ScenarioDecisionOutcome`
-    - `_scenario_decision_outcome`
-    - `DecisionGenerationStatus = "regenerated"`
-    - `decisions_regenerated`
-    - `decision_generation_status`
-    - `ScenarioRunConfig.params`
-    - `MatrixScenario.params` except where needed for the base config
-  - If parameter robustness is intentionally added instead, implement it fully:
-    regenerate decisions per parameter scenario, re-run param validation,
-    re-run row/causality checks, and make the artifact explicitly separate from
-    cost/fill sensitivity. Do not keep a half-implemented parameter axis.
-
-- **Update docs and tests.**
-  - `docs/runner.md`
-  - `docs/validation.md`
-  - `docs/quant-autoresearch-consumer.md`
-  - `docs/research-process.md`
-  - `README.md` if verdict labels or artifact names change
-  - runner mode tests in `tests/test_runner_api_cli.py` and
-    `tests/test_runner_config.py`
-  - relevant tests in `tests/test_validation_runner.py`,
-    `tests/test_validation_backends_and_policy.py`,
-    `tests/test_validation_manifest.py`
-
-### Acceptance Criteria
-
-- Quick-run docs and canonical configs no longer expose `screen` / `gate` as
-  research vocabulary.
-- Quick run still checks causality by default.
-- Quick run remains distinct from validation: no quick-run output is described as
-  a validation verdict.
-- A losing candidate with paper readiness disabled cannot receive an overstated
-  positive label.
-- Cost/fill sensitivity artifacts do not claim or imply parameter robustness.
-- No emitted validation artifact contains dead regeneration fields unless real
-  regeneration exists.
+```bash
+conda run -n quant pytest tests/test_runner_config.py tests/test_runner_api_cli.py tests/test_validation_backends_and_policy.py tests/test_validation_runner.py tests/test_validation_manifest.py tests/test_validation_config.py tests/test_validation_matrix.py -q
+# Run the PR3 literal leak check from the implementation plan.
+conda run -n quant pytest -q
+```
 - Validation remains advisory: no paper/live/promotion eligibility is introduced.
 
 ### Suggested Verification
@@ -520,7 +456,7 @@ belong in reference docs and artifacts.
     - human willingness to inspect trades
 
 - **Optionally reduce visible verdict labels.**
-  - If PR 3 renames `mechanical_pass`, consider making the operator-facing set:
+  - If PR 3 renames `mechanical_complete`, consider making the operator-facing set:
     - `hard_no`
     - `watchlist`
     - `review_candidate`
@@ -548,7 +484,7 @@ conda run -n quant pytest tests/test_simple_momentum.py tests/test_validation_co
 Run a docs grep before merging:
 
 ```bash
-rg -n "quick run|validation run|mechanical_pass|robustness_matrix|cost_fill_sensitivity|replayable_from_artifacts" README.md docs tests
+rg -n "quick run|validation run|mechanical_complete|cost_fill_sensitivity|cost_fill_sensitivity|replayable_from_artifacts" README.md docs tests
 ```
 
 ## PR 5: Foundation Lock And Review Hygiene

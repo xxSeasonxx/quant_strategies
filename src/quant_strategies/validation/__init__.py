@@ -21,14 +21,13 @@ from quant_strategies.runner.execution import (
 from quant_strategies.validation.artifacts import (
     backend_runs_payload,
     canonical_jsonl_lines,
+    cost_fill_sensitivity_payload,
     create_validation_result_dir,
-    robustness_matrix_payload,
     write_json_artifact,
     write_text_artifact,
 )
 from quant_strategies.validation.backends import (
     BackendRunResult,
-    DecisionGenerationStatus,
     ScenarioBackendRunResult,
     ValidationBackend,
     get_backend,
@@ -58,14 +57,6 @@ class ValidationRunResult:
     message: str
     run_completed: bool = True
     failure_stage: str | None = None
-
-
-@dataclass(frozen=True)
-class _ScenarioDecisionOutcome:
-    decisions: list[StrategyDecision]
-    decision_generation_status: DecisionGenerationStatus
-    decisions_regenerated: bool
-    failure: BackendRunResult | None = None
 
 
 @dataclass(frozen=True)
@@ -470,7 +461,6 @@ def _run_window_scenarios(
 ) -> None:
     scenarios = expand_validation_matrix(
         window_id=window.id,
-        base_params=_plain_mapping(execution.validated_params),
         base_costs=_plain_mapping(context.config.cost_model),
         base_fill=_plain_mapping(context.config.fill_model),
     )
@@ -510,58 +500,55 @@ def _run_scenario_backend(
     scenario_config = _scenario_config(
         config=context.config,
         scenario=scenario,
-        base_params=execution.validated_params,
         data=execution_spec.data,
     )
-    decision_outcome = _scenario_decision_outcome(
-        base_decisions=execution.decisions,
+    scenario_decisions = list(execution.decisions)
+    decision_records_path, decision_records_sha256 = _write_scenario_decision_records(
+        result_dir=context.result_dir,
+        scenario_id=scenario.id,
+        decisions=scenario_decisions,
     )
-    backend_result = decision_outcome.failure
-    decision_records_path = None
-    decision_records_sha256 = None
-    if backend_result is None:
-        decision_records_path, decision_records_sha256 = _write_scenario_decision_records(
-            result_dir=context.result_dir,
+    try:
+        with context.event_emitter.stage(
+            "scenario_backend",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
             scenario_id=scenario.id,
-            decisions=decision_outcome.decisions,
+            backend=context.backend_name,
+        ):
+            raw_backend_result = context.selected_backend.run(
+                decisions=list(scenario_decisions),
+                rows=execution.normalized_rows.projection_rows(),
+                config=scenario_config,
+            )
+    except Exception as exc:
+        backend_result = _failed_backend_result(
+            context.backend_name,
+            f"backend_exception: {exc}",
         )
-        try:
-            with context.event_emitter.stage(
-                "scenario_backend",
-                strategy_id=context.config.strategy_id,
-                window_id=window.id,
-                scenario_id=scenario.id,
-                backend=context.backend_name,
-            ):
-                raw_backend_result = context.selected_backend.run(
-                    decisions=list(decision_outcome.decisions),
-                    rows=execution.normalized_rows.projection_rows(),
-                    config=scenario_config,
-                )
-        except Exception as exc:
+    else:
+        if isinstance(raw_backend_result, BackendRunResult):
+            backend_result = raw_backend_result
+        else:
             backend_result = _failed_backend_result(
                 context.backend_name,
-                f"backend_exception: {exc}",
+                "invalid_backend_result: expected BackendRunResult, "
+                f"got {type(raw_backend_result).__name__}",
             )
-        else:
-            if isinstance(raw_backend_result, BackendRunResult):
-                backend_result = raw_backend_result
-            else:
-                backend_result = _failed_backend_result(
-                    context.backend_name,
-                    "invalid_backend_result: expected BackendRunResult, "
-                    f"got {type(raw_backend_result).__name__}",
-                )
     trade_ledger_path = None
     trade_ledger_sha256 = None
-    if backend_result is not None and backend_result.trades:
+    if backend_result.trades:
         trade_ledger_path, trade_ledger_sha256 = _write_scenario_trade_ledger(
             result_dir=context.result_dir,
             scenario_id=scenario.id,
             trades=backend_result.trades,
         )
     agreement = _run_agreement_oracle(
-        context, scenario_config, decision_outcome, execution, backend_result
+        context,
+        scenario_config,
+        scenario_decisions,
+        execution,
+        backend_result,
     )
     return ScenarioBackendRunResult(
         window_id=window.id,
@@ -569,10 +556,8 @@ def _run_scenario_backend(
         required=scenario.required,
         result=backend_result,
         scenario_kind=scenario.kind,
-        decisions_regenerated=decision_outcome.decisions_regenerated,
         diagnostic_only=not scenario.required,
-        decision_generation_status=decision_outcome.decision_generation_status,
-        decision_count=len(decision_outcome.decisions),
+        decision_count=len(scenario_decisions),
         decision_records_path=decision_records_path,
         decision_records_sha256=decision_records_sha256,
         trade_ledger_path=trade_ledger_path,
@@ -584,7 +569,7 @@ def _run_scenario_backend(
 def _run_agreement_oracle(
     context: _ValidationContext,
     scenario_config: ScenarioRunConfig,
-    decision_outcome: _ScenarioDecisionOutcome,
+    decisions: list[StrategyDecision],
     execution: _StrategyExecutionResult,
     backend_result: BackendRunResult,
 ):
@@ -604,7 +589,7 @@ def _run_agreement_oracle(
     try:
         return evaluate_agreement(
             engine_metrics=backend_result.metrics,
-            decisions=list(decision_outcome.decisions),
+            decisions=list(decisions),
             rows=execution.normalized_rows.projection_rows(),
             config=scenario_config,
             tolerance_abs=oracle.tolerance_abs,
@@ -829,28 +814,15 @@ def _scenario_config(
     *,
     config: Any,
     scenario: MatrixScenario,
-    base_params: Mapping[str, Any],
     data: Any,
 ) -> ScenarioRunConfig:
     return ScenarioRunConfig.model_validate(
         {
             "scenario_id": scenario.id,
-            "params": {**_plain_mapping(base_params), **scenario.params},
             "cost_model": {**_plain_mapping(config.cost_model), **scenario.cost_model},
             "fill_model": {**_plain_mapping(config.fill_model), **scenario.fill_model},
             "data": _plain_mapping(data),
         }
-    )
-
-
-def _scenario_decision_outcome(
-    *,
-    base_decisions: list[StrategyDecision],
-) -> _ScenarioDecisionOutcome:
-    return _ScenarioDecisionOutcome(
-        decisions=list(base_decisions),
-        decision_generation_status="base_reused",
-        decisions_regenerated=False,
     )
 
 
@@ -974,8 +946,8 @@ def _write_validation_artifacts(
         )
         write_json_artifact(
             result_dir,
-            "robustness_matrix.json",
-            robustness_matrix_payload(
+            "cost_fill_sensitivity.json",
+            cost_fill_sensitivity_payload(
                 decision=decision,
                 backend_results=backend_results,
                 failure_details=failure_details,
@@ -1014,4 +986,3 @@ def _write_validation_artifacts(
             data_provenance=data_provenance,
             backend_results=backend_results,
         )
-

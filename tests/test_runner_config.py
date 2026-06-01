@@ -25,16 +25,22 @@ def write_config(
     strategy_path: str = "tested/demo.py",
     data_kind: str = "bars",
     dataset: str | None = "equity_1min",
-    output_mode: str = "gate",
+    quick_checks: bool | None = None,
     results_dir: str = "results",
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     allow_same_bar_close_fill: bool = False,
     artifact_profile: str | None = None,
+    output_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
     artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    quick_checks_line = (
+        f"quick_checks = {str(quick_checks).lower()}\n"
+        if quick_checks is not None
+        else ""
+    )
     config_path = repo_root / "run.toml"
     config_path.write_text(
         f'''
@@ -63,8 +69,7 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "{results_dir}"
-mode = "{output_mode}"
-{artifact_profile_line}
+{quick_checks_line}{artifact_profile_line}{output_extra}
 '''.lstrip()
     )
     return config_path
@@ -78,6 +83,7 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.strategy_id == "demo"
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
+    assert config.output.quick_checks is False
     assert config.output.artifact_profile == "diagnostic"
     assert config.output.diagnostic_sample_trades == 5
     assert config.params == {"weight": 1.0}
@@ -102,6 +108,16 @@ def test_committed_run_configs_default_to_diagnostic_profile():
         config = load_config(path, repo_root=repo_root)
         if "artifact_profile" not in text:
             assert config.output.artifact_profile == "diagnostic"
+
+
+def test_output_quick_checks_accepts_explicit_true_and_false(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    enabled = load_config(write_config(tmp_path, quick_checks=True), repo_root=tmp_path)
+    disabled = load_config(write_config(tmp_path, quick_checks=False), repo_root=tmp_path)
+
+    assert enabled.output.quick_checks is True
+    assert disabled.output.quick_checks is False
 
 
 def test_committed_run_configs_use_decision_strategy_contract():
@@ -136,11 +152,12 @@ def test_missing_required_config_fields_are_rejected(tmp_path: Path, content: st
         load_config(path, repo_root=tmp_path)
 
 
-def test_unknown_output_mode_is_rejected(tmp_path: Path):
+def test_legacy_output_mode_is_rejected(tmp_path: Path):
     write_strategy(tmp_path)
+    legacy_mode_line = "mode = " + '"gate"' + "\n"
 
-    with pytest.raises(ConfigError, match="output.mode"):
-        load_config(write_config(tmp_path, output_mode="paper"), repo_root=tmp_path)
+    with pytest.raises(ConfigError, match="mode"):
+        load_config(write_config(tmp_path, output_extra=legacy_mode_line), repo_root=tmp_path)
 
 
 @pytest.mark.parametrize("artifact_profile", ["diagnostic", "summary", "full"])
@@ -161,7 +178,7 @@ def test_full_artifact_profile_is_accepted_with_explicit_opt_in(tmp_path: Path):
 def test_unknown_artifact_profile_is_rejected(tmp_path: Path):
     write_strategy(tmp_path)
     path = write_config(tmp_path)
-    path.write_text(path.read_text().replace('mode = "gate"\n', 'mode = "gate"\nartifact_profile = "compact"\n'))
+    path.write_text(path.read_text() + 'artifact_profile = "compact"\n')
 
     with pytest.raises(ConfigError, match="artifact_profile"):
         load_config(path, repo_root=tmp_path)
@@ -173,8 +190,8 @@ def test_diagnostic_sample_trades_range_is_accepted(tmp_path: Path, value: int):
     path = write_config(tmp_path)
     path.write_text(
         path.read_text().replace(
-            'mode = "gate"\n',
-            f'mode = "gate"\ndiagnostic_sample_trades = {value}\n',
+            '[output]\nresults_dir = "results"\n',
+            f'[output]\nresults_dir = "results"\ndiagnostic_sample_trades = {value}\n',
         )
     )
 
@@ -189,8 +206,8 @@ def test_diagnostic_sample_trades_out_of_range_is_rejected(tmp_path: Path, value
     path = write_config(tmp_path)
     path.write_text(
         path.read_text().replace(
-            'mode = "gate"\n',
-            f'mode = "gate"\ndiagnostic_sample_trades = {value}\n',
+            '[output]\nresults_dir = "results"\n',
+            f'[output]\nresults_dir = "results"\ndiagnostic_sample_trades = {value}\n',
         )
     )
 

@@ -193,7 +193,6 @@ class SearchPressureConfig(ValidationConfigModel):
 
 class ScenarioRunConfig(ValidationConfigModel):
     scenario_id: str = Field(min_length=1)
-    params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     data: DataConfig

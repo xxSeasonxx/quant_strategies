@@ -65,7 +65,6 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "screen"
 '''.lstrip()
     )
     return load_config(config_path, repo_root=tmp_path)

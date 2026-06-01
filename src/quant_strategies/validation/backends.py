@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
-DecisionGenerationStatus = Literal["base_reused", "regenerated", "failed"]
 MetricValue = float | int | str | bool | None
 
 
@@ -171,9 +170,7 @@ class ScenarioBackendRunResult:
     required: bool
     result: BackendRunResult
     scenario_kind: str = "unknown"
-    decisions_regenerated: bool = False
     diagnostic_only: bool = False
-    decision_generation_status: DecisionGenerationStatus = "base_reused"
     decision_count: int = 0
     decision_records_path: str | None = None
     decision_records_sha256: str | None = None

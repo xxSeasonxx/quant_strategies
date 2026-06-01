@@ -87,8 +87,6 @@ def _backend_summary(
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
                 "diagnostic_only": item.diagnostic_only,
-                "decisions_regenerated": item.decisions_regenerated,
-                "decision_generation_status": item.decision_generation_status,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,
@@ -128,7 +126,7 @@ def _core_hashes(result_dir: Path) -> dict[str, str | None]:
         "decision_records.jsonl",
         "data_audit.json",
         "backend_runs/summary.json",
-        "robustness_matrix.json",
+        "cost_fill_sensitivity.json",
         "validation_decision.json",
         "validation_report.md",
     )

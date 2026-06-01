@@ -61,7 +61,6 @@ def decision(*, max_hold_bars: int = 1, direction: str = "long", size: float = 1
 def scenario_config(*, fee_bps: float = 0.0, slippage_bps: float = 0.0):
     return ScenarioRunConfig(
         scenario_id="realistic",
-        params={},
         fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=fee_bps, slippage_bps_per_side=slippage_bps),
         data=DataConfig(

@@ -52,7 +52,6 @@ def decision(*, minute: int = 0, direction: str = "long", size: float = 1.0, sym
 def scenario_config():
     return ScenarioRunConfig(
         scenario_id="base",
-        params={},
         fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=5.0, slippage_bps_per_side=2.0),
         data=DataConfig(

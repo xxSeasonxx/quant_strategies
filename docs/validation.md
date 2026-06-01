@@ -140,7 +140,7 @@ a mismatch fails with `strategy_generation_not_deterministic`.
 For each window, the validator expands required and diagnostic scenarios, runs the
 engine verdict kernel (and, when enabled, the agreement oracle), and classifies:
 
-- **`mechanical_pass`** — passing data audits, required backend scenarios, valid backend
+- **`mechanical_complete`** — passing data audits, required backend scenarios, valid backend
   metrics, and at least `10` trades per required scenario. With paper-readiness enabled,
   nonpositive realistic net activity is a `hard_no`.
 - **`mechanical_review_candidate`** — mechanical validation plus paper-readiness gates:
@@ -184,7 +184,7 @@ Validation artifacts (under ignored result directories):
 - `data_audit.json`
 - `backend_runs/summary.json`
 - `backend_runs/trade_ledgers/<scenario_id>.jsonl` — per-scenario engine trade ledger
-- `robustness_matrix.json`
+- `cost_fill_sensitivity.json`
 - `validation_decision.json`
 - `validation_manifest.json`
 - `environment.json`
@@ -203,7 +203,7 @@ per scenario. The manifest records replayability per scenario and sets global
 `verdict_replayable = true` only when all required completed verdict scenarios have
 trade ledgers; `verdict_replay_basis = "engine_trade_ledger"` names the basis. The
 opt-in VectorBT Pro check emits no ledger of its own. `validation_decision.json` and
-`robustness_matrix.json` include `failure_details` for fatal setup failures, while
+`cost_fill_sensitivity.json` include `failure_details` for fatal setup failures, while
 stable policy reason strings remain unchanged.
 
 V1 validation row, decision, and trade-ledger artifacts use deterministic JSONL.

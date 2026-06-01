@@ -184,7 +184,7 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "gate"
+quick_checks = true
 artifact_profile = "{artifact_profile}"
 {diagnostic_sample_trades_line}
 '''.lstrip()

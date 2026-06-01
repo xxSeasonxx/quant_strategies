@@ -56,6 +56,7 @@ def summary_profile_payload(
         "artifact_profile": "summary",
         "replayable_from_artifacts": replayable_from_artifacts_for_profile("summary"),
         "strategy_id": config.strategy_id,
+        "quick_checks": config.output.quick_checks,
         "rows": _rows_profile_payload(
             config,
             rows,

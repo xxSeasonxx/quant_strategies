@@ -113,7 +113,6 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results"
-mode = "screen"
 artifact_profile = "summary"
 '''.lstrip()
     )

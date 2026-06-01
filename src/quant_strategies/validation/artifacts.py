@@ -123,8 +123,6 @@ def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dic
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
                 "diagnostic_only": item.diagnostic_only,
-                "decisions_regenerated": item.decisions_regenerated,
-                "decision_generation_status": item.decision_generation_status,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,
@@ -138,7 +136,7 @@ def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dic
     }
 
 
-def robustness_matrix_payload(
+def cost_fill_sensitivity_payload(
     *,
     decision: ValidationPolicyDecision,
     backend_results: list[ScenarioBackendRunResult],
@@ -153,8 +151,6 @@ def robustness_matrix_payload(
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
                 "diagnostic_only": item.diagnostic_only,
-                "decisions_regenerated": item.decisions_regenerated,
-                "decision_generation_status": item.decision_generation_status,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
                 "decision_records_sha256": item.decision_records_sha256,

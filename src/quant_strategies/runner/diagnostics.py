@@ -39,6 +39,7 @@ def diagnostic_payload(
     trade_result = _mapping_or_empty(engine.get("trade_result"))
     return {
         "strategy_id": config.strategy_id,
+        "quick_checks": config.output.quick_checks,
         "artifact_profile": "diagnostic",
         "replayable_from_artifacts": replayable_from_artifacts_for_profile("diagnostic"),
         "trade_count": engine.get("trade_count"),

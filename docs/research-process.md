@@ -57,7 +57,7 @@ Fields:
 | `message`                     | `str`             | Human-readable run message.                                                                                             |
 | `run_completed`               | `bool`            | Whether the run completed as a structured run.                                                                          |
 | `failure_stage`               | `str or None`     | Structured stage name when the run failed.                                                                              |
-| `assessment_status`           | `str`             | Quick-run assessment label, such as `screened`, `quick_check_passed`, `quick_check_failed`, `quick_check_unverified`, or `runner_failed`. |
+| `assessment_status`           | `str`             | Quick-run assessment label, such as `diagnostics_complete`, `quick_check_passed`, `quick_check_failed`, `quick_check_unverified`, or `runner_failed`. |
 | `promotion_eligible`          | `bool`            | Always false for quick-run output.                                                                                      |
 | `param_contract`              | `str`             | `validated`, `unvalidated_passthrough`, or `unknown`.                                                                   |
 | `replayable_from_artifacts`   | `bool or None`    | Whether reported quick-run metrics can be replayed from emitted artifacts alone.                                        |
@@ -151,7 +151,7 @@ Fields:
 
 | Field                      | Type              | Meaning                                                                                             |
 | -------------------------- | ----------------- | --------------------------------------------------------------------------------------------------- |
-| `decision`                 | `str`             | Current verdict label: `hard_no`, `mechanical_pass`, `watchlist`, or `mechanical_review_candidate`. |
+| `decision`                 | `str`             | Current verdict label: `hard_no`, `mechanical_complete`, `watchlist`, or `mechanical_review_candidate`. |
 | `reasons`                  | `tuple[str, ...]` | Stable reason strings attached to the decision.                                                     |
 | `advisory_decision`        | `str or None`     | Additional advisory decision value when present.                                                 |
 | `evidence_class`           | `str`             | Evidence class, currently validation advisory evidence.                                             |
@@ -190,7 +190,7 @@ Validation artifact files:
 | `backend_runs/summary.json`                         | Per-scenario backend metrics and metadata.                                           |
 | `backend_runs/decision_records/<scenario_id>.jsonl` | Per-scenario decision records used for backend execution.                            |
 | `backend_runs/trade_ledgers/<scenario_id>.jsonl`    | Per-scenario engine trade ledger.                                                    |
-| `robustness_matrix.json`                            | Current cost/fill scenario summary.                                                  |
+| `cost_fill_sensitivity.json`                       | Current cost/fill scenario summary.                                                  |
 | `validation_decision.json`                          | Serialized `ValidationPolicyDecision`.                                               |
 | `validation_manifest.json`                          | Hashes, replayability, provenance, and artifact inventory.                           |
 | `environment.json`                                  | Runtime and package environment.                                                     |
@@ -203,7 +203,7 @@ Important validation output values:
 | Value                                               | What it is                                                                                 |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `decision.decision = "hard_no"`                     | Required mechanical checks failed.                                                         |
-| `decision.decision = "mechanical_pass"`             | Mechanical execution checks passed; not paper/live/promotion authorization.                |
+| `decision.decision = "mechanical_complete"`        | Mechanical execution checks passed; not paper/live/promotion authorization.                |
 | `decision.decision = "watchlist"`                   | Positive evidence with caveats or failed paper-readiness/search-pressure gates.            |
 | `decision.decision = "mechanical_review_candidate"` | Mechanical validation plus paper-readiness gates passed without search-pressure downgrade. |
 | `promotion_eligible = false`                        | Validation does not promote.                                                               |
@@ -220,7 +220,7 @@ Current validation labels are:
 
 ```text
 hard_no
-mechanical_pass
+mechanical_complete
 watchlist
 mechanical_review_candidate
 ```
@@ -239,7 +239,7 @@ Mapping intent:
 | Current value                 | Target operator meaning                                               |
 | ----------------------------- | --------------------------------------------------------------------- |
 | `hard_no`                     | `hard_no`                                                             |
-| `mechanical_pass`             | internal/weaker mechanical state, or removed as operator-facing label |
+| `mechanical_complete`             | internal/weaker mechanical state, or removed as operator-facing label |
 | `watchlist`                   | `watchlist`                                                           |
 | `mechanical_review_candidate` | `review_candidate`                                                    |
 
@@ -249,7 +249,7 @@ Mapping intent:
 Current validation artifact:
 
 ```text
-robustness_matrix.json
+cost_fill_sensitivity.json
 ```
 
 Target artifact name:

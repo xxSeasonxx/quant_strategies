@@ -78,7 +78,7 @@ replay from emitted artifacts is required. See [docs/runner.md](docs/runner.md).
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 
 Runs the same kernel across configured windows and stress scenarios, then classifies
-the candidate into an advisory verdict (`hard_no` · `mechanical_pass` · `watchlist` ·
+the candidate into an advisory verdict (`hard_no` · `mechanical_complete` · `watchlist` ·
 `mechanical_review_candidate`) with audit-replayable per-trade ledgers. Mechanical
 only — never statistical significance, regime robustness, or promotion authority.
 `promotion_eligible` / `paper_trade_eligible` / `live_eligible` always stay false.

@@ -9,7 +9,7 @@ from quant_strategies.evidence_semantics import validation_evidence_semantics
 from quant_strategies.validation.backends import BackendMetrics, BackendRunResult, ScenarioBackendRunResult
 
 
-ValidationDecision = Literal["hard_no", "mechanical_pass", "watchlist", "mechanical_review_candidate"]
+ValidationDecision = Literal["hard_no", "mechanical_complete", "watchlist", "mechanical_review_candidate"]
 
 
 class ValidationPolicyDecision(BaseModel):
@@ -118,7 +118,7 @@ def classify_validation(
         return finish(required_gate)
 
     backend_gate = _backend_execution_gate(required_results, min_trades=min_trades)
-    if backend_gate.decision != "mechanical_pass":
+    if backend_gate.decision != "mechanical_complete":
         return finish(backend_gate)
 
     return finish(
@@ -311,7 +311,7 @@ def _backend_execution_gate(
         )
 
     return _decision(
-        "mechanical_pass",
+        "mechanical_complete",
         passed=("mechanical_validation",),
         details={
             "mechanical_validation": "required scenarios completed with valid metrics",
@@ -352,7 +352,7 @@ def _paper_readiness_decision(
 
     if not _paper_enabled(paper_readiness):
         return _decision(
-            "mechanical_pass",
+            "mechanical_complete",
             reasons=("paper_readiness_disabled",),
             passed=base_passed_gates,
             failed=("paper_readiness_enabled",),

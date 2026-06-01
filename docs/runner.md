@@ -14,25 +14,27 @@ Rows are normalized once at the data-load boundary through the neutral
 plain mapping rows typed as `Sequence[Mapping[str, Any]]`; they do not receive row
 model objects.
 
-## Modes
+## Quick Checks
 
-**`[output] mode = "screen"`** — the engine simulates entries and exits from the
-decisions, fill model, cost model, and exit policy. It reports `trade_count` plus
+By default, `[output] quick_checks` is omitted and defaults to `false`. The runner
+simulates entries and exits from the decisions, fill model, cost model, and exit
+policy, then reports `trade_count` plus
 `trade_result.sum_signed_trade_activity_gross`, `sum_signed_trade_activity_funding`,
 `sum_signed_trade_activity_cost`, and `sum_signed_trade_activity_net`. A completed
-screen has `assessment_status = "screened"`. If a strategy returns no decisions, the
-screen still completes with `trade_count = 0` and zero trade-result metrics — a
-zero-opportunity search signal, not an infrastructure failure.
+diagnostic run has `assessment_status = "diagnostics_complete"`. If a strategy
+returns no decisions, the run still completes with `trade_count = 0` and zero
+trade-result metrics — a zero-opportunity search signal, not an infrastructure
+failure.
 
-**`[output] mode = "gate"`** — the engine runs the same screen and applies quick
-checks: `valid_inputs`, `min_trades >= 1`, `positive_gross`, and `positive_net`.
-Passing checks produce `assessment_status = "quick_check_passed"` only when hidden-lookahead
+Set `[output] quick_checks = true` to apply the runner's quick checks:
+`valid_inputs`, `min_trades >= 1`, `positive_gross`, and `positive_net`. Passing
+checks produce `assessment_status = "quick_check_passed"` only when hidden-lookahead
 replay passes and all rows carry `available_at`. Passing checks with missing or
-partial `available_at` produce `assessment_status = "quick_check_unverified"`. Invalid
-`available_at` is a row contract failure. A `gate` run with no decisions completes
-normally but fails as `quick_check_failed` because `min_trades` is not met. These checks are
-mechanical checks only; they do not test statistical significance, regime robustness,
-capacity, or execution quality.
+partial `available_at` produce `assessment_status = "quick_check_unverified"`.
+Invalid `available_at` is a row contract failure. A run with no decisions completes
+normally but reports `quick_check_failed` because `min_trades` is not met. These
+checks are mechanical checks only; they do not test statistical significance, regime
+robustness, capacity, or execution quality.
 
 ## Decision support
 

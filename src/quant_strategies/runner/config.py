@@ -17,7 +17,6 @@ from quant_strategies.core.config import (
 from quant_strategies.runner.errors import ConfigError
 
 
-RunMode = Literal["screen", "gate"]
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
 # Row-contract strictness is an EXPLICIT run policy, independent of artifact
 # verbosity (`artifact_profile`). The quick-run defaults to the lenient "search"
@@ -79,7 +78,7 @@ def resolve_config_path(path: str | Path, *, repo_root: Path | None = None) -> P
 
 class OutputConfig(RunnerConfigModel):
     results_dir: Path
-    mode: RunMode
+    quick_checks: bool = False
     artifact_profile: ArtifactProfile = "diagnostic"
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
 

@@ -519,7 +519,7 @@ def test_policy_uses_worst_window_stressed_and_fill_lag_loss_floors():
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_pass_when_paper_readiness_disabled():
+def test_policy_mechanical_complete_when_paper_readiness_disabled():
     decision = classify_validation(
         data_passed=True,
         backend_results=paper_ready_scenarios(cost_returns=(-0.01, 0.0)),
@@ -527,7 +527,8 @@ def test_policy_mechanical_pass_when_paper_readiness_disabled():
         paper_readiness=PaperReadinessConfig(enabled=False),
     )
 
-    assert decision.decision == "mechanical_pass"
+    assert decision.decision == "mechanical_complete"
+    assert decision.decision not in {"watchlist", "mechanical_review_candidate"}
     assert decision.reasons == ("paper_readiness_disabled",)
     assert "paper_readiness_enabled" in decision.failed_gates
     assert_advisory_only(decision)

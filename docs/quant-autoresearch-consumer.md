@@ -217,7 +217,6 @@ slippage_bps_per_side = 0.0
 
 [output]
 results_dir = "results/<run-id>"
-mode = "screen"
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5
 ```
@@ -246,15 +245,14 @@ is never a side effect of asking for richer artifacts.
 |---|---|---|---|
 | quick run | `quant-strategies run` / `run_config` | the fast quick-run | iterate and rank here |
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
-| `[output] mode` | `screen` \| `gate` | engine quick-run scoring (`screen`) vs quick-**checking** (`gate`) — NOT the validation run | `gate` mode only applies `valid_inputs`/`min_trades` checks to the quick run |
+| `[output] quick_checks` | `false` \| `true` | optional runner quick checks — NOT the validation run | omit for diagnostics-only evidence; set `true` to apply `valid_inputs`/`min_trades` checks |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
 | `artifact_profile` | `diagnostic` \| `summary` \| `full` | artifact verbosity | never changes pass/fail |
 | `diagnostic_sample_trades` | integer 1-20 | largest winners/losers per side in `diagnostics.json` | only affects diagnostic artifact size |
 | `replayable_from_artifacts` | `true` \| `false` | derived replayability flag | follows `artifact_profile`; not set directly |
 
-The quick-run mode that applies quick checks is named `gate` (not `validate`), so
-"validate" now refers only to the validation package (`quant-strategies validate`
-/ `run_validation`) — the quick run never uses the word.
+The quick run and validation run are separate surfaces. "Validate" refers only to
+the validation package (`quant-strategies validate` / `run_validation`).
 
 Trade results are activity sums, not portfolio returns. The runner reports them
 under `trade_result.sum_signed_trade_activity_gross`,
@@ -265,10 +263,11 @@ backend, return path model, comparability, tolerance, and asymmetry so ranking
 code does not compare trade-result activity sums to NAV-path backend returns by name
 alone.
 
-A strategy may return `[]` when it finds no opportunity. In `screen` mode this
-is a completed zero-trade result with zero trade-result metrics. In `gate` mode it
-is a completed `quick_check_failed` result because the `min_trades` check fails. Treat
-that as search evidence about the candidate, not as a runner failure.
+A strategy may return `[]` when it finds no opportunity. With quick checks disabled,
+this is a completed zero-trade result with zero trade-result metrics. With quick
+checks enabled, it is a completed `quick_check_failed` result because the
+`min_trades` check fails. Treat that as search evidence about the candidate, not
+as a runner failure.
 
 ## What autoresearch Reads
 
@@ -392,7 +391,7 @@ kept advisory.
 Treat validation verdicts as advisory routing labels only:
 
 - `hard_no`: skip or return to strategy generation.
-- `mechanical_pass`: keep as mechanical evidence, not promotion evidence.
+- `mechanical_complete`: keep as mechanical evidence, not promotion evidence.
 - `watchlist`: keep only with the recorded caveat.
 - `mechanical_review_candidate`: escalate for human review.
 
@@ -427,7 +426,7 @@ with `backend_agreement_failed` on divergence, but it never produces verdict met
 The engine verdict `net_return` is audit-replayable: each scenario emits a
 per-trade ledger at `backend_runs/trade_ledgers/<scenario_id>.jsonl` (one `Trade`
 per line) referenced by `trade_ledger_path`/`trade_ledger_sha256` in
-`backend_runs/summary.json`, `robustness_matrix.json`, and the manifest, and
+`backend_runs/summary.json`, `cost_fill_sensitivity.json`, and the manifest, and
 hash-pinned under manifest `artifacts`. Recompute the gated metric by summing
 `net_return` over the ledger; `validation_manifest.json` records per-scenario
 replayability and sets global `verdict_replayable = true` only when all required

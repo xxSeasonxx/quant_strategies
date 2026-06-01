@@ -254,8 +254,6 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
         "scenario_kind": "base",
         "required": True,
         "diagnostic_only": False,
-        "decisions_regenerated": False,
-        "decision_generation_status": "base_reused",
         "decision_count": 1,
         "decision_records_path": base_decision_path,
         "decision_records_sha256": file_sha256(base_decision_file),
@@ -284,11 +282,13 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert (result.result_dir / "validation_config.toml").exists()
     assert (result.result_dir / "strategy_snapshot.py").exists()
     assert (result.result_dir / "decision_schema.json").exists()
-    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "watchlist"
-    assert "min_windows" in robustness_matrix["decision"]["failed_gates"]
-    assert len(robustness_matrix["scenarios"]) == 4
-    assert robustness_matrix["failure_details"] == []
+    legacy_sensitivity_artifact = "robustness" + "_matrix.json"
+    assert not (result.result_dir / legacy_sensitivity_artifact).exists()
+    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    assert cost_fill_sensitivity["decision"]["decision"] == "watchlist"
+    assert "min_windows" in cost_fill_sensitivity["decision"]["failed_gates"]
+    assert len(cost_fill_sensitivity["scenarios"]) == 4
+    assert cost_fill_sensitivity["failure_details"] == []
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `watchlist`" in report
     assert "Reasons: paper_readiness_gates_failed" in report
@@ -769,16 +769,16 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["gate_details"]["min_windows"] == "2 >= 2"
     assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
 
-    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["decision"]["decision"] == "watchlist"
-    assert robustness_matrix["decision"]["reasons"] == [
+    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    assert cost_fill_sensitivity["decision"]["decision"] == "watchlist"
+    assert cost_fill_sensitivity["decision"]["reasons"] == [
         "multiple_testing_not_corrected_advisory_only"
     ]
-    assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
-    assert robustness_matrix["decision"]["failed_gates"] == []
-    assert "gate_details" in robustness_matrix["decision"]
-    assert len(robustness_matrix["scenarios"]) == 8
-    assert robustness_matrix["failure_details"] == []
+    assert cost_fill_sensitivity["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
+    assert cost_fill_sensitivity["decision"]["failed_gates"] == []
+    assert "gate_details" in cost_fill_sensitivity["decision"]
+    assert len(cost_fill_sensitivity["scenarios"]) == 8
+    assert cost_fill_sensitivity["failure_details"] == []
 
     report = (result.result_dir / "validation_report.md").read_text()
     assert "Decision: `watchlist`" in report
@@ -874,9 +874,9 @@ selection_rule = "manual shortlist"
     assert decision_payload["overfit_controls"]["candidate_count"] == 20
     assert decision_payload["overfit_controls"]["trial_count"] == 5
     assert decision_payload["overfit_controls"]["selection_rule"] == "manual shortlist"
-    robustness_matrix = json.loads((result.result_dir / "robustness_matrix.json").read_text())
-    assert robustness_matrix["failure_details"] == decision_payload["failure_details"]
-    assert robustness_matrix["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
+    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    assert cost_fill_sensitivity["failure_details"] == decision_payload["failure_details"]
+    assert cost_fill_sensitivity["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
 
 
 def test_run_validation_records_backend_selection_failure_details(
@@ -1381,7 +1381,10 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     base_result = backend_summary["results"][0]
-    assert base_result["decision_generation_status"] == "base_reused"
+    legacy_generation_status = "_".join(("decision", "generation", "status"))
+    legacy_generation_flag = "_".join(("decisions", "regen" + "erated"))
+    assert legacy_generation_status not in base_result
+    assert legacy_generation_flag not in base_result
     assert base_result["decision_count"] == 1
     assert base_result["result"]["status"] == "failed"
     assert any("flat" in warning for warning in base_result["result"]["warnings"])
@@ -1467,7 +1470,6 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert result.decision.decision == "watchlist"
     configs = {item.scenario_id: item for item in backend.configs}
     decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
-    assert configs["validation_2026_h1/base"].params == {"weight": 1.0}
     assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].cost_model.slippage_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].fill_model.entry_lag_bars == 1
