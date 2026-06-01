@@ -361,7 +361,7 @@ from artifact identity; those values live in `environment.json` for audit only.
 - add compatibility adapters for old strategy output contracts.
 
 If a candidate later needs review or validation, that is a separate handoff
-workflow outside the autoresearch loop. Create an explicit `validation.toml` in
+surface outside the autoresearch loop. Create an explicit `validation.toml` in
 the candidate workspace, point it at `strategy.py`, and run:
 
 ```bash
@@ -404,9 +404,9 @@ decision; a future-dependent suppression trick fails with
 `hidden_lookahead_suppression_detected`. Runner and validation evidence expose whether
 replay was fully verified, and validation may `hard_no` incomplete or failed replay
 evidence in `data_audit.json`. Validation runs always use the validation row contract.
-`[paper_readiness] enabled = true` controls the paper-readiness gates (window count,
-trade floors, stressed and fill-lag net floors) — it no longer governs replay
-strictness.
+`[paper_readiness] enabled = true` controls the legacy-named mechanical review
+thresholds (window count, trade floors, stressed and fill-lag net floors) — it
+does not confer paper-trading readiness and no longer governs replay strictness.
 
 Validation backend metrics are flat but semantically typed in
 `backend_runs/summary.json`. The verdict PnL source is the execution kernel,
@@ -418,8 +418,10 @@ cost_return`). `gross_return` is the funding- and cost-exclusive price path;
 There is no `linear_funding_adjusted_return` and no separate VectorBT Pro verdict
 metric. `net_return` declares no cross-backend tolerance because it is a linear
 per-trade sum, not a NAV path; validation sums it linearly for the
-`realistic_net_activity_positive` gate rather than compounding it. Rank candidates on
-`net_return`. VectorBT Pro is only an explicitly enabled single-trade agreement check:
+`realistic_net_activity_positive` gate rather than compounding it. Use
+`net_return` as the mechanical review threshold input; do not treat it as a
+NAV/path return or standalone research-evaluation ranking signal. VectorBT Pro
+is only an explicitly enabled single-trade agreement check:
 when enabled it cross-checks the engine price path (`gross_return`) and fails the run
 with `backend_agreement_failed` on divergence, but it never produces verdict metrics.
 

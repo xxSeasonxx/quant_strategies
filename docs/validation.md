@@ -4,9 +4,11 @@
 validation for a config and its referenced strategy. See the [README](../README.md)
 for the overall design; validation reuses the same execution kernel as the quick run.
 
-Validation is mechanical only. Verdict labels are advisory inputs to human review,
-never autonomous promotion signals; `promotion_eligible`, `paper_trade_eligible`, and
-`live_eligible` always remain false.
+Validation is mechanical evidence validation. Verdict labels are advisory inputs
+to human review, never autonomous promotion signals; `promotion_eligible`,
+`paper_trade_eligible`, and `live_eligible` always remain false. Validation does
+not prove alpha, statistical significance, robustness, capacity, portfolio
+quality, paper-trading readiness, or live-trading readiness.
 
 ## Config layout
 
@@ -42,7 +44,11 @@ prior_search = "none"
 This proves the strategy declared enough local row lineage for backend execution. It
 is intentionally small — not a dependency DSL and not market evidence.
 
-## Paper-readiness gates
+## Mechanical review policy
+
+The config key is still `[paper_readiness]` for compatibility with the current
+implementation. Treat the key as a legacy name for mechanical review thresholds,
+not as a claim that validation confers paper-trading readiness.
 
 ```toml
 [paper_readiness]
@@ -59,8 +65,9 @@ across validation windows. The positive realistic gate is
 `realistic_net_activity_positive`: it sums the realistic-cost scenario `net_return`
 linearly across windows because `net_return` is a signed trade-activity metric, not a
 NAV-path portfolio return. Validation runs always use the validation row contract;
-`[paper_readiness] enabled = true` controls only the paper-readiness gates. It no
-longer governs replay strictness — strict replay is always on (see below).
+`[paper_readiness] enabled = true` controls only these mechanical review
+thresholds. It no longer governs replay strictness — strict replay is always on
+(see below).
 
 ## Search pressure
 
@@ -115,6 +122,7 @@ against vbt's zero-cost total return, and is sound only where the engine's linea
 per-trade sum equals a NAV path: a single-trade, close-fill, threshold-free scenario.
 It reports `skipped` otherwise. If the oracle is enabled but VectorBT Pro cannot be
 imported, the cross-check is recorded as unavailable and the engine verdict stands.
+See [docs/vectorbtpro.md](vectorbtpro.md) for the package facts and project boundary.
 
 ## What a validation run checks
 
@@ -140,15 +148,17 @@ a mismatch fails with `strategy_generation_not_deterministic`.
 For each window, the validator expands required and diagnostic scenarios, runs the
 engine verdict kernel (and, when enabled, the agreement oracle), and classifies:
 
-- **`mechanical_complete`** — passing data audits, required backend scenarios, valid backend
-  metrics, and at least `10` trades per required scenario. With paper-readiness enabled,
-  nonpositive realistic net activity is a `hard_no`.
-- **`mechanical_review_candidate`** — mechanical validation plus paper-readiness gates:
-  multiple windows, enough realistic-cost trades, no zero-trade windows, positive
-  realistic net activity, sufficient positive-window fraction, stressed-cost and
-  fill-lag loss floors, and `prior_search = "none"`.
-- **`watchlist`** — positive evidence that misses paper-readiness gates or carries
-  uncorrected search pressure.
+- **`mechanical_complete`** — passing data audits, required backend scenarios,
+  valid backend metrics, and at least `10` trades per required scenario. With
+  the legacy-named mechanical review policy enabled, nonpositive realistic net
+  activity is a `hard_no`.
+- **`mechanical_review_candidate`** — mechanical validation plus mechanical
+  review thresholds: multiple windows, enough realistic-cost trades, no
+  zero-trade windows, positive realistic net activity, sufficient
+  positive-window fraction, stressed-cost and fill-lag loss floors, and
+  `prior_search = "none"`.
+- **`watchlist`** — positive evidence that misses mechanical review thresholds
+  or carries uncorrected search pressure.
 - **`hard_no`** — failed audits, or a required scenario the engine ontology cannot
   represent (flat targets, non-`target_weight` sizing, options/futures/multi-leg). A
   required backend scenario with unsupported execution semantics is a `hard_no` because
@@ -168,7 +178,7 @@ trade-result net — so funding is part of the gated number, not a side diagnost
 funding- and cost-exclusive price path the agreement oracle cross-checks against
 VectorBT Pro. `net_return` declares no cross-backend tolerance because it is a linear
 per-trade sum, not a NAV path. Validation therefore does not compound `net_return`;
-future true NAV-path portfolio metrics must be added as separate metrics with separate
+true NAV-path portfolio metrics must be added as separate metrics with separate
 semantics.
 
 Stop-loss, take-profit, and trailing-stop exits use the shared engine convention:
@@ -207,4 +217,4 @@ opt-in VectorBT Pro check emits no ledger of its own. `validation_decision.json`
 stable policy reason strings remain unchanged.
 
 V1 validation row, decision, and trade-ledger artifacts use deterministic JSONL.
-Columnar storage is not part of the current validation artifact contract.
+Columnar storage is not part of the validation artifact contract.

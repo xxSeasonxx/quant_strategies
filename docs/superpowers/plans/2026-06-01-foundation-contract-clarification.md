@@ -4,7 +4,7 @@
 
 **Goal:** Clarify the active foundation contract so quick run, mechanical evidence validation, and the future research evaluation surface are distinct without changing code, commands, public APIs, or artifact schemas.
 
-**Architecture:** This is a docs-only contract update. `PRD.md`, `README.md`, `FOUNDATION_LOCK.md`, and `TODOS.md` become the first-read roadmap for A -> C -> B; `docs/validation.md` and `docs/quant-autoresearch-consumer.md` get narrow wording corrections where old "paper-readiness" language implies more than mechanical review. `docs/foundation-surfaces.md` is intentionally not modified because it remains the factual I/O map for implemented surfaces.
+**Architecture:** This is a docs-only contract update. `PRD.md`, `README.md`, `FOUNDATION_LOCK.md`, and `TODOS.md` become the first-read roadmap for A -> C -> B; `docs/validation.md` and `docs/quant-autoresearch-consumer.md` get narrow wording corrections where old "paper-readiness" language implies more than mechanical review. `docs/foundation-surfaces.md` is intentionally not added or modified because A must not create speculative I/O documentation for the future evaluation surface.
 
 **Tech Stack:** Markdown docs, `rg`, `git diff --check`; no Python source, no tests unless an implementation step unexpectedly touches code.
 
@@ -30,8 +30,12 @@
 - Modify if needed: `docs/quant-autoresearch-consumer.md`
   - Responsibility: downstream consumer contract.
   - Remove stale wording that makes validation sound like paper-readiness or strategy-quality evaluation.
+- Modify: `docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md`
+  - Responsibility: implementation handoff.
+  - Keep this plan consistent with the final A-scoped staged file set.
 - Do not modify: `docs/foundation-surfaces.md`
-  - It remains the current implemented I/O reference and should be updated only when the research evaluation surface is implemented.
+  - It is not part of this milestone and should not be added, staged, or updated
+    speculatively before the research evaluation surface is implemented.
 - Do not modify unless a direct contradiction is found: `docs/vectorbtpro.md`
   - Current wording already places VectorBT Pro in evaluation/research-workbench territory and says it does not prove alpha or readiness.
 
@@ -44,7 +48,7 @@
 - Inspect: `TODOS.md`
 - Inspect: `docs/validation.md`
 - Inspect: `docs/quant-autoresearch-consumer.md`
-- Inspect only: `docs/foundation-surfaces.md`
+- Do not inspect, add, or modify: `docs/foundation-surfaces.md`
 
 - [ ] **Step 1: Confirm the dirty worktree before editing**
 
@@ -68,6 +72,7 @@ TODOS.md
 docs/validation.md
 docs/quant-autoresearch-consumer.md
 docs/vectorbtpro.md
+docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md
 ```
 
 Forbidden for this plan:
@@ -396,7 +401,6 @@ advisory retained-candidate mechanical evidence. It is an evidence audit, not
 research evaluation: never statistical significance, regime robustness,
 portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 `paper_trade_eligible` / `live_eligible` always stay false. See
-[docs/foundation-surfaces.md](docs/foundation-surfaces.md) and
 [docs/validation.md](docs/validation.md).
 ```
 
@@ -482,9 +486,10 @@ with:
 After the artifact boundary locked contract, insert:
 
 ```markdown
-- **Current I/O docs boundary:** `docs/foundation-surfaces.md` describes
-  implemented surfaces only. Do not make it speculative before research
-  evaluation is implemented.
+- **Current I/O docs boundary:** current implemented-surface references live in
+  `README.md`, `docs/runner.md`, and `docs/validation.md`. Do not add or update
+  `docs/foundation-surfaces.md` speculatively before research evaluation is
+  implemented.
 ```
 
 - [ ] **Step 5: Add an approved direction section**
@@ -843,6 +848,7 @@ Expected decision: no Python tests are required if only Markdown docs changed. I
 - Stage if modified by this plan: `docs/validation.md`
 - Stage if modified by this plan: `docs/quant-autoresearch-consumer.md`
 - Stage only if modified by this plan: `docs/vectorbtpro.md`
+- Stage if modified by this plan: `docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md`
 - Do not stage: `docs/foundation-surfaces.md`
 - Do not stage: dated review/synthesis docs unless Season explicitly asks
 
@@ -851,7 +857,7 @@ Expected decision: no Python tests are required if only Markdown docs changed. I
 Run:
 
 ```bash
-git diff -- PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md
+git diff -- PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md
 ```
 
 Expected: every changed line should trace to A's contract clarification. If unrelated hunks are mixed into the same files, use `git add -p` in the next step and stage only A-related hunks.
@@ -861,13 +867,13 @@ Expected: every changed line should trace to A's contract clarification. If unre
 Prefer patch staging if the files contain pre-existing unrelated hunks:
 
 ```bash
-git add -p PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md
+git add -p PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md
 ```
 
 If the full diffs are all A-related, this non-interactive command is acceptable:
 
 ```bash
-git add -- PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md
+git add -- PRD.md README.md FOUNDATION_LOCK.md TODOS.md docs/validation.md docs/quant-autoresearch-consumer.md docs/vectorbtpro.md docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md
 ```
 
 Do not stage `docs/foundation-surfaces.md`.
@@ -890,6 +896,7 @@ TODOS.md
 docs/validation.md
 docs/quant-autoresearch-consumer.md
 docs/vectorbtpro.md
+docs/superpowers/plans/2026-06-01-foundation-contract-clarification.md
 ```
 
 `docs/vectorbtpro.md` may be absent if no direct contradiction was found.

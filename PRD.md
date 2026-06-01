@@ -2,10 +2,10 @@
 
 **Status:** Draft v1
 **Owner:** Season Yang
-**Last updated:** 2026-05-31
+**Last updated:** 2026-06-01
 **Companion documents:** `AGENTS.md` (agent contract), `README.md` (current state),
-`docs/quant-autoresearch-consumer.md` (consumer contract),
-`docs/research-process.md` (research return surfaces).
+`FOUNDATION_LOCK.md` (locked foundation contracts),
+`docs/quant-autoresearch-consumer.md` (consumer contract).
 
 This PRD is the source of truth for **why** `quant_strategies` exists and **what** it must
 provide. `README.md` describes the current implementation; this PRD describes the target
@@ -16,9 +16,10 @@ the work to be done.
 
 ## 1. One-Line Summary
 
-`quant_strategies` is a **two-step research foundation** for a small, focused quant
-research lifecycle: diagnostic quick runs for one-strategy iteration, and advisory
-validation runs for retained-candidate triage.
+`quant_strategies` is a **stateless research foundation**: it has two
+implemented public surfaces today — diagnostic quick runs and mechanical
+evidence validation — and its next missing product job is stateless research
+evaluation for frozen candidates.
 
 ---
 
@@ -28,15 +29,19 @@ validation runs for retained-candidate triage.
 
 A disciplined Python library and CLI that:
 
-1. Defines a **declarative strategy contract** (pure function → typed decisions).
+1. Defines a **declarative strategy contract** (pure function -> typed decisions).
 2. Provides a **mathematically explicit execution kernel** that turns decisions into
-  trade-level PnL with declared assumptions.
-3. Provides a **diagnostic quick-run harness** that computes quick-run evidence, causality
-  hygiene, and bounded behavior diagnostics for one strategy version.
-4. Provides an **advisory validation harness** that runs the strategy across windows and
-  scenarios with hidden-lookahead protection and writes mechanically-auditable artifacts.
-5. Exposes a **stable, minimal consumer surface** for `quant_autoresearch` to drive
-  strategy iteration without touching internals.
+   trade-level PnL with declared assumptions.
+3. Provides a **diagnostic quick-run harness** that computes quick-run evidence,
+   causality hygiene, and bounded behavior diagnostics for one strategy version.
+4. Provides a **mechanical evidence validation harness** that runs a retained
+   candidate across windows and scenarios with hidden-lookahead protection and
+   mechanically auditable artifacts.
+5. Separates the missing **research evaluation** job from validation: evaluation
+   is where frozen candidates should receive portfolio, path, robustness, and
+   economic evidence under explicit assumptions.
+6. Exposes a **stable, minimal consumer surface** for `quant_autoresearch` to drive
+   strategy iteration without touching internals.
 
 ### What the project is not
 
@@ -47,6 +52,21 @@ human-led process.
 - Not a data platform. Data acquisition, refresh, and repair are owned by `quant_data`.
 - Not a paper-trading or live-trading harness.
 - Not a research-loop driver. Auto-research is owned by `quant_autoresearch`.
+
+### Foundation jobs
+
+The product contract distinguishes three jobs:
+
+| Job | Status | Purpose |
+| --- | --- | --- |
+| Quick run | Implemented public surface | Fast causal diagnostics for one strategy version. |
+| Mechanical evidence validation | Implemented public surface through `quant-strategies validate` | Retained-candidate integrity checks across windows and scenarios. |
+| Research evaluation | Approved missing surface | Stateless economic, path, and portfolio evidence for frozen candidates. |
+
+Validation is not research evaluation. It verifies that evidence was produced
+honestly, causally, reproducibly, and audibly under explicit config. It does not
+answer whether a strategy has durable alpha, statistical significance, regime
+robustness, benchmark-relative edge, capacity, or portfolio quality.
 
 ---
 
@@ -94,7 +114,7 @@ MUST live behind explicit opt-in imports. A strategy that needs those axes must 
 to express them without monkey-patching the foundation, but the default import path must
 not imply that unsupported execution semantics are executable.
 
-**G2. Math correctness adequate for paper-readiness research.**
+**G2. Math correctness adequate for advisory research evidence.**
 Every numeric quantity emitted by the foundation MUST:
 
 - Carry a declared **unit** and **base** (e.g., "fraction of entry notional",
@@ -103,8 +123,9 @@ Every numeric quantity emitted by the foundation MUST:
 quick-run profiles are not required to be replayable; full artifact output is.
 - Declare backend-specific comparability and asymmetry explicitly. If multiple
 production backends exist later, cross-backend comparisons need a declared tolerance.
-- Be **named in a way that does not overstate what it computes** (no "paper_candidate"
-without statistical evidence; no "return" for a linear sum of per-trade results).
+- Be **named in a way that does not overstate what it computes** (no
+`validated_alpha` labels without statistical evidence; no "return" for a linear
+sum of per-trade results).
 
 **G3. Modular code with explicit ontology and the right abstractions.**
 
@@ -125,15 +146,21 @@ strategy version, explain behavior, compare against prior versions, and decide
 whether the candidate is worth retaining.
 - For validation runs, it uses the result object and structured artifacts as advisory
 retained-candidate triage.
+- For future research evaluation runs, it should pass frozen candidate inputs and
+  explicit assumptions to a separate stateless evaluation surface. That surface
+  is not part of the current public API.
 - The public consumer surface is intentionally narrow:
 `quant_strategies.runner.run_config` returns
 `quant_strategies.runner.RunResult`, and no top-level facade is promised.
 Strategy generation and backend extension points are Protocol-typed;
 internals are private.
-- User-facing workflow vocabulary MUST remain small. Daily research language centers
-on `quick run`, `validation run`, and advisory validation verdicts. Terms such as
+- User-facing foundation vocabulary MUST remain small. Current implemented
+surface language centers on `quick run`, `validation run`, and advisory
+validation verdicts. Product-direction language may name `research evaluation`
+as the missing stateless surface, but must not imply it is implemented before it
+exists. Terms such as
 `screen`, `gate`, artifact profile internals, replayability metadata, and `row_contract`
-are reference-level vocabulary, not the normal research workflow.
+are reference-level vocabulary, not the normal foundation surface.
 - Misusing the surface (returning the wrong shape, importing private modules, etc.)
 produces a clear error, not a silent miscalculation.
 
@@ -198,13 +225,31 @@ in seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vect
 engine inner-loop tuning are explicitly out of scope (§8). The goal is good performance
 code, not benchmark-chasing.
 
+**G7. Research evaluation is a separate stateless surface.**
+The next missing product surface SHOULD evaluate frozen candidates under
+explicit assumptions and emit portfolio/economic/path evidence. It should accept
+strategy and config references, params, data references or splits, portfolio
+model assumptions, cost/slippage/fill assumptions, and optional search-pressure
+metadata supplied by the caller.
+
+It SHOULD return NAV/path metrics, drawdown, turnover, exposure and
+concentration summaries, cost/slippage sensitivity, per-asset or per-regime
+breakdowns where configured, and explicit non-claims. It MUST NOT own candidate
+generation, search memory, ranking across variants, stopping rules, promotion,
+paper-trading authorization, or live-trading authorization.
+
+VectorBT Pro is appropriate here when portfolio/NAV semantics are the
+deliverable. It remains out of the quick-run hot path.
+
 ### 4.2 Non-goals (explicit, durable)
 
 **NG1.** Market validation. Mechanical and statistical checks are advisory only; no output
 flips a `paper_trade_eligible` or `live_eligible` bit autonomously. The validation
 verdict label (see G5) is itself advisory — it summarizes mechanical evidence, not
-market-validated alpha. Downstream consumers (including `quant_autoresearch`) MUST
-treat the verdict as an input to human review, never as a promotion signal.
+market-validated alpha. Future research evaluation metrics are also advisory
+evidence, not promotion authority. Downstream consumers (including
+`quant_autoresearch`) MUST treat the verdict as an input to human review, never
+as a promotion signal.
 
 **NG2.** Data acquisition, refresh, repair, source joining. These belong to `quant_data`.
 The foundation gives `quant_data` structured feedback when row contracts are violated and
@@ -240,8 +285,9 @@ usable quick-run evidence if any decision violates it. Quick runs always compute
 quick-run evidence and causality hygiene. Optional quick checks may classify the
 quick-run result, but this is not validation.
 - **NFR-SIMPLICITY.** New strategy authors can read one Protocol + one decision schema
-and write a working strategy quickly. Researchers can understand the daily workflow
-as quick run followed, when warranted, by validation run.
+and write a working strategy quickly. Researchers can distinguish fast quick-run
+diagnostics, mechanical evidence validation, and the approved missing research
+evaluation job without learning implementation vocabulary first.
 - **NFR-ROOT-CAUSE.** When a bug is fixed, the fix lands at the boundary or contract that
 produced it. Wrappers, guards, adapters, and "the new code path" are anti-patterns
 unless explicitly justified.
@@ -275,8 +321,10 @@ concentration, holding-period summaries, and representative trade samples.
 - **Auditability.** Any reported number in a `full` run is back-traceable from artifacts
 alone to the decisions, fills, and config that produced it. Compact quick-run profiles
 intentionally omit the full trade-level chain.
-- **Workflow simplicity.** A user can distinguish quick run from validation run without
-knowing implementation vocabulary such as screen/gate modes or replayability metadata.
+- **Surface simplicity.** A user can distinguish quick run, mechanical evidence
+validation, and research evaluation without knowing implementation vocabulary
+such as screen/gate modes or replayability metadata. Current docs must also make
+clear which of those jobs are implemented today.
 - **Performance.** Typical diagnostic quick runs complete in seconds, not minutes. Overhead
 the strategy did not request (eager imports, redundant deepcopies, per-run database
 reconnects, unwanted artifact writes) does not dominate wall-clock time.
