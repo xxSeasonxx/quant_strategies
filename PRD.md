@@ -45,8 +45,10 @@ A disciplined Python library and CLI that:
 
 ### What the project is not
 
-- Not a backtester users compose pipelines in. There is one pipeline. Strategies are pure
-functions.
+- Not a general-purpose backtesting framework where users compose arbitrary
+pipelines. There is one foundation pipeline. Strategies are pure functions.
+The future research evaluation surface does own stateless historical
+backtest/evaluation evidence for frozen candidates under explicit assumptions.
 - Not a market-validation authority. All outputs are advisory; promotion requires a separate
 human-led process.
 - Not a data platform. Data acquisition, refresh, and repair are owned by `quant_data`.
@@ -61,7 +63,7 @@ The product contract distinguishes three jobs:
 | --- | --- | --- |
 | Quick run | Implemented public surface | Fast causal diagnostics for one strategy version. |
 | Mechanical evidence validation | Implemented public surface through `quant-strategies validate` | Retained-candidate integrity checks across windows and scenarios. |
-| Research evaluation | Approved missing surface | Stateless economic, path, and portfolio evidence for frozen candidates. |
+| Research evaluation | Approved missing surface | Stateless historical backtest, economic, path, and portfolio evidence for frozen candidates. |
 
 Validation is not research evaluation. It verifies that evidence was produced
 honestly, causally, reproducibly, and audibly under explicit config. It does not
@@ -225,12 +227,12 @@ in seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vect
 engine inner-loop tuning are explicitly out of scope (§8). The goal is good performance
 code, not benchmark-chasing.
 
-**G7. Research evaluation is a separate stateless surface.**
+**G7. Research evaluation is a separate stateless backtest surface.**
 The next missing product surface SHOULD evaluate frozen candidates under
-explicit assumptions and emit portfolio/economic/path evidence. It should accept
-strategy and config references, params, data references or splits, portfolio
-model assumptions, cost/slippage/fill assumptions, and optional search-pressure
-metadata supplied by the caller.
+explicit assumptions and emit historical backtest, portfolio, economic, and path
+evidence. It should accept strategy and config references, params, data
+references or splits, portfolio model assumptions, cost/slippage/fill
+assumptions, and optional search-pressure metadata supplied by the caller.
 
 It SHOULD return NAV/path metrics, drawdown, turnover, exposure and
 concentration summaries, cost/slippage sensitivity, per-asset or per-regime
@@ -370,10 +372,12 @@ inadequate.
 
 - Live trading, paper trading, order routing, broker integration.
 - Real-time market data feeds.
-- A general-purpose backtesting framework. The execution kernel produces quick-run and
-validation evidence; the optional VectorBT Pro integration is only a single-trade
-agreement check, not a validation backend or verdict source. Neither is a backtester
-for free composition.
+- A general-purpose, user-composable backtesting framework. The execution kernel
+produces quick-run and validation evidence; the optional VectorBT Pro integration
+is only a single-trade agreement check, not a validation backend or verdict
+source. Future research evaluation does own stateless historical backtesting for
+frozen candidates under explicit assumptions, but it is not a free-composition
+backtester.
 - Strategy generation. (Owned by `quant_autoresearch`.)
 - Data acquisition / repair / join. (Owned by `quant_data`.)
 - Promotion automation. (Human-led process.)

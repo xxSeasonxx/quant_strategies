@@ -18,8 +18,9 @@ The project contract separates three jobs:
 - **Mechanical evidence validation**: implemented today through
   `quant-strategies validate`; retained-candidate integrity checks across
   windows and scenarios.
-- **Research evaluation**: approved missing surface; stateless portfolio,
-  economic, and path evidence for frozen candidates under explicit assumptions.
+- **Research evaluation**: approved missing surface; stateless historical
+  backtest, portfolio, economic, and path evidence for frozen candidates under
+  explicit assumptions.
 
 Validation is not research evaluation. None of these jobs authorizes paper
 trading, live trading, or autonomous promotion.
@@ -107,10 +108,10 @@ portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
-- **Research evaluation is separate and not implemented yet.** Future NAV/path,
-  drawdown, exposure, benchmark-relative, and robustness evidence belongs in a
-  stateless evaluation surface for frozen candidates, not in validation verdicts
-  or quick-run hot paths.
+- **Research evaluation is separate and not implemented yet.** Future historical
+  backtest evidence, NAV/path, drawdown, exposure, benchmark-relative, and
+  robustness evidence belongs in a stateless evaluation surface for frozen
+  candidates, not in validation verdicts or quick-run hot paths.
 - **`researched/` is not market-validated.** It may hold frozen packages from
   upstream research; validation does not treat it as special.
 

@@ -10,7 +10,8 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
   validation run. Quick run is diagnostic; validation run is mechanical evidence
   validation.
 - **Approved missing surface:** research evaluation is the next missing stateless
-  foundation surface for frozen-candidate portfolio, path, and economic evidence.
+  foundation surface for frozen-candidate historical backtest, portfolio, path,
+  and economic evidence.
 - **Strategy shape:** strategies are flat, single-file, pure strategy modules.
 - **Strategy rationale:** each strategy module docstring states thesis,
   observables, rule, assumptions, provenance, and falsifier.

@@ -13,7 +13,7 @@ make the foundation surfaces simple enough to use and honest enough to trust:
 ```text
 quick run                  -> diagnose one strategy version and decide whether to keep iterating
 mechanical evidence validation -> audit retained-candidate evidence integrity
-research evaluation        -> missing stateless surface for frozen-candidate portfolio/economic evidence
+research evaluation        -> missing stateless surface for frozen-candidate backtest/portfolio/economic evidence
 ```
 
 ## Status
@@ -29,7 +29,8 @@ protocol.
 
 The next missing product layer is a stateless evaluation surface for frozen
 candidates. It should accept strategy/config/data references and explicit
-evaluation assumptions, then return economic, path, and portfolio evidence.
+evaluation assumptions, then return historical backtest, economic, path, and
+portfolio evidence.
 
 Initial design boundaries:
 
