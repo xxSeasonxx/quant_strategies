@@ -370,10 +370,11 @@ def summary_payload(
     assessment_status: str,
     evidence_quality: dict[str, object],
     param_contract: str = "unknown",
+    economic_metrics: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
-    return {
+    payload = {
         "strategy_id": config.strategy_id,
         "quick_checks": config.output.quick_checks,
         "artifact_profile": config.output.artifact_profile,
@@ -392,6 +393,9 @@ def summary_payload(
         **semantics,
         **evidence_quality,
     }
+    if economic_metrics is not None:
+        payload["economic_metrics"] = json_safe_value(dict(economic_metrics))
+    return payload
 
 
 def _trade_count(engine_run: EngineRun) -> int | None:

@@ -265,6 +265,29 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["asymmetry"]
 
 
+def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, object]:
+    metrics = payload["economic_metrics"]
+    assert isinstance(metrics, dict)
+    assert metrics["schema_version"] == "quant_strategies.runner.economic_metrics/v1"
+    assert metrics["basis"] == "engine_trade_ledger"
+    assert set(metrics) == {
+        "schema_version",
+        "basis",
+        "trade_count",
+        "winning_trade_count",
+        "losing_trade_count",
+        "flat_trade_count",
+        "hit_rate",
+        "average_trade_net",
+        "average_win_net",
+        "average_loss_net",
+        "profit_factor",
+        "cost_share_of_abs_gross",
+        "funding_share_of_abs_gross",
+    }
+    return metrics
+
+
 def assert_no_mode_fields(value: object) -> None:
     if isinstance(value, dict):
         assert "mode" not in value
@@ -354,7 +377,7 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     assert "runner quick checks only" in (result.result_dir / "notes.md").read_text()
 
 
-def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
@@ -394,6 +417,10 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
     assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
+    metrics = assert_summary_economic_metrics(summary)
+    assert metrics["trade_count"] == summary["engine"]["trade_count"]
+    assert metrics["hit_rate"] is not None
+    assert "diagnostic_trades" not in summary["engine"]
 
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())
     assert profile["artifact_profile"] == "summary"
@@ -408,6 +435,7 @@ def test_run_config_summary_profile_writes_compact_artifacts(tmp_path: Path, mon
     assert profile["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
     assert profile["engine"]["trade_result"]["sum_signed_trade_activity_cost"] is not None
     assert profile["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
+    assert "diagnostic_trades" not in profile["engine"]
     assert_trade_result_metric_semantics(profile)
 
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
@@ -472,6 +500,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
         artifact_profile="diagnostic",
     )
     assert "diagnostic_trades" not in summary["engine"]
+    assert_summary_economic_metrics(summary)
 
     diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
     assert diagnostics["artifact_profile"] == "diagnostic"
@@ -567,6 +596,11 @@ def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
         "sum_signed_trade_activity_cost": 0.0,
         "sum_signed_trade_activity_net": 0.0,
     }
+    metrics = assert_summary_economic_metrics(summary)
+    assert metrics["trade_count"] == 0
+    assert metrics["hit_rate"] is None
+    assert metrics["average_trade_net"] is None
+    assert metrics["profit_factor"] is None
     assert_assessment(result, summary, assessment_status="diagnostics_complete")
     request = json.loads((result.result_dir / "engine_request.json").read_text())
     evidence = json.loads((result.result_dir / "evidence.json").read_text())
