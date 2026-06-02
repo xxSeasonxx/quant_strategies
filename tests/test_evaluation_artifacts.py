@@ -10,6 +10,7 @@ import pytest
 
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
+    table_metadata,
     write_evaluation_manifest,
     write_json_artifact,
     write_parquet_artifact,
@@ -47,7 +48,13 @@ def test_write_parquet_artifact_records_schema_hash_and_row_count(tmp_path: Path
     assert metadata["format"] == "parquet"
     assert metadata["compression"] == "zstd"
     assert metadata["row_count"] == 2
-    assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "timestamp", "portfolio_value"]
+    assert [column["name"] for column in metadata["columns"]] == [
+        "scenario_id",
+        "timestamp",
+        "portfolio_value",
+        "period_return",
+        "drawdown",
+    ]
     assert metadata["scenario_ids"] == ["w/base"]
     assert len(metadata["file_sha256"]) == 64
     assert len(metadata["schema_sha256"]) == 64
@@ -89,11 +96,90 @@ def test_table_metadata_is_stable_for_empty_table(tmp_path: Path):
     )
 
     assert metadata["row_count"] == 0
-    assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "asset", "turnover"]
+    assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "asset", "trade_count", "turnover"]
     logical_types = {column["name"]: column["logical_type"] for column in metadata["columns"]}
     assert logical_types["scenario_id"] == "string"
     assert logical_types["asset"] == "string"
     assert logical_types["turnover"] == "double"
+    assert logical_types["trade_count"] == "int64"
+
+
+def test_table_metadata_reads_scenario_ids_from_parquet_footer(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    write_parquet_artifact(
+        result_dir,
+        "tables/trades.parquet",
+        pd.DataFrame({"scenario_id": ["base"]}),
+        artifact_kind="trades",
+        scenario_ids=("base",),
+    )
+
+    metadata = table_metadata(
+        result_dir,
+        result_dir / "tables" / "trades.parquet",
+        artifact_kind="trades",
+    )
+
+    assert metadata["scenario_ids"] == ["base"]
+
+
+@pytest.mark.parametrize(
+    ("artifact_kind", "frame", "expected_types"),
+    [
+        (
+            "portfolio_path",
+            pd.DataFrame({"scenario_id": []}),
+            {
+                "scenario_id": "string",
+                "timestamp": "timestamp[us, tz=UTC]",
+                "portfolio_value": "double",
+                "period_return": "double",
+                "drawdown": "double",
+            },
+        ),
+        (
+            "positions",
+            pd.DataFrame({"scenario_id": []}),
+            {
+                "scenario_id": "string",
+                "asset": "string",
+                "weight": "double",
+            },
+        ),
+        (
+            "per_asset_metrics",
+            pd.DataFrame(),
+            {
+                "scenario_id": "string",
+                "asset": "string",
+                "trade_count": "int64",
+                "turnover": "double",
+            },
+        ),
+    ],
+)
+def test_write_parquet_artifact_materializes_empty_trace_table_schema(
+    tmp_path: Path,
+    artifact_kind: str,
+    frame: pd.DataFrame,
+    expected_types: dict[str, str],
+):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+
+    metadata = write_parquet_artifact(
+        result_dir,
+        f"tables/{artifact_kind}.parquet",
+        frame,
+        artifact_kind=artifact_kind,
+        scenario_ids=(),
+    )
+
+    assert metadata["row_count"] == 0
+    assert [column["name"] for column in metadata["columns"]] == list(expected_types)
+    logical_types = {column["name"]: column["logical_type"] for column in metadata["columns"]}
+    assert logical_types == expected_types
 
 
 def test_write_evaluation_manifest_rejects_partial_trace_table_artifacts(tmp_path: Path):
@@ -178,6 +264,32 @@ def test_write_evaluation_manifest_rejects_forged_trace_table_metadata(tmp_path:
             data_windows=[],
             table_artifacts=table_artifacts,
             scenario_summary=_scenario_summary("base"),
+        )
+
+
+def test_write_evaluation_manifest_rejects_forged_trace_table_scenario_ids(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = [
+        {**metadata, "scenario_ids": ["base", "stress"]}
+        for metadata in _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    ]
+
+    with pytest.raises(ValueError, match="scenario_ids"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=_scenario_summary("base", "stress"),
         )
 
 

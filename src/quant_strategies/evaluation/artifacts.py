@@ -83,6 +83,8 @@ _TRACE_COLUMN_TYPES = {
     },
 }
 
+_SCENARIO_IDS_METADATA_KEY = b"quant_strategies.scenario_ids"
+
 
 def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: datetime | None = None) -> Path:
     timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
@@ -146,14 +148,16 @@ def write_parquet_artifact(
 
     path = _artifact_path(result_dir, name)
     path.parent.mkdir(parents=True, exist_ok=True)
+    scenario_id_tuple = tuple(scenario_ids)
     table = pa.Table.from_pandas(frame, preserve_index=False)
-    table = _cast_known_trace_columns(pa, table, artifact_kind)
+    table = _materialize_known_trace_columns(pa, table, artifact_kind)
+    table = _with_scenario_ids_metadata(table, scenario_id_tuple)
     pq.write_table(table, path, compression="zstd")
     return table_metadata(
         result_dir,
         path,
         artifact_kind=artifact_kind,
-        scenario_ids=tuple(scenario_ids),
+        scenario_ids=scenario_id_tuple,
         logical_name=logical_name,
     )
 
@@ -163,7 +167,7 @@ def table_metadata(
     path: Path,
     *,
     artifact_kind: str,
-    scenario_ids: tuple[str, ...],
+    scenario_ids: tuple[str, ...] = (),
     logical_name: str | None = None,
 ) -> dict[str, Any]:
     import pyarrow.parquet as pq
@@ -171,6 +175,12 @@ def table_metadata(
     parquet_file = pq.ParquetFile(path)
     parquet_metadata = parquet_file.metadata
     schema = parquet_file.schema_arrow
+    footer_scenario_ids = _scenario_ids_from_footer(schema, artifact_kind=artifact_kind)
+    if scenario_ids and list(scenario_ids) != footer_scenario_ids:
+        raise ValueError(
+            "supplied scenario_ids do not match Parquet metadata: "
+            f"supplied={list(scenario_ids)!r}; file={footer_scenario_ids!r}"
+        )
     arrow_schema = str(schema)
     manifest_path = _artifact_path(result_dir, logical_name) if logical_name is not None else path
     relative_path = manifest_path.resolve().relative_to(result_dir.resolve()).as_posix()
@@ -194,7 +204,7 @@ def table_metadata(
         "schema_sha256": text_sha256(arrow_schema),
         "file_sha256": file_sha256(path),
         "byte_size": path.stat().st_size,
-        "scenario_ids": list(scenario_ids),
+        "scenario_ids": footer_scenario_ids,
     }
 
 
@@ -288,22 +298,53 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
     return path
 
 
-def _cast_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
+def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
     column_types = _TRACE_COLUMN_TYPES.get(artifact_kind)
     if column_types is None:
         return table
 
     fields = []
     columns = []
+    for column_name, logical_type in column_types.items():
+        arrow_type = _arrow_type(pa, logical_type)
+        if column_name in table.schema.names:
+            field = table.schema.field(column_name)
+            fields.append(pa.field(column_name, arrow_type, nullable=field.nullable))
+            columns.append(table[column_name].cast(arrow_type))
+        else:
+            fields.append(pa.field(column_name, arrow_type, nullable=True))
+            columns.append(pa.nulls(table.num_rows, type=arrow_type))
+
     for field in table.schema:
-        arrow_type = _arrow_type(pa, column_types.get(field.name))
-        if arrow_type is None:
-            fields.append(field)
-            columns.append(table[field.name])
+        if field.name in column_types:
             continue
-        fields.append(pa.field(field.name, arrow_type, nullable=field.nullable))
-        columns.append(table[field.name].cast(arrow_type))
+        fields.append(field)
+        columns.append(table[field.name])
     return pa.Table.from_arrays(columns, schema=pa.schema(fields))
+
+
+def _with_scenario_ids_metadata(table: Any, scenario_ids: tuple[str, ...]) -> Any:
+    metadata = dict(table.schema.metadata or {})
+    metadata[_SCENARIO_IDS_METADATA_KEY] = json.dumps(list(scenario_ids), allow_nan=False).encode("utf-8")
+    return table.replace_schema_metadata(metadata)
+
+
+def _scenario_ids_from_footer(schema: Any, *, artifact_kind: str) -> list[str]:
+    metadata = schema.metadata or {}
+    raw_value = metadata.get(_SCENARIO_IDS_METADATA_KEY)
+    if raw_value is None:
+        if artifact_kind in _TRACE_COLUMN_TYPES:
+            raise ValueError(f"{artifact_kind} trace table is missing scenario_ids Parquet metadata")
+        return []
+
+    try:
+        value = json.loads(raw_value.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{artifact_kind} trace table has invalid scenario_ids Parquet metadata") from exc
+
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{artifact_kind} trace table scenario_ids Parquet metadata must be a list of strings")
+    return value
 
 
 def _arrow_type(pa: Any, logical_type: str | None) -> Any:
@@ -419,7 +460,6 @@ def _validate_trace_table_metadata_item(
             result_dir,
             artifact_path,
             artifact_kind=kind,
-            scenario_ids=tuple(scenario_ids),
             logical_name=item["path"],
         )
     except Exception as exc:
