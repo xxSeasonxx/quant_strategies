@@ -1,8 +1,9 @@
 # Runner reference (quick run)
 
 `quant-strategies run path/to/config.toml` executes one TOML experiment config —
-the fast, deterministic "quick run" used for ranking and iteration. See the
-[README](../README.md) for the overall design and the strategy contract.
+the fast, deterministic "quick run" that produces factual engine diagnostic
+metrics for one strategy version. See the [README](../README.md) for the overall
+design and the strategy contract.
 
 The runner loads rows, calls the pure `generate_decisions(rows, params)`, validates
 the `StrategyDecision` contract, runs hidden-lookahead replay keyed by `decision_id`,
@@ -35,6 +36,28 @@ Invalid `available_at` is a row contract failure. A run with no decisions comple
 normally but reports `quick_check_failed` because `min_trades` is not met. These
 checks are mechanical checks only; they do not test statistical significance, regime
 robustness, capacity, or execution quality.
+
+## Economic Metrics
+
+Completed quick runs write factual engine trade-activity summaries in
+`summary.json.economic_metrics`. The block is derived from the completed
+in-memory engine trade ledger and existing `trade_result` fields. It is not a
+ranking policy, validation verdict, portfolio/NAV return, drawdown path,
+benchmark comparison, promotion signal, paper-trading signal, or live-trading
+signal.
+
+`economic_metrics.schema_version` is
+`quant_strategies.runner.economic_metrics/v1` and `basis` is
+`engine_trade_ledger`. Metrics include trade counts, hit rate, average trade
+net, average win/loss net, profit factor, cost share of absolute gross activity,
+and funding share of absolute gross activity. Rates and averages that cannot be
+computed from completed trades are `null`; profit factor is also `null` when no
+losses exist, so artifacts never emit infinity.
+
+Diagnostic-profile runs additionally write
+`diagnostics.json.economic_slices`, grouped by symbol, direction, and exit
+reason, plus a bounded win/loss distribution. These slices remain bounded
+diagnostics and are not full replay artifacts.
 
 ## Decision support
 

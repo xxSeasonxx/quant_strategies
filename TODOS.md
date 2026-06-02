@@ -40,23 +40,17 @@ during implementation.
 
 ### B. Quick-run economic diagnostics improvement
 
-Improve quick-run keep/kill diagnostics using the existing engine trade ledger
-after the evaluation follow-ups that matter to the diagnostic design are settled.
+Implemented by the quick-run economic diagnostics work. Completed quick-run
+summaries now expose factual `economic_metrics` derived from the internal engine
+trade ledger, and diagnostic-profile runs expose bounded `economic_slices`.
 
-Candidate diagnostics:
+Preserved constraints:
 
-- hit rate;
-- average trade net;
-- win/loss distribution;
-- cost and funding share;
-- active exposure or concentration summaries.
-
-Constraints:
-
-- keep quick run on the internal causality-controlled engine;
-- do not import VectorBT Pro on the quick-run hot path;
-- do not relabel engine trade-activity sums as NAV/path returns;
-- do not turn quick run into research evaluation.
+- quick run stays on the internal causality-controlled engine;
+- VectorBT Pro remains outside the quick-run hot path;
+- engine trade-activity sums are not relabeled as NAV/path returns;
+- quick run remains factual evidence output, not ranking, validation,
+  evaluation, promotion, paper-trading, or live-trading authority.
 
 ## Locked Direction
 

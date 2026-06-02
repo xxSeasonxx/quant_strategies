@@ -67,7 +67,10 @@ Output: `RunResult`. The CLI prints the result directory on success.
 Common artifacts include `config.toml`, `strategy_snapshot.py`,
 `run_manifest.json`, `summary.json`, `environment.json`, `notes.md`,
 `data_manifest.json` when data loading is reached, and optional diagnostic or
-full-profile artifacts.
+full-profile artifacts. Completed quick-run `summary.json` files include
+`economic_metrics`, a compact factual summary derived from the engine trade
+ledger. Diagnostic-profile runs additionally write `diagnostics.json` with
+`economic_slices`.
 
 ## Validation Run
 

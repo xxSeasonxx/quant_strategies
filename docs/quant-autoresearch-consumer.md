@@ -251,7 +251,7 @@ is never a side effect of asking for richer artifacts.
 
 | Surface / knob | Values | Controls | Notes |
 |---|---|---|---|
-| quick run | `quant-strategies run` / `run_config` | the fast quick-run | iterate and rank here |
+| quick run | `quant-strategies run` / `run_config` | the fast quick-run | factual diagnostics for downstream iteration |
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
 | evaluation run | `quant-strategies evaluate` / `run_evaluation` | frozen-candidate portfolio/economic/path evidence | separate from validation; no promotion authority |
 | `[output] quick_checks` | `false` \| `true` | optional runner quick checks — NOT the validation run | omit for diagnostics-only evidence; set `true` to apply `valid_inputs`/`min_trades` checks |
@@ -299,9 +299,12 @@ result.causality_verified
 result.evidence_quality_warnings
 ```
 
-For ranking and iteration, read structured artifacts from `result.result_dir`,
-especially `diagnostics.json` for diagnostic-profile runs and `summary.json` for
-all completed runs. Do not parse `notes.md` as the primary machine interface.
+For downstream consumption, read structured artifacts from `result.result_dir`,
+especially `summary.json` for every completed run and `diagnostics.json` for
+diagnostic-profile runs. `summary.json.economic_metrics` is the stable compact
+factual economic summary for completed quick runs. It is derived from the engine
+trade ledger and is not a ranking policy, validation verdict, evaluation result,
+or promotion signal. Do not parse `notes.md` as the primary machine interface.
 The evidence-quality fields exposed on `RunResult` are also written to
 `summary.json` and `data_manifest.json` for audit and replay.
 

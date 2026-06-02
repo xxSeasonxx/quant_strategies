@@ -96,7 +96,8 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 
 Loads rows, runs the pure strategy, validates the decision contract, replays for
 hidden lookahead, and computes trade-level diagnostic evidence for one strategy
-version. See [docs/runner.md](docs/runner.md).
+version. Completed quick-run summaries include factual `economic_metrics`
+derived from the internal engine trade ledger. See [docs/runner.md](docs/runner.md).
 
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 

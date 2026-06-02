@@ -148,9 +148,9 @@ evaluation then branches to VectorBT Pro rather than the engine PnL contract.
 
 - `quant_autoresearch` writes exactly two files per candidate (`strategy.py`,
 `experiment.toml`).
-- For quick runs, it uses the result object and structured artifacts to diagnose one
-strategy version, explain behavior, compare against prior versions, and decide
-whether the candidate is worth retaining.
+- For quick runs, it uses the result object and structured artifacts to consume
+factual diagnostics for one strategy version; downstream retention and iteration
+decisions belong outside `quant_strategies`.
 - For validation runs, it uses the result object and structured artifacts as advisory
 retained-candidate triage.
 - For research evaluation runs, it passes frozen candidate inputs and explicit
@@ -327,7 +327,8 @@ reported metrics are replayable from artifacts alone.
 - **Consumer integration.** `quant_autoresearch` drives iteration end-to-end using only
 the public surface; misuse fails fast and clearly.
 - **Diagnostic usefulness.** A quick run explains one strategy version with bounded
-behavior diagnostics: aggregate metrics, slices, cost/funding contribution,
+behavior diagnostics: aggregate trade-result metrics, factual `economic_metrics`
+in `summary.json`, diagnostic-profile slices, cost/funding contribution,
 concentration, holding-period summaries, and representative trade samples.
 - **Auditability.** Any reported number in a `full` run is back-traceable from artifacts
 alone to the decisions, fills, and config that produced it. Compact quick-run profiles
