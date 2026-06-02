@@ -250,6 +250,7 @@ def run_evaluation(
             scenario_summary=scenario_summary,
         )
     except (OSError, ValueError) as exc:
+        _cleanup_trace_table_dirs(result_dir)
         return _failure_result(
             result_dir,
             "artifact_write",
@@ -309,6 +310,16 @@ def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResul
         )
         for artifact_kind in ("portfolio_path", "trades", "positions", "per_asset_metrics")
     ]
+
+
+def _cleanup_trace_table_dirs(result_dir: Path) -> None:
+    for dirname in ("tables", "tables_staging"):
+        path = result_dir / dirname
+        try:
+            if path.exists():
+                shutil.rmtree(path)
+        except OSError:
+            pass
 
 
 def _combine_trace_frames(results: list[PortfolioEvaluationResult], table_name: str) -> Any:

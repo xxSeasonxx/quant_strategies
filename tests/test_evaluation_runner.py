@@ -363,3 +363,27 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "tables_staging").exists()
+
+
+def test_run_evaluation_removes_published_tables_when_manifest_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    def failing_manifest(*args: Any, **kwargs: Any) -> None:
+        raise OSError("manifest failed")
+
+    monkeypatch.setattr(evaluation_runner, "write_evaluation_manifest", failing_manifest)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    assert "manifest failed" in result.message
+    assert result.result_dir is not None
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert not (result.result_dir / "tables").exists()
+    assert not (result.result_dir / "tables_staging").exists()
