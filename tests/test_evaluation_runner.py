@@ -578,6 +578,33 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     assert not (result.result_dir / "tables_staging").exists()
 
 
+def test_run_evaluation_uses_staged_write_table_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    def forbidden_table_metadata(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValueError("runner-level metadata recompute should not run")
+
+    monkeypatch.setattr(evaluation_runner, "table_metadata", forbidden_table_metadata, raising=False)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is True
+    assert result.failure_stage is None
+    assert result.result_dir is not None
+    assert (result.result_dir / "tables" / "portfolio_path.parquet").exists()
+    manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
+    assert [item["artifact_kind"] for item in manifest["tables"]] == [
+        "portfolio_path",
+        "trades",
+        "positions",
+        "per_asset_metrics",
+    ]
+
+
 def test_run_evaluation_removes_published_tables_when_manifest_write_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

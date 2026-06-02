@@ -11,7 +11,6 @@ from quant_strategies.core.config import default_repo_root
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
     initialize_evaluation_artifacts,
-    table_metadata,
     write_data_manifest,
     write_evaluation_manifest,
     write_json_artifact,
@@ -271,12 +270,8 @@ def run_evaluation(
 
 def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:
     scenario_ids = tuple(result.scenario_id for result in results)
-    frames = {
-        "portfolio_path": _combine_trace_frames(results, "portfolio_path"),
-        "trades": _combine_trace_frames(results, "trades"),
-        "positions": _combine_trace_frames(results, "positions"),
-        "per_asset_metrics": _combine_trace_frames(results, "per_asset_metrics"),
-    }
+    artifact_kinds = ("portfolio_path", "trades", "positions", "per_asset_metrics")
+    frames = {artifact_kind: _combine_trace_frames(results, artifact_kind) for artifact_kind in artifact_kinds}
     final_dir = result_dir / "tables"
     staging_dir = result_dir / "tables_staging"
     if staging_dir.exists():
@@ -284,15 +279,18 @@ def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResul
     if final_dir.exists():
         raise OSError(f"trace table directory already exists: {final_dir}")
 
+    table_artifacts: list[dict[str, Any]] = []
     try:
-        for artifact_kind, frame in frames.items():
-            write_parquet_artifact(
-                result_dir,
-                f"tables_staging/{artifact_kind}.parquet",
-                frame,
-                artifact_kind=artifact_kind,
-                scenario_ids=scenario_ids,
-                logical_name=f"tables/{artifact_kind}.parquet",
+        for artifact_kind in artifact_kinds:
+            table_artifacts.append(
+                write_parquet_artifact(
+                    result_dir,
+                    f"tables_staging/{artifact_kind}.parquet",
+                    frames[artifact_kind],
+                    artifact_kind=artifact_kind,
+                    scenario_ids=scenario_ids,
+                    logical_name=f"tables/{artifact_kind}.parquet",
+                )
             )
         staging_dir.rename(final_dir)
     except Exception:
@@ -300,16 +298,7 @@ def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResul
             shutil.rmtree(staging_dir)
         raise
 
-    return [
-        table_metadata(
-            result_dir,
-            final_dir / f"{artifact_kind}.parquet",
-            artifact_kind=artifact_kind,
-            scenario_ids=scenario_ids,
-            logical_name=f"tables/{artifact_kind}.parquet",
-        )
-        for artifact_kind in ("portfolio_path", "trades", "positions", "per_asset_metrics")
-    ]
+    return table_artifacts
 
 
 def _cleanup_trace_table_dirs(result_dir: Path) -> None:
