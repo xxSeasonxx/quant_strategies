@@ -11,6 +11,7 @@ import pytest
 
 import quant_strategies.evaluation.runner as evaluation_runner
 from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
+from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.runner import run_evaluation
 from quant_strategies.runner.data_loader import LoadedData
 
@@ -62,6 +63,19 @@ def rows() -> list[dict[str, Any]]:
             "has_funding_event": False,
         },
     ]
+
+
+def messy_raw_rows() -> list[dict[str, Any]]:
+    messy = []
+    for row in rows():
+        raw = dict(row)
+        raw["timestamp"] = row["timestamp"].isoformat()
+        raw["available_at"] = row["available_at"].isoformat()
+        for field in ("open", "high", "low", "close"):
+            raw[field] = str(row[field])
+        raw["VendorField"] = "kept but irrelevant"
+        messy.append(raw)
+    return messy
 
 
 def write_candidate(tmp_path: Path, *, with_param_validator: bool = True) -> Path:
@@ -175,7 +189,10 @@ class PreparedFakeBackend(FakeBackend):
 def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     candidate = write_candidate(tmp_path)
     backend = PreparedFakeBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=messy_raw_rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -197,11 +214,22 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert not (result.result_dir / "tables_staging").exists()
     assert len(backend.prepare_calls) == 1
     assert len(backend.run_prepared_scenario_ids) == 6
-    assert backend.prepare_calls[0][1][0]["available_at"] == AS_OF
+    prepared_rows = backend.prepare_calls[0][1]
+    assert prepared_rows[0]["timestamp"] == AS_OF
+    assert prepared_rows[0]["available_at"] == AS_OF
+    assert prepared_rows[0]["close"] == 100.0
+    assert prepared_rows[1]["timestamp"] == DECISION
+    assert isinstance(prepared_rows[0]["timestamp"], datetime)
+    assert prepared_rows[0]["timestamp"].tzinfo is not None
+    assert isinstance(prepared_rows[0]["open"], float)
+    assert isinstance(prepared_rows[0]["high"], float)
+    assert isinstance(prepared_rows[0]["low"], float)
+    assert isinstance(prepared_rows[0]["close"], float)
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["schema_version"] == "quant_strategies.evaluation.data_manifest/v1"
     assert data_manifest["windows"][0]["window_id"] == "eval_2026_h1"
     assert data_manifest["windows"][0]["row_count"] == 4
+    assert len(data_manifest["windows"][0]["normalized_rows_sha256"]) == 64
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
     assert data_manifest["windows"][0]["row_contract"]["mode"] == "validation"
     assert data_manifest["windows"][0]["decision_count"] == 1
@@ -283,23 +311,116 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path
     assert "vectorbtpro import failed" in result.message
 
 
+def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class UnavailablePreparedBackend(FakeBackend):
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.run_prepared_calls = 0
+
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+            self.prepare_calls += 1
+            raise EvaluationDependencyError("vectorbtpro import failed")
+
+        def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
+            self.run_prepared_calls += 1
+            raise AssertionError("run_prepared should not be called after prepare_inputs fails")
+
+    candidate = write_candidate(tmp_path)
+    backend = UnavailablePreparedBackend()
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_backend_unavailable"
+    assert result.message == "vectorbtpro import failed"
+    assert backend.prepare_calls == 1
+    assert backend.run_prepared_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("backend_status", "assessment_status", "message_fragment"),
+    [
+        ("unsupported", "portfolio_evaluation_failed", "non_target_weight_sizing"),
+        ("failed", "portfolio_evaluation_failed", "prepared scenario failed"),
+        ("unavailable", "portfolio_backend_unavailable", "vectorbtpro import failed"),
+    ],
+)
+def test_run_evaluation_maps_run_prepared_failure_statuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backend_status: str,
+    assessment_status: str,
+    message_fragment: str,
+):
+    class FailingPreparedBackend(PreparedFakeBackend):
+        def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
+            self.run_prepared_scenario_ids.append(scenario.scenario_id)
+            return PortfolioEvaluationResult(
+                scenario_id=scenario.scenario_id,
+                backend=self.name,
+                status=backend_status,
+                warnings=(message_fragment,) if backend_status != "unsupported" else (),
+                unsupported_semantics=(message_fragment,) if backend_status == "unsupported" else (),
+            )
+
+    candidate = write_candidate(tmp_path)
+    backend = FailingPreparedBackend()
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == assessment_status
+    assert message_fragment in result.message
+    assert len(backend.prepare_calls) == 1
+    assert len(backend.run_prepared_scenario_ids) == 1
+
+
 def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    class BackendShouldNotBeCalled(FakeBackend):
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.run_calls = 0
+            self.run_prepared_calls = 0
+
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+            self.prepare_calls += 1
+            raise AssertionError("prepare_inputs should not be called after row contract failure")
+
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            self.run_calls += 1
+            raise AssertionError("run should not be called after row contract failure")
+
+        def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
+            self.run_prepared_calls += 1
+            raise AssertionError("run_prepared should not be called after row contract failure")
+
     candidate = write_candidate(tmp_path)
+    backend = BackendShouldNotBeCalled()
     invalid_rows = [{key: value for key, value in row.items() if key != "available_at"} for row in rows()]
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=invalid_rows),
     )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.run_completed is False
     assert result.failure_stage == "data_load"
     assert result.assessment_status == "evaluation_failed"
     assert "row contract failed" in result.message
+    assert backend.prepare_calls == 0
+    assert backend.run_calls == 0
+    assert backend.run_prepared_calls == 0
 
 
 def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fails(
