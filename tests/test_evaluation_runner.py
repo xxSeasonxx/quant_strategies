@@ -343,6 +343,46 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
 
 
 @pytest.mark.parametrize(
+    ("exception", "expected_message"),
+    [
+        (ValueError("bad rows"), "bad rows"),
+        (RuntimeError("shape drift"), "portfolio input preparation failed: shape drift"),
+    ],
+)
+def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception: Exception,
+    expected_message: str,
+):
+    class FailingPrepareBackend(FakeBackend):
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.run_prepared_calls = 0
+
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+            self.prepare_calls += 1
+            raise exception
+
+        def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
+            self.run_prepared_calls += 1
+            raise AssertionError("run_prepared should not be called after prepare_inputs fails")
+
+    candidate = write_candidate(tmp_path)
+    backend = FailingPrepareBackend()
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert result.message == expected_message
+    assert backend.prepare_calls == 1
+    assert backend.run_prepared_calls == 0
+
+
+@pytest.mark.parametrize(
     ("backend_status", "assessment_status", "message_fragment"),
     [
         ("unsupported", "portfolio_evaluation_failed", "non_target_weight_sizing"),
@@ -380,6 +420,58 @@ def test_run_evaluation_maps_run_prepared_failure_statuses(
     assert message_fragment in result.message
     assert len(backend.prepare_calls) == 1
     assert len(backend.run_prepared_scenario_ids) == 1
+
+
+def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class DuplicateScenarioBackend(FakeBackend):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+            return result.model_copy(update={"scenario_id": "duplicate_scenario"})
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=DuplicateScenarioBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert "scenario coverage mismatch" in result.message
+    assert "duplicate_scenario" in result.message
+    assert result.result_dir is not None
+    assert not (result.result_dir / "tables").exists()
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
+
+
+def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class MissingTraceTablesBackend(FakeBackend):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            return PortfolioEvaluationResult(
+                scenario_id=scenario.scenario_id,
+                backend=self.name,
+                status="completed",
+                metrics={"total_return": 0.01, "trade_count": 1},
+                tables=None,
+            )
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingTraceTablesBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert "no trace tables" in result.message
+    assert result.result_dir is not None
+    assert not (result.result_dir / "tables").exists()
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
 
 
 def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
