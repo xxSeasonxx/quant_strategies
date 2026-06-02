@@ -14,6 +14,7 @@ from quant_strategies.evaluation.artifacts import (
     write_parquet_artifact,
     write_text_artifact,
 )
+from quant_strategies.provenance import file_sha256
 
 
 def test_write_parquet_artifact_records_schema_hash_and_row_count(tmp_path: Path):
@@ -51,6 +52,26 @@ def test_write_parquet_artifact_records_schema_hash_and_row_count(tmp_path: Path
     assert len(metadata["schema_sha256"]) == 64
     assert metadata["byte_size"] > 0
     assert metadata["row_group_count"] >= 1
+
+
+def test_write_parquet_artifact_can_report_logical_path_for_staged_file(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    frame = pd.DataFrame({"scenario_id": ["base"], "portfolio_value": [100.0]})
+
+    metadata = write_parquet_artifact(
+        result_dir,
+        "tables_staging/portfolio_path.parquet",
+        frame,
+        artifact_kind="portfolio_path",
+        scenario_ids=("base",),
+        logical_name="tables/portfolio_path.parquet",
+    )
+
+    physical_path = result_dir / "tables_staging" / "portfolio_path.parquet"
+    assert physical_path.exists()
+    assert metadata["path"] == "tables/portfolio_path.parquet"
+    assert metadata["file_sha256"] == file_sha256(physical_path)
 
 
 def test_table_metadata_is_stable_for_empty_table(tmp_path: Path):

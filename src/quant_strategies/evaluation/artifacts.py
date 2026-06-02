@@ -74,6 +74,7 @@ def write_parquet_artifact(
     *,
     artifact_kind: str,
     scenario_ids: Iterable[str],
+    logical_name: str | None = None,
 ) -> dict[str, Any]:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -87,16 +88,17 @@ def write_parquet_artifact(
         path,
         artifact_kind=artifact_kind,
         scenario_ids=tuple(scenario_ids),
+        logical_name=logical_name,
     )
 
 
 def table_metadata(
     result_dir: Path,
     path: Path,
-    frame: Any | None = None,
     *,
     artifact_kind: str,
     scenario_ids: tuple[str, ...],
+    logical_name: str | None = None,
 ) -> dict[str, Any]:
     import pyarrow.parquet as pq
 
@@ -104,7 +106,8 @@ def table_metadata(
     parquet_metadata = parquet_file.metadata
     schema = parquet_file.schema_arrow
     arrow_schema = str(schema)
-    relative_path = path.resolve().relative_to(result_dir.resolve()).as_posix()
+    manifest_path = _artifact_path(result_dir, logical_name) if logical_name is not None else path
+    relative_path = manifest_path.resolve().relative_to(result_dir.resolve()).as_posix()
     return {
         "path": relative_path,
         "artifact_kind": artifact_kind,
