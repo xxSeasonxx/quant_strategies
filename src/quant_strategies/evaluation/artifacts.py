@@ -83,7 +83,6 @@ _TRACE_COLUMN_TYPES = {
 }
 
 _SCENARIO_IDS_METADATA_KEY = b"quant_strategies.scenario_ids"
-_TRUSTED_FILE_SHA256_TOKEN = object()
 _TRUSTED_FILE_SHA256_TOKEN_KEY = "_trusted_file_sha256_token"
 _TRUSTED_FILE_SHA256_VALUE_KEY = "_trusted_file_sha256"
 
@@ -162,7 +161,7 @@ def write_parquet_artifact(
         scenario_ids=scenario_id_tuple,
         logical_name=logical_name,
     )
-    metadata[_TRUSTED_FILE_SHA256_TOKEN_KEY] = _TRUSTED_FILE_SHA256_TOKEN
+    metadata[_TRUSTED_FILE_SHA256_TOKEN_KEY] = (object(), metadata["file_sha256"])
     metadata[_TRUSTED_FILE_SHA256_VALUE_KEY] = metadata["file_sha256"]
     return metadata
 
@@ -453,7 +452,13 @@ def _validate_trace_table_metadata_item(
         if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
             raise ValueError(f"{kind} trace table metadata {hash_key} must be 64 hex characters")
     trusted_file_hash = item.get(_TRUSTED_FILE_SHA256_VALUE_KEY)
-    if item.get(_TRUSTED_FILE_SHA256_TOKEN_KEY) is _TRUSTED_FILE_SHA256_TOKEN:
+    trusted_token = item.get(_TRUSTED_FILE_SHA256_TOKEN_KEY)
+    if (
+        isinstance(trusted_token, tuple)
+        and len(trusted_token) == 2
+        and trusted_token[0] is not None
+        and trusted_token[1] == trusted_file_hash
+    ):
         if trusted_file_hash != item["file_sha256"]:
             raise ValueError(f"{kind} trace table metadata file_sha256 does not match trusted writer hash")
     elif file_sha256(artifact_path) != item["file_sha256"]:
