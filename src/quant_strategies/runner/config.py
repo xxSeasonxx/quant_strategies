@@ -32,6 +32,7 @@ _SOURCE_LIKE_OUTPUT_ROOTS = frozenset(
         "examples",
         "tested",
         "untested",
+        "researched",
     }
 )
 

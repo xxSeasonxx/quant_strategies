@@ -246,6 +246,7 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         "examples/results",
         "tested/results",
         "untested/results",
+        "researched/results",
     ],
 )
 def test_output_path_under_source_like_roots_is_rejected(tmp_path: Path, results_dir: str):
