@@ -392,9 +392,9 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
 
 
 def _portfolio_tables(pd: Any, portfolio: Any, scenario_id: str) -> PortfolioTraceTables:
-    path = _frame_from_series(pd, portfolio.value(), "portfolio_value")
-    returns = _frame_from_series(pd, portfolio.returns(), "period_return")
-    drawdown = _frame_from_series(pd, portfolio.drawdowns(), "drawdown")
+    path = _frame_from_series(pd, _series_or_none(portfolio, "value"), "portfolio_value")
+    returns = _frame_from_series(pd, _series_or_none(portfolio, "returns"), "period_return")
+    drawdown = _frame_from_series(pd, _drawdown_series_or_none(portfolio), "drawdown")
     portfolio_path = path.join(returns, how="outer").join(drawdown, how="outer").reset_index()
     portfolio_path.insert(0, "scenario_id", scenario_id)
     trades = _records_frame(pd, getattr(getattr(portfolio, "trades", None), "records_readable", None), scenario_id)
@@ -467,6 +467,36 @@ def _trades_or_none(portfolio: Any) -> Any | None:
         return getattr(portfolio, "trades")
     except Exception:
         return None
+
+
+def _drawdown_series_or_none(portfolio: Any) -> Any | None:
+    drawdown = _series_or_none(portfolio, "drawdown")
+    if _is_series_like(drawdown):
+        return drawdown
+
+    drawdowns = _series_or_none(portfolio, "drawdowns")
+    if _is_series_like(drawdowns):
+        return drawdowns
+
+    for name in ("drawdown", "drawdowns"):
+        drawdown = _series_or_none(drawdowns, name)
+        if _is_series_like(drawdown):
+            return drawdown
+
+    records = _series_or_none(drawdowns, "records_readable")
+    if hasattr(records, "columns"):
+        for column in records.columns:
+            if str(column).lower().replace(" ", "_") == "drawdown":
+                return records[column]
+    return None
+
+
+def _is_series_like(values: Any | None) -> bool:
+    if values is None:
+        return False
+    if hasattr(values, "columns"):
+        return True
+    return any(hasattr(values, name) for name in ("to_frame", "tolist", "to_numpy", "_values"))
 
 
 def _set_metric(payload: dict[str, MetricValue], name: str, value: Any) -> None:

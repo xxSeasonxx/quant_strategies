@@ -280,6 +280,67 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert captured["kwargs"]["group_by"] is True
 
 
+def test_vectorbtpro_evaluation_backend_accepts_property_paths_and_drawdowns_object(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pd = pytest.importorskip("pandas")
+
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        @property
+        def records_readable(self):
+            return pd.DataFrame({"Trade Id": [1], "Column": ["BTC-PERP"]})
+
+    class FakeDrawdowns:
+        @property
+        def drawdown(self):
+            return pd.Series([0.0, 0.0, -0.019801980198])
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def __init__(self, close, **kwargs):
+            self.close = close
+            self.kwargs = kwargs
+            self.value = pd.Series([100.0, 101.0, 99.0])
+            self.returns = pd.Series([0.0, 0.01, -0.019801980198])
+            self.drawdowns = FakeDrawdowns()
+
+        def get_total_return(self):
+            return -0.01
+
+        def get_max_drawdown(self):
+            return -0.019801980198
+
+    def from_signals(close, **kwargs):
+        return FakePortfolio(close, **kwargs)
+
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=from_signals))
+    fake_pyarrow = SimpleNamespace(__name__="pyarrow")
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: EvaluationDependencies(pandas=pd, pyarrow=fake_pyarrow, vectorbtpro=fake_vbt),
+    )
+
+    result = VectorBTProEvaluationBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+    )
+
+    assert result.status == "completed"
+    assert result.tables is not None
+    assert list(result.tables.portfolio_path["scenario_id"].unique()) == ["w/realistic_costs/base_fill"]
+    assert "portfolio_value" in result.tables.portfolio_path.columns
+    assert "period_return" in result.tables.portfolio_path.columns
+    assert "drawdown" in result.tables.portfolio_path.columns
+    assert result.tables.portfolio_path["drawdown"].min() == pytest.approx(-0.019801980198)
+
+
 def test_vectorbtpro_evaluation_backend_reports_unsupported_threshold_exit():
     bad = decision()
     bad = bad.model_copy(update={"exit_policy": ExitPolicy(max_hold_bars=1, stop_loss_bps=100.0)})
