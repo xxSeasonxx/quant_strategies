@@ -122,8 +122,8 @@ Detailed trace artifacts are Parquet only through `pyarrow`:
 | --- | --- |
 | `tables/portfolio_path.parquet` | portfolio value, period return, and drawdown traces by scenario |
 | `tables/trades.parquet` | trade traces by scenario |
-| `tables/positions.parquet` | position traces by scenario |
-| `tables/per_asset_metrics.parquet` | per-asset metrics by scenario |
+| `tables/target_positions.parquet` | target-position entry/exit events by scenario; this is target schedule evidence, not realized broker position state |
+| `tables/target_exposure_summary.parquet` | target exposure decision counts and target round-trip turnover by scenario and asset |
 
 The companion JSON artifacts include `evaluation_metrics.json`,
 `scenario_summary.json`, `data_manifest.json`, `evaluation_manifest.json`,

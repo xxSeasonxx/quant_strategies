@@ -76,6 +76,7 @@ def execute_strategy_run(
     *,
     repo_root: Path,
     row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
+    require_passed_row_contract: bool = False,
 ) -> StrategyExecutionResult:
     contract_mode = RowContractMode(row_contract_mode)
     try:
@@ -124,6 +125,15 @@ def execute_strategy_run(
     rows = normalized_rows.projection_rows()
     row_hash = normalized_rows.normalized_rows_sha256
     evidence = compact_evidence_quality(normalized_rows.evidence_quality())
+    row_contract = normalized_rows.row_contract_summary()
+    if require_passed_row_contract and row_contract["status"] != "passed":
+        raise StrategyExecutionError(
+            "data_load",
+            _row_contract_failure_message(row_contract),
+            loaded_rows=rows,
+            normalized_rows=normalized_rows,
+            evidence_quality=evidence,
+        )
     strategy_rows = frozen_rows(rows)
     strategy_params = frozen_params(validated_params)
 
@@ -186,3 +196,12 @@ def _load_strategy(path: str | Path, *, repo_root: Path | None = None) -> Genera
 
 def _system_exit_message(exc: SystemExit) -> str:
     return str(exc) or repr(exc.code)
+
+
+def _row_contract_failure_message(row_contract: Mapping[str, Any]) -> str:
+    feedback = row_contract.get("quant_data_feedback")
+    if isinstance(feedback, Sequence) and not isinstance(feedback, str):
+        reasons = [str(item) for item in feedback if item]
+        if reasons:
+            return f"row contract failed: {'; '.join(reasons)}"
+    return f"row contract {row_contract['status']}"

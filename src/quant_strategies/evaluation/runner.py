@@ -79,6 +79,7 @@ def run_evaluation(
                 execution_spec,
                 repo_root=config.base_dir,
                 row_contract_mode="validation",
+                require_passed_row_contract=True,
             )
             row_contract = execution.normalized_rows.row_contract_summary()
             data_windows.append(
@@ -94,12 +95,12 @@ def run_evaluation(
                     "decision_count": len(execution.decisions),
                 }
             )
-            if row_contract["status"] == "failed":
+            if row_contract["status"] != "passed":
                 return _failure_result(
                     result_dir,
                     "data_load",
                     "evaluation_failed",
-                    "evaluation row contract failed",
+                    f"evaluation row contract {row_contract['status']}",
                     warnings=tuple(all_warnings),
                 )
 
@@ -248,7 +249,7 @@ def run_evaluation(
             table_artifacts=table_artifacts,
             scenario_summary=scenario_summary,
         )
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         _cleanup_trace_table_dirs(result_dir)
         return _failure_result(
             result_dir,
@@ -270,7 +271,7 @@ def run_evaluation(
 
 def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:
     scenario_ids = tuple(result.scenario_id for result in results)
-    artifact_kinds = ("portfolio_path", "trades", "positions", "per_asset_metrics")
+    artifact_kinds = ("portfolio_path", "trades", "target_positions", "target_exposure_summary")
     frames = {artifact_kind: _combine_trace_frames(results, artifact_kind) for artifact_kind in artifact_kinds}
     final_dir = result_dir / "tables"
     staging_dir = result_dir / "tables_staging"

@@ -21,8 +21,8 @@ from quant_strategies.provenance import (
 _REQUIRED_TRACE_TABLES = {
     "portfolio_path": "tables/portfolio_path.parquet",
     "trades": "tables/trades.parquet",
-    "positions": "tables/positions.parquet",
-    "per_asset_metrics": "tables/per_asset_metrics.parquet",
+    "target_positions": "tables/target_positions.parquet",
+    "target_exposure_summary": "tables/target_exposure_summary.parquet",
 }
 
 _REQUIRED_TRACE_TABLE_METADATA = {
@@ -69,16 +69,20 @@ _TRACE_COLUMN_TYPES = {
     "trades": {
         "scenario_id": "string",
     },
-    "positions": {
+    "target_positions": {
         "scenario_id": "string",
+        "timestamp": "timestamp_us_utc",
         "asset": "string",
-        "weight": "float64",
+        "target_weight": "float64",
+        "event": "string",
+        "decision_time": "timestamp_us_utc",
+        "direction": "string",
     },
-    "per_asset_metrics": {
+    "target_exposure_summary": {
         "scenario_id": "string",
         "asset": "string",
-        "trade_count": "int64",
-        "turnover": "float64",
+        "decision_count": "int64",
+        "target_round_trip_turnover": "float64",
     },
 }
 
@@ -191,13 +195,14 @@ def table_metadata(
     parquet_file = pq.ParquetFile(path)
     parquet_metadata = parquet_file.metadata
     schema = parquet_file.schema_arrow
+    logical_schema = schema.remove_metadata()
     footer_scenario_ids = _scenario_ids_from_footer(schema, artifact_kind=artifact_kind)
     if scenario_ids and list(scenario_ids) != footer_scenario_ids:
         raise ValueError(
             "supplied scenario_ids do not match Parquet metadata: "
             f"supplied={list(scenario_ids)!r}; file={footer_scenario_ids!r}"
         )
-    arrow_schema = str(schema)
+    arrow_schema = str(logical_schema)
     manifest_path = _artifact_path(result_dir, logical_name) if logical_name is not None else path
     relative_path = manifest_path.resolve().relative_to(result_dir.resolve()).as_posix()
     metadata = {
@@ -207,14 +212,14 @@ def table_metadata(
         "compression": _compression_from_footer(parquet_metadata),
         "row_count": int(parquet_metadata.num_rows),
         "row_group_count": int(parquet_metadata.num_row_groups),
-        "column_count": len(schema.names),
+        "column_count": len(logical_schema.names),
         "columns": [
             {
                 "name": field.name,
                 "logical_type": str(field.type),
                 "nullable": bool(field.nullable),
             }
-            for field in schema
+            for field in logical_schema
         ],
         "arrow_schema": arrow_schema,
         "schema_sha256": text_sha256(arrow_schema),
@@ -239,7 +244,7 @@ def write_evaluation_manifest(
     scenario_summary: Mapping[str, Any],
 ) -> Path:
     _validate_trace_table_artifacts(table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary)
-    manifest_table_artifacts = [_manifest_table_artifact(item) for item in table_artifacts]
+    manifest_table_artifacts = [dict(item) for item in table_artifacts]
     write_json_artifact(
         result_dir,
         "environment.json",
@@ -295,8 +300,8 @@ def write_evaluation_manifest(
                 "evaluation_manifest.json",
                 "portfolio_path.parquet",
                 "trades.parquet",
-                "positions.parquet",
-                "per_asset_metrics.parquet",
+                "target_positions.parquet",
+                "target_exposure_summary.parquet",
             },
             recursive=True,
         ),
@@ -315,11 +320,6 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
     except ValueError as exc:
         raise ValueError("Artifact name must stay inside result_dir") from exc
     return path
-
-
-def _manifest_table_artifact(item: Mapping[str, Any]) -> dict[str, Any]:
-    return dict(item)
-
 
 def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
     column_types = _TRACE_COLUMN_TYPES.get(artifact_kind)
@@ -422,7 +422,7 @@ def _validate_trace_table_artifacts(
         item = by_kind[kind]
         _validate_trace_table_metadata_item(item, kind=kind, required_path=required_path, result_dir=result_dir)
 
-        scenario_ids = _trace_table_scenario_ids(item, kind=kind)
+        scenario_ids = set(item["scenario_ids"])
         if expected_scenario_ids is None:
             expected_scenario_ids = scenario_ids
         elif scenario_ids != expected_scenario_ids:
@@ -515,13 +515,6 @@ def _validate_positive_int(item: Mapping[str, Any], key: str, *, kind: str) -> N
     value = item[key]
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"{kind} trace table metadata {key} must be > 0")
-
-
-def _trace_table_scenario_ids(item: Mapping[str, Any], *, kind: str) -> set[Any]:
-    scenario_ids = item["scenario_ids"]
-    if not isinstance(scenario_ids, (list, tuple)):
-        raise ValueError(f"{kind} trace table scenario_ids must be a list or tuple")
-    return set(scenario_ids)
 
 
 def _scenario_coverage_ids(scenario_summary: Mapping[str, Any]) -> set[Any]:

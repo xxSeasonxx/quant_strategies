@@ -176,28 +176,32 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
         ),
         write_parquet_artifact(
             result_dir,
-            "tables/positions.parquet",
+            "tables/target_positions.parquet",
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc)] * len(scenario_ids),
                     "asset": ["BTC-PERP"] * len(scenario_ids),
-                    "weight": [0.25] * len(scenario_ids),
+                    "target_weight": [0.25] * len(scenario_ids),
+                    "event": ["entry"] * len(scenario_ids),
+                    "decision_time": [datetime(2026, 1, 1, tzinfo=timezone.utc)] * len(scenario_ids),
+                    "direction": ["long"] * len(scenario_ids),
                 }
             ),
-            artifact_kind="positions",
+            artifact_kind="target_positions",
             scenario_ids=scenario_ids,
         ),
         write_parquet_artifact(
             result_dir,
-            "tables/per_asset_metrics.parquet",
+            "tables/target_exposure_summary.parquet",
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
                     "asset": ["BTC-PERP"] * len(scenario_ids),
-                    "trade_count": [1] * len(scenario_ids),
+                    "decision_count": [1] * len(scenario_ids),
                 }
             ),
-            artifact_kind="per_asset_metrics",
+            artifact_kind="target_exposure_summary",
             scenario_ids=scenario_ids,
         ),
     ]
@@ -328,9 +332,16 @@ class FakeEvaluationBackend:
         tables = PortfolioTraceTables(
             portfolio_path=frame,
             trades=pd.DataFrame({"scenario_id": [scenario.scenario_id], "trade_id": [1]}),
-            positions=pd.DataFrame({"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "weight": [0.25]}),
-            per_asset_metrics=pd.DataFrame(
-                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "trade_count": [1]}
+            target_positions=pd.DataFrame(
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "timestamp": [rows[0]["timestamp"]],
+                    "asset": ["BTC-PERP"],
+                    "target_weight": [0.25],
+                }
+            ),
+            target_exposure_summary=pd.DataFrame(
+                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
             ),
         )
         return PortfolioEvaluationResult(
@@ -439,8 +450,8 @@ def test_strip_trace_tables_removes_dataframe_payload_from_summaries():
     tables = PortfolioTraceTables(
         portfolio_path=pd.DataFrame({"scenario_id": ["base"], "portfolio_value": [100.0]}),
         trades=pd.DataFrame({"scenario_id": ["base"], "trade_id": [1]}),
-        positions=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "weight": [0.25]}),
-        per_asset_metrics=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "trade_count": [1]}),
+        target_positions=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "target_weight": [0.25]}),
+        target_exposure_summary=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "decision_count": [1]}),
     )
     result = PortfolioEvaluationResult(
         scenario_id="base",

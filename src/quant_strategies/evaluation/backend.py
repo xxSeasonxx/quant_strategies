@@ -23,8 +23,8 @@ EvaluationBackendStatus = Literal["completed", "failed", "unsupported", "unavail
 class PortfolioTraceTables:
     portfolio_path: Any
     trades: Any
-    positions: Any
-    per_asset_metrics: Any
+    target_positions: Any
+    target_exposure_summary: Any
 
 
 @dataclass(frozen=True)
@@ -225,53 +225,6 @@ def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[s
     return close
 
 
-def _decision_windows(
-    pd: Any,
-    close: Any,
-    decisions: list[StrategyDecision],
-    scenario: EvaluationScenario,
-) -> list[dict[str, Any]]:
-    entry_lag = _fill_lag(scenario, "entry_lag_bars", default=1)
-    exit_lag = _fill_lag(scenario, "exit_lag_bars", default=0)
-    windows: list[dict[str, Any]] = []
-
-    for item in decisions:
-        symbol = item.instrument.symbol
-        if symbol not in close.columns:
-            raise ValueError(f"missing_symbol:{symbol}")
-
-        symbol_close = close.loc[close[symbol].notna(), [symbol]]
-        decision_idx = _index_position(pd, symbol_close.index, item.decision_time)
-        if decision_idx is None:
-            raise ValueError(f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
-
-        entry_idx = decision_idx + entry_lag
-        if entry_idx >= len(symbol_close.index):
-            raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
-        entry_time = symbol_close.index[entry_idx]
-
-        exit_idx = entry_idx + item.exit_policy.max_hold_bars + exit_lag
-        if exit_idx >= len(symbol_close.index):
-            raise ValueError(f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
-        exit_time = symbol_close.index[exit_idx]
-
-        windows.append(
-            {
-                "decision": item,
-                "symbol": symbol,
-                "entry_idx": entry_idx,
-                "exit_idx": exit_idx,
-                "entry_time": entry_time,
-                "exit_time": exit_time,
-            }
-        )
-
-    _validate_max_gross_target_weight(windows)
-    _validate_duplicate_signals(windows)
-    _validate_overlapping_symbol_windows(windows)
-    return windows
-
-
 def _symbol_indexes(close: Any, *, symbols: Sequence[str]) -> dict[str, Any]:
     indexes: dict[str, Any] = {}
     for symbol in symbols:
@@ -447,14 +400,14 @@ def _run_portfolio(
 
 
 def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> dict[str, MetricValue]:
-    returns = _series_or_none(portfolio, "returns")
-    values = _series_or_none(portfolio, "value")
-    total_return = _call_metric(portfolio, "get_total_return")
-    max_drawdown = _call_metric(portfolio, "get_max_drawdown")
+    returns = _attribute_value_or_none(portfolio, "returns")
+    values = _attribute_value_or_none(portfolio, "value")
+    total_return = _attribute_value_or_none(portfolio, "get_total_return")
+    max_drawdown = _attribute_value_or_none(portfolio, "get_max_drawdown")
     trades = _trades_or_none(portfolio)
-    trade_count = _call_metric(trades, "count") if trades is not None else None
-    win_rate = _call_metric(trades, "win_rate") if trades is not None else None
-    profit_factor = _call_metric(trades, "profit_factor") if trades is not None else None
+    trade_count = _attribute_value_or_none(trades, "count") if trades is not None else None
+    win_rate = _attribute_value_or_none(trades, "win_rate") if trades is not None else None
+    profit_factor = _attribute_value_or_none(trades, "profit_factor") if trades is not None else None
 
     payload: dict[str, MetricValue] = {}
     _set_metric(payload, "total_return", total_return)
@@ -499,43 +452,73 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
 
 
 def _portfolio_tables(pd: Any, portfolio: Any, scenario_id: str, windows: list[dict[str, Any]]) -> PortfolioTraceTables:
-    path = _frame_from_series(pd, _series_or_none(portfolio, "value"), "portfolio_value")
-    returns = _frame_from_series(pd, _series_or_none(portfolio, "returns"), "period_return")
+    path = _frame_from_series(pd, _attribute_value_or_none(portfolio, "value"), "portfolio_value")
+    returns = _frame_from_series(pd, _attribute_value_or_none(portfolio, "returns"), "period_return")
     drawdown = _frame_from_series(pd, _drawdown_series_or_none(portfolio), "drawdown")
     portfolio_path = path.join(returns, how="outer").join(drawdown, how="outer").reset_index()
     portfolio_path.insert(0, "scenario_id", scenario_id)
     trades = _records_frame(pd, getattr(getattr(portfolio, "trades", None), "records_readable", None), scenario_id)
-    positions = _positions_frame(pd, windows, scenario_id)
-    per_asset_metrics = _per_asset_metrics_frame(pd, windows, scenario_id)
+    target_positions = _target_positions_frame(pd, windows, scenario_id)
+    target_exposure_summary = _target_exposure_summary_frame(pd, windows, scenario_id)
     return PortfolioTraceTables(
         portfolio_path=portfolio_path,
         trades=trades,
-        positions=positions,
-        per_asset_metrics=per_asset_metrics,
+        target_positions=target_positions,
+        target_exposure_summary=target_exposure_summary,
     )
 
 
-def _positions_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
+def _target_positions_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
     if not windows:
-        return pd.DataFrame({"scenario_id": [], "asset": [], "weight": []})
+        return pd.DataFrame(
+            {
+                "scenario_id": [],
+                "timestamp": [],
+                "asset": [],
+                "target_weight": [],
+                "event": [],
+                "decision_time": [],
+                "direction": [],
+            }
+        )
     return pd.DataFrame(
         [
-            {
-                "scenario_id": scenario_id,
-                "asset": window["symbol"],
-                "entry_time": window["entry_time"],
-                "exit_time": window["exit_time"],
-                "direction": window["decision"].target.direction,
-                "weight": float(window["decision"].target.size),
-            }
+            record
             for window in windows
+            for record in (
+                {
+                    "scenario_id": scenario_id,
+                    "timestamp": window["entry_time"],
+                    "asset": window["symbol"],
+                    "target_weight": _signed_target_weight(window),
+                    "event": "entry",
+                    "decision_time": window["decision"].decision_time,
+                    "direction": window["decision"].target.direction,
+                },
+                {
+                    "scenario_id": scenario_id,
+                    "timestamp": window["exit_time"],
+                    "asset": window["symbol"],
+                    "target_weight": 0.0,
+                    "event": "exit",
+                    "decision_time": window["decision"].decision_time,
+                    "direction": window["decision"].target.direction,
+                },
+            )
         ]
     )
 
 
-def _per_asset_metrics_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
+def _target_exposure_summary_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
     if not windows:
-        return pd.DataFrame({"scenario_id": [], "asset": [], "trade_count": [], "turnover": []})
+        return pd.DataFrame(
+            {
+                "scenario_id": [],
+                "asset": [],
+                "decision_count": [],
+                "target_round_trip_turnover": [],
+            }
+        )
     by_asset: dict[str, dict[str, float | int | str]] = {}
     for window in windows:
         asset = window["symbol"]
@@ -544,13 +527,20 @@ def _per_asset_metrics_frame(pd: Any, windows: list[dict[str, Any]], scenario_id
             {
                 "scenario_id": scenario_id,
                 "asset": asset,
-                "trade_count": 0,
-                "turnover": 0.0,
+                "decision_count": 0,
+                "target_round_trip_turnover": 0.0,
             },
         )
-        metrics["trade_count"] = int(metrics["trade_count"]) + 1
-        metrics["turnover"] = float(metrics["turnover"]) + (2.0 * abs(float(window["decision"].target.size)))
+        metrics["decision_count"] = int(metrics["decision_count"]) + 1
+        metrics["target_round_trip_turnover"] = float(metrics["target_round_trip_turnover"]) + (
+            2.0 * abs(float(window["decision"].target.size))
+        )
     return pd.DataFrame(list(by_asset.values()))
+
+
+def _signed_target_weight(window: Mapping[str, Any]) -> float:
+    weight = float(window["decision"].target.size)
+    return -weight if window["decision"].target.direction == "short" else weight
 
 
 def _index_position(pd: Any, index: Any, value: Any) -> int | None:
@@ -585,18 +575,7 @@ def _cost_bps_fraction(scenario: EvaluationScenario, field: str) -> float:
     return float_value / 10_000.0
 
 
-def _series_or_none(owner: Any, name: str) -> Any | None:
-    try:
-        value = getattr(owner, name)
-    except Exception:
-        return None
-    try:
-        return value() if callable(value) else value
-    except Exception:
-        return None
-
-
-def _call_metric(owner: Any, name: str) -> Any | None:
+def _attribute_value_or_none(owner: Any, name: str) -> Any | None:
     try:
         value = getattr(owner, name)
     except Exception:
@@ -615,20 +594,20 @@ def _trades_or_none(portfolio: Any) -> Any | None:
 
 
 def _drawdown_series_or_none(portfolio: Any) -> Any | None:
-    drawdown = _series_or_none(portfolio, "drawdown")
+    drawdown = _attribute_value_or_none(portfolio, "drawdown")
     if _is_series_like(drawdown):
         return drawdown
 
-    drawdowns = _series_or_none(portfolio, "drawdowns")
+    drawdowns = _attribute_value_or_none(portfolio, "drawdowns")
     if _is_series_like(drawdowns):
         return drawdowns
 
     for name in ("drawdown", "drawdowns"):
-        drawdown = _series_or_none(drawdowns, name)
+        drawdown = _attribute_value_or_none(drawdowns, name)
         if _is_series_like(drawdown):
             return drawdown
 
-    records = _series_or_none(drawdowns, "records_readable")
+    records = _attribute_value_or_none(drawdowns, "records_readable")
     if hasattr(records, "columns"):
         for column in records.columns:
             if str(column).lower().replace(" ", "_") == "drawdown":

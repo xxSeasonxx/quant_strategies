@@ -183,8 +183,8 @@ There is no JSONL fallback path for evaluation traces.
 | --- | --- |
 | `tables/portfolio_path.parquet` | aggregate portfolio value, period return, and drawdown trace rows by `scenario_id` |
 | `tables/trades.parquet` | aggregate trade trace rows by `scenario_id` |
-| `tables/positions.parquet` | aggregate position trace rows by `scenario_id` |
-| `tables/per_asset_metrics.parquet` | aggregate per-asset metrics by `scenario_id` |
+| `tables/target_positions.parquet` | aggregate target-position entry/exit events by `scenario_id`, timestamp, and asset; this is target schedule evidence, not realized broker position state |
+| `tables/target_exposure_summary.parquet` | aggregate target exposure decision counts and target round-trip turnover by `scenario_id` and asset |
 
 ## What This Project Does Not Decide
 

@@ -328,8 +328,8 @@ def test_vectorbtpro_evaluation_backend_emits_no_trade_evidence_for_zero_decisio
     assert result.tables is not None
     assert not result.tables.portfolio_path.empty
     assert result.tables.trades.empty
-    assert result.tables.positions.empty
-    assert result.tables.per_asset_metrics.empty
+    assert result.tables.target_positions.empty
+    assert result.tables.target_exposure_summary.empty
     assert captured["close_columns"] == ["BTC-PERP"]
 
 
@@ -584,12 +584,14 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert result.tables is not None
     assert not result.tables.portfolio_path.empty
     assert not result.tables.trades.empty
-    assert not result.tables.positions.empty
-    assert not result.tables.per_asset_metrics.empty
-    assert result.tables.positions.loc[0, "asset"] == "BTC-PERP"
-    assert result.tables.positions.loc[0, "weight"] == pytest.approx(1.0)
-    assert result.tables.per_asset_metrics.loc[0, "trade_count"] == 1
-    assert result.tables.per_asset_metrics.loc[0, "turnover"] == pytest.approx(2.0)
+    assert not result.tables.target_positions.empty
+    assert not result.tables.target_exposure_summary.empty
+    assert list(result.tables.target_positions["event"]) == ["entry", "exit"]
+    assert result.tables.target_positions.loc[0, "asset"] == "BTC-PERP"
+    assert result.tables.target_positions.loc[0, "target_weight"] == pytest.approx(1.0)
+    assert result.tables.target_positions.loc[1, "target_weight"] == pytest.approx(0.0)
+    assert result.tables.target_exposure_summary.loc[0, "decision_count"] == 1
+    assert result.tables.target_exposure_summary.loc[0, "target_round_trip_turnover"] == pytest.approx(2.0)
     assert set(captured["close_columns"]) == {"BTC-PERP"}
     assert captured["kwargs"]["cash_sharing"] is True
     assert captured["kwargs"]["group_by"] is True
@@ -710,19 +712,21 @@ def test_vectorbtpro_evaluation_backend_fails_when_simultaneous_gross_exposure_e
     assert "portfolio_target_weight_exceeds_one" in result.warnings[0]
 
 
-def test_decision_windows_reject_same_symbol_overlap_after_different_entries(monkeypatch: pytest.MonkeyPatch):
-    pd = pytest.importorskip("pandas")
+def test_prepared_decision_windows_reject_same_symbol_overlap_after_different_entries(monkeypatch: pytest.MonkeyPatch):
     install_fake_vbt(monkeypatch)
     overlap_rows = rows() + [
         {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc), "close": 104.0},
     ]
-    close = backend_module._close_frame(pd, overlap_rows, symbols=("BTC-PERP",))
     later_decision = decision(size=0.4).model_copy(
         update={"decision_time": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)}
     )
+    prepared = VectorBTProEvaluationBackend().prepare_inputs(
+        decisions=[decision(size=0.4), later_decision],
+        rows=overlap_rows,
+    )
 
     with pytest.raises(ValueError, match="^overlapping_decision_window:BTC-PERP:"):
-        backend_module._decision_windows(pd, close, [decision(size=0.4), later_decision], scenario())
+        backend_module._prepared_decision_windows(prepared, scenario())
 
 
 def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():

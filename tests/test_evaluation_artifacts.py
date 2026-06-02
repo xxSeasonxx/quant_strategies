@@ -85,23 +85,28 @@ def test_write_parquet_artifact_can_report_logical_path_for_staged_file(tmp_path
 def test_table_metadata_is_stable_for_empty_table(tmp_path: Path):
     result_dir = tmp_path / "results"
     result_dir.mkdir()
-    frame = pd.DataFrame({"scenario_id": [], "asset": [], "turnover": []})
+    frame = pd.DataFrame({"scenario_id": [], "asset": [], "target_round_trip_turnover": []})
 
     metadata = write_parquet_artifact(
         result_dir,
-        "tables/per_asset_metrics.parquet",
+        "tables/target_exposure_summary.parquet",
         frame,
-        artifact_kind="per_asset_metrics",
+        artifact_kind="target_exposure_summary",
         scenario_ids=(),
     )
 
     assert metadata["row_count"] == 0
-    assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "asset", "trade_count", "turnover"]
+    assert [column["name"] for column in metadata["columns"]] == [
+        "scenario_id",
+        "asset",
+        "decision_count",
+        "target_round_trip_turnover",
+    ]
     logical_types = {column["name"]: column["logical_type"] for column in metadata["columns"]}
     assert logical_types["scenario_id"] == "string"
     assert logical_types["asset"] == "string"
-    assert logical_types["turnover"] == "double"
-    assert logical_types["trade_count"] == "int64"
+    assert logical_types["target_round_trip_turnover"] == "double"
+    assert logical_types["decision_count"] == "int64"
 
 
 def test_table_metadata_reads_scenario_ids_from_parquet_footer(tmp_path: Path):
@@ -139,22 +144,26 @@ def test_table_metadata_reads_scenario_ids_from_parquet_footer(tmp_path: Path):
             },
         ),
         (
-            "positions",
+            "target_positions",
             pd.DataFrame({"scenario_id": []}),
             {
                 "scenario_id": "string",
+                "timestamp": "timestamp[us, tz=UTC]",
                 "asset": "string",
-                "weight": "double",
+                "target_weight": "double",
+                "event": "string",
+                "decision_time": "timestamp[us, tz=UTC]",
+                "direction": "string",
             },
         ),
         (
-            "per_asset_metrics",
+            "target_exposure_summary",
             pd.DataFrame(),
             {
                 "scenario_id": "string",
                 "asset": "string",
-                "trade_count": "int64",
-                "turnover": "double",
+                "decision_count": "int64",
+                "target_round_trip_turnover": "double",
             },
         ),
     ],
@@ -478,15 +487,8 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
     )
 
     manifest = json.loads((result_dir / "evaluation_manifest.json").read_text())
-    trace_table_names = {
-        "portfolio_path.parquet",
-        "trades.parquet",
-        "positions.parquet",
-        "per_asset_metrics.parquet",
-    }
     artifact_paths = set(manifest["artifacts"])
     assert not any(path.endswith(".parquet") for path in artifact_paths)
-    assert not any(path == f"tables/{name}" for path in artifact_paths for name in trace_table_names)
     assert manifest["tables"][0]["path"] == "tables/portfolio_path.parquet"
     assert manifest["tables"][0]["file_sha256"]
     assert manifest["trace_artifacts"]["table_count"] == 4
@@ -551,28 +553,32 @@ def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, .
         ),
         write_parquet_artifact(
             result_dir,
-            "tables/positions.parquet",
+            "tables/target_positions.parquet",
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
                     "asset": ["SPY" for _ in scenario_ids],
-                    "weight": [1.0 for _ in scenario_ids],
+                    "target_weight": [1.0 for _ in scenario_ids],
+                    "event": ["entry" for _ in scenario_ids],
+                    "decision_time": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
+                    "direction": ["long" for _ in scenario_ids],
                 }
             ),
-            artifact_kind="positions",
+            artifact_kind="target_positions",
             scenario_ids=scenario_ids,
         ),
         write_parquet_artifact(
             result_dir,
-            "tables/per_asset_metrics.parquet",
+            "tables/target_exposure_summary.parquet",
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
                     "asset": ["SPY" for _ in scenario_ids],
-                    "turnover": [0.1 for _ in scenario_ids],
+                    "target_round_trip_turnover": [0.1 for _ in scenario_ids],
                 }
             ),
-            artifact_kind="per_asset_metrics",
+            artifact_kind="target_exposure_summary",
             scenario_ids=scenario_ids,
         ),
     ]

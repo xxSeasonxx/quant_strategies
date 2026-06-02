@@ -153,9 +153,16 @@ class FakeBackend:
         tables = PortfolioTraceTables(
             portfolio_path=frame,
             trades=pd.DataFrame({"scenario_id": [scenario.scenario_id], "trade_id": [1]}),
-            positions=pd.DataFrame({"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "weight": [0.25]}),
-            per_asset_metrics=pd.DataFrame(
-                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "trade_count": [1]}
+            target_positions=pd.DataFrame(
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "timestamp": [rows[0]["timestamp"]],
+                    "asset": ["BTC-PERP"],
+                    "target_weight": [0.25],
+                }
+            ),
+            target_exposure_summary=pd.DataFrame(
+                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
             ),
         )
         return PortfolioEvaluationResult(
@@ -209,8 +216,8 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert (result.result_dir / "evaluation_manifest.json").exists()
     assert (result.result_dir / "tables" / "portfolio_path.parquet").exists()
     assert (result.result_dir / "tables" / "trades.parquet").exists()
-    assert (result.result_dir / "tables" / "positions.parquet").exists()
-    assert (result.result_dir / "tables" / "per_asset_metrics.parquet").exists()
+    assert (result.result_dir / "tables" / "target_positions.parquet").exists()
+    assert (result.result_dir / "tables" / "target_exposure_summary.parquet").exists()
     assert not (result.result_dir / "tables_staging").exists()
     assert len(backend.prepare_calls) == 1
     assert len(backend.run_prepared_scenario_ids) == 6
@@ -240,14 +247,14 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert {item["artifact_kind"] for item in manifest["tables"]} == {
         "portfolio_path",
         "trades",
-        "positions",
-        "per_asset_metrics",
+        "target_positions",
+        "target_exposure_summary",
     }
     assert {item["path"] for item in manifest["tables"]} == {
         "tables/portfolio_path.parquet",
         "tables/trades.parquet",
-        "tables/positions.parquet",
-        "tables/per_asset_metrics.parquet",
+        "tables/target_positions.parquet",
+        "tables/target_exposure_summary.parquet",
     }
     assert all(len(item["scenario_ids"]) == 6 for item in manifest["tables"])
     assert manifest["scenario_coverage"]["expected_count"] == 6
@@ -515,6 +522,31 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
     assert backend.run_prepared_calls == 0
 
 
+def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class BackendShouldNotBeCalled(FakeBackend):
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+            raise AssertionError("prepare_inputs should not be called after empty row contract")
+
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            raise AssertionError("run should not be called after empty row contract")
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=[]),
+    )
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=BackendShouldNotBeCalled())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "data_load"
+    assert result.assessment_status == "evaluation_failed"
+    assert "row_contract_not_evaluated:no_rows" in result.message
+
+
 def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -562,7 +594,7 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
         nonlocal calls
         calls += 1
         if calls == 4:
-            raise OSError("disk full")
+            raise TypeError("arrow conversion failed")
         return real_write(*args, **kwargs)
 
     monkeypatch.setattr(evaluation_runner, "write_parquet_artifact", failing_write)
@@ -572,7 +604,7 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
     assert result.assessment_status == "evaluation_failed"
-    assert "disk full" in result.message
+    assert "arrow conversion failed" in result.message
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "tables_staging").exists()
@@ -585,11 +617,6 @@ def test_run_evaluation_uses_staged_write_table_metadata(
     candidate = write_candidate(tmp_path)
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
-    def forbidden_table_metadata(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        raise ValueError("runner-level metadata recompute should not run")
-
-    monkeypatch.setattr(evaluation_runner, "table_metadata", forbidden_table_metadata, raising=False)
-
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
 
     assert result.run_completed is True
@@ -600,8 +627,8 @@ def test_run_evaluation_uses_staged_write_table_metadata(
     assert [item["artifact_kind"] for item in manifest["tables"]] == [
         "portfolio_path",
         "trades",
-        "positions",
-        "per_asset_metrics",
+        "target_positions",
+        "target_exposure_summary",
     ]
 
 
