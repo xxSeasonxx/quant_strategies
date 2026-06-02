@@ -174,6 +174,7 @@ def _unsupported_semantics(decisions: list[StrategyDecision], scenario: Evaluati
 
 def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[str] | None = None) -> Any:
     selected_symbols = None if symbols is None else set(symbols)
+    symbol_order = tuple(dict.fromkeys(symbols or ()))
     if selected_symbols is not None and not selected_symbols:
         return pd.DataFrame(index=pd.DatetimeIndex([], name="timestamp"))
 
@@ -200,6 +201,8 @@ def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[s
             raise ValueError(f"nonpositive_close:{symbol}:{timestamp.isoformat()}")
         records.append({"symbol": symbol, "timestamp": timestamp, "close": close})
 
+    if not records and selected_symbols is not None:
+        return pd.DataFrame(index=pd.DatetimeIndex([], name="timestamp"))
     if not records:
         raise ValueError("no_rows")
 
@@ -208,7 +211,11 @@ def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[s
         close = frame.pivot(index="timestamp", columns="symbol", values="close")
     except ValueError as exc:
         raise ValueError(f"duplicate_rows:{exc}") from exc
-    return close.sort_index()
+    close = close.sort_index()
+    if symbols is not None:
+        ordered_columns = [symbol for symbol in symbol_order if symbol in close.columns]
+        close = close.loc[:, ordered_columns]
+    return close
 
 
 def _decision_windows(
@@ -260,15 +267,22 @@ def _decision_windows(
 
 def _validate_max_gross_target_weight(windows: list[dict[str, Any]]) -> float:
     max_gross = 0.0
-    for current in windows:
-        timestamp = current["entry_time"]
-        gross = 0.0
-        for window in windows:
-            if window["entry_time"] <= timestamp <= window["exit_time"]:
-                gross += abs(float(window["decision"].target.size))
-        max_gross = max(max_gross, gross)
-        if gross > 1.0 + 1e-12:
-            raise ValueError(f"portfolio_target_weight_exceeds_one:{timestamp.isoformat()}:{gross}")
+    gross = 0.0
+    events: list[tuple[Any, int, float]] = []
+    for window in windows:
+        weight = abs(float(window["decision"].target.size))
+        events.append((window["entry_time"], 0, weight))
+        events.append((window["exit_time"], 1, weight))
+    for timestamp, event_order, weight in sorted(events, key=lambda item: (item[0], item[1])):
+        if event_order == 0:
+            gross += weight
+            max_gross = max(max_gross, gross)
+            if gross > 1.0 + 1e-12:
+                raise ValueError(f"portfolio_target_weight_exceeds_one:{timestamp.isoformat()}:{gross}")
+        else:
+            gross -= weight
+            if gross < 1e-12:
+                gross = 0.0
     return max_gross
 
 
@@ -290,16 +304,18 @@ def _validate_duplicate_signals(windows: list[dict[str, Any]]) -> None:
 
 
 def _validate_overlapping_symbol_windows(windows: list[dict[str, Any]]) -> None:
-    active: dict[str, list[dict[str, Any]]] = {}
-    for window in windows:
+    previous_by_symbol: dict[str, dict[str, Any]] = {}
+    sorted_windows = sorted(windows, key=lambda item: (item["symbol"], item["entry_idx"], item["exit_idx"]))
+    for window in sorted_windows:
         symbol = window["symbol"]
-        for existing in active.get(symbol, []):
-            if window["entry_idx"] <= existing["exit_idx"] and window["exit_idx"] >= existing["entry_idx"]:
-                raise ValueError(
-                    f"overlapping_decision_window:{symbol}:"
-                    f"{window['entry_time'].isoformat()}:{window['exit_time'].isoformat()}"
-                )
-        active.setdefault(symbol, []).append(window)
+        previous = previous_by_symbol.get(symbol)
+        if previous is not None and window["entry_idx"] <= previous["exit_idx"]:
+            raise ValueError(
+                f"overlapping_decision_window:{symbol}:"
+                f"{window['entry_time'].isoformat()}:{window['exit_time'].isoformat()}"
+            )
+        if previous is None or window["exit_idx"] > previous["exit_idx"]:
+            previous_by_symbol[symbol] = window
 
 
 def _run_portfolio(

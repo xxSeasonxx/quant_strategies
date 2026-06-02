@@ -409,6 +409,60 @@ def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(monkeypatch:
     pd.testing.assert_frame_equal(prepared.close, original_snapshot)
 
 
+def test_run_prepared_reuses_multi_symbol_close_in_decision_order(monkeypatch: pytest.MonkeyPatch):
+    pd = pytest.importorskip("pandas")
+    captured = install_fake_vbt(monkeypatch)
+    timestamps = [
+        AS_OF,
+        DECISION,
+        datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+    ]
+    multi_symbol_rows = [
+        {"symbol": symbol, "timestamp": timestamp, "close": close}
+        for symbol, closes in {
+            "QQQ": [100.0, 101.0, 102.0, 103.0],
+            "SPY": [200.0, 201.0, 202.0, 203.0],
+            "IWM": [300.0, 301.0, 302.0, 303.0],
+        }.items()
+        for timestamp, close in zip(timestamps, closes, strict=True)
+    ]
+    decisions = [
+        decision(symbol="SPY", size=0.4),
+        decision(symbol="QQQ", size=0.4),
+    ]
+    base_scenario = scenario()
+    stress_scenario = base_scenario.model_copy(
+        update={
+            "scenario_id": "w/stress_costs/base_fill",
+            "cost_scenario": "stress_costs",
+            "cost_model": CostModelConfig(fee_bps_per_side=7.0, slippage_bps_per_side=11.0),
+        }
+    )
+    backend = VectorBTProEvaluationBackend()
+
+    prepared = backend.prepare_inputs(decisions=decisions, rows=multi_symbol_rows)
+    original_close = prepared.close
+    original_snapshot = prepared.close.copy(deep=True)
+    results = [
+        backend.run_prepared(
+            prepared=prepared,
+            scenario=item,
+            metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        )
+        for item in (base_scenario, stress_scenario)
+    ]
+
+    assert [result.status for result in results] == ["completed", "completed"]
+    assert list(prepared.close.columns) == ["SPY", "QQQ"]
+    assert "IWM" not in prepared.close.columns
+    assert len(captured["calls"]) == 2
+    assert [call["close_columns"] for call in captured["calls"]] == [["SPY", "QQQ"], ["SPY", "QQQ"]]
+    assert [id(call["close"]) for call in captured["calls"]] == [id(original_close), id(original_close)]
+    assert prepared.close is original_close
+    pd.testing.assert_frame_equal(prepared.close, original_snapshot)
+
+
 def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: pytest.MonkeyPatch):
     captured = install_fake_vbt(monkeypatch)
 
@@ -549,6 +603,21 @@ def test_vectorbtpro_evaluation_backend_fails_when_simultaneous_gross_exposure_e
 
     assert result.status == "failed"
     assert "portfolio_target_weight_exceeds_one" in result.warnings[0]
+
+
+def test_decision_windows_reject_same_symbol_overlap_after_different_entries(monkeypatch: pytest.MonkeyPatch):
+    pd = pytest.importorskip("pandas")
+    install_fake_vbt(monkeypatch)
+    overlap_rows = rows() + [
+        {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc), "close": 104.0},
+    ]
+    close = backend_module._close_frame(pd, overlap_rows, symbols=("BTC-PERP",))
+    later_decision = decision(size=0.4).model_copy(
+        update={"decision_time": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)}
+    )
+
+    with pytest.raises(ValueError, match="^overlapping_decision_window:BTC-PERP:"):
+        backend_module._decision_windows(pd, close, [decision(size=0.4), later_decision], scenario())
 
 
 def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():
