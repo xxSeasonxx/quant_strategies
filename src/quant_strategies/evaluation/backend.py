@@ -54,8 +54,11 @@ class VectorBTProEvaluationBackend:
         decisions: list[StrategyDecision],
         rows: Sequence[Mapping[str, Any]],
     ) -> PreparedPortfolioInputs:
+        decision_symbols = tuple(dict.fromkeys(item.instrument.symbol for item in decisions))
+        if not decision_symbols:
+            raise ValueError("no_decisions")
         deps = require_evaluation_dependencies()
-        close = _close_frame(deps.pandas, rows)
+        close = _close_frame(deps.pandas, rows, symbols=decision_symbols)
         return PreparedPortfolioInputs(close=close, decisions=tuple(decisions))
 
     def run(
@@ -169,17 +172,26 @@ def _unsupported_semantics(decisions: list[StrategyDecision], scenario: Evaluati
     return tuple(dict.fromkeys(unsupported))
 
 
-def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]]) -> Any:
+def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[str] | None = None) -> Any:
+    selected_symbols = None if symbols is None else set(symbols)
+    if selected_symbols is not None and not selected_symbols:
+        return pd.DataFrame(index=pd.DatetimeIndex([], name="timestamp"))
+
     records: list[dict[str, Any]] = []
     for row in rows:
         try:
             symbol = str(row["symbol"]).strip()
-            timestamp = pd.to_datetime(row["timestamp"], utc=True)
-            close = float(row["close"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"invalid_row:{exc}") from exc
         if not symbol:
             raise ValueError("empty_symbol")
+        if selected_symbols is not None and symbol not in selected_symbols:
+            continue
+        try:
+            timestamp = pd.to_datetime(row["timestamp"], utc=True)
+            close = float(row["close"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid_row:{exc}") from exc
         if pd.isna(timestamp):
             raise ValueError(f"invalid_timestamp:{row.get('timestamp')}")
         if not math.isfinite(close):
@@ -298,11 +310,16 @@ def _run_portfolio(
     scenario: EvaluationScenario,
 ) -> Any:
     decision_symbols = tuple(dict.fromkeys(window["symbol"] for window in windows))
+    symbol_columns = list(decision_symbols)
     if len(decision_symbols) == 1:
         symbol = decision_symbols[0]
-        close = close.loc[close[symbol].notna(), [symbol]]
+        if list(close.columns) != symbol_columns:
+            close = close.loc[:, symbol_columns]
+        if close[symbol].isna().any():
+            close = close.loc[close[symbol].notna(), symbol_columns]
     elif decision_symbols:
-        close = close.loc[:, list(decision_symbols)]
+        if list(close.columns) != symbol_columns:
+            close = close.loc[:, symbol_columns]
 
     long_entries = pd.DataFrame(False, index=close.index, columns=close.columns)
     long_exits = pd.DataFrame(False, index=close.index, columns=close.columns)

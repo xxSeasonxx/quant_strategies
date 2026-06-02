@@ -332,10 +332,12 @@ def install_fake_vbt(monkeypatch: pytest.MonkeyPatch):
         def get_max_drawdown(self):
             return -0.019801980198
 
-    captured = {}
+    captured = {"calls": []}
 
     def from_signals(close, **kwargs):
-        captured["close_columns"] = list(close.columns)
+        call = {"close": close, "close_columns": list(close.columns), "kwargs": kwargs}
+        captured["calls"].append(call)
+        captured["close_columns"] = call["close_columns"]
         captured["kwargs"] = kwargs
         return FakePortfolio(close, **kwargs)
 
@@ -347,6 +349,64 @@ def install_fake_vbt(monkeypatch: pytest.MonkeyPatch):
         lambda: EvaluationDependencies(pandas=pd, pyarrow=fake_pyarrow, vectorbtpro=fake_vbt),
     )
     return captured
+
+
+def test_prepare_inputs_rejects_no_decisions_before_loading_dependencies(monkeypatch: pytest.MonkeyPatch):
+    def fail_dependencies():
+        raise AssertionError("dependencies should not load when there are no decisions")
+
+    monkeypatch.setattr(backend_module, "require_evaluation_dependencies", fail_dependencies)
+
+    with pytest.raises(ValueError, match="^no_decisions$"):
+        VectorBTProEvaluationBackend().prepare_inputs(decisions=[], rows=rows())
+
+
+def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(monkeypatch: pytest.MonkeyPatch):
+    pd = pytest.importorskip("pandas")
+    captured = install_fake_vbt(monkeypatch)
+    extra_rows = rows() + [
+        {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 200.0},
+        {"symbol": "ETH-PERP", "timestamp": DECISION, "close": 201.0},
+        {"symbol": "ETH-PERP", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": 202.0},
+        {"symbol": "ETH-PERP", "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "close": 203.0},
+    ]
+    base_scenario = scenario()
+    stress_scenario = base_scenario.model_copy(
+        update={
+            "scenario_id": "w/stress_costs/base_fill",
+            "cost_scenario": "stress_costs",
+            "cost_model": CostModelConfig(fee_bps_per_side=7.0, slippage_bps_per_side=11.0),
+        }
+    )
+    backend = VectorBTProEvaluationBackend()
+
+    prepared = backend.prepare_inputs(decisions=[decision()], rows=extra_rows)
+    original_close = prepared.close
+    original_snapshot = prepared.close.copy(deep=True)
+    results = [
+        backend.run_prepared(
+            prepared=prepared,
+            scenario=item,
+            metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        )
+        for item in (base_scenario, stress_scenario)
+    ]
+
+    assert [result.status for result in results] == ["completed", "completed"]
+    assert all(result.tables is not None for result in results)
+    assert all(not result.tables.portfolio_path.empty for result in results if result.tables is not None)
+    assert all(not result.tables.trades.empty for result in results if result.tables is not None)
+    assert list(prepared.close.columns) == ["BTC-PERP"]
+    assert "ETH-PERP" not in prepared.close.columns
+    assert len(captured["calls"]) == 2
+    assert [call["close_columns"] for call in captured["calls"]] == [["BTC-PERP"], ["BTC-PERP"]]
+    assert [id(call["close"]) for call in captured["calls"]] == [id(original_close), id(original_close)]
+    assert captured["calls"][0]["kwargs"]["fees"] == pytest.approx(0.0001)
+    assert captured["calls"][0]["kwargs"]["slippage"] == pytest.approx(0.0002)
+    assert captured["calls"][1]["kwargs"]["fees"] == pytest.approx(0.0007)
+    assert captured["calls"][1]["kwargs"]["slippage"] == pytest.approx(0.0011)
+    assert prepared.close is original_close
+    pd.testing.assert_frame_equal(prepared.close, original_snapshot)
 
 
 def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: pytest.MonkeyPatch):
