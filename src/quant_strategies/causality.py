@@ -27,6 +27,20 @@ class LookaheadCheckResult:
     skipped_probe_reasons: tuple[str, ...] = ()
 
 
+def causality_completeness_violations(
+    lookahead: LookaheadCheckResult,
+) -> tuple[str, ...]:
+    """Reasons a lookahead result is not complete usable evidence."""
+    violations = list(lookahead.violations)
+    if lookahead.passed and not lookahead.deterministic_replay_verified:
+        violations.append("determinism_replay_not_verified")
+    if lookahead.passed and not lookahead.emitted_replay_verified:
+        violations.append("emitted_replay_not_verified")
+    if lookahead.passed and not lookahead.strict_suppression_verified:
+        violations.append("strict_suppression_replay_not_verified")
+    return tuple(dict.fromkeys(violations))
+
+
 @dataclass(frozen=True)
 class ReplayBoundary:
     as_of_time: datetime

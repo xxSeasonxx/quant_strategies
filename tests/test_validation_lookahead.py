@@ -435,6 +435,63 @@ def test_strict_hidden_lookahead_reports_skipped_probe_as_incomplete_evidence():
     assert result.skipped_probe_reasons == ("RuntimeError: prefix too short",)
 
 
+def test_causality_completeness_violations_accepts_complete_strict_result():
+    result = causality.LookaheadCheckResult(
+        passed=True,
+        mode="strict",
+        deterministic_replay_verified=True,
+        emitted_replay_verified=True,
+        strict_suppression_verified=True,
+    )
+
+    assert causality.causality_completeness_violations(result) == ()
+
+
+def test_causality_completeness_violations_returns_failed_lookahead_reasons_once():
+    result = causality.LookaheadCheckResult(
+        passed=False,
+        violations=("hidden_lookahead_detected", "hidden_lookahead_detected"),
+        mode="strict",
+        deterministic_replay_verified=True,
+        emitted_replay_verified=False,
+        strict_suppression_verified=False,
+    )
+
+    assert causality.causality_completeness_violations(result) == ("hidden_lookahead_detected",)
+
+
+def test_causality_completeness_violations_reports_missing_replay_proofs():
+    result = causality.LookaheadCheckResult(
+        passed=True,
+        mode="strict",
+        deterministic_replay_verified=False,
+        emitted_replay_verified=False,
+        strict_suppression_verified=False,
+    )
+
+    assert causality.causality_completeness_violations(result) == (
+        "determinism_replay_not_verified",
+        "emitted_replay_not_verified",
+        "strict_suppression_replay_not_verified",
+    )
+
+
+def test_causality_completeness_violations_reports_skipped_strict_probe():
+    result = causality.LookaheadCheckResult(
+        passed=True,
+        mode="strict",
+        deterministic_replay_verified=True,
+        emitted_replay_verified=True,
+        strict_suppression_verified=False,
+        skipped_probe_count=1,
+        skipped_probe_reasons=("RuntimeError: prefix too short",),
+    )
+
+    assert causality.causality_completeness_violations(result) == (
+        "strict_suppression_replay_not_verified",
+    )
+
+
 def test_hidden_lookahead_rejects_nondeterministic_full_replay():
     rows = [row(AS_OF, 100.0, available_at=AS_OF)]
     calls = 0
