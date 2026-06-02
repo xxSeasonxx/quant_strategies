@@ -87,6 +87,8 @@ def write_candidate(tmp_path: Path, *, with_param_validator: bool = True) -> Pat
         "PositionTarget, StrategyDecision\n"
         f"{validator}"
         "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
@@ -520,6 +522,57 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
     assert backend.prepare_calls == 0
     assert backend.run_calls == 0
     assert backend.run_prepared_calls == 0
+
+
+def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class BackendShouldNotBeCalled(FakeBackend):
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.run_calls = 0
+            self.run_prepared_calls = 0
+
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+            self.prepare_calls += 1
+            raise AssertionError("prepare_inputs should not be called after causality preflight failure")
+
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            self.run_calls += 1
+            raise AssertionError("run should not be called after causality preflight failure")
+
+        def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
+            self.run_prepared_calls += 1
+            raise AssertionError("run_prepared should not be called after causality preflight failure")
+
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    if not any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
+        "        raise RuntimeError('prefix too short')\n"
+        "    return []\n"
+    )
+    backend = BackendShouldNotBeCalled()
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "preflight"
+    assert result.assessment_status == "evaluation_preflight_failed"
+    assert "strict_suppression_replay_not_verified" in result.message
+    assert result.result_dir is not None
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert backend.prepare_calls == 0
+    assert backend.run_calls == 0
+    assert backend.run_prepared_calls == 0
+    assert "RuntimeError: prefix too short" in result.evidence_quality_warnings
 
 
 def test_run_evaluation_fails_before_strategy_on_empty_row_contract(

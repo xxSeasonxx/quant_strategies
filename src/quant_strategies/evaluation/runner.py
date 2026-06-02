@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.causality import check_hidden_lookahead
+from quant_strategies.causality import (
+    causality_completeness_violations,
+    check_hidden_lookahead,
+)
 from quant_strategies.core.config import default_repo_root
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
@@ -112,15 +115,16 @@ def run_evaluation(
                 strategy_id=config.strategy_id,
                 mode="strict",
             )
-            if not lookahead.passed:
+            all_warnings.extend(lookahead.skipped_probe_reasons)
+            causality_violations = causality_completeness_violations(lookahead)
+            if causality_violations:
                 return _failure_result(
                     result_dir,
                     "preflight",
                     "evaluation_preflight_failed",
-                    "; ".join(lookahead.violations),
+                    "; ".join(causality_violations),
                     warnings=tuple(all_warnings),
                 )
-            all_warnings.extend(lookahead.skipped_probe_reasons)
 
             scenarios = expand_evaluation_scenarios(
                 window=window,
