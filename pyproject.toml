@@ -17,6 +17,11 @@ vectorbtpro = [
     "pandas>=2.2",
     "vectorbtpro",
 ]
+evaluation = [
+    "pandas>=2.2",
+    "pyarrow>=16",
+    "vectorbtpro",
+]
 
 [project.scripts]
 quant-strategies = "quant_strategies.runner.cli:main"
