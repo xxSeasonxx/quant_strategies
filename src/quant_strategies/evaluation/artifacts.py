@@ -52,7 +52,6 @@ _TRACE_TABLE_METADATA_COMPARE_FIELDS = (
     "columns",
     "arrow_schema",
     "schema_sha256",
-    "file_sha256",
     "byte_size",
     "scenario_ids",
 )
@@ -169,6 +168,7 @@ def table_metadata(
     artifact_kind: str,
     scenario_ids: tuple[str, ...] = (),
     logical_name: str | None = None,
+    include_file_hash: bool = True,
 ) -> dict[str, Any]:
     import pyarrow.parquet as pq
 
@@ -184,7 +184,7 @@ def table_metadata(
     arrow_schema = str(schema)
     manifest_path = _artifact_path(result_dir, logical_name) if logical_name is not None else path
     relative_path = manifest_path.resolve().relative_to(result_dir.resolve()).as_posix()
-    return {
+    metadata = {
         "path": relative_path,
         "artifact_kind": artifact_kind,
         "format": "parquet",
@@ -202,10 +202,12 @@ def table_metadata(
         ],
         "arrow_schema": arrow_schema,
         "schema_sha256": text_sha256(arrow_schema),
-        "file_sha256": file_sha256(path),
         "byte_size": path.stat().st_size,
         "scenario_ids": footer_scenario_ids,
     }
+    if include_file_hash:
+        metadata["file_sha256"] = file_sha256(path)
+    return metadata
 
 
 def write_evaluation_manifest(
@@ -461,6 +463,7 @@ def _validate_trace_table_metadata_item(
             artifact_path,
             artifact_kind=kind,
             logical_name=item["path"],
+            include_file_hash=False,
         )
     except Exception as exc:
         raise ValueError(f"{kind} trace table metadata could not be verified from Parquet file") from exc

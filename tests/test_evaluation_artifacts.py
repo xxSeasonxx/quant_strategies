@@ -251,7 +251,7 @@ def test_write_evaluation_manifest_rejects_forged_trace_table_metadata(tmp_path:
     strategy_path = tmp_path / "demo_strategy.py"
     strategy_path.write_text('"""Demo strategy."""\n')
     table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
-    table_artifacts[0] = {**table_artifacts[0], "file_sha256": "0" * 64}
+    table_artifacts[0] = {**table_artifacts[0], "row_count": table_artifacts[0]["row_count"] + 1}
 
     with pytest.raises(ValueError, match="trace table metadata"):
         write_evaluation_manifest(
