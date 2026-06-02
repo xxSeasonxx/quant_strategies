@@ -91,7 +91,7 @@ result = run_validation("path/to/candidate/validation.toml")
 Purpose:
 
 - audit retained-candidate evidence integrity across windows and fixed stress
-  scenarios;
+scenarios;
 - require `validate_params`;
 - run strict row-contract, observation, and hidden-lookahead checks;
 - emit an advisory validation decision from the validation policy.
@@ -106,7 +106,7 @@ Important sections:
 - `[readiness]`;
 - `[output]`;
 - `[search_pressure]`, plus optional `[paper_readiness]` and
-  `[agreement_oracle]`.
+`[agreement_oracle]`.
 
 Output: `ValidationRunResult`. Validation is mechanical evidence validation,
 not research evaluation. Its decision labels are advisory and never authorize
@@ -120,12 +120,14 @@ trade-ledger JSONL files, `cost_fill_sensitivity.json`,
 
 CLI exit codes:
 
-| Exit code | Meaning |
-| --- | --- |
-| `0` | validation completed with a non-`hard_no` advisory decision |
-| `2` | validation completed with `hard_no` |
-| `3` | data readiness or audit failure |
-| `1` | config, infrastructure, artifact, or other execution failure |
+
+| Exit code | Meaning                                                      |
+| --------- | ------------------------------------------------------------ |
+| `0`       | validation completed with a non-`hard_no` advisory decision  |
+| `2`       | validation completed with `hard_no`                          |
+| `3`       | data readiness or audit failure                              |
+| `1`       | config, infrastructure, artifact, or other execution failure |
+
 
 ## Evaluation Run
 
@@ -168,32 +170,37 @@ and exits `3` for data-load or row-contract failures.
 
 Control artifacts:
 
-| Artifact | Contents |
-| --- | --- |
-| `evaluation_config.toml` | copied evaluation config |
-| `strategy_snapshot.py` | copied strategy file |
-| `data_manifest.json` | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, and decision count |
-| `evaluation_metrics.json` | metric semantics and per-scenario portfolio metrics |
-| `scenario_summary.json` | scenario counts, statuses, coverage, warnings, and unsupported semantics |
-| `evaluation_manifest.json` | hashes, scenario coverage, table metadata, metric semantics, replayability, provenance, and artifact inventory |
-| `environment.json` | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro` |
-| `notes.md` | human-readable evaluation notes |
+
+| Artifact                   | Contents                                                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `evaluation_config.toml`   | copied evaluation config                                                                                                   |
+| `strategy_snapshot.py`     | copied strategy file                                                                                                       |
+| `data_manifest.json`       | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, and decision count |
+| `evaluation_metrics.json`  | metric semantics and per-scenario portfolio metrics                                                                        |
+| `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, and unsupported semantics                                                   |
+| `evaluation_manifest.json` | hashes, scenario coverage, table metadata, metric semantics, replayability, provenance, and artifact inventory             |
+| `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro`                                          |
+| `notes.md`                 | human-readable evaluation notes                                                                                            |
+
 
 Detailed trace artifacts are Parquet only and require pyarrow.
 There is no JSONL fallback path for evaluation traces.
 
-| Trace artifact | Contents |
-| --- | --- |
-| `tables/portfolio_path.parquet` | aggregate portfolio value, period return, and drawdown trace rows by `scenario_id` |
-| `tables/trades.parquet` | aggregate trade trace rows by `scenario_id` |
-| `tables/target_positions.parquet` | aggregate target-position entry/exit events by `scenario_id`, timestamp, and asset; this is target schedule evidence, not realized broker position state |
-| `tables/target_exposure_summary.parquet` | aggregate target exposure decision counts and target round-trip turnover by `scenario_id` and asset |
+
+| Trace artifact                           | Contents                                                                                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tables/portfolio_path.parquet`          | aggregate portfolio value, period return, and drawdown trace rows by `scenario_id`                                                                       |
+| `tables/trades.parquet`                  | aggregate trade trace rows by `scenario_id`                                                                                                              |
+| `tables/target_positions.parquet`        | aggregate target-position entry/exit events by `scenario_id`, timestamp, and asset; this is target schedule evidence, not realized broker position state |
+| `tables/target_exposure_summary.parquet` | aggregate target exposure decision counts and target round-trip turnover by `scenario_id` and asset                                                      |
+
 
 ## What This Project Does Not Decide
 
 - It does not choose which strategy ideas are worth researching.
 - It does not acquire, refresh, repair, or join data; `quant_data` owns that.
 - It does not produce market proof, statistical proof, paper-trading permission,
-  live-trading permission, or promotion authority.
+live-trading permission, or promotion authority.
 - It does not make generated artifacts true by construction; artifacts are
-  evidence to inspect.
+evidence to inspect.
+

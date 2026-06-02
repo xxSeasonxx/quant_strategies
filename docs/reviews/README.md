@@ -14,13 +14,14 @@ Each archived review should state the reviewed commit or branch, the scope, and
 the resulting disposition: accepted, rejected as false positive, deferred, or
 implemented in a named phase.
 
-Current disposition note:
+Current disposition anchor:
 
 ```text
-2026-05-30-foundation-finalization-plan.md
+../../FOUNDATION_LOCK.md
 ```
 
 Future foundation reviews should be disposition-aware delta reviews by default:
-read the current disposition note first, then classify findings as new,
-regression, fixed, accepted debt, deferred, false positive, or superseded. Run a
-fresh blind review only when Season explicitly asks for one.
+read the current disposition anchor first, then classify findings as `new`,
+`regression`, `fixed`, `accepted_debt`, `deferred_until_trigger`,
+`false_positive`, or `superseded`. Run a fresh broad blind foundation review only
+when Season explicitly asks for one.
