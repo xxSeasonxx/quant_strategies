@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from quant_strategies.evaluation import run_evaluation
 from quant_strategies.runner import run_config
 from quant_strategies.runner.events import jsonl_event_sink as runner_jsonl_event_sink
 from quant_strategies.validation import run_validation
@@ -32,6 +33,10 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative validation config path")
     validate_parser.add_argument("--events-jsonl", action="store_true", help="write structured validation stage events to stderr")
     validate_parser.add_argument("config", type=Path)
+
+    evaluate_parser = subparsers.add_parser("evaluate", help="evaluate one evaluation TOML config")
+    evaluate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative evaluation config path")
+    evaluate_parser.add_argument("config", type=Path)
 
     args = parser.parse_args(argv)
 
@@ -81,6 +86,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{result.message}; artifacts: {result.result_dir}")
         return _validation_exit_code(result)
 
+    if args.command == "evaluate":
+        try:
+            result = run_evaluation(args.config, repo_root=args.repo_root)
+        except OSError as exc:
+            print(f"evaluation failed: {exc}")
+            return 1
+        if _evaluation_exit_code(result) == 0:
+            print(result.result_dir)
+            return 0
+        result_dir = getattr(result, "result_dir", None)
+        if result_dir is not None and result_dir.exists():
+            print(f"evaluation failed: {result.message}; artifacts: {result_dir}")
+        else:
+            print(f"evaluation failed: {result.message}")
+        return _evaluation_exit_code(result)
+
     parser.error(f"unknown command: {args.command}")
     return 2
 
@@ -103,4 +124,13 @@ def _validation_exit_code(result: object) -> int:
     decision = getattr(getattr(result, "decision", None), "decision", None)
     if decision == "hard_no":
         return 2
+    return 0
+
+
+def _evaluation_exit_code(result: object) -> int:
+    failure_stage = getattr(result, "failure_stage", None)
+    if failure_stage in _DATA_FAILURE_STAGES or failure_stage == "data_load":
+        return 3
+    if failure_stage is not None or not getattr(result, "run_completed", False):
+        return 1
     return 0
