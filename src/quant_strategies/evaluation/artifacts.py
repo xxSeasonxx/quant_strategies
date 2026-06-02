@@ -41,6 +41,22 @@ _REQUIRED_TRACE_TABLE_METADATA = {
     "scenario_ids",
 }
 
+_TRACE_TABLE_METADATA_COMPARE_FIELDS = (
+    "path",
+    "artifact_kind",
+    "format",
+    "compression",
+    "row_count",
+    "row_group_count",
+    "column_count",
+    "columns",
+    "arrow_schema",
+    "schema_sha256",
+    "file_sha256",
+    "byte_size",
+    "scenario_ids",
+)
+
 _SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 
 _TRACE_COLUMN_TYPES = {
@@ -394,6 +410,30 @@ def _validate_trace_table_metadata_item(
     ):
         raise ValueError(f"{kind} trace table metadata columns must include scenario_id")
 
+    scenario_ids = item["scenario_ids"]
+    if not isinstance(scenario_ids, (list, tuple)):
+        raise ValueError(f"{kind} trace table scenario_ids must be a list or tuple")
+
+    try:
+        actual_metadata = table_metadata(
+            result_dir,
+            artifact_path,
+            artifact_kind=kind,
+            scenario_ids=tuple(scenario_ids),
+            logical_name=item["path"],
+        )
+    except Exception as exc:
+        raise ValueError(f"{kind} trace table metadata could not be verified from Parquet file") from exc
+
+    for key in _TRACE_TABLE_METADATA_COMPARE_FIELDS:
+        expected_value = actual_metadata[key]
+        supplied_value = list(scenario_ids) if key == "scenario_ids" else item[key]
+        if supplied_value != expected_value:
+            raise ValueError(
+                f"{kind} trace table metadata does not match Parquet file for {key}: "
+                f"supplied={supplied_value!r}; actual={expected_value!r}"
+            )
+
 
 def _validate_non_negative_int(item: Mapping[str, Any], key: str, *, kind: str) -> None:
     value = item[key]
@@ -419,18 +459,25 @@ def _scenario_coverage_ids(scenario_summary: Mapping[str, Any]) -> set[Any]:
     if not isinstance(scenario_coverage, Mapping):
         raise ValueError("scenario_ids validation requires scenario_summary scenario_coverage")
 
-    expected_ids = _coverage_id_set(scenario_coverage.get("expected_ids"))
-    completed_ids = _coverage_id_set(scenario_coverage.get("completed_ids"))
-    if expected_ids is not None:
-        return expected_ids or completed_ids or set()
-    if completed_ids is not None:
+    has_expected_ids = "expected_ids" in scenario_coverage
+    has_completed_ids = "completed_ids" in scenario_coverage
+    expected_ids = _coverage_id_set(scenario_coverage["expected_ids"]) if has_expected_ids else None
+    completed_ids = _coverage_id_set(scenario_coverage["completed_ids"]) if has_completed_ids else None
+    if has_expected_ids and has_completed_ids and expected_ids != completed_ids:
+        raise ValueError(
+            "scenario_coverage expected_ids and completed_ids must match for a completed evaluation manifest; "
+            f"expected={sorted(expected_ids)!r}; completed={sorted(completed_ids)!r}"
+        )
+    if has_expected_ids:
+        return expected_ids
+    if has_completed_ids:
         return completed_ids
     return set(scenario_coverage)
 
 
-def _coverage_id_set(value: Any) -> set[Any] | None:
+def _coverage_id_set(value: Any) -> set[Any]:
     if value is None:
-        return None
+        raise ValueError("scenario_ids coverage expected_ids/completed_ids must be arrays")
     if not isinstance(value, (list, tuple, set)):
         raise ValueError("scenario_ids coverage expected_ids/completed_ids must be arrays")
     return set(value)

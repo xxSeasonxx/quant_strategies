@@ -157,6 +157,88 @@ def test_write_evaluation_manifest_rejects_inconsistent_trace_scenario_ids(tmp_p
         raise AssertionError("inconsistent trace table scenario_ids should fail")
 
 
+def test_write_evaluation_manifest_rejects_forged_trace_table_metadata(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    table_artifacts[0] = {**table_artifacts[0], "file_sha256": "0" * 64}
+
+    with pytest.raises(ValueError, match="trace table metadata"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=_scenario_summary("base"),
+        )
+
+
+def test_write_evaluation_manifest_rejects_mismatched_expected_completed_coverage(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    scenario_summary = {
+        "scenario_coverage": {
+            "expected_ids": ["base", "stress"],
+            "completed_ids": ["base"],
+        }
+    }
+
+    with pytest.raises(ValueError, match="scenario_coverage"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=scenario_summary,
+        )
+
+
+def test_write_evaluation_manifest_treats_empty_expected_coverage_as_declared(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    scenario_summary = {
+        "scenario_coverage": {
+            "expected_ids": [],
+            "completed_ids": ["base"],
+        }
+    }
+
+    with pytest.raises(ValueError, match="scenario_coverage"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=scenario_summary,
+        )
+
+
 @pytest.mark.parametrize("artifact_index", [0, 1, 2, 3])
 @pytest.mark.parametrize("missing_value", [True, False])
 def test_write_evaluation_manifest_rejects_missing_required_trace_table_metadata(
