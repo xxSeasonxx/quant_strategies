@@ -492,6 +492,23 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
     assert payload["by_direction"]["long"]["count"] == 2
     assert payload["by_direction"]["long"]["net"] == pytest.approx(0.05)
     assert payload["by_exit_reason"]["take_profit"]["count"] == 1
+    economic_slices = payload["economic_slices"]
+    assert economic_slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
+    assert economic_slices["basis"] == "engine_trade_ledger"
+    assert economic_slices["by_symbol"]["SPY"]["count"] == 2
+    assert economic_slices["by_symbol"]["QQQ"]["count"] == 1
+    assert economic_slices["by_direction"]["long"]["count"] == 2
+    assert economic_slices["by_direction"]["short"]["count"] == 1
+    assert economic_slices["by_exit_reason"]["take_profit"]["count"] == 1
+    assert economic_slices["by_exit_reason"]["stop_loss"]["count"] == 1
+    assert economic_slices["by_exit_reason"]["max_hold"]["count"] == 1
+    assert set(economic_slices["win_loss_distribution"]) == {
+        "largest_win_net",
+        "largest_loss_net",
+        "median_trade_net",
+        "sum_positive_net",
+        "sum_negative_net",
+    }
     assert payload["holding_period"] == {
         "count": 3,
         "min_seconds": 86400.0,
