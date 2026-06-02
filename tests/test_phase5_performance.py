@@ -263,6 +263,8 @@ def write_evaluation_candidate(tmp_path: Path) -> Path:
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
         "    return [StrategyDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"

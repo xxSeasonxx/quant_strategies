@@ -75,3 +75,30 @@ def test_docs_do_not_call_evaluation_validation_verdict():
     ]
     lowered = docs.lower()
     assert not any(term.lower() in lowered for term in forbidden)
+
+
+def test_active_docs_do_not_present_engine_as_user_api():
+    docs = {
+        path: read(path)
+        for path in [
+            "README.md",
+            "FOUNDATION_LOCK.md",
+            "PRD.md",
+            "AGENTS.md",
+            "docs/foundation-surfaces.md",
+            "docs/vectorbtpro.md",
+        ]
+    }
+
+    forbidden_import_snippets = [
+        "from quant_strategies.engine",
+        "import quant_strategies.engine",
+        "quant_strategies.engine import",
+    ]
+    for path, text in docs.items():
+        assert not any(snippet in text for snippet in forbidden_import_snippets), path
+
+    active_text = " ".join("\n".join(docs.values()).lower().split())
+    assert "quant_strategies.engine" in active_text
+    assert "internal execution kernel" in active_text
+    assert "not a fourth public" in active_text

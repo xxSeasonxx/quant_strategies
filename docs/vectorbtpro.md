@@ -98,6 +98,9 @@ backend.
 | Evaluation run | VectorBT Pro portfolio evaluation backend |
 | VectorBT Pro agreement oracle | Optional single-trade validation agreement check |
 
+`quant_strategies.engine` is internal to the quick-run and validation paths in
+this table. It is not a separate public user surface.
+
 The reason is semantic, not just implementation preference:
 
 - The project engine reports linear signed per-trade activity sums.

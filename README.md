@@ -64,6 +64,10 @@ The design has one spine:
   evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
   economic, and path evidence. VectorBT Pro remains out of validation verdict
   metrics and is required by evaluation.
+- **One internal execution engine.** `quant_strategies.engine` is an internal
+  kernel used by the quick-run and validation surfaces, not a fourth user-facing
+  API. Internal imports and tests can use it; consumers should use the three
+  public surfaces above.
 
 Promotion is always a separate human decision, outside this code.
 
@@ -131,6 +135,8 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
+- **The engine package is internal.** Do not build user workflows on
+  `quant_strategies.engine`; call quick run, validation run, or evaluation run.
 - **Research evaluation is separate from validation.** Historical portfolio,
   economic, and path evidence belongs in the stateless evaluation surface for
   frozen candidates, not in validation decisions or quick-run hot paths.

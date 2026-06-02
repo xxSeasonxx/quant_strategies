@@ -198,12 +198,18 @@ class PreparedFakeBackend(FakeBackend):
 def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     candidate = write_candidate(tmp_path)
     backend = PreparedFakeBackend()
+    events: list[dict[str, object]] = []
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=messy_raw_rows()),
     )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=backend,
+        event_sink=events.append,
+    )
 
     assert result.run_completed is True
     assert result.failure_stage is None
@@ -264,6 +270,28 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert manifest["scenario_coverage"]["expected_ids"] == manifest["scenario_coverage"]["completed_ids"]
     assert manifest["scenario_coverage"]["missing_ids"] == []
     assert manifest["scenario_coverage"]["unexpected_ids"] == []
+    assert {event["event"] for event in events} == {"evaluation_stage"}
+    assert not [event for event in events if event["status"] == "failed"]
+    completed_stages = {event["stage"] for event in events if event["status"] == "completed"}
+    assert {
+        "config_load",
+        "artifact_initialization",
+        "window_execution",
+        "causality_check",
+        "portfolio_input_preparation",
+        "portfolio_evaluation",
+        "artifact_writes",
+    } <= completed_stages
+    completed_scenario_events = [
+        event
+        for event in events
+        if event["stage"] == "portfolio_evaluation" and event["status"] == "completed"
+    ]
+    assert len(completed_scenario_events) == 6
+    assert {event["scenario_id"] for event in completed_scenario_events} == set(
+        manifest["scenario_coverage"]["expected_ids"]
+    )
+    assert all("duration_ms" in event for event in events if event["status"] == "completed")
 
 
 def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -289,14 +317,27 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
             )
 
     candidate = write_candidate(tmp_path)
+    events: list[dict[str, object]] = []
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=UnsupportedBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=UnsupportedBackend(),
+        event_sink=events.append,
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
     assert result.assessment_status == "portfolio_evaluation_failed"
     assert "non_target_weight_sizing" in result.message
+    failed_events = [event for event in events if event["status"] == "failed"]
+    assert any(
+        event["event"] == "evaluation_stage"
+        and event["stage"] == "portfolio_evaluation"
+        and "non_target_weight_sizing" in str(event["error"])
+        for event in failed_events
+    )
 
 
 def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -556,12 +597,18 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
         "    return []\n"
     )
     backend = BackendShouldNotBeCalled()
+    events: list[dict[str, object]] = []
     monkeypatch.setattr(
         "quant_strategies.runner.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=backend,
+        event_sink=events.append,
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "preflight"
@@ -573,6 +620,14 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
     assert backend.run_calls == 0
     assert backend.run_prepared_calls == 0
     assert "RuntimeError: prefix too short" in result.evidence_quality_warnings
+    failed_events = [event for event in events if event["status"] == "failed"]
+    assert any(
+        event["event"] == "evaluation_stage"
+        and event["stage"] == "causality_check"
+        and "strict_suppression_replay_not_verified" in str(event["error"])
+        for event in failed_events
+    )
+    assert not any(event["stage"] == "portfolio_input_preparation" for event in events)
 
 
 def test_run_evaluation_fails_before_strategy_on_empty_row_contract(

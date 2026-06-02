@@ -1,4 +1,9 @@
-"""Deterministic quant screening and validation engine."""
+"""Internal deterministic quant screening and validation engine.
+
+This package is the execution kernel used by the quick-run and validation
+surfaces. It remains importable for project internals and tests, but it is not a
+user-facing public surface.
+"""
 
 from quant_strategies.engine.evaluation import gate_screen, screen
 from quant_strategies.engine.evidence import build_evidence_packet, evidence_json

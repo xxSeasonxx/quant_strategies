@@ -15,6 +15,10 @@ evaluation run input: candidate strategy.py + evaluation.toml
                output: EvaluationRunResult + evaluation artifacts
 ```
 
+These are the public user surfaces. `quant_strategies.engine` is an internal
+execution kernel used by quick-run and validation internals/tests; it is not a
+fourth public API.
+
 ## Shared Input Contract
 
 Every surface imports one pure strategy file:
@@ -139,6 +143,8 @@ Command:
 conda run -n quant quant-strategies evaluate candidate/evaluation.toml
 ```
 
+Use `--events-jsonl` to stream structured `evaluation_stage` events to stderr.
+
 Python API: `quant_strategies.evaluation.run_evaluation`
 
 ```python
@@ -146,6 +152,8 @@ from quant_strategies.evaluation import run_evaluation
 
 result = run_evaluation("candidate/evaluation.toml")
 ```
+
+Python callers that need stage observability can pass `event_sink`.
 
 Purpose:
 

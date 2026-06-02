@@ -10,6 +10,9 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 validation run, and evaluation run. Quick run is diagnostic; validation run is
 mechanical evidence validation; evaluation run is stateless frozen-candidate
 portfolio, path, and economic evidence.
+- **Internal engine boundary:** `quant_strategies.engine` is an internal
+execution kernel for quick-run and validation internals/tests, not a fourth
+public user surface.
 - **Strategy shape:** strategies are flat, single-file, pure strategy modules.
 - **Strategy rationale:** each strategy module docstring states thesis,
 observables, rule, assumptions, provenance, and falsifier.

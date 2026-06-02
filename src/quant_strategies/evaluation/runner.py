@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +24,14 @@ from quant_strategies.evaluation.backend import PortfolioEvaluationResult, Vecto
 from quant_strategies.evaluation.config import load_evaluation_config, resolve_evaluation_config_path
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.errors import EvaluationConfigError
+from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
 from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
-from quant_strategies.runner.execution import StrategyExecutionError, execute_strategy_run
+from quant_strategies.runner.execution import (
+    StrategyExecutionError,
+    StrategyExecutionResult,
+    execute_strategy_run,
+)
 
 
 @dataclass(frozen=True)
@@ -39,16 +44,42 @@ class EvaluationRunResult:
     evidence_quality_warnings: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _EvaluationContext:
+    repo_root: Path
+    config: Any
+    config_path: Path
+    result_dir: Path
+    selected_backend: Any
+    event_emitter: EvaluationStageEmitter
+
+
+@dataclass
+class _EvaluationState:
+    backend_results: list[PortfolioEvaluationResult] = field(default_factory=list)
+    trace_results: list[PortfolioEvaluationResult] = field(default_factory=list)
+    data_windows: list[dict[str, Any]] = field(default_factory=list)
+    expected_scenario_ids: list[str] = field(default_factory=list)
+    all_warnings: list[str] = field(default_factory=list)
+
+
 def run_evaluation(
     config_path: str | Path,
     *,
     repo_root: Path | None = None,
     backend: Any | None = None,
+    event_sink: EvaluationEventSink | None = None,
 ) -> EvaluationRunResult:
-    root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+    events = EvaluationStageEmitter(event_sink)
     try:
-        resolved_config_path = resolve_evaluation_config_path(config_path, repo_root=root)
-        config = load_evaluation_config(resolved_config_path)
+        with events.stage(
+            "config_load",
+            config_path=str(config_path),
+            repo_root=str(repo_root) if repo_root is not None else None,
+        ):
+            root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+            resolved_config_path = resolve_evaluation_config_path(config_path, repo_root=root)
+            config = load_evaluation_config(resolved_config_path)
     except EvaluationConfigError as exc:
         return EvaluationRunResult(
             result_dir=None,
@@ -58,8 +89,9 @@ def run_evaluation(
         )
 
     try:
-        result_dir = create_evaluation_result_dir(config.output.results_dir, config.strategy_id)
-        initialize_evaluation_artifacts(resolved_config_path, config.strategy_path, result_dir)
+        with events.stage("artifact_initialization", strategy_id=config.strategy_id):
+            result_dir = create_evaluation_result_dir(config.output.results_dir, config.strategy_id)
+            initialize_evaluation_artifacts(resolved_config_path, config.strategy_path, result_dir)
     except OSError as exc:
         return EvaluationRunResult(
             result_dir=None,
@@ -69,159 +101,330 @@ def run_evaluation(
         )
 
     selected_backend = backend or VectorBTProEvaluationBackend()
-    backend_results: list[PortfolioEvaluationResult] = []
-    trace_results: list[PortfolioEvaluationResult] = []
-    data_windows: list[dict[str, Any]] = []
-    expected_scenario_ids: list[str] = []
-    all_warnings: list[str] = []
+    context = _EvaluationContext(
+        repo_root=root,
+        config=config,
+        config_path=resolved_config_path,
+        result_dir=result_dir,
+        selected_backend=selected_backend,
+        event_emitter=events,
+    )
+    state = _EvaluationState()
 
+    for window in config.windows:
+        failure = _run_evaluation_window(context, state, window)
+        if failure is not None:
+            return failure
+
+    scenario_summary = _scenario_summary(state.backend_results, state.expected_scenario_ids)
+    coverage_failure = _check_scenario_coverage(context, state, scenario_summary)
+    if coverage_failure is not None:
+        return coverage_failure
+
+    artifact_failure = _write_completion_artifacts(context, state, scenario_summary)
+    if artifact_failure is not None:
+        return artifact_failure
+
+    return EvaluationRunResult(
+        result_dir=result_dir,
+        message=f"evaluation complete: {len(state.backend_results)} scenarios",
+        run_completed=True,
+        failure_stage=None,
+        assessment_status="evaluation_complete",
+        evidence_quality_warnings=tuple(state.all_warnings),
+    )
+
+
+def _run_evaluation_window(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+) -> EvaluationRunResult | None:
+    execution_spec = context.config.to_execution_spec(window)
     try:
-        for window in config.windows:
-            execution_spec = config.to_execution_spec(window)
+        with context.event_emitter.stage(
+            "window_execution",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            row_contract_mode="validation",
+        ) as window_event:
             execution = execute_strategy_run(
                 execution_spec,
-                repo_root=config.base_dir,
+                repo_root=context.config.base_dir,
                 row_contract_mode="validation",
                 require_passed_row_contract=True,
             )
             row_contract = execution.normalized_rows.row_contract_summary()
-            data_windows.append(
-                {
-                    "window_id": window.id,
-                    "data": execution_spec.data.model_dump(mode="json"),
-                    "row_count": len(execution.normalized_rows),
-                    "ranges_by_symbol": execution.normalized_rows.ranges_by_symbol,
-                    "availability_coverage": execution.normalized_rows.availability_coverage,
-                    "normalized_rows_sha256": execution.normalized_rows_sha256,
-                    "row_contract": row_contract,
-                    "evidence_quality": execution.evidence_quality,
-                    "decision_count": len(execution.decisions),
-                }
+            state.data_windows.append(
+                _data_window_payload(window, execution_spec, execution, row_contract)
             )
             if row_contract["status"] != "passed":
+                message = f"evaluation row contract {row_contract['status']}"
+                window_event.fail(message)
                 return _failure_result(
-                    result_dir,
+                    context.result_dir,
                     "data_load",
                     "evaluation_failed",
-                    f"evaluation row contract {row_contract['status']}",
-                    warnings=tuple(all_warnings),
+                    message,
+                    warnings=tuple(state.all_warnings),
                 )
-
-            lookahead = check_hidden_lookahead(
-                execution.generate_decisions,
-                rows=execution.normalized_rows,
-                params=execution.validated_params,
-                baseline_decisions=execution.decisions,
-                strategy_id=config.strategy_id,
-                mode="strict",
-            )
-            all_warnings.extend(lookahead.skipped_probe_reasons)
-            causality_violations = causality_completeness_violations(lookahead)
-            if causality_violations:
-                return _failure_result(
-                    result_dir,
-                    "preflight",
-                    "evaluation_preflight_failed",
-                    "; ".join(causality_violations),
-                    warnings=tuple(all_warnings),
-                )
-
-            scenarios = expand_evaluation_scenarios(
-                window=window,
-                base_costs=config.cost_model,
-                base_fill=config.fill_model,
-            )
-            expected_scenario_ids.extend(scenario.scenario_id for scenario in scenarios)
-            projection_rows = execution.normalized_rows.projection_rows()
-            try:
-                prepared = (
-                    selected_backend.prepare_inputs(decisions=execution.decisions, rows=projection_rows)
-                    if hasattr(selected_backend, "prepare_inputs")
-                    else None
-                )
-            except EvaluationDependencyError as exc:
-                return _failure_result(
-                    result_dir,
-                    "portfolio_evaluation",
-                    "portfolio_backend_unavailable",
-                    str(exc),
-                    warnings=tuple(all_warnings),
-                )
-            except ValueError as exc:
-                return _failure_result(
-                    result_dir,
-                    "portfolio_evaluation",
-                    "portfolio_evaluation_failed",
-                    str(exc),
-                    warnings=tuple(all_warnings),
-                )
-            except Exception as exc:
-                return _failure_result(
-                    result_dir,
-                    "portfolio_evaluation",
-                    "portfolio_evaluation_failed",
-                    f"portfolio input preparation failed: {exc}",
-                    warnings=tuple(all_warnings),
-                )
-
-            for scenario in scenarios:
-                scenario_result = (
-                    selected_backend.run_prepared(
-                        prepared=prepared,
-                        scenario=scenario,
-                        metrics=config.metrics,
-                    )
-                    if prepared is not None and hasattr(selected_backend, "run_prepared")
-                    else selected_backend.run(
-                        decisions=execution.decisions,
-                        rows=projection_rows,
-                        scenario=scenario,
-                        metrics=config.metrics,
-                    )
-                )
-                backend_results.append(_strip_trace_tables(scenario_result))
-                if scenario_result.status != "completed":
-                    status = (
-                        "portfolio_backend_unavailable"
-                        if scenario_result.status == "unavailable"
-                        else "portfolio_evaluation_failed"
-                    )
-                    return _failure_result(
-                        result_dir,
-                        "portfolio_evaluation",
-                        status,
-                        _backend_failure_message(scenario_result),
-                        warnings=tuple(all_warnings),
-                    )
-                if scenario_result.tables is None:
-                    return _failure_result(
-                        result_dir,
-                        "portfolio_evaluation",
-                        "portfolio_evaluation_failed",
-                        f"{scenario_result.scenario_id}: completed backend emitted no trace tables",
-                        warnings=tuple(all_warnings),
-                    )
-                trace_results.append(scenario_result)
     except StrategyExecutionError as exc:
         return _failure_result(
-            result_dir,
+            context.result_dir,
             exc.stage,
             "evaluation_failed",
             str(exc),
-            warnings=tuple(all_warnings),
+            warnings=tuple(state.all_warnings),
         )
 
-    scenario_summary = _scenario_summary(backend_results, expected_scenario_ids)
-    coverage = scenario_summary["scenario_coverage"]
-    if coverage["missing_ids"] or coverage["unexpected_ids"]:
-        return _failure_result(
-            result_dir,
+    causality_failure = _run_causality_check(context, state, window, execution)
+    if causality_failure is not None:
+        return causality_failure
+    return _run_window_portfolio_evaluation(context, state, window, execution)
+
+
+def _data_window_payload(
+    window: Any,
+    execution_spec: Any,
+    execution: StrategyExecutionResult,
+    row_contract: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "window_id": window.id,
+        "data": execution_spec.data.model_dump(mode="json"),
+        "row_count": len(execution.normalized_rows),
+        "ranges_by_symbol": execution.normalized_rows.ranges_by_symbol,
+        "availability_coverage": execution.normalized_rows.availability_coverage,
+        "normalized_rows_sha256": execution.normalized_rows_sha256,
+        "row_contract": row_contract,
+        "evidence_quality": execution.evidence_quality,
+        "decision_count": len(execution.decisions),
+    }
+
+
+def _run_causality_check(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    execution: StrategyExecutionResult,
+) -> EvaluationRunResult | None:
+    with context.event_emitter.stage(
+        "causality_check",
+        strategy_id=context.config.strategy_id,
+        window_id=window.id,
+        mode="strict",
+        decision_count=len(execution.decisions),
+    ) as causality_event:
+        lookahead = check_hidden_lookahead(
+            execution.generate_decisions,
+            rows=execution.normalized_rows,
+            params=execution.validated_params,
+            baseline_decisions=execution.decisions,
+            strategy_id=context.config.strategy_id,
+            mode="strict",
+        )
+        state.all_warnings.extend(lookahead.skipped_probe_reasons)
+        causality_violations = causality_completeness_violations(lookahead)
+        if causality_violations:
+            message = "; ".join(causality_violations)
+            causality_event.fail(message)
+            return _failure_result(
+                context.result_dir,
+                "preflight",
+                "evaluation_preflight_failed",
+                message,
+                warnings=tuple(state.all_warnings),
+            )
+    return None
+
+
+def _run_window_portfolio_evaluation(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    execution: StrategyExecutionResult,
+) -> EvaluationRunResult | None:
+    scenarios = expand_evaluation_scenarios(
+        window=window,
+        base_costs=context.config.cost_model,
+        base_fill=context.config.fill_model,
+    )
+    state.expected_scenario_ids.extend(scenario.scenario_id for scenario in scenarios)
+    projection_rows = execution.normalized_rows.projection_rows()
+    prepared, preparation_failure = _prepare_portfolio_inputs(
+        context,
+        state,
+        window,
+        execution,
+        projection_rows,
+        scenario_count=len(scenarios),
+    )
+    if preparation_failure is not None:
+        return preparation_failure
+
+    for scenario in scenarios:
+        scenario_failure = _run_portfolio_scenario(
+            context,
+            state,
+            window,
+            execution,
+            projection_rows,
+            scenario,
+            prepared=prepared,
+        )
+        if scenario_failure is not None:
+            return scenario_failure
+    return None
+
+
+def _prepare_portfolio_inputs(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    execution: StrategyExecutionResult,
+    projection_rows: Sequence[dict[str, Any]],
+    *,
+    scenario_count: int,
+) -> tuple[Any | None, EvaluationRunResult | None]:
+    try:
+        with context.event_emitter.stage(
+            "portfolio_input_preparation",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            backend=_backend_name(context.selected_backend),
+            decision_count=len(execution.decisions),
+            row_count=len(projection_rows),
+            scenario_count=scenario_count,
+        ):
+            prepared = (
+                context.selected_backend.prepare_inputs(
+                    decisions=execution.decisions,
+                    rows=projection_rows,
+                )
+                if hasattr(context.selected_backend, "prepare_inputs")
+                else None
+            )
+    except EvaluationDependencyError as exc:
+        return None, _failure_result(
+            context.result_dir,
+            "portfolio_evaluation",
+            "portfolio_backend_unavailable",
+            str(exc),
+            warnings=tuple(state.all_warnings),
+        )
+    except ValueError as exc:
+        return None, _failure_result(
+            context.result_dir,
             "portfolio_evaluation",
             "portfolio_evaluation_failed",
-            f"scenario coverage mismatch: missing={coverage['missing_ids']} unexpected={coverage['unexpected_ids']}",
-            warnings=tuple(all_warnings),
+            str(exc),
+            warnings=tuple(state.all_warnings),
         )
+    except Exception as exc:
+        return None, _failure_result(
+            context.result_dir,
+            "portfolio_evaluation",
+            "portfolio_evaluation_failed",
+            f"portfolio input preparation failed: {exc}",
+            warnings=tuple(state.all_warnings),
+        )
+    return prepared, None
 
+
+def _run_portfolio_scenario(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    execution: StrategyExecutionResult,
+    projection_rows: Sequence[dict[str, Any]],
+    scenario: Any,
+    *,
+    prepared: Any | None,
+) -> EvaluationRunResult | None:
+    with context.event_emitter.stage(
+        "portfolio_evaluation",
+        strategy_id=context.config.strategy_id,
+        window_id=window.id,
+        scenario_id=scenario.scenario_id,
+        backend=_backend_name(context.selected_backend),
+    ) as scenario_event:
+        scenario_result = (
+            context.selected_backend.run_prepared(
+                prepared=prepared,
+                scenario=scenario,
+                metrics=context.config.metrics,
+            )
+            if prepared is not None and hasattr(context.selected_backend, "run_prepared")
+            else context.selected_backend.run(
+                decisions=execution.decisions,
+                rows=projection_rows,
+                scenario=scenario,
+                metrics=context.config.metrics,
+            )
+        )
+        state.backend_results.append(_strip_trace_tables(scenario_result))
+        if scenario_result.status != "completed":
+            status = (
+                "portfolio_backend_unavailable"
+                if scenario_result.status == "unavailable"
+                else "portfolio_evaluation_failed"
+            )
+            message = _backend_failure_message(scenario_result)
+            scenario_event.fail(message, backend_status=scenario_result.status)
+            return _failure_result(
+                context.result_dir,
+                "portfolio_evaluation",
+                status,
+                message,
+                warnings=tuple(state.all_warnings),
+            )
+        if scenario_result.tables is None:
+            message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
+            scenario_event.fail(message, backend_status=scenario_result.status)
+            return _failure_result(
+                context.result_dir,
+                "portfolio_evaluation",
+                "portfolio_evaluation_failed",
+                message,
+                warnings=tuple(state.all_warnings),
+            )
+        state.trace_results.append(scenario_result)
+    return None
+
+
+def _check_scenario_coverage(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    scenario_summary: dict[str, Any],
+) -> EvaluationRunResult | None:
+    coverage = scenario_summary["scenario_coverage"]
+    if not coverage["missing_ids"] and not coverage["unexpected_ids"]:
+        return None
+    message = (
+        "scenario coverage mismatch: "
+        f"missing={coverage['missing_ids']} unexpected={coverage['unexpected_ids']}"
+    )
+    with context.event_emitter.stage(
+        "portfolio_evaluation",
+        strategy_id=context.config.strategy_id,
+        scenario_id="scenario_coverage",
+        backend=_backend_name(context.selected_backend),
+    ) as coverage_event:
+        coverage_event.fail(message)
+    return _failure_result(
+        context.result_dir,
+        "portfolio_evaluation",
+        "portfolio_evaluation_failed",
+        message,
+        warnings=tuple(state.all_warnings),
+    )
+
+
+def _write_completion_artifacts(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    scenario_summary: dict[str, Any],
+) -> EvaluationRunResult | None:
     metrics_payload = {
         "metric_semantics": evaluation_metric_semantics(),
         "scenarios": [
@@ -233,44 +436,49 @@ def run_evaluation(
                 "warnings": list(item.warnings),
                 "unsupported_semantics": list(item.unsupported_semantics),
             }
-            for item in backend_results
+            for item in state.backend_results
         ],
     }
     try:
-        write_data_manifest(result_dir, windows=data_windows)
-        table_artifacts = _write_trace_tables(result_dir, trace_results)
-        write_json_artifact(result_dir, "evaluation_metrics.json", metrics_payload)
-        write_json_artifact(result_dir, "scenario_summary.json", scenario_summary)
-        write_text_artifact(result_dir, "notes.md", _notes(config.strategy_id, backend_results))
-        write_evaluation_manifest(
-            result_dir,
-            repo_root=root,
-            path_base=config.base_dir,
-            config=config,
-            config_path=resolved_config_path,
-            backend_name=getattr(selected_backend, "name", "unknown"),
-            data_windows=data_windows,
-            table_artifacts=table_artifacts,
-            scenario_summary=scenario_summary,
-        )
+        with context.event_emitter.stage(
+            "artifact_writes",
+            strategy_id=context.config.strategy_id,
+            scenario_count=len(state.backend_results),
+        ):
+            write_data_manifest(context.result_dir, windows=state.data_windows)
+            table_artifacts = _write_trace_tables(context.result_dir, state.trace_results)
+            write_json_artifact(context.result_dir, "evaluation_metrics.json", metrics_payload)
+            write_json_artifact(context.result_dir, "scenario_summary.json", scenario_summary)
+            write_text_artifact(
+                context.result_dir,
+                "notes.md",
+                _notes(context.config.strategy_id, state.backend_results),
+            )
+            write_evaluation_manifest(
+                context.result_dir,
+                repo_root=context.repo_root,
+                path_base=context.config.base_dir,
+                config=context.config,
+                config_path=context.config_path,
+                backend_name=_backend_name(context.selected_backend),
+                data_windows=state.data_windows,
+                table_artifacts=table_artifacts,
+                scenario_summary=scenario_summary,
+            )
     except Exception as exc:
-        _cleanup_trace_table_dirs(result_dir)
+        _cleanup_trace_table_dirs(context.result_dir)
         return _failure_result(
-            result_dir,
+            context.result_dir,
             "artifact_write",
             "evaluation_failed",
             f"artifact write failed: {exc}",
-            warnings=tuple(all_warnings),
+            warnings=tuple(state.all_warnings),
         )
+    return None
 
-    return EvaluationRunResult(
-        result_dir=result_dir,
-        message=f"evaluation complete: {len(backend_results)} scenarios",
-        run_completed=True,
-        failure_stage=None,
-        assessment_status="evaluation_complete",
-        evidence_quality_warnings=tuple(all_warnings),
-    )
+
+def _backend_name(backend: Any) -> str:
+    return getattr(backend, "name", "unknown")
 
 
 def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:

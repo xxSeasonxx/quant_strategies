@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from quant_strategies.evaluation import run_evaluation
+from quant_strategies.evaluation.events import jsonl_event_sink as evaluation_jsonl_event_sink
 from quant_strategies.runner import run_config
 from quant_strategies.runner.events import jsonl_event_sink as runner_jsonl_event_sink
 from quant_strategies.validation import run_validation
@@ -36,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
 
     evaluate_parser = subparsers.add_parser("evaluate", help="evaluate one evaluation TOML config")
     evaluate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative evaluation config path")
+    evaluate_parser.add_argument("--events-jsonl", action="store_true", help="write structured evaluation stage events to stderr")
     evaluate_parser.add_argument("config", type=Path)
 
     args = parser.parse_args(argv)
@@ -88,7 +90,14 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "evaluate":
         try:
-            result = run_evaluation(args.config, repo_root=args.repo_root)
+            if args.events_jsonl:
+                result = run_evaluation(
+                    args.config,
+                    repo_root=args.repo_root,
+                    event_sink=evaluation_jsonl_event_sink(sys.stderr),
+                )
+            else:
+                result = run_evaluation(args.config, repo_root=args.repo_root)
         except OSError as exc:
             print(f"evaluation failed: {exc}")
             return 1

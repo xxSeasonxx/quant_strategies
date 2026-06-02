@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from quant_strategies.evaluation import EvaluationRunResult
@@ -27,6 +28,48 @@ def test_evaluate_cli_prints_result_artifact_path_on_success(monkeypatch, tmp_pa
     assert code == 0
     assert capsys.readouterr().out == f"{result_dir}\n"
     assert calls == [(Path("candidate/evaluation.toml"), tmp_path)]
+
+
+def test_evaluate_cli_events_jsonl_wires_evaluation_event_sink(monkeypatch, tmp_path: Path, capsys):
+    calls: list[tuple[Path, Path | None, bool]] = []
+    result_dir = tmp_path / "evaluation_results" / "run"
+
+    def fake_run_evaluation(path: Path, repo_root: Path | None = None, event_sink=None) -> EvaluationRunResult:
+        calls.append((path, repo_root, event_sink is not None))
+        assert event_sink is not None
+        event_sink(
+            {
+                "event": "evaluation_stage",
+                "stage": "portfolio_evaluation",
+                "status": "completed",
+            }
+        )
+        return EvaluationRunResult(
+            result_dir=result_dir,
+            message="evaluation completed",
+            run_completed=True,
+            failure_stage=None,
+            assessment_status="completed",
+        )
+
+    monkeypatch.setattr("quant_strategies.runner.cli.run_evaluation", fake_run_evaluation)
+
+    code = cli.main(
+        [
+            "evaluate",
+            "--events-jsonl",
+            "--repo-root",
+            str(tmp_path),
+            "candidate/evaluation.toml",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert calls == [(Path("candidate/evaluation.toml"), tmp_path, True)]
+    assert captured.out == f"{result_dir}\n"
+    assert json.loads(captured.err)["event"] == "evaluation_stage"
+    assert json.loads(captured.err)["stage"] == "portfolio_evaluation"
 
 
 def test_evaluate_cli_returns_three_for_data_load_failure(monkeypatch, tmp_path: Path, capsys):
