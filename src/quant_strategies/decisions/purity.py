@@ -20,9 +20,11 @@ BANNED_IMPORT_ROOTS = {
     "multiprocessing",
     "quant_data",
     "quant_strategies.engine",
+    "quant_strategies.evaluation",
     "quant_strategies.runner",
     "quant_strategies.validation",
     "threading",
+    "vectorbtpro",
 }
 BANNED_CALL_NAMES = {
     "__import__",
@@ -108,6 +110,11 @@ def strategy_purity_violations(path: str | Path) -> tuple[str, ...]:
             module = node.module or ""
             if _is_banned_import(module):
                 violations.append(f"{strategy_path}: from {module} import ...")
+            else:
+                for alias in node.names:
+                    imported_module = f"{module}.{alias.name}" if module else alias.name
+                    if _is_banned_import(imported_module):
+                        violations.append(f"{strategy_path}: from {imported_module} import ...")
         elif isinstance(node, ast.Call):
             call_name = _call_name(node.func, aliases)
             if _is_banned_call_name(call_name):
