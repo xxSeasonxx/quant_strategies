@@ -16,10 +16,9 @@ the work to be done.
 
 ## 1. One-Line Summary
 
-`quant_strategies` is a **stateless research foundation**: it has two
-implemented public surfaces today — diagnostic quick runs and mechanical
-evidence validation — and its next missing product job is stateless research
-evaluation for frozen candidates.
+`quant_strategies` is a **stateless research foundation**: it has three
+implemented public surfaces today — diagnostic quick runs, mechanical evidence
+validation, and research evaluation for frozen candidates.
 
 ---
 
@@ -37,9 +36,9 @@ A disciplined Python library and CLI that:
 4. Provides a **mechanical evidence validation harness** that runs a retained
    candidate across windows and scenarios with hidden-lookahead protection and
    mechanically auditable artifacts.
-5. Separates the missing **research evaluation** job from validation: evaluation
-   is where frozen candidates should receive portfolio, path, robustness, and
-   economic evidence under explicit assumptions.
+5. Separates the **research evaluation** job from validation: evaluation is
+   where frozen candidates receive portfolio, path, and economic evidence under
+   explicit assumptions.
 6. Exposes a **stable, minimal consumer surface** for `quant_autoresearch` to drive
    strategy iteration without touching internals.
 
@@ -47,8 +46,8 @@ A disciplined Python library and CLI that:
 
 - Not a general-purpose backtesting framework where users compose arbitrary
 pipelines. There is one foundation pipeline. Strategies are pure functions.
-The future research evaluation surface does own stateless historical
-backtest/evaluation evidence for frozen candidates under explicit assumptions.
+The research evaluation surface owns stateless historical evaluation evidence
+for frozen candidates under explicit assumptions.
 - Not a market-validation authority. All outputs are advisory; promotion requires a separate
 human-led process.
 - Not a data platform. Data acquisition, refresh, and repair are owned by `quant_data`.
@@ -63,12 +62,17 @@ The product contract distinguishes three jobs:
 | --- | --- | --- |
 | Quick run | Implemented public surface | Fast causal diagnostics for one strategy version. |
 | Mechanical evidence validation | Implemented public surface through `quant-strategies validate` | Retained-candidate integrity checks across windows and scenarios. |
-| Research evaluation | Approved missing surface | Stateless historical backtest, economic, path, and portfolio evidence for frozen candidates. |
+| Research evaluation | Implemented public surface through `quant-strategies evaluate` | Stateless historical economic, path, and portfolio evidence for frozen candidates. |
 
 Validation is not research evaluation. It verifies that evidence was produced
 honestly, causally, reproducibly, and audibly under explicit config. It does not
 answer whether a strategy has durable alpha, statistical significance, regime
 robustness, benchmark-relative edge, capacity, or portfolio quality.
+Evaluation is now an implemented stateless surface for frozen-candidate
+portfolio/economic/path evidence. Programmatic callers use
+`quant_strategies.evaluation.run_evaluation` with a candidate-local
+`evaluation.toml`; evaluation writes detailed trace artifacts as Parquet through
+`pyarrow`. It remains separate from validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
 ---
 
@@ -148,19 +152,18 @@ strategy version, explain behavior, compare against prior versions, and decide
 whether the candidate is worth retaining.
 - For validation runs, it uses the result object and structured artifacts as advisory
 retained-candidate triage.
-- For future research evaluation runs, it should pass frozen candidate inputs and
-  explicit assumptions to a separate stateless evaluation surface. That surface
-  is not part of the current public API.
+- For research evaluation runs, it passes frozen candidate inputs and explicit
+  assumptions to the separate stateless evaluation surface through
+  `quant-strategies evaluate candidate/evaluation.toml` or
+  `quant_strategies.evaluation.run_evaluation`.
 - The public consumer surface is intentionally narrow:
 `quant_strategies.runner.run_config` returns
 `quant_strategies.runner.RunResult`, and no top-level facade is promised.
 Strategy generation and backend extension points are Protocol-typed;
 internals are private.
 - User-facing foundation vocabulary MUST remain small. Current implemented
-surface language centers on `quick run`, `validation run`, and advisory
-validation verdicts. Product-direction language may name `research evaluation`
-as the missing stateless surface, but must not imply it is implemented before it
-exists. Terms such as
+surface language centers on `quick run`, `validation run`, and `evaluation run`.
+Validation verdicts remain advisory validation vocabulary only. Terms such as
 `screen`, `gate`, artifact profile internals, replayability metadata, and `row_contract`
 are reference-level vocabulary, not the normal foundation surface.
 - Misusing the surface (returning the wrong shape, importing private modules, etc.)
@@ -227,29 +230,32 @@ in seconds, not minutes. Micro-latency optimization (sub-100ms per run) and vect
 engine inner-loop tuning are explicitly out of scope (§8). The goal is good performance
 code, not benchmark-chasing.
 
-**G7. Research evaluation is a separate stateless backtest surface.**
-The next missing product surface SHOULD evaluate frozen candidates under
-explicit assumptions and emit historical backtest, portfolio, economic, and path
-evidence. It should accept strategy and config references, params, data
-references or splits, portfolio model assumptions, cost/slippage/fill
-assumptions, and optional search-pressure metadata supplied by the caller.
+**G7. Research evaluation is a separate stateless evaluation surface.**
+The implemented evaluation surface evaluates frozen candidates under explicit
+assumptions and emits portfolio, economic, and path evidence. It accepts a
+candidate-local `evaluation.toml`, strategy reference, params, data config,
+windows, fill/cost assumptions, metrics config, and output root. Programmatic
+callers use `quant_strategies.evaluation.run_evaluation`.
 
-It SHOULD return NAV/path metrics, drawdown, turnover, exposure and
-concentration summaries, cost/slippage sensitivity, per-asset or per-regime
-breakdowns where configured, and explicit non-claims. It MUST NOT own candidate
-generation, search memory, ranking across variants, stopping rules, promotion,
-paper-trading authorization, or live-trading authorization.
+It returns `EvaluationRunResult` and writes portfolio metrics, scenario summary,
+data manifest, evaluation manifest, and detailed trace artifacts as Parquet
+through `pyarrow`. VectorBT Pro is required for evaluation. Detailed traces have
+no JSONL fallback path. It MUST NOT own candidate generation, search memory,
+ranking across variants, stopping rules, promotion, paper-trading
+authorization, or live-trading authorization.
+
+Evaluation is not validation. It does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
 VectorBT Pro is appropriate here when portfolio/NAV semantics are the
-deliverable. It remains out of the quick-run hot path.
+deliverable. It remains out of the quick-run hot path and validation authority.
 
 ### 4.2 Non-goals (explicit, durable)
 
 **NG1.** Market validation. Mechanical and statistical checks are advisory only; no output
 flips a `paper_trade_eligible` or `live_eligible` bit autonomously. The validation
 verdict label (see G5) is itself advisory — it summarizes mechanical evidence, not
-market-validated alpha. Future research evaluation metrics are also advisory
-evidence, not promotion authority. Downstream consumers (including
+market-validated alpha. Research evaluation metrics are also advisory evidence,
+not promotion authority. Downstream consumers (including
 `quant_autoresearch`) MUST treat the verdict as an input to human review, never
 as a promotion signal.
 
@@ -288,8 +294,8 @@ quick-run evidence and causality hygiene. Optional quick checks may classify the
 quick-run result, but this is not validation.
 - **NFR-SIMPLICITY.** New strategy authors can read one Protocol + one decision schema
 and write a working strategy quickly. Researchers can distinguish fast quick-run
-diagnostics, mechanical evidence validation, and the approved missing research
-evaluation job without learning implementation vocabulary first.
+diagnostics, mechanical evidence validation, and research evaluation without
+learning implementation vocabulary first.
 - **NFR-ROOT-CAUSE.** When a bug is fixed, the fix lands at the boundary or contract that
 produced it. Wrappers, guards, adapters, and "the new code path" are anti-patterns
 unless explicitly justified.
@@ -337,9 +343,11 @@ kernel between runner and validation, and no orchestrator god-functions.
 
 ## 7. Constraints
 
-- **C-1.** Python ≥ 3.12; pydantic ≥ 2.10; `quant-data` for data loading. Optional
-`vectorbtpro` only for the explicitly enabled single-trade agreement check; it
-is not a validation backend or verdict source.
+- **C-1.** Python ≥ 3.12; pydantic ≥ 2.10; `quant-data` for data loading.
+`vectorbtpro` is used for the explicitly enabled single-trade agreement check
+and is required for the implemented evaluation surface; it is not a validation
+backend or verdict source. Evaluation trace artifacts are Parquet and require
+`pyarrow`.
 - **C-2.** Conda environment `quant`. All Python commands run via `conda run -n quant`.
 - **C-3.** `quant_data` is the only source of market data. The foundation does not load
 CSVs, fetch APIs, or maintain caches.
@@ -363,8 +371,9 @@ a quick-run artifact profile: `summary` (compact aggregate quick-run evidence),
 `replayable_from_artifacts = true | false`; there is no separate user-facing artifact
 tier. V1 audit row, decision, and trade-ledger artifacts use deterministic JSONL;
 control-plane artifacts (manifest, summary, config, evidence, diagnostics) stay
-sort-keys JSON. Move to columnar storage only after a benchmark shows JSONL is
-inadequate.
+sort-keys JSON. Evaluation trace artifacts are separate: they are Parquet only
+through `pyarrow`; quick-run and validation JSONL audit artifacts do not define
+the evaluation trace format.
 
 ---
 
@@ -373,11 +382,11 @@ inadequate.
 - Live trading, paper trading, order routing, broker integration.
 - Real-time market data feeds.
 - A general-purpose, user-composable backtesting framework. The execution kernel
-produces quick-run and validation evidence; the optional VectorBT Pro integration
-is only a single-trade agreement check, not a validation backend or verdict
-source. Future research evaluation does own stateless historical backtesting for
-frozen candidates under explicit assumptions, but it is not a free-composition
-backtester.
+produces quick-run and validation evidence; the optional VectorBT Pro agreement
+integration is only a single-trade agreement check, not a validation backend or
+verdict source. Research evaluation owns stateless historical portfolio/path
+evidence for frozen candidates under explicit assumptions, but it is not a
+free-composition backtester.
 - Strategy generation. (Owned by `quant_autoresearch`.)
 - Data acquisition / repair / join. (Owned by `quant_data`.)
 - Promotion automation. (Human-led process.)

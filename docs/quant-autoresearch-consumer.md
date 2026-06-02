@@ -381,6 +381,26 @@ Programmatic retained-candidate handoff may call the stable validation API:
 from quant_strategies.validation import run_validation
 ```
 
+For frozen-candidate portfolio/economic/path evidence, use the implemented
+evaluation surface as a separate handoff from validation. Create an
+`evaluation.toml` in the candidate workspace, point it at `strategy.py`, and
+run:
+
+```bash
+conda run -n quant quant-strategies evaluate \
+  /path/to/candidate_workspace/evaluation.toml
+```
+
+Programmatic callers may use the stable evaluation API:
+
+```python
+from quant_strategies.evaluation import run_evaluation
+```
+
+Evaluation returns `EvaluationRunResult`, uses VectorBT Pro, and writes detailed
+trace artifacts as Parquet through `pyarrow`; there is no JSONL fallback path
+for evaluation traces. Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+
 Every retained-candidate `validation.toml` must include `[search_pressure]` with
 `prior_search = "none"`, `"known"`, or `"unknown"`. Known prior search records
 candidate counts, trial counts, selection rule, and optional search metadata. These

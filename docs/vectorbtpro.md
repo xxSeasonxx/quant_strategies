@@ -15,6 +15,7 @@ Local package inspection in Season's `quant` environment on 2026-06-01:
 | Package root | `/opt/anaconda3/envs/quant/lib/python3.12/site-packages/vectorbtpro/` |
 | `Portfolio` module | `vectorbtpro/portfolio/base.py` |
 | Project optional extra | `pip install -e '.[vectorbtpro]'` installs `pandas>=2.2` and `vectorbtpro` |
+| Evaluation extra | `pip install -e '.[evaluation]'` installs `pandas>=2.2`, `pyarrow>=16`, and `vectorbtpro` |
 
 Verify the local install with:
 
@@ -78,19 +79,24 @@ simulation workbench:
   signal definition;
 - independently sanity-checking simple engine cases.
 
-This makes it valuable for a research evaluation layer. It does not by itself
-prove alpha, statistical significance, economic durability, data quality, or
-paper-trading or live-trading authorization.
+This makes it valuable for the implemented research evaluation layer. Evaluation
+uses `quant-strategies evaluate candidate/evaluation.toml` or
+`quant_strategies.evaluation.run_evaluation` and writes detailed trace artifacts
+as Parquet through `pyarrow`. It does not by itself prove alpha, statistical
+significance, economic durability, data quality, or paper-trading or
+live-trading authorization.
 
 ## Project Boundary
 
-`quant_strategies` does not use VectorBT Pro as a foundation backend.
+`quant_strategies` does not use VectorBT Pro as a quick-run or validation
+backend.
 
 | Surface | Backend |
 | --- | --- |
 | Quick run | Internal `quant_strategies.engine` path through `runner.engine_runner` |
 | Validation verdict | Internal `EngineBackend`, using the same engine path |
-| VectorBT Pro | Optional agreement oracle and research workbench |
+| Evaluation run | VectorBT Pro portfolio evaluation backend |
+| VectorBT Pro agreement oracle | Optional validation agreement check and research workbench |
 
 The reason is semantic, not just implementation preference:
 
@@ -100,8 +106,29 @@ The reason is semantic, not just implementation preference:
 - Funding semantics belong to the project engine, not to VectorBT Pro.
 - Strategy purity still forbids calling VectorBT Pro inside strategy files.
 
-Any VectorBT Pro evaluation output should be named as VectorBT/portfolio evidence,
-not as the project engine verdict.
+VectorBT Pro evaluation output is named as portfolio/path evidence, not as a
+project engine validation decision. Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+
+## Evaluation Surface
+
+The evaluation surface is an implemented stateless surface for
+frozen-candidate portfolio/economic/path evidence. It requires a candidate-local
+`evaluation.toml`, calls VectorBT Pro with explicit portfolio assumptions, and
+returns `EvaluationRunResult`.
+
+Detailed trace artifacts are Parquet only through `pyarrow`:
+
+| Artifact | Contents |
+| --- | --- |
+| `tables/portfolio_path.parquet` | portfolio value, period return, and drawdown traces by scenario |
+| `tables/trades.parquet` | trade traces by scenario |
+| `tables/positions.parquet` | position traces by scenario |
+| `tables/per_asset_metrics.parquet` | per-asset metrics by scenario |
+
+The companion JSON artifacts include `evaluation_metrics.json`,
+`scenario_summary.json`, `data_manifest.json`, `evaluation_manifest.json`,
+`environment.json`, and `notes.md`. There is no JSONL fallback path for
+evaluation traces.
 
 ## Agreement Oracle
 

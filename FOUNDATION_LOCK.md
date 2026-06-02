@@ -6,12 +6,10 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 
 ## Locked Contracts
 
-- **Implemented public surfaces:** the project currently exposes quick run and
-  validation run. Quick run is diagnostic; validation run is mechanical evidence
-  validation.
-- **Approved missing surface:** research evaluation is the next missing stateless
-  foundation surface for frozen-candidate historical backtest, portfolio, path,
-  and economic evidence.
+- **Implemented public surfaces:** the project currently exposes quick run,
+  validation run, and evaluation run. Quick run is diagnostic; validation run is
+  mechanical evidence validation; evaluation run is stateless frozen-candidate
+  portfolio, path, and economic evidence.
 - **Strategy shape:** strategies are flat, single-file, pure strategy modules.
 - **Strategy rationale:** each strategy module docstring states thesis,
   observables, rule, assumptions, provenance, and falsifier.
@@ -19,8 +17,14 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
   evidence. It is not validation.
 - **Validation run:** validation requires `validate_params` and returns advisory
   retained-candidate mechanical evidence. It is not quant strategy evaluation.
+- **Evaluation run:** evaluation uses
+  `quant-strategies evaluate candidate/evaluation.toml` or
+  `quant_strategies.evaluation.run_evaluation` and returns
+  `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
+  `pyarrow`.
 - **Promotion boundary:** validation does not authorize paper trading, live
   trading, or promotion. Promotion remains outside this foundation.
+- **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 - **Metric contract:** the engine computes linear signed per-trade result, not
   NAV or portfolio accounting.
 - **Data boundary:** `quant_data` owns data acquisition, materialization,
@@ -28,15 +32,14 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact
   quick-run artifacts are intentionally not full replay chains.
 - **Current I/O docs boundary:** current implemented-surface references live in
-  `README.md`, `docs/runner.md`, and `docs/validation.md`. Do not add
-  speculative I/O reference docs for research evaluation before that surface is
-  implemented.
+  `README.md`, `docs/foundation-surfaces.md`, `docs/runner.md`, and
+  `docs/validation.md`.
 
 ## Accepted Debt
 
 - Large facade modules are not immediate foundation blockers.
-- Full NAV and portfolio accounting are deferred to the future research evaluation
-  surface; they are not quick-run or validation verdict metrics.
+- Full NAV and portfolio accounting belong to the evaluation surface; they are
+  not quick-run or validation metrics.
 - The VectorBT Pro agreement check is optional and single-trade only; it should
   not be treated as multi-trade validation confidence.
 - Runtime sandboxing is deferred unless strategy code becomes untrusted.
@@ -46,11 +49,10 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 - Preserve the clarified contract: docs should distinguish quick run,
   mechanical evidence validation, and research evaluation without renaming
   current code, CLI commands, package paths, artifact names, or public APIs.
-- Design and implement a stateless research evaluation surface for frozen
-  candidates next.
-- After evaluation is scoped, improve quick-run economic diagnostics from the
-  existing engine trade ledger, without putting VectorBT Pro on the quick-run
-  hot path.
+- Keep the stateless research evaluation surface separate from validation and
+  quick-run hot paths.
+- Improve quick-run economic diagnostics from the existing engine trade ledger,
+  without putting VectorBT Pro on the quick-run hot path.
 
 ## Deferred Until Trigger
 

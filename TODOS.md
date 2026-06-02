@@ -13,7 +13,7 @@ make the foundation surfaces simple enough to use and honest enough to trust:
 ```text
 quick run                  -> diagnose one strategy version and decide whether to keep iterating
 mechanical evidence validation -> audit retained-candidate evidence integrity
-research evaluation        -> missing stateless surface for frozen-candidate backtest/portfolio/economic evidence
+research evaluation        -> stateless frozen-candidate portfolio/economic/path evidence
 ```
 
 ## Status
@@ -25,39 +25,23 @@ protocol.
 
 ## Current Open Work
 
-### C. Research evaluation surface MVP
+### C. Evaluation follow-ups
 
-The next missing product layer is a stateless evaluation surface for frozen
-candidates. It should accept strategy/config/data references and explicit
-evaluation assumptions, then return historical backtest, economic, path, and
-portfolio evidence.
+The stateless evaluation surface is implemented through
+`quant-strategies evaluate candidate/evaluation.toml` and
+`quant_strategies.evaluation.run_evaluation`. It returns `EvaluationRunResult`
+for frozen-candidate portfolio/economic/path evidence, remains separate from
+validation, and does not authorize promotion, paper trading, or live trading.
+Detailed trace artifacts are Parquet through `pyarrow`.
 
-Initial design boundaries:
-
-- keep it stateless; no candidate generation, search memory, ranking, stopping
-  rules, or promotion policy;
-- keep validation as mechanical evidence validation, not a renamed evaluation
-  run;
-- use VectorBT Pro where portfolio/NAV semantics are the deliverable;
-- label all NAV/path/portfolio metrics separately from engine trade-activity
-  sums;
-- preserve the promotion boundary: evaluation evidence does not authorize paper
-  trading, live trading, or autonomous promotion.
-
-Acceptance criteria for the next C design:
-
-- clear input contract for frozen candidate, params, data references or splits,
-  and evaluation assumptions;
-- clear output contract for NAV/path metrics, drawdown, turnover, exposure,
-  concentration, per-asset evidence where supported, and explicit non-claims;
-- no quick-run dependency on VectorBT Pro;
-- no speculative implemented-surface I/O reference docs before the evaluation
-  surface exists.
+Remaining follow-up work is limited to benchmark-relative metrics,
+user-defined scenario matrices, and any residual backend limitations found
+during implementation.
 
 ### B. Quick-run economic diagnostics improvement
 
-After C is designed, improve quick-run keep/kill diagnostics using the existing
-engine trade ledger.
+Improve quick-run keep/kill diagnostics using the existing engine trade ledger
+after the evaluation follow-ups that matter to the diagnostic design are settled.
 
 Candidate diagnostics:
 
@@ -79,8 +63,9 @@ Constraints:
 Use `FOUNDATION_LOCK.md` as the source of truth for what should not be reopened
 as a fresh P1 without a regression or documented trigger. In short:
 
-- quick run and validation run are the two implemented public surfaces;
-- research evaluation is the approved missing next surface;
+- quick run, validation run, and evaluation run are the implemented public
+  surfaces;
+- Benchmark-relative metrics are deferred for evaluation;
 - strategies are flat pure files;
 - validation requires `validate_params`;
 - engine metrics are linear signed per-trade results, not NAV;

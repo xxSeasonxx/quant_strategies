@@ -2,7 +2,7 @@
 
 A disciplined research foundation for **pure strategy functions**,
 deterministic **quick runs**, **mechanical evidence validation**, and the
-approved missing **research evaluation** layer.
+implemented **research evaluation** layer.
 
 It is *not* a trading system and does not imply paper-trading or live-trading
 readiness. Its one job is to take a strategy idea from "pure function" to
@@ -18,8 +18,8 @@ The project contract separates three jobs:
 - **Mechanical evidence validation**: implemented today through
   `quant-strategies validate`; retained-candidate integrity checks across
   windows and scenarios.
-- **Research evaluation**: approved missing surface; stateless historical
-  backtest, portfolio, economic, and path evidence for frozen candidates under
+- **Research evaluation**: implemented today through `quant-strategies evaluate`;
+  stateless portfolio, economic, and path evidence for frozen candidates under
   explicit assumptions.
 
 Validation is not research evaluation. None of these jobs authorizes paper
@@ -29,14 +29,16 @@ trading, live trading, or autonomous promotion.
 
 ```mermaid
 flowchart TD
-    cfg["experiment.toml / validation.toml"] --> strat
+    cfg["experiment.toml / validation.toml / evaluation.toml"] --> strat
     strat["pure strategy.py<br/>generate_decisions(rows, params) → [StrategyDecision]"] --> spec
     spec["StrategyExecutionSpec<br/>(neutral; runner and validation both adapt into it)"] --> kernel
     kernel["one execution kernel<br/>load rows via quant_data · freeze · strict causal replay"] --> pnl
     pnl["one PnL contract<br/>per-trade ledger · funding-aware net"]
     pnl --> quick["quant-strategies run<br/>quick run · diagnostic evidence"]
     pnl --> valid["quant-strategies validate<br/>windows × scenarios → advisory evidence"]
+    pnl --> eval["quant-strategies evaluate<br/>frozen candidate → portfolio/path evidence"]
     valid -. "opt-in single-trade check" .-> oracle["VectorBT Pro<br/>single-trade check"]
+    eval --> vbt["VectorBT Pro<br/>portfolio evidence · Parquet traces"]
     valid --> human["human promotion review<br/>(outside the code)"]
 ```
 
@@ -49,10 +51,11 @@ The design has one spine:
   → freeze inputs → typed decisions → strict causal replay.
 - **One PnL contract.** The shared engine result is the single source of trade-level
   PnL, so **the number a human audits is the number the verdict is computed from.**
-- **Two implemented public surfaces today.** A fast *quick run* for diagnostic
-  evidence, and an *advisory validation run* for retained-candidate mechanical
-  evidence. Research evaluation is the approved missing surface. VectorBT Pro is
-  optional today, single-trade only, and never produces validation verdict metrics.
+- **Three implemented public surfaces today.** A fast *quick run* for diagnostic
+  evidence, an *advisory validation run* for retained-candidate mechanical
+  evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
+  economic, and path evidence. VectorBT Pro remains out of validation verdict
+  metrics and is required by evaluation.
 
 Promotion is always a separate human decision, outside this code.
 
@@ -100,6 +103,17 @@ portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 `paper_trade_eligible` / `live_eligible` always stay false. See
 [docs/validation.md](docs/validation.md).
 
+**Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
+
+Runs a frozen candidate through the research evaluation surface and writes
+portfolio, economic, and path evidence. Evaluation uses VectorBT Pro and writes
+detailed trace artifacts as Parquet through `pyarrow`; there is no JSONL fallback
+for trace-level evaluation artifacts.
+
+Python callers use `quant_strategies.evaluation.run_evaluation`.
+
+Evaluation is not validation. It does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+
 ## Boundaries
 
 - **`quant-data` owns data.** Materialization, refresh, backfill, repair, and
@@ -108,10 +122,10 @@ portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
-- **Research evaluation is separate and not implemented yet.** Future historical
-  backtest evidence, NAV/path, drawdown, exposure, benchmark-relative, and
-  robustness evidence belongs in a stateless evaluation surface for frozen
-  candidates, not in validation verdicts or quick-run hot paths.
+- **Research evaluation is separate from validation.** Historical portfolio,
+  economic, and path evidence belongs in the stateless evaluation surface for
+  frozen candidates, not in validation decisions or quick-run hot paths.
+  Benchmark-relative metrics are deferred.
 - **`researched/` is not market-validated.** It may hold frozen packages from
   upstream research; validation does not treat it as special.
 
@@ -123,6 +137,7 @@ Use the `quant` conda environment for all Python commands:
 conda run -n quant pytest
 conda run -n quant quant-strategies run path/to/config.toml
 conda run -n quant quant-strategies validate path/to/candidate/validation.toml
+conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 ```
 
 ## Documentation
@@ -131,6 +146,8 @@ conda run -n quant quant-strategies validate path/to/candidate/validation.toml
   evidence quality, exit codes, and artifacts.
 - **[docs/validation.md](docs/validation.md)** — validation reference: config schema,
   advisory verdicts, scenario evidence, and artifacts.
+- **[docs/foundation-surfaces.md](docs/foundation-surfaces.md)** — current quick-run,
+  validation-run, and evaluation-run I/O reference.
 - **[docs/quant-autoresearch-consumer.md](docs/quant-autoresearch-consumer.md)** —
   the stable Python consumer contract: `quant_strategies.runner.run_config` →
   `quant_strategies.runner.RunResult`, and
