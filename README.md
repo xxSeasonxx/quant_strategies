@@ -31,12 +31,13 @@ trading, live trading, or autonomous promotion.
 flowchart TD
     cfg["experiment.toml / validation.toml / evaluation.toml"] --> strat
     strat["pure strategy.py<br/>generate_decisions(rows, params) → [StrategyDecision]"] --> spec
-    spec["StrategyExecutionSpec<br/>(neutral; runner and validation both adapt into it)"] --> kernel
-    kernel["one execution kernel<br/>load rows via quant_data · freeze · strict causal replay"] --> pnl
+    spec["StrategyExecutionSpec<br/>(neutral; all surfaces adapt into it)"] --> kernel
+    kernel["one execution kernel<br/>load rows via quant_data · freeze · strict causal replay"] --> evidence
+    evidence["frozen rows · typed decisions · causal preflight"] --> pnl
     pnl["one PnL contract<br/>per-trade ledger · funding-aware net"]
     pnl --> quick["quant-strategies run<br/>quick run · diagnostic evidence"]
     pnl --> valid["quant-strategies validate<br/>windows × scenarios → advisory evidence"]
-    pnl --> eval["quant-strategies evaluate<br/>frozen candidate → portfolio/path evidence"]
+    evidence --> eval["quant-strategies evaluate<br/>frozen candidate → portfolio/path evidence"]
     valid -. "opt-in single-trade check" .-> oracle["VectorBT Pro<br/>single-trade check"]
     eval --> vbt["VectorBT Pro<br/>portfolio evidence · Parquet traces"]
     valid --> human["human promotion review<br/>(outside the code)"]
@@ -45,12 +46,15 @@ flowchart TD
 The design has one spine:
 
 - **One strategy contract.** A strategy is a pure `generate_decisions(rows, params)`.
-- **One neutral execution spec.** Runner and validation both adapt their config
-  into the same `StrategyExecutionSpec`; neither owns the other's execution path.
+- **One neutral execution spec.** Runner, validation, and evaluation adapt their
+  config into the same `StrategyExecutionSpec`; none owns the other's execution
+  path.
 - **One execution kernel.** Import → validate params → load rows (via `quant_data`)
   → freeze inputs → typed decisions → strict causal replay.
-- **One PnL contract.** The shared engine result is the single source of trade-level
-  PnL, so **the number a human audits is the number the verdict is computed from.**
+- **One PnL contract for quick run and validation.** The shared engine result is
+  the single source of trade-level PnL, so **the number a human audits is the
+  number the validation decision is computed from.** Evaluation branches from
+  the same frozen rows and decisions into VectorBT Pro portfolio evidence.
 - **Three implemented public surfaces today.** A fast *quick run* for diagnostic
   evidence, an *advisory validation run* for retained-candidate mechanical
   evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
@@ -74,7 +78,7 @@ generate_decisions(rows, params) -> list[StrategyDecision]
   guarantee is the contract plus review.
 - **Optional `validate_params`.** A `validate_params(params) -> Mapping` hook is
   optional for the quick run (schema-less runs are flagged exploratory) but
-  **required** for the validation run, so a mechanical evidence verdict never
+  **required** for validation and evaluation, so candidate-level evidence never
   rests on params that were never schema-checked.
 - **Typed output.** The default output is `StrategyDecision` — a stable
   `decision_id`, instrument, `open` intent, decision/as-of times, target,
@@ -150,9 +154,10 @@ conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
   validation-run, and evaluation-run I/O reference.
 - **[docs/quant-autoresearch-consumer.md](docs/quant-autoresearch-consumer.md)** —
   the stable Python consumer contract: `quant_strategies.runner.run_config` →
-  `quant_strategies.runner.RunResult`, and
-  `quant_strategies.validation.run_validation` → `ValidationRunResult`. No top-level
-  facade is promised.
+  `quant_strategies.runner.RunResult`,
+  `quant_strategies.validation.run_validation` → `ValidationRunResult`, and
+  `quant_strategies.evaluation.run_evaluation` → `EvaluationRunResult`. No
+  top-level facade is promised.
 
 ## Promotion discipline
 

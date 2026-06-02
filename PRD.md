@@ -83,7 +83,7 @@ portfolio/economic/path evidence. Programmatic callers use
 
 | User                                         | Role                                                                                                                                                                | What they need                                                                                                                                                                                                                                     |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop; consumes quick-run diagnostics for one-version improvement and validation verdicts for retained-candidate triage | Stable, typed Python API for both `runner.run_config` and `validation.run_validation`; declarative strategy contract; deterministic artifacts; bounded behavior diagnostics; advisory verdict labels from validation; small surface area to misuse |
+| `**quant_autoresearch`** (autonomous agent)  | Generates and iterates strategies in a tight loop; consumes quick-run diagnostics for one-version improvement, validation verdicts for retained-candidate triage, and evaluation evidence for frozen-candidate review | Stable, typed Python API for `runner.run_config`, `validation.run_validation`, and `evaluation.run_evaluation`; declarative strategy contract; deterministic artifacts; bounded behavior diagnostics; advisory verdict labels from validation; small surface area to misuse |
 | **Senior quant researcher (Season)**         | Designs strategies, audits research, makes promotion decisions                                                                                                      | Math correctness; explicit ontology; ability to understand behavior slices and investigate trades end-to-end; ability to add new strategy axes without rewriting the harness                                                                       |
 | **Future strategy authors** (human or agent) | Write new strategy files                                                                                                                                            | One-page contract; obvious where to put thesis/observables/rule/falsifier; impossible to accidentally introduce lookahead                                                                                                                          |
 
@@ -138,8 +138,9 @@ sum of per-trade results).
 - A single ontology for strategy output. The engine consumes it directly; no parallel
 representation in the math layer.
 - A single execution-model contract that any PnL backend implements.
-- A single causal-invariant kernel shared by runner and validation; validation does not
-reach into runner internals.
+- A single causal-invariant kernel shared by runner, validation, and evaluation
+for import, data loading, decision generation, and replay checks; portfolio
+evaluation then branches to VectorBT Pro rather than the engine PnL contract.
 - A single declared freezing idiom for `params` / `rows` / `metadata`.
 - Each module has one main reason to change. Orchestrator god-functions are forbidden.
 
@@ -158,9 +159,11 @@ retained-candidate triage.
   `quant_strategies.evaluation.run_evaluation`.
 - The public consumer surface is intentionally narrow:
 `quant_strategies.runner.run_config` returns
-`quant_strategies.runner.RunResult`, and no top-level facade is promised.
-Strategy generation and backend extension points are Protocol-typed;
-internals are private.
+`quant_strategies.runner.RunResult`,
+`quant_strategies.validation.run_validation` returns `ValidationRunResult`, and
+`quant_strategies.evaluation.run_evaluation` returns `EvaluationRunResult`.
+No top-level facade is promised. Strategy generation and backend extension
+points are Protocol-typed; internals are private.
 - User-facing foundation vocabulary MUST remain small. Current implemented
 surface language centers on `quick run`, `validation run`, and `evaluation run`.
 Validation verdicts remain advisory validation vocabulary only. Terms such as

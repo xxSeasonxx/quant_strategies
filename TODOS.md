@@ -67,7 +67,7 @@ as a fresh P1 without a regression or documented trigger. In short:
   surfaces;
 - Benchmark-relative metrics are deferred for evaluation;
 - strategies are flat pure files;
-- validation requires `validate_params`;
+- validation and evaluation require `validate_params`;
 - engine metrics are linear signed per-trade results, not NAV;
 - validation is mechanical evidence validation, advisory, and never promotion authority;
 - `quant_data` owns data acquisition and materialization;
@@ -91,13 +91,13 @@ as a fresh P1 without a regression or documented trigger. In short:
   keep working. Revisit rejecting outputs under source directories only if
   validation config paths are redesigned.
 
-Strict suppression-lookahead replay is the default for both quick runs and
-validation runs; see `causality.check_hidden_lookahead` and the
+Strict suppression-lookahead replay is the default for quick runs, validation
+runs, and evaluation preflight; see `causality.check_hidden_lookahead` and the
 `hidden_lookahead_suppression_detected` regression tests.
 
 ## Verification
 
-The closeout was docs-only. Suggested checks:
+Suggested closeout checks:
 
 ```bash
 rg -n "FOUNDATION_LOCK|accepted_debt|deferred_until_trigger|broad blind|delta reviews|quick run|validation run" FOUNDATION_LOCK.md docs/reviews/README.md TODOS.md
@@ -107,6 +107,5 @@ git diff --check
 Also run a stale-reference grep across active docs for removed dated review
 anchors and stale process/guide wording; it should return no matches.
 
-Run `conda run -n quant pytest -q` only if a final full-suite confidence check
-is needed; the closeout itself does not change source, tests, public APIs,
-schemas, artifacts, or verdict labels.
+Run `conda run -n quant pytest -q` for final confidence when source, tests, or
+public APIs changed.

@@ -3,8 +3,9 @@
 `quant_strategies` provides the execution foundation. `quant_autoresearch`
 owns the research loop.
 
-The downstream setup should be deliberately small: for each candidate,
-`quant_autoresearch` writes or modifies only two input files:
+The downstream search-loop setup should be deliberately small: for each active
+candidate iteration, `quant_autoresearch` writes or modifies only two input
+files:
 
 ```text
 candidate_workspace/
@@ -14,7 +15,9 @@ candidate_workspace/
 ```
 
 `strategy.py` contains the generated strategy. `experiment.toml` contains the
-data, params, fill model, cost model, and output settings for one run.
+data, params, fill model, cost model, and output settings for one quick run.
+Retained-candidate handoffs may add explicit `validation.toml` or
+`evaluation.toml` files outside the quick-run search loop.
 
 ## Minimal Flow
 
@@ -69,10 +72,13 @@ Each event is a structured `runner_stage` dictionary with `stage`, `status`,
 `timestamp`, and `duration_ms` on completed or failed stages.
 
 `quant_strategies.runner.run_config` and `quant_strategies.runner.RunResult`
-are the stable Python API for downstream execution. The package root does not
-re-export them; import from the `runner` subpackage deliberately.
-The shared strategy execution boundary used by runner and validation is
-internal; `quant_autoresearch` should not import it.
+are the stable Python API for downstream quick-run execution. Retained-candidate
+handoffs use `quant_strategies.validation.run_validation` and frozen-candidate
+portfolio review uses `quant_strategies.evaluation.run_evaluation`. The package
+root does not re-export these APIs; import from the surface subpackage
+deliberately. The shared strategy execution boundary used by runner,
+validation, and evaluation is internal; `quant_autoresearch` should not import
+it.
 
 The CLI equivalent is:
 
@@ -179,11 +185,13 @@ or RNG calls such as `time.time()`, `datetime.now()`, `random.random()`, and
 `numpy.random.*()`. The check is alias-aware for common generated-code forms,
 but it is not a sandbox or process isolation boundary. The explicit
 `enforce_purity=False` loader option is only for trusted local tests or
-deliberate manual inspection; autoresearch and normal runner/validation flows
-should leave the default enforcement on.
+deliberate manual inspection; autoresearch and normal runner, validation, and
+evaluation flows should leave the default enforcement on.
 
 Optional `validate_params(params)` may normalize and reject params before each
-run. It must return a mapping.
+quick run. It must return a mapping. Validation and evaluation require
+`validate_params`; retained-candidate evidence should not rest on unchecked
+params.
 
 ## experiment.toml Contract
 
@@ -239,20 +247,22 @@ non-fatal warning evidence; `validation` requires `available_at` and fails the
 row contract when it is missing or invalid. Choose strictness deliberately — it
 is never a side effect of asking for richer artifacts.
 
-### Run vocabulary — one quick run, one validation run
+### Run vocabulary — quick run, validation run, evaluation run
 
 | Surface / knob | Values | Controls | Notes |
 |---|---|---|---|
 | quick run | `quant-strategies run` / `run_config` | the fast quick-run | iterate and rank here |
 | validation run | `quant-strategies validate` / `run_validation` | the advisory windows·scenarios·verdict run | the only "validate" surface |
+| evaluation run | `quant-strategies evaluate` / `run_evaluation` | frozen-candidate portfolio/economic/path evidence | separate from validation; no promotion authority |
 | `[output] quick_checks` | `false` \| `true` | optional runner quick checks — NOT the validation run | omit for diagnostics-only evidence; set `true` to apply `valid_inputs`/`min_trades` checks |
 | `row_contract` | `search` \| `validation` | row-contract strictness (pass/fail) | explicit; independent of verbosity |
 | `artifact_profile` | `diagnostic` \| `summary` \| `full` | artifact verbosity | never changes pass/fail |
 | `diagnostic_sample_trades` | integer 1-20 | largest winners/losers per side in `diagnostics.json` | only affects diagnostic artifact size |
 | `replayable_from_artifacts` | `true` \| `false` | derived replayability flag | follows `artifact_profile`; not set directly |
 
-The quick run and validation run are separate surfaces. "Validate" refers only to
-the validation package (`quant-strategies validate` / `run_validation`).
+The quick run, validation run, and evaluation run are separate surfaces.
+"Validate" refers only to the validation package (`quant-strategies validate` /
+`run_validation`).
 
 Trade results are activity sums, not portfolio returns. The runner reports them
 under `trade_result.sum_signed_trade_activity_gross`,
