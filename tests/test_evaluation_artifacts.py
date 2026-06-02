@@ -300,7 +300,6 @@ def test_write_evaluation_manifest_rejects_tampered_live_trace_table_file_hash(t
     strategy_path.write_text('"""Demo strategy."""\n')
     table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
     table_artifacts[0]["file_sha256"] = "0" * 64
-    table_artifacts[0]["_trusted_file_sha256"] = "0" * 64
 
     with pytest.raises(ValueError, match="file_sha256"):
         write_evaluation_manifest(

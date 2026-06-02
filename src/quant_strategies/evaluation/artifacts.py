@@ -83,8 +83,21 @@ _TRACE_COLUMN_TYPES = {
 }
 
 _SCENARIO_IDS_METADATA_KEY = b"quant_strategies.scenario_ids"
-_TRUSTED_FILE_SHA256_TOKEN_KEY = "_trusted_file_sha256_token"
-_TRUSTED_FILE_SHA256_VALUE_KEY = "_trusted_file_sha256"
+
+
+class _TrustedTableMetadata(dict[str, Any]):
+    __slots__ = ("_trusted_file_sha256",)
+
+    def __init__(self, payload: Mapping[str, Any], *, trusted_file_sha256: str) -> None:
+        super().__init__(payload)
+        object.__setattr__(self, "_trusted_file_sha256", trusted_file_sha256)
+
+    @property
+    def trusted_file_sha256(self) -> str:
+        return self._trusted_file_sha256
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AttributeError(f"{type(self).__name__} attributes are immutable")
 
 
 def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: datetime | None = None) -> Path:
@@ -161,9 +174,7 @@ def write_parquet_artifact(
         scenario_ids=scenario_id_tuple,
         logical_name=logical_name,
     )
-    metadata[_TRUSTED_FILE_SHA256_TOKEN_KEY] = (object(), metadata["file_sha256"])
-    metadata[_TRUSTED_FILE_SHA256_VALUE_KEY] = metadata["file_sha256"]
-    return metadata
+    return _TrustedTableMetadata(metadata, trusted_file_sha256=metadata["file_sha256"])
 
 
 def table_metadata(
@@ -307,7 +318,7 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
 
 
 def _manifest_table_artifact(item: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in item.items() if not str(key).startswith("_trusted_")}
+    return dict(item)
 
 
 def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
@@ -451,14 +462,8 @@ def _validate_trace_table_metadata_item(
     for hash_key in ("file_sha256", "schema_sha256"):
         if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
             raise ValueError(f"{kind} trace table metadata {hash_key} must be 64 hex characters")
-    trusted_file_hash = item.get(_TRUSTED_FILE_SHA256_VALUE_KEY)
-    trusted_token = item.get(_TRUSTED_FILE_SHA256_TOKEN_KEY)
-    if (
-        isinstance(trusted_token, tuple)
-        and len(trusted_token) == 2
-        and trusted_token[0] is not None
-        and trusted_token[1] == trusted_file_hash
-    ):
+    trusted_file_hash = item.trusted_file_sha256 if isinstance(item, _TrustedTableMetadata) else None
+    if trusted_file_hash is not None:
         if trusted_file_hash != item["file_sha256"]:
             raise ValueError(f"{kind} trace table metadata file_sha256 does not match trusted writer hash")
     elif file_sha256(artifact_path) != item["file_sha256"]:
