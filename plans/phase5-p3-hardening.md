@@ -97,8 +97,8 @@ reads. AGENTS.md says strategies must not load data; reads *are* data loading.
   - Keep it honest: a static AST denylist is **best-effort**, not exhaustive
     (`getattr`/computed access still escapes) and **not a sandbox**.
 - **Pre-check (no committed strategy may trip the new bans):** the existing
-  `tests/test_strategy_docstrings.py:87-92` already asserts every committed strategy
-  (`tested/`, `untested/`, `researched/`, `examples/`) passes purity. Run the full
+  `tests/test_strategy_docstrings.py:87-92` already asserts every active committed strategy
+  (`tested/`, `untested/`, `examples/`) passes purity. Run the full
   suite; if a committed strategy now fails, it genuinely loads data — fix the
   strategy (or, if a false positive, narrow the ban). Do **not** weaken the ban to
   paper over a real violation.

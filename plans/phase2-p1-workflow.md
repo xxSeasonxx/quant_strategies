@@ -31,7 +31,7 @@ vocabulary.
 ### 2d — F6 mode rename — DONE in Phase 4a (was deferred, then completed)
 
 **UPDATE:** completed in Phase 4a (`validate`→`gate` across engine/runner/tests/docs
-+ 15 frozen `researched/` configs migrated). The deferral rationale below is kept
++ 15 frozen archived configs migrated). The deferral rationale below is kept
 for history; Season directed "finish the goal," so it was executed.
 
 **Decision: not executed overnight.** Renaming the runner/engine `validate` mode to
