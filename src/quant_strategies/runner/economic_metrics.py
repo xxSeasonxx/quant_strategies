@@ -21,9 +21,9 @@ def summary_metrics(
     wins = [net for net in nets if net > 0]
     losses = [net for net in nets if net < 0]
     flats = [net for net in nets if net == 0]
-    gross = _optional_numeric_field(trade_result, "sum_signed_trade_activity_gross")
-    cost = _optional_numeric_field(trade_result, "sum_signed_trade_activity_cost")
-    funding = _optional_numeric_field(trade_result, "sum_signed_trade_activity_funding")
+    gross = _required_numeric_field(trade_result, "sum_signed_trade_activity_gross")
+    cost = _required_numeric_field(trade_result, "sum_signed_trade_activity_cost")
+    funding = _required_numeric_field(trade_result, "sum_signed_trade_activity_funding")
 
     payload = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
@@ -66,6 +66,20 @@ def trades_from_engine_summary(engine: Mapping[str, Any]) -> list[dict[str, Any]
         if not isinstance(item, Mapping):
             raise ValueError(f"engine diagnostic_trades[{index}] must be a mapping")
         copied_trades.append(dict(item))
+    trade_count = engine.get("trade_count")
+    if trade_count is not None:
+        if isinstance(trade_count, bool):
+            raise ValueError("engine trade_count must be an integer when provided")
+        if isinstance(trade_count, int):
+            expected_trade_count = trade_count
+        elif isinstance(trade_count, float) and trade_count.is_integer():
+            expected_trade_count = int(trade_count)
+        else:
+            raise ValueError("engine trade_count must be an integer when provided")
+        if expected_trade_count != len(copied_trades):
+            raise ValueError(
+                "engine diagnostic_trades length does not match trade_count"
+            )
     return copied_trades
 
 
@@ -125,7 +139,7 @@ def _net_return(trade: Mapping[str, Any]) -> float:
     if "net_return" not in trade:
         raise ValueError("trade is missing net_return")
     value = trade["net_return"]
-    if isinstance(value, bool) or value is None:
+    if isinstance(value, bool) or isinstance(value, str | bytes) or value is None:
         raise ValueError("trade net_return must be finite numeric")
     try:
         numeric = float(value)
@@ -136,20 +150,18 @@ def _net_return(trade: Mapping[str, Any]) -> float:
     return numeric
 
 
-def _optional_numeric_field(trade_result: Mapping[str, Any], field: str) -> float | None:
+def _required_numeric_field(trade_result: Mapping[str, Any], field: str) -> float:
     if field not in trade_result or trade_result[field] is None:
-        return None
+        raise ValueError(f"trade_result {field} is required")
     value = trade_result[field]
-    if isinstance(value, bool):
-        raise ValueError(f"trade_result {field} must be finite numeric when provided")
+    if isinstance(value, bool) or isinstance(value, str | bytes):
+        raise ValueError(f"trade_result {field} must be finite numeric")
     try:
         numeric = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"trade_result {field} must be finite numeric when provided"
-        ) from exc
+        raise ValueError(f"trade_result {field} must be finite numeric") from exc
     if not math.isfinite(numeric):
-        raise ValueError(f"trade_result {field} must be finite numeric when provided")
+        raise ValueError(f"trade_result {field} must be finite numeric")
     return numeric
 
 
@@ -169,7 +181,7 @@ def _profit_factor(wins: Sequence[float], losses: Sequence[float]) -> float | No
     return sum(wins) / abs(sum(losses))
 
 
-def _share_of_abs_gross(value: float | None, gross: float | None) -> float | None:
-    if value is None or gross is None or gross == 0.0:
+def _share_of_abs_gross(value: float, gross: float) -> float | None:
+    if gross == 0.0:
         return None
     return value / abs(gross)

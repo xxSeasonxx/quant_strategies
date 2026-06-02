@@ -118,13 +118,19 @@ def test_summary_metrics_null_cost_and_funding_shares_when_gross_is_zero():
 @pytest.mark.parametrize(
     "field,value",
     [
+        ("sum_signed_trade_activity_gross", None),
         ("sum_signed_trade_activity_gross", True),
+        ("sum_signed_trade_activity_gross", "0.01"),
         ("sum_signed_trade_activity_gross", "not-numeric"),
         ("sum_signed_trade_activity_gross", float("nan")),
+        ("sum_signed_trade_activity_cost", None),
         ("sum_signed_trade_activity_cost", True),
+        ("sum_signed_trade_activity_cost", "0.01"),
         ("sum_signed_trade_activity_cost", "not-numeric"),
         ("sum_signed_trade_activity_cost", float("inf")),
+        ("sum_signed_trade_activity_funding", None),
         ("sum_signed_trade_activity_funding", True),
+        ("sum_signed_trade_activity_funding", "0.01"),
         ("sum_signed_trade_activity_funding", "not-numeric"),
         ("sum_signed_trade_activity_funding", float("-inf")),
     ],
@@ -132,6 +138,22 @@ def test_summary_metrics_null_cost_and_funding_shares_when_gross_is_zero():
 def test_summary_metrics_rejects_malformed_trade_result_components(field, value):
     result = trade_result(gross=0.01)
     result[field] = value
+
+    with pytest.raises(ValueError):
+        summary_metrics([trade(0.01)], result)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "sum_signed_trade_activity_gross",
+        "sum_signed_trade_activity_cost",
+        "sum_signed_trade_activity_funding",
+    ],
+)
+def test_summary_metrics_rejects_missing_trade_result_components(field):
+    result = trade_result(gross=0.01)
+    result.pop(field)
 
     with pytest.raises(ValueError):
         summary_metrics([trade(0.01)], result)
@@ -166,7 +188,7 @@ def test_diagnostic_slices_group_economic_summaries_and_distribution():
 
 def test_trades_from_engine_summary_returns_copied_trade_dicts():
     source_trade = trade(0.01)
-    engine = {"diagnostic_trades": [source_trade]}
+    engine = {"trade_count": 1, "diagnostic_trades": [source_trade]}
 
     trades = trades_from_engine_summary(engine)
 
@@ -175,6 +197,12 @@ def test_trades_from_engine_summary_returns_copied_trade_dicts():
 
     trades[0]["net_return"] = 0.02
     assert source_trade["net_return"] == 0.01
+
+
+def test_trades_from_engine_summary_accepts_integral_float_trade_count():
+    assert trades_from_engine_summary(
+        {"trade_count": 1.0, "diagnostic_trades": [trade(0.01)]}
+    ) == [trade(0.01)]
 
 
 def test_trade_result_from_engine_summary_returns_copied_dict():
@@ -206,6 +234,21 @@ def test_trades_from_engine_summary_rejects_malformed_diagnostic_trades(engine):
 @pytest.mark.parametrize(
     "engine",
     [
+        {"trade_count": True, "diagnostic_trades": [trade(0.01)]},
+        {"trade_count": "not-an-int", "diagnostic_trades": [trade(0.01)]},
+        {"trade_count": 1.2, "diagnostic_trades": [trade(0.01)]},
+        {"trade_count": 1.9, "diagnostic_trades": [trade(0.01)]},
+        {"trade_count": 2, "diagnostic_trades": [trade(0.01)]},
+    ],
+)
+def test_trades_from_engine_summary_rejects_trade_count_mismatch(engine):
+    with pytest.raises(ValueError):
+        trades_from_engine_summary(engine)
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
         {},
         {"trade_result": "not-a-mapping"},
     ],
@@ -221,6 +264,7 @@ def test_trade_result_from_engine_summary_rejects_malformed_trade_result(engine)
         {"symbol": "SPY", "side": "long", "exit_reason": "max_hold"},
         trade(None),  # type: ignore[arg-type]
         trade(True),  # type: ignore[arg-type]
+        trade("0.01"),  # type: ignore[arg-type]
         trade("not-numeric"),  # type: ignore[arg-type]
         trade(float("nan")),
         trade(float("inf")),
@@ -237,6 +281,7 @@ def test_summary_metrics_rejects_malformed_net_return(bad_trade):
         {"symbol": "SPY", "side": "long", "exit_reason": "max_hold"},
         trade(None),  # type: ignore[arg-type]
         trade(True),  # type: ignore[arg-type]
+        trade("0.01"),  # type: ignore[arg-type]
         trade("not-numeric"),  # type: ignore[arg-type]
         trade(float("nan")),
         trade(float("inf")),
