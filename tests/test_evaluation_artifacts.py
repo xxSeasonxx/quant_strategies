@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
+    write_evaluation_manifest,
     write_json_artifact,
     write_parquet_artifact,
     write_text_artifact,
@@ -40,6 +43,7 @@ def test_write_parquet_artifact_records_schema_hash_and_row_count(tmp_path: Path
     assert metadata["path"] == "tables/portfolio_path.parquet"
     assert metadata["artifact_kind"] == "portfolio_path"
     assert metadata["format"] == "parquet"
+    assert metadata["compression"] == "zstd"
     assert metadata["row_count"] == 2
     assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "timestamp", "portfolio_value"]
     assert metadata["scenario_ids"] == ["w/base"]
@@ -65,6 +69,49 @@ def test_table_metadata_is_stable_for_empty_table(tmp_path: Path):
     assert metadata["row_count"] == 0
     assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "asset", "turnover"]
     assert "scenario_id" in metadata["arrow_schema"]
+
+
+def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_metadata = write_parquet_artifact(
+        result_dir,
+        "tables/portfolio_path.parquet",
+        pd.DataFrame({"scenario_id": ["base"], "portfolio_value": [100.0]}),
+        artifact_kind="portfolio_path",
+        scenario_ids=("base",),
+    )
+    for name in ("trades.parquet", "positions.parquet", "per_asset_metrics.parquet"):
+        (result_dir / "tables" / name).write_bytes(b"trace table placeholder")
+
+    write_evaluation_manifest(
+        result_dir,
+        repo_root=tmp_path,
+        path_base=tmp_path,
+        config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+        config_path=config_path,
+        backend_name="unit-test",
+        data_windows=[],
+        table_artifacts=[table_metadata],
+        scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+    )
+
+    manifest = json.loads((result_dir / "evaluation_manifest.json").read_text())
+    trace_table_names = {
+        "portfolio_path.parquet",
+        "trades.parquet",
+        "positions.parquet",
+        "per_asset_metrics.parquet",
+    }
+    artifact_paths = set(manifest["artifacts"])
+    assert not any(path.endswith(".parquet") for path in artifact_paths)
+    assert not any(path == f"tables/{name}" for path in artifact_paths for name in trace_table_names)
+    assert manifest["tables"][0]["path"] == "tables/portfolio_path.parquet"
+    assert manifest["tables"][0]["file_sha256"]
 
 
 def test_write_json_artifact_rejects_path_escape(tmp_path: Path):
