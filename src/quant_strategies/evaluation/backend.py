@@ -31,6 +31,8 @@ class PortfolioTraceTables:
 class PreparedPortfolioInputs:
     close: Any
     decisions: tuple[StrategyDecision, ...]
+    symbol_indexes: Mapping[str, Any]
+    decision_positions: tuple[int, ...]
 
 
 class PortfolioEvaluationResult(BaseModel):
@@ -55,11 +57,16 @@ class VectorBTProEvaluationBackend:
         rows: Sequence[Mapping[str, Any]],
     ) -> PreparedPortfolioInputs:
         decision_symbols = tuple(dict.fromkeys(item.instrument.symbol for item in decisions))
-        if not decision_symbols:
-            raise ValueError("no_decisions")
         deps = require_evaluation_dependencies()
-        close = _close_frame(deps.pandas, rows, symbols=decision_symbols)
-        return PreparedPortfolioInputs(close=close, decisions=tuple(decisions))
+        close = _close_frame(deps.pandas, rows, symbols=decision_symbols or None)
+        symbol_indexes = _symbol_indexes(close, symbols=decision_symbols or tuple(close.columns))
+        decision_positions = _decision_positions(deps.pandas, symbol_indexes, decisions)
+        return PreparedPortfolioInputs(
+            close=close,
+            decisions=tuple(decisions),
+            symbol_indexes=symbol_indexes,
+            decision_positions=decision_positions,
+        )
 
     def run(
         self,
@@ -122,10 +129,10 @@ class VectorBTProEvaluationBackend:
         pd = deps.pandas
         vbt = deps.vectorbtpro
         try:
-            windows = _decision_windows(pd, prepared.close, list(prepared.decisions), scenario)
+            windows = _prepared_decision_windows(prepared, scenario)
             portfolio = _run_portfolio(vbt, pd, prepared.close, windows, scenario)
             metric_payload = _portfolio_metrics(portfolio, metrics.annualization_periods_per_year)
-            tables = _portfolio_tables(pd, portfolio, scenario.scenario_id)
+            tables = _portfolio_tables(pd, portfolio, scenario.scenario_id, windows)
         except ValueError as exc:
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
@@ -247,6 +254,73 @@ def _decision_windows(
         if exit_idx >= len(symbol_close.index):
             raise ValueError(f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
         exit_time = symbol_close.index[exit_idx]
+
+        windows.append(
+            {
+                "decision": item,
+                "symbol": symbol,
+                "entry_idx": entry_idx,
+                "exit_idx": exit_idx,
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+            }
+        )
+
+    _validate_max_gross_target_weight(windows)
+    _validate_duplicate_signals(windows)
+    _validate_overlapping_symbol_windows(windows)
+    return windows
+
+
+def _symbol_indexes(close: Any, *, symbols: Sequence[str]) -> dict[str, Any]:
+    indexes: dict[str, Any] = {}
+    for symbol in symbols:
+        if symbol not in close.columns:
+            raise ValueError(f"missing_symbol:{symbol}")
+        indexes[symbol] = close.loc[close[symbol].notna(), [symbol]].index
+    return indexes
+
+
+def _decision_positions(
+    pd: Any,
+    symbol_indexes: Mapping[str, Any],
+    decisions: Sequence[StrategyDecision],
+) -> tuple[int, ...]:
+    positions: list[int] = []
+    for item in decisions:
+        symbol = item.instrument.symbol
+        try:
+            symbol_index = symbol_indexes[symbol]
+        except KeyError as exc:
+            raise ValueError(f"missing_symbol:{symbol}") from exc
+        decision_idx = _index_position(pd, symbol_index, item.decision_time)
+        if decision_idx is None:
+            raise ValueError(f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
+        positions.append(decision_idx)
+    return tuple(positions)
+
+
+def _prepared_decision_windows(
+    prepared: PreparedPortfolioInputs,
+    scenario: EvaluationScenario,
+) -> list[dict[str, Any]]:
+    entry_lag = _fill_lag(scenario, "entry_lag_bars", default=1)
+    exit_lag = _fill_lag(scenario, "exit_lag_bars", default=0)
+    windows: list[dict[str, Any]] = []
+
+    for item, decision_idx in zip(prepared.decisions, prepared.decision_positions, strict=True):
+        symbol = item.instrument.symbol
+        symbol_index = prepared.symbol_indexes[symbol]
+
+        entry_idx = decision_idx + entry_lag
+        if entry_idx >= len(symbol_index):
+            raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
+        entry_time = symbol_index[entry_idx]
+
+        exit_idx = entry_idx + item.exit_policy.max_hold_bars + exit_lag
+        if exit_idx >= len(symbol_index):
+            raise ValueError(f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
+        exit_time = symbol_index[exit_idx]
 
         windows.append(
             {
@@ -394,6 +468,7 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
     payload["sharpe"] = None
     payload["sortino"] = None
     payload["calmar"] = None
+    payload["worst_period_return"] = None
 
     observed_returns = _observed_returns(returns)
     if observed_returns:
@@ -423,21 +498,59 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
     return payload
 
 
-def _portfolio_tables(pd: Any, portfolio: Any, scenario_id: str) -> PortfolioTraceTables:
+def _portfolio_tables(pd: Any, portfolio: Any, scenario_id: str, windows: list[dict[str, Any]]) -> PortfolioTraceTables:
     path = _frame_from_series(pd, _series_or_none(portfolio, "value"), "portfolio_value")
     returns = _frame_from_series(pd, _series_or_none(portfolio, "returns"), "period_return")
     drawdown = _frame_from_series(pd, _drawdown_series_or_none(portfolio), "drawdown")
     portfolio_path = path.join(returns, how="outer").join(drawdown, how="outer").reset_index()
     portfolio_path.insert(0, "scenario_id", scenario_id)
     trades = _records_frame(pd, getattr(getattr(portfolio, "trades", None), "records_readable", None), scenario_id)
-    positions = pd.DataFrame({"scenario_id": []})
-    per_asset_metrics = pd.DataFrame({"scenario_id": []})
+    positions = _positions_frame(pd, windows, scenario_id)
+    per_asset_metrics = _per_asset_metrics_frame(pd, windows, scenario_id)
     return PortfolioTraceTables(
         portfolio_path=portfolio_path,
         trades=trades,
         positions=positions,
         per_asset_metrics=per_asset_metrics,
     )
+
+
+def _positions_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
+    if not windows:
+        return pd.DataFrame({"scenario_id": [], "asset": [], "weight": []})
+    return pd.DataFrame(
+        [
+            {
+                "scenario_id": scenario_id,
+                "asset": window["symbol"],
+                "entry_time": window["entry_time"],
+                "exit_time": window["exit_time"],
+                "direction": window["decision"].target.direction,
+                "weight": float(window["decision"].target.size),
+            }
+            for window in windows
+        ]
+    )
+
+
+def _per_asset_metrics_frame(pd: Any, windows: list[dict[str, Any]], scenario_id: str) -> Any:
+    if not windows:
+        return pd.DataFrame({"scenario_id": [], "asset": [], "trade_count": [], "turnover": []})
+    by_asset: dict[str, dict[str, float | int | str]] = {}
+    for window in windows:
+        asset = window["symbol"]
+        metrics = by_asset.setdefault(
+            asset,
+            {
+                "scenario_id": scenario_id,
+                "asset": asset,
+                "trade_count": 0,
+                "turnover": 0.0,
+            },
+        )
+        metrics["trade_count"] = int(metrics["trade_count"]) + 1
+        metrics["turnover"] = float(metrics["turnover"]) + (2.0 * abs(float(window["decision"].target.size)))
+    return pd.DataFrame(list(by_asset.values()))
 
 
 def _index_position(pd: Any, index: Any, value: Any) -> int | None:

@@ -30,6 +30,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "backend": "vectorbtpro",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "backend total return is unavailable or non-finite",
         },
         "ending_value": {
             "unit": "portfolio_value",
@@ -38,6 +39,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "backend": "vectorbtpro",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "portfolio value path is empty or final value is unavailable/non-finite",
         },
         "annualized_return": {
             "unit": "decimal_fraction_per_year",
@@ -47,6 +49,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "annualization": "explicit_config.annualization_periods_per_year",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "no observed returns after the synthetic first return, total return is unavailable/non-finite, or total return <= -100%",
         },
         "volatility": {
             "unit": "decimal_fraction_per_year",
@@ -56,6 +59,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "annualization": "explicit_config.annualization_periods_per_year",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "fewer than two observed returns after the synthetic first return",
         },
         "sharpe": {
             "unit": "ratio",
@@ -65,6 +69,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "annualization": "explicit_config.annualization_periods_per_year",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "volatility is unavailable or zero",
         },
         "sortino": {
             "unit": "ratio",
@@ -74,6 +79,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "annualization": "explicit_config.annualization_periods_per_year",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
         },
         "calmar": {
             "unit": "ratio",
@@ -83,6 +89,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "annualization": "explicit_config.annualization_periods_per_year",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
         },
         "max_drawdown": {
             "unit": "decimal_fraction",
@@ -91,6 +98,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "backend": "vectorbtpro",
             "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "backend max drawdown is unavailable or non-finite",
         },
         "trade_count": {
             "unit": "count",
@@ -98,6 +106,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "aggregation": "scenario total",
             "backend": "vectorbtpro",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "backend trade records are unavailable",
         },
         "win_rate": {
             "unit": "ratio",
@@ -105,6 +114,7 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "aggregation": "winning trades / all closed trades",
             "backend": "vectorbtpro",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "backend win-rate is unavailable/non-finite, including no closed trades",
         },
         "profit_factor": {
             "unit": "ratio",
@@ -112,6 +122,16 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
             "aggregation": "gross profits / abs(gross losses)",
             "backend": "vectorbtpro",
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "backend profit factor is unavailable/non-finite; no losses is reported as null rather than infinity",
+        },
+        "worst_period_return": {
+            "unit": "decimal_fraction",
+            "base": "periodic portfolio returns",
+            "aggregation": "minimum observed return after the synthetic first return",
+            "backend": "vectorbtpro",
+            "cost_scope": "net of configured fees/slippage; excludes funding, borrow, financing, market impact",
+            "not_authority": "not validation, promotion, paper trading, or live trading authority",
+            "null_when": "no observed returns after the synthetic first return",
         },
     }
     assert (
@@ -233,11 +253,84 @@ def test_portfolio_metrics_emit_none_for_unavailable_annualized_metrics_and_dege
     for name in ("annualized_return", "volatility", "sharpe", "sortino", "calmar"):
         assert no_trade_metrics[name] is None
         assert no_loss_metrics[name] is None
-    assert "worst_period_return" not in no_trade_metrics
+    assert no_trade_metrics["worst_period_return"] is None
     assert no_trade_metrics["win_rate"] is None
     assert no_trade_metrics["profit_factor"] is None
     assert no_loss_metrics["win_rate"] == pytest.approx(1.0)
     assert no_loss_metrics["profit_factor"] is None
+
+
+def test_vectorbtpro_evaluation_backend_emits_no_trade_evidence_for_zero_decisions(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    pd = pytest.importorskip("pandas")
+
+    class NoTradeStats:
+        @property
+        def records_readable(self):
+            return pd.DataFrame()
+
+        def count(self):
+            return 0
+
+        def win_rate(self):
+            return math.nan
+
+        def profit_factor(self):
+            return math.nan
+
+    class FakePortfolio:
+        trades = NoTradeStats()
+
+        def value(self):
+            return pd.Series([100.0, 100.0, 100.0])
+
+        def returns(self):
+            return pd.Series([0.0, 0.0, 0.0])
+
+        def drawdowns(self):
+            return pd.Series([0.0, 0.0, 0.0])
+
+        def get_total_return(self):
+            return 0.0
+
+        def get_max_drawdown(self):
+            return 0.0
+
+    captured = {}
+
+    def from_signals(close, **kwargs):
+        captured["close_columns"] = list(close.columns)
+        captured["kwargs"] = kwargs
+        return FakePortfolio()
+
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=from_signals))
+    fake_pyarrow = SimpleNamespace(__name__="pyarrow")
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: EvaluationDependencies(pandas=pd, pyarrow=fake_pyarrow, vectorbtpro=fake_vbt),
+    )
+
+    result = VectorBTProEvaluationBackend().run(
+        decisions=[],
+        rows=rows(),
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["total_return"] == pytest.approx(0.0)
+    assert result.metrics["trade_count"] == 0
+    assert result.metrics["win_rate"] is None
+    assert result.metrics["profit_factor"] is None
+    assert result.metrics["worst_period_return"] == pytest.approx(0.0)
+    assert result.tables is not None
+    assert not result.tables.portfolio_path.empty
+    assert result.tables.trades.empty
+    assert result.tables.positions.empty
+    assert result.tables.per_asset_metrics.empty
+    assert captured["close_columns"] == ["BTC-PERP"]
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -351,14 +444,20 @@ def install_fake_vbt(monkeypatch: pytest.MonkeyPatch):
     return captured
 
 
-def test_prepare_inputs_rejects_no_decisions_before_loading_dependencies(monkeypatch: pytest.MonkeyPatch):
-    def fail_dependencies():
-        raise AssertionError("dependencies should not load when there are no decisions")
+def test_prepare_inputs_accepts_no_decisions_as_no_trade_evidence(monkeypatch: pytest.MonkeyPatch):
+    pd = pytest.importorskip("pandas")
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: None))
+    fake_pyarrow = SimpleNamespace(__name__="pyarrow")
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: EvaluationDependencies(pandas=pd, pyarrow=fake_pyarrow, vectorbtpro=fake_vbt),
+    )
 
-    monkeypatch.setattr(backend_module, "require_evaluation_dependencies", fail_dependencies)
+    prepared = VectorBTProEvaluationBackend().prepare_inputs(decisions=[], rows=rows())
 
-    with pytest.raises(ValueError, match="^no_decisions$"):
-        VectorBTProEvaluationBackend().prepare_inputs(decisions=[], rows=rows())
+    assert prepared.decisions == ()
+    assert list(prepared.close.columns) == ["BTC-PERP"]
 
 
 def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(monkeypatch: pytest.MonkeyPatch):
@@ -485,6 +584,12 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert result.tables is not None
     assert not result.tables.portfolio_path.empty
     assert not result.tables.trades.empty
+    assert not result.tables.positions.empty
+    assert not result.tables.per_asset_metrics.empty
+    assert result.tables.positions.loc[0, "asset"] == "BTC-PERP"
+    assert result.tables.positions.loc[0, "weight"] == pytest.approx(1.0)
+    assert result.tables.per_asset_metrics.loc[0, "trade_count"] == 1
+    assert result.tables.per_asset_metrics.loc[0, "turnover"] == pytest.approx(2.0)
     assert set(captured["close_columns"]) == {"BTC-PERP"}
     assert captured["kwargs"]["cash_sharing"] is True
     assert captured["kwargs"]["group_by"] is True

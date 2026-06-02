@@ -510,9 +510,13 @@ def test_evaluation_manifest_uses_table_hashes_without_rehashing_parquet(
     )
 
     manifest = json.loads((result_dir / "evaluation_manifest.json").read_text())
+    public_table_artifacts = [
+        {key: value for key, value in item.items() if not str(key).startswith("_trusted_")}
+        for item in table_artifacts
+    ]
 
-    assert manifest["tables"] == table_artifacts
-    assert manifest["trace_artifacts"]["total_byte_size"] == sum(item["byte_size"] for item in table_artifacts)
+    assert manifest["tables"] == public_table_artifacts
+    assert manifest["trace_artifacts"]["total_byte_size"] == sum(item["byte_size"] for item in public_table_artifacts)
     assert not any(path.startswith("tables/") and path.endswith(".parquet") for path in manifest["artifacts"])
 
 

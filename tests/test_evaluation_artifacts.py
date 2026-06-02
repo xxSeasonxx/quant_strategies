@@ -267,6 +267,30 @@ def test_write_evaluation_manifest_rejects_forged_trace_table_metadata(tmp_path:
         )
 
 
+def test_write_evaluation_manifest_rejects_tampered_trace_table_file_hash(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    table_artifacts[0] = {**table_artifacts[0], "file_sha256": "0" * 64}
+
+    with pytest.raises(ValueError, match="file_sha256"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=_scenario_summary("base"),
+        )
+
+
 def test_write_evaluation_manifest_rejects_forged_trace_table_scenario_ids(tmp_path: Path):
     result_dir = tmp_path / "results"
     result_dir.mkdir()

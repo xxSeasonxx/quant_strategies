@@ -33,6 +33,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "backend": "vectorbtpro",
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "backend total return is unavailable or non-finite",
         },
         "ending_value": {
             "unit": "portfolio_value",
@@ -41,6 +42,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "backend": "vectorbtpro",
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "portfolio value path is empty or final value is unavailable/non-finite",
         },
         "annualized_return": {
             "unit": "decimal_fraction_per_year",
@@ -50,6 +52,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "no observed returns after the synthetic first return, total return is unavailable/non-finite, or total return <= -100%",
         },
         "volatility": {
             "unit": "decimal_fraction_per_year",
@@ -59,6 +62,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "fewer than two observed returns after the synthetic first return",
         },
         "sharpe": {
             "unit": "ratio",
@@ -68,6 +72,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "volatility is unavailable or zero",
         },
         "sortino": {
             "unit": "ratio",
@@ -77,6 +82,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
         },
         "calmar": {
             "unit": "ratio",
@@ -86,6 +92,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
         },
         "max_drawdown": {
             "unit": "decimal_fraction",
@@ -94,6 +101,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "backend": "vectorbtpro",
             "cost_scope": cost_scope,
             "not_authority": not_authority,
+            "null_when": "backend max drawdown is unavailable or non-finite",
         },
         "trade_count": {
             "unit": "count",
@@ -101,6 +109,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "aggregation": "scenario total",
             "backend": "vectorbtpro",
             "not_authority": not_authority,
+            "null_when": "backend trade records are unavailable",
         },
         "win_rate": {
             "unit": "ratio",
@@ -108,6 +117,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "aggregation": "winning trades / all closed trades",
             "backend": "vectorbtpro",
             "not_authority": not_authority,
+            "null_when": "backend win-rate is unavailable/non-finite, including no closed trades",
         },
         "profit_factor": {
             "unit": "ratio",
@@ -115,5 +125,15 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "aggregation": "gross profits / abs(gross losses)",
             "backend": "vectorbtpro",
             "not_authority": not_authority,
+            "null_when": "backend profit factor is unavailable/non-finite; no losses is reported as null rather than infinity",
+        },
+        "worst_period_return": {
+            "unit": "decimal_fraction",
+            "base": returns_base,
+            "aggregation": "minimum observed return after the synthetic first return",
+            "backend": "vectorbtpro",
+            "cost_scope": cost_scope,
+            "not_authority": not_authority,
+            "null_when": "no observed returns after the synthetic first return",
         },
     }

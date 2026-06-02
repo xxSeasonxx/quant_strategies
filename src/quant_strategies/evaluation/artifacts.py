@@ -83,6 +83,9 @@ _TRACE_COLUMN_TYPES = {
 }
 
 _SCENARIO_IDS_METADATA_KEY = b"quant_strategies.scenario_ids"
+_TRUSTED_FILE_SHA256_TOKEN = object()
+_TRUSTED_FILE_SHA256_TOKEN_KEY = "_trusted_file_sha256_token"
+_TRUSTED_FILE_SHA256_VALUE_KEY = "_trusted_file_sha256"
 
 
 def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: datetime | None = None) -> Path:
@@ -152,13 +155,16 @@ def write_parquet_artifact(
     table = _materialize_known_trace_columns(pa, table, artifact_kind)
     table = _with_scenario_ids_metadata(table, scenario_id_tuple)
     pq.write_table(table, path, compression="zstd")
-    return table_metadata(
+    metadata = table_metadata(
         result_dir,
         path,
         artifact_kind=artifact_kind,
         scenario_ids=scenario_id_tuple,
         logical_name=logical_name,
     )
+    metadata[_TRUSTED_FILE_SHA256_TOKEN_KEY] = _TRUSTED_FILE_SHA256_TOKEN
+    metadata[_TRUSTED_FILE_SHA256_VALUE_KEY] = metadata["file_sha256"]
+    return metadata
 
 
 def table_metadata(
@@ -223,6 +229,7 @@ def write_evaluation_manifest(
     scenario_summary: Mapping[str, Any],
 ) -> Path:
     _validate_trace_table_artifacts(table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary)
+    manifest_table_artifacts = [_manifest_table_artifact(item) for item in table_artifacts]
     write_json_artifact(
         result_dir,
         "environment.json",
@@ -260,7 +267,7 @@ def write_evaluation_manifest(
         "metric_semantics": evaluation_metric_semantics(),
         "scenario_summary": json_safe_value(scenario_summary),
         "scenario_coverage": scenario_summary["scenario_coverage"],
-        "tables": table_artifacts,
+        "tables": manifest_table_artifacts,
         "replayability": {
             "basis": "candidate config, strategy snapshot, normalized row hash, scenario assumptions, and Parquet trace tables",
             "input_rows_embedded": False,
@@ -268,8 +275,8 @@ def write_evaluation_manifest(
         },
         "trace_artifacts": {
             "format": "parquet",
-            "table_count": len(table_artifacts),
-            "total_byte_size": sum(int(item["byte_size"]) for item in table_artifacts),
+            "table_count": len(manifest_table_artifacts),
+            "total_byte_size": sum(int(item["byte_size"]) for item in manifest_table_artifacts),
         },
         "artifacts": artifact_hashes(
             result_dir,
@@ -298,6 +305,10 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
     except ValueError as exc:
         raise ValueError("Artifact name must stay inside result_dir") from exc
     return path
+
+
+def _manifest_table_artifact(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in item.items() if not str(key).startswith("_trusted_")}
 
 
 def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
@@ -441,6 +452,12 @@ def _validate_trace_table_metadata_item(
     for hash_key in ("file_sha256", "schema_sha256"):
         if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
             raise ValueError(f"{kind} trace table metadata {hash_key} must be 64 hex characters")
+    trusted_file_hash = item.get(_TRUSTED_FILE_SHA256_VALUE_KEY)
+    if item.get(_TRUSTED_FILE_SHA256_TOKEN_KEY) is _TRUSTED_FILE_SHA256_TOKEN:
+        if trusted_file_hash != item["file_sha256"]:
+            raise ValueError(f"{kind} trace table metadata file_sha256 does not match trusted writer hash")
+    elif file_sha256(artifact_path) != item["file_sha256"]:
+        raise ValueError(f"{kind} trace table metadata file_sha256 does not match Parquet file")
 
     _validate_non_negative_int(item, "row_count", kind=kind)
     _validate_non_negative_int(item, "row_group_count", kind=kind)
