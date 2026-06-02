@@ -131,8 +131,9 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
   economic, and path evidence belongs in the stateless evaluation surface for
   frozen candidates, not in validation decisions or quick-run hot paths.
   Benchmark-relative metrics are deferred.
-- **`researched/` is not market-validated.** It may hold frozen packages from
-  upstream research; validation does not treat it as special.
+- **Research archives live outside this repo.** Search-loop archives, ranks, and
+  handoff records do not live in the active foundation context. Regenerate or
+  rerun evidence instead of relying on historical outputs.
 
 ## Usage
 

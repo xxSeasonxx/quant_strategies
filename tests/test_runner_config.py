@@ -246,7 +246,6 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         "examples/results",
         "tested/results",
         "untested/results",
-        "researched/results",
     ],
 )
 def test_output_path_under_source_like_roots_is_rejected(tmp_path: Path, results_dir: str):
@@ -259,9 +258,9 @@ def test_output_path_under_source_like_roots_is_rejected(tmp_path: Path, results
 def test_output_path_under_results_subdir_named_like_source_is_accepted(tmp_path: Path):
     write_strategy(tmp_path)
 
-    config = load_config(write_config(tmp_path, results_dir="results/researched/demo"), repo_root=tmp_path)
+    config = load_config(write_config(tmp_path, results_dir="results/src/demo"), repo_root=tmp_path)
 
-    assert config.output.results_dir == tmp_path / "results" / "researched" / "demo"
+    assert config.output.results_dir == tmp_path / "results" / "src" / "demo"
 
 
 def test_missing_relative_config_reports_resolved_path(tmp_path: Path):
