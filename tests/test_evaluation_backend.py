@@ -144,6 +144,102 @@ def test_observed_returns_drops_first_raw_return_before_filtering_nonfinite_valu
     assert backend_module._observed_returns([0.0, math.nan, 0.03]) == [0.03]
 
 
+def test_portfolio_metrics_use_explicit_annualized_formulas():
+    class FakeTrades:
+        def count(self):
+            return 3
+
+        def win_rate(self):
+            return 2 / 3
+
+        def profit_factor(self):
+            return 1.75
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def value(self):
+            return [100.0, 102.0, 101.0, 104.0, 101.92]
+
+        def returns(self):
+            return [0.0, 0.02, -0.01, 0.03, -0.02]
+
+        def get_total_return(self):
+            return 0.08
+
+        def get_max_drawdown(self):
+            return -0.04
+
+    observed_returns = [0.02, -0.01, 0.03, -0.02]
+    annualization = 12
+    mean_return = sum(observed_returns) / len(observed_returns)
+    annualized_return = ((1.0 + 0.08) ** (annualization / len(observed_returns))) - 1.0
+    sample_variance = sum((value - mean_return) ** 2 for value in observed_returns) / (len(observed_returns) - 1)
+    volatility = math.sqrt(sample_variance) * math.sqrt(annualization)
+    downside_deviation = math.sqrt(((-0.01) ** 2 + (-0.02) ** 2) / len(observed_returns)) * math.sqrt(
+        annualization
+    )
+
+    metrics = backend_module._portfolio_metrics(FakePortfolio(), annualization)
+
+    assert metrics["annualized_return"] == pytest.approx(annualized_return)
+    assert metrics["volatility"] == pytest.approx(volatility)
+    assert metrics["sharpe"] == pytest.approx((mean_return * annualization) / volatility)
+    assert metrics["sortino"] == pytest.approx((mean_return * annualization) / downside_deviation)
+    assert metrics["calmar"] == pytest.approx(annualized_return / abs(-0.04))
+    assert metrics["worst_period_return"] == pytest.approx(-0.02)
+
+
+def test_portfolio_metrics_emit_none_for_unavailable_annualized_metrics_and_degenerate_trades():
+    class NoTradeStats:
+        def count(self):
+            return 0
+
+        def win_rate(self):
+            return math.nan
+
+        def profit_factor(self):
+            return math.nan
+
+    class NoLossTradeStats:
+        def count(self):
+            return 2
+
+        def win_rate(self):
+            return 1.0
+
+        def profit_factor(self):
+            return math.inf
+
+    class FakePortfolio:
+        def __init__(self, trades):
+            self.trades = trades
+
+        def value(self):
+            return [100.0]
+
+        def returns(self):
+            return [math.nan]
+
+        def get_total_return(self):
+            return 0.0
+
+        def get_max_drawdown(self):
+            return 0.0
+
+    no_trade_metrics = backend_module._portfolio_metrics(FakePortfolio(NoTradeStats()), 252)
+    no_loss_metrics = backend_module._portfolio_metrics(FakePortfolio(NoLossTradeStats()), 252)
+
+    for name in ("annualized_return", "volatility", "sharpe", "sortino", "calmar"):
+        assert no_trade_metrics[name] is None
+        assert no_loss_metrics[name] is None
+    assert "worst_period_return" not in no_trade_metrics
+    assert no_trade_metrics["win_rate"] is None
+    assert no_trade_metrics["profit_factor"] is None
+    assert no_loss_metrics["win_rate"] == pytest.approx(1.0)
+    assert no_loss_metrics["profit_factor"] is None
+
+
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 
@@ -278,6 +374,12 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert set(captured["close_columns"]) == {"BTC-PERP"}
     assert captured["kwargs"]["cash_sharing"] is True
     assert captured["kwargs"]["group_by"] is True
+    assert captured["kwargs"]["size_type"] == "valuepercent"
+    assert captured["kwargs"]["init_cash"] == pytest.approx(100.0)
+    assert captured["kwargs"]["fees"] == pytest.approx(0.0001)
+    assert captured["kwargs"]["slippage"] == pytest.approx(0.0002)
+    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    assert captured["kwargs"]["size"].loc[entry_time, "BTC-PERP"] == pytest.approx(1.0)
 
 
 def test_vectorbtpro_evaluation_backend_accepts_property_paths_and_drawdowns_object(

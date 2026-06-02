@@ -355,8 +355,12 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
     _set_metric(payload, "max_drawdown", max_drawdown)
     _set_metric(payload, "trade_count", trade_count)
     _set_metric(payload, "win_rate", win_rate)
-    profit_factor_value = finite_metric_or_none(profit_factor)
-    _set_metric(payload, "profit_factor", None if profit_factor_value in (math.inf, -math.inf) else profit_factor)
+    _set_metric(payload, "profit_factor", profit_factor)
+    payload["annualized_return"] = None
+    payload["volatility"] = None
+    payload["sharpe"] = None
+    payload["sortino"] = None
+    payload["calmar"] = None
 
     observed_returns = _observed_returns(returns)
     if observed_returns:
@@ -372,17 +376,12 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> d
             if len(observed_returns) < 2
             else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
         )
-        downside_returns = [value for value in observed_returns if value < 0.0]
-        downside_vol = (
-            None
-            if len(downside_returns) < 2
-            else _sample_stdev(downside_returns) * math.sqrt(annualization_periods_per_year)
-        )
+        downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
         payload["annualized_return"] = annualized_return
         payload["volatility"] = volatility
         annualized_mean = mean_return * annualization_periods_per_year
         payload["sharpe"] = None if not volatility else annualized_mean / volatility
-        payload["sortino"] = None if not downside_vol else annualized_mean / downside_vol
+        payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
         max_dd = finite_metric_or_none(max_drawdown)
         payload["calmar"] = (
             None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
@@ -545,6 +544,15 @@ def _sample_stdev(values: Sequence[float]) -> float:
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
     return math.sqrt(variance)
+
+
+def _downside_deviation(values: Sequence[float], annualization_periods_per_year: int) -> float | None:
+    downside_returns = [value for value in values if value < 0.0]
+    if not downside_returns:
+        return None
+    periodic_deviation = math.sqrt(sum(value**2 for value in downside_returns) / len(values))
+    annualized_deviation = periodic_deviation * math.sqrt(annualization_periods_per_year)
+    return annualized_deviation if annualized_deviation > 0.0 else None
 
 
 def _frame_from_series(pd: Any, values: Any, name: str) -> Any:
