@@ -5,7 +5,10 @@ from dataclasses import dataclass, field as _field
 from pathlib import Path
 from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
 
-from quant_strategies.causality import check_hidden_lookahead
+from quant_strategies.causality import (
+    causality_completeness_violations,
+    check_hidden_lookahead,
+)
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
@@ -389,7 +392,7 @@ def _audit_window_execution(
                 baseline_decisions=decisions,
                 strategy_id=context.config.strategy_id,
             )
-            causality_violations = _validation_causality_violations(lookahead)
+            causality_violations = causality_completeness_violations(lookahead)
             if causality_violations:
                 causality_event.fail(
                     _event_failure_message(causality_violations, "hidden_lookahead_check_failed")
@@ -412,17 +415,6 @@ def _audit_window_execution(
             audit_payload["passed"] = False
             audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
     return audit_payload
-
-
-def _validation_causality_violations(lookahead: Any) -> tuple[str, ...]:
-    violations = list(lookahead.violations)
-    if lookahead.passed and not lookahead.deterministic_replay_verified:
-        violations.append("determinism_replay_not_verified")
-    if lookahead.passed and not lookahead.emitted_replay_verified:
-        violations.append("emitted_replay_not_verified")
-    if lookahead.passed and not lookahead.strict_suppression_verified:
-        violations.append("strict_suppression_replay_not_verified")
-    return tuple(dict.fromkeys(violations))
 
 
 def _lookahead_audit_payload(lookahead: Any) -> dict[str, Any]:
