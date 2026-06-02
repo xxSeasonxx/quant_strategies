@@ -19,7 +19,7 @@ review's "subtract, don't add" theme. Behavior-preserving; suite green throughou
 ### 3b — F11 trim data_contract (safe subtractions)
 - Remove the dead `freshness_status="not_evaluated"` field from `row_contract_summary`.
 - Remove the `metadata_field_coverage` freshness scaffolding (`_METADATA_COVERAGE_FIELDS`, `metadata_present` tracking, the property, the manifest field in `runner/artifacts.py`); `available_at` coverage already lives in `availability_coverage`. Update the 2 test assertions.
-- Remove the `RETAINED` enum value; collapse `RowContractMode` to `search|validation`. Simplify `_validation_row_contract_mode` (paper_readiness no longer changes row-contract mode). Update the `mode="retained"` test.
+- Remove the `RETAINED` enum value; collapse `RowContractMode` to `search|validation`. Simplify `_validation_row_contract_mode` (mechanical_thresholds no longer changes row-contract mode). Update the `mode="retained"` test.
 - **Defer (documented):** the bespoke issue sampler (`_IssueAccumulator`, working, low value) and deferring OHLC/quote structural validation to `engine.Bar` (correctness-adjacent; risky). Note as recommendations.
 
 ### 3c — F10 god-module serialization split — DONE (validation payload builders)

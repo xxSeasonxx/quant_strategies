@@ -10,7 +10,7 @@ Do not restart a broad foundation review before reading:
 Current foundation surfaces:
 
 ```text
-quick run                  -> diagnose one strategy version with factual evidence
+quick run                  -> diagnose one strategy version with engine-derived evidence
 mechanical evidence validation -> audit retained-candidate evidence integrity
 research evaluation        -> stateless frozen-candidate portfolio/economic/path evidence
 ```
@@ -48,6 +48,8 @@ as a fresh P1 without a regression or documented trigger. In short:
 - validation and evaluation require `validate_params`;
 - engine metrics are linear signed per-trade results, not NAV;
 - validation is mechanical evidence validation, advisory, and never promotion authority;
+- `quant_autoresearch` owns generation, search memory, variant ranking, stopping
+  rules, and iteration decisions;
 - `quant_data` owns data acquisition and materialization;
 - generated artifacts are evidence, not truth.
 

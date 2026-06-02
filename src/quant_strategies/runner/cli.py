@@ -122,7 +122,7 @@ def _validation_exit_code(result: object) -> int:
     if failure_stage is not None or not getattr(result, "run_completed", False):
         return 1
     decision = getattr(getattr(result, "decision", None), "decision", None)
-    if decision == "hard_no":
+    if decision == "mechanical_fail":
         return 2
     return 0
 

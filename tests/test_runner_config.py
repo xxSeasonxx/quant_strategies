@@ -29,12 +29,11 @@ def write_config(
     results_dir: str = "results",
     fill_price: str = "close",
     entry_lag_bars: int = 1,
-    allow_same_bar_close_fill: bool = False,
+    fill_model_extra: str = "",
     artifact_profile: str | None = None,
     output_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
-    allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
     artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
     quick_checks_line = (
         f"quick_checks = {str(quick_checks).lower()}\n"
@@ -61,7 +60,7 @@ weight = 1.0
 price = "{fill_price}"
 entry_lag_bars = {entry_lag_bars}
 exit_lag_bars = 0
-{allow_line}
+{fill_model_extra}
 
 [cost_model]
 fee_bps_per_side = 0.0
@@ -274,23 +273,26 @@ def test_missing_relative_config_reports_resolved_path(tmp_path: Path):
         load_config("runs/missing.toml", repo_root=tmp_path)
 
 
-def test_close_fill_zero_lag_is_rejected_by_default(tmp_path: Path):
+@pytest.mark.parametrize("fill_price", ["close", "open", "quote"])
+def test_zero_lag_entry_fill_is_rejected_for_every_price(tmp_path: Path, fill_price: str):
     write_strategy(tmp_path)
 
-    with pytest.raises(ConfigError, match="allow_same_bar_close_fill"):
-        load_config(write_config(tmp_path, entry_lag_bars=0), repo_root=tmp_path)
+    with pytest.raises(ConfigError, match="greater than or equal to 1"):
+        load_config(
+            write_config(tmp_path, fill_price=fill_price, entry_lag_bars=0),
+            repo_root=tmp_path,
+        )
 
 
-def test_close_fill_zero_lag_accepts_explicit_opt_in(tmp_path: Path):
+def test_removed_same_bar_close_fill_flag_is_rejected_as_unknown(tmp_path: Path):
     write_strategy(tmp_path)
+    removed_flag = "allow_same_bar" + "_close_fill"
 
-    config = load_config(
-        write_config(tmp_path, entry_lag_bars=0, allow_same_bar_close_fill=True),
-        repo_root=tmp_path,
-    )
-
-    assert config.fill_model.entry_lag_bars == 0
-    assert config.fill_model.allow_same_bar_close_fill is True
+    with pytest.raises(ConfigError, match=removed_flag):
+        load_config(
+            write_config(tmp_path, fill_model_extra=f"{removed_flag} = true\n"),
+            repo_root=tmp_path,
+        )
 
 
 def test_future_bar_close_fill_remains_accepted(tmp_path: Path):

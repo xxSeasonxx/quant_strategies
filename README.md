@@ -9,6 +9,10 @@ readiness. Its one job is to take a strategy idea from "pure function" to
 trustworthy evidence without ever letting a number with unclear semantics drive
 a conclusion.
 
+Research evaluation here means stateless evidence for a supplied frozen
+candidate. Candidate generation, search memory, ranking, stopping rules, and
+iteration decisions remain outside this repo in `quant_autoresearch`.
+
 ## Foundation jobs
 
 The project contract separates three jobs:
@@ -96,8 +100,8 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 
 Loads rows, runs the pure strategy, validates the decision contract, replays for
 hidden lookahead, and computes trade-level diagnostic evidence for one strategy
-version. Completed quick-run summaries include factual `economic_metrics`
-derived from the internal engine trade ledger. See [docs/runner.md](docs/runner.md).
+version. Completed quick-run summaries include engine-derived
+`economic_metrics` from the internal trade ledger.
 
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 
@@ -105,8 +109,7 @@ Runs the same kernel across configured windows and stress scenarios, then return
 advisory retained-candidate mechanical evidence. It is an evidence audit, not
 research evaluation: never statistical significance, regime robustness,
 portfolio quality, capacity, or promotion authority. `promotion_eligible` /
-`paper_trade_eligible` / `live_eligible` always stay false. See
-[docs/validation.md](docs/validation.md).
+`paper_trade_eligible` / `live_eligible` always stay false.
 
 **Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
 
@@ -149,18 +152,15 @@ conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 
 ## Documentation
 
-- **[docs/runner.md](docs/runner.md)** — quick-run reference: configuration,
-  evidence quality, exit codes, and artifacts.
-- **[docs/validation.md](docs/validation.md)** — validation reference: config schema,
-  advisory verdicts, scenario evidence, and artifacts.
+- **[PRD.md](PRD.md)** — product intent, goals, non-goals, constraints, and
+  durable ownership boundaries.
+- **[FOUNDATION_LOCK.md](FOUNDATION_LOCK.md)** — locked contracts, accepted debt,
+  deferred triggers, and review protocol.
 - **[docs/foundation-surfaces.md](docs/foundation-surfaces.md)** — current quick-run,
-  validation-run, and evaluation-run I/O reference.
-- **[docs/quant-autoresearch-consumer.md](docs/quant-autoresearch-consumer.md)** —
-  the stable Python consumer contract: `quant_strategies.runner.run_config` →
-  `quant_strategies.runner.RunResult`,
-  `quant_strategies.validation.run_validation` → `ValidationRunResult`, and
-  `quant_strategies.evaluation.run_evaluation` → `EvaluationRunResult`. No
-  top-level facade is promised.
+  validation-run, and evaluation-run command/API/artifact reference.
+- **[docs/vectorbtpro.md](docs/vectorbtpro.md)** — VectorBT Pro package facts and
+  project boundary.
+- **[AGENTS.md](AGENTS.md)** — agent operating rules for this repository.
 
 ## Promotion discipline
 

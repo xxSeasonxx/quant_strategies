@@ -1,8 +1,8 @@
 # Foundation Surfaces
 
 This is the compact current-state map for what `quant_strategies` accepts and
-what it returns. Detailed quick-run behavior lives in `docs/runner.md`; detailed
-validation behavior lives in `docs/validation.md`.
+what it returns. Product intent and ownership boundaries live in `PRD.md`;
+agent operating rules live in `AGENTS.md`.
 
 ```text
 quick run      input: strategy.py + experiment.toml
@@ -51,7 +51,8 @@ Purpose:
 
 - diagnose one strategy version quickly;
 - produce trade-level diagnostic evidence from the internal engine;
-- support iteration, not retained-candidate review or promotion.
+- support iteration feedback, not retained-candidate review, variant ranking, or
+promotion.
 
 Primary config file: `experiment.toml`.
 
@@ -69,7 +70,7 @@ Common artifacts include `config.toml`, `strategy_snapshot.py`,
 `run_manifest.json`, `summary.json`, `environment.json`, `notes.md`,
 `data_manifest.json` when data loading is reached, and optional diagnostic or
 full-profile artifacts. Completed quick-run `summary.json` files include
-`economic_metrics`, a compact factual summary derived from the engine trade
+`economic_metrics`, a compact summary derived from the engine trade
 ledger. Diagnostic-profile runs additionally write `diagnostics.json` with
 `economic_slices`.
 
@@ -106,7 +107,7 @@ Important sections:
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[readiness]`;
 - `[output]`;
-- `[search_pressure]`, plus optional `[paper_readiness]` and
+- `[search_pressure]`, plus optional `[mechanical_thresholds]` and
 `[agreement_oracle]`.
 
 Output: `ValidationRunResult`. Validation is mechanical evidence validation,
@@ -124,8 +125,8 @@ CLI exit codes:
 
 | Exit code | Meaning                                                      |
 | --------- | ------------------------------------------------------------ |
-| `0`       | validation completed with a non-`hard_no` advisory decision  |
-| `2`       | validation completed with `hard_no`                          |
+| `0`       | validation completed with a non-`mechanical_fail` advisory decision |
+| `2`       | validation completed with `mechanical_fail`                  |
 | `3`       | data readiness or audit failure                              |
 | `1`       | config, infrastructure, artifact, or other execution failure |
 
@@ -204,10 +205,10 @@ There is no JSONL fallback path for evaluation traces.
 
 ## What This Project Does Not Decide
 
-- It does not choose which strategy ideas are worth researching.
+- It does not choose which strategy ideas are worth researching, how to mutate
+variants, how to rank candidates, or when an auto-research loop should stop.
 - It does not acquire, refresh, repair, or join data; `quant_data` owns that.
 - It does not produce market proof, statistical proof, paper-trading permission,
 live-trading permission, or promotion authority.
 - It does not make generated artifacts true by construction; artifacts are
 evidence to inspect.
-

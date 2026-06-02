@@ -17,8 +17,9 @@ def validate_strategy_params(
     Returns ``(validated_params, had_validator)``. When no validator is defined the
     raw params pass through unchanged and ``had_validator`` is ``False`` — so the
     caller can flag the run as exploratory. When ``require_validator`` is set (the
-    validation run does this) a missing validator is an error: a paper-readiness
-    verdict must not be sought on a strategy whose params are never validated.
+    validation run does this) a missing validator is an error: a mechanical
+    threshold verdict must not be sought on a strategy whose params are never
+    validated.
     """
     validator = getattr(generate_decisions, "validate_params", None)
     if validator is None:

@@ -143,14 +143,12 @@ def write_config(
     dataset: str | None = "equity_1min",
     fill_price: str = "close",
     entry_lag_bars: int = 1,
-    allow_same_bar_close_fill: bool = False,
     quick_checks: bool = True,
     artifact_profile: str | None = "full",
     diagnostic_sample_trades: int | None = None,
     row_contract: str | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
-    allow_line = "allow_same_bar_close_fill = true\n" if allow_same_bar_close_fill else ""
     row_contract_line = f'row_contract = "{row_contract}"\n' if row_contract else ""
     artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
     diagnostic_sample_trades_line = (
@@ -177,7 +175,6 @@ strict = true
 [fill_model]
 price = "{fill_price}"
 entry_lag_bars = {entry_lag_bars}
-{allow_line}
 
 [cost_model]
 fee_bps_per_side = 0.0

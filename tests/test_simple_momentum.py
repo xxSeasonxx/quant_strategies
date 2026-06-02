@@ -127,7 +127,7 @@ def test_validation_config_runs_with_fixture_loader_and_engine_backend(tmp_path:
 
     assert result.run_completed is True
     assert result.failure_stage is None
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("insufficient_trades",)
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())

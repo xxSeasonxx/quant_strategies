@@ -8,7 +8,7 @@ sub-step plus a follow-up and a review-fixes commit):
 - **5a (F17)** purity lint extended to data-loading reads + best-effort docs + escape tests.
 - **5b (F19)** artifact init/final/failure-path writes routed to structured `failure_stage`
   results; CLI `OSError` backstop. (Residual: mid-pipeline success-path writes — see `TODOS.md`.)
-- **5c (F18)** validation requires `validate_params` (`hard_no`/`param_validation`); quick-run
+- **5c (F18)** validation requires `validate_params` (`mechanical_fail`/`param_validation`); quick-run
   flags `param_contract` (`validated`/`unvalidated_passthrough`/`unknown`).
 - **5d (F16)** engine per-trade ledger emitted per scenario (`backend_runs/trade_ledgers/*.jsonl`),
   hash-pinned; verdict `net_return` recomputable as `sum(trade.net_return)`; manifest
@@ -50,7 +50,7 @@ prevention** — the gaps that let *silent* wrongness through a trust foundation
 **Approved scope decisions:**
 - **F16** → emit the engine per-trade ledger **in the validation run only** (bounded
   to the verdict path); runner full-profile mirror is an explicit non-goal here.
-- **F18** → **require `validate_params` on the validation run** (fail-fast `hard_no`);
+- **F18** → **require `validate_params` on the validation run** (fail-fast `mechanical_fail`);
   quick-run still allows passthrough but flags it. Mostly non-breaking.
 - **F17** → **extend the denylist** to close the data-loading escapes (root-cause:
   AGENTS.md forbids data loading) **and** document purity as best-effort lint **and**
@@ -168,7 +168,7 @@ higher bar than quick-run.
   (`runner/execution.py`, ~line 88) passes it into `validate_strategy_params` and on the
   required-but-absent case raises `StrategyExecutionError("param_validation", ...)` —
   the stage already exists (cf. `test_execute_strategy_run_maps_param_validation_failure`),
-  so validation maps it to `hard_no` with no new wiring.
+  so validation maps it to `mechanical_fail` with no new wiring.
 - Surface the quick-run marker: carry `had_validator` into `StrategyExecutionResult`
   and emit `param_contract: "validated" | "unvalidated_passthrough"` in the runner
   `summary_payload` (`runner/artifacts.py:339-367`) and the evidence warnings, so a
@@ -178,7 +178,7 @@ higher bar than quick-run.
   - `tests/test_runner_execution.py` — add the **missing** passthrough case (no
     validator → quick-run completes, `param_contract == "unvalidated_passthrough"`), and
     the required-but-absent case (→ `StrategyExecutionError("param_validation")`).
-  - validation test — a schema-less strategy → `run_validation` returns `hard_no`,
+  - validation test — a schema-less strategy → `run_validation` returns `mechanical_fail`,
     `failure_stage="param_validation"`.
 - Docs: `README.md` Strategy Contract + `docs/quant-autoresearch-consumer.md` —
   `validate_params` is optional for quick-run (exploratory, flagged) but **required**
@@ -243,7 +243,7 @@ human re-sum the gated `net_return`.
    `backend_runs/trade_ledgers/*.jsonl` are emitted, the manifest hashes them, and the
    replay test passes against the real artifacts (re-sum == gated `net_return`).
 4. Misuse paths fail cleanly: a strategy that calls `pd.read_csv` is rejected at load;
-   a schema-less strategy returns `hard_no`/`param_validation` from `validate`; an
+   a schema-less strategy returns `mechanical_fail`/`param_validation` from `validate`; an
    unwritable results dir yields exit 1 with a one-line message (no traceback).
 5. Report line-count deltas (source / tests / docs separately).
 6. Update `TODOS.md` (currently "No open foundation TODOs") to reflect P3 closed, and

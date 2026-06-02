@@ -121,7 +121,7 @@ def run_validation(
         # instead of letting a raw filesystem error escape to the caller/CLI.
         return ValidationRunResult(
             result_dir=None,
-            decision=_hard_no_decision("artifact_initialization_failed"),
+            decision=_mechanical_fail_decision("artifact_initialization_failed"),
             message=f"artifact initialization failed: {exc}",
             run_completed=False,
             failure_stage="artifact_initialization",
@@ -153,7 +153,7 @@ def run_validation(
         )
 
     # Validation always uses the validation row contract; strict replay is always
-    # on (Phase 1) and paper_readiness governs only the readiness gates.
+    # on (Phase 1) and mechanical_thresholds governs only the mechanical gates.
     row_contract_mode = RowContractMode.VALIDATION
     context = _ValidationContext(
         repo_root=root,
@@ -384,7 +384,7 @@ def _audit_window_execution(
         ) as causality_event:
             # Strict suppression-replay is always on: boundaries auto-derive from the
             # row grid so a peek-to-suppress strategy is caught on the default path,
-            # not only when paper_readiness is enabled.
+            # not only when mechanical_thresholds is enabled.
             lookahead = check_hidden_lookahead(
                 execution.generate_decisions,
                 rows=execution.normalized_rows,
@@ -568,7 +568,7 @@ def _run_agreement_oracle(
     """Opt-in cross-check of the engine verdict against VectorBT Pro.
 
     Off by default. Runs only when the backend completed, reusing the verdict's
-    already-computed metrics (no re-screen). A divergence becomes a hard_no via
+    already-computed metrics (no re-screen). A divergence becomes a mechanical_fail via
     state.failure_reasons (see _record_agreement_failure). Any oracle error is
     recorded as inconclusive and never crashes the run.
     """
@@ -597,7 +597,7 @@ def _classify_validation_state(
 ) -> ValidationPolicyDecision:
     data_passed = all(audit["passed"] for audit in state.data_audits)
     if state.failure_reasons:
-        return _hard_no_decision(
+        return _mechanical_fail_decision(
             state.failure_reasons,
             search_pressure=context.config.search_pressure,
         )
@@ -608,7 +608,7 @@ def _classify_validation_state(
         backend_results=state.backend_results,
         min_trades=_MIN_VALIDATION_TRADES,
         required_scenario_ids=tuple(state.required_scenario_ids),
-        paper_readiness=context.config.paper_readiness,
+        mechanical_thresholds=context.config.mechanical_thresholds,
         search_pressure=context.config.search_pressure,
     )
 
@@ -654,14 +654,14 @@ def _validation_result(
     )
 
 
-def _hard_no_decision(
+def _mechanical_fail_decision(
     reasons: str | Sequence[str],
     *,
     search_pressure: object | None = None,
 ) -> ValidationPolicyDecision:
     reason_tuple = (reasons,) if isinstance(reasons, str) else tuple(dict.fromkeys(reasons))
     return ValidationPolicyDecision(
-        decision="hard_no",
+        decision="mechanical_fail",
         reasons=reason_tuple,
         failed_gates=reason_tuple,
         gate_details={reason: "failed" for reason in reason_tuple},
@@ -704,7 +704,7 @@ def _failure_result(
     failure_details: list[dict[str, str]] | None = None,
     event_emitter: ValidationStageEmitter | None = None,
 ) -> ValidationRunResult:
-    decision = _hard_no_decision(
+    decision = _mechanical_fail_decision(
         reason,
         search_pressure=getattr(config, "search_pressure", None),
     )
@@ -726,7 +726,7 @@ def _failure_result(
         )
     except OSError:
         # Artifacts could not be persisted; still return the structured verdict with
-        # its original failure_stage rather than raising to the caller (every hard_no
+        # its original failure_stage rather than raising to the caller (every mechanical_fail
         # path routes through here, including API consumers with no CLI backstop).
         pass
     return _validation_result(result_dir, decision, failure_stage=failure_stage)

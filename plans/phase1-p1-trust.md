@@ -4,7 +4,7 @@
 
 **Goal:** Close the three P1 trust gaps that survive after the P0 "one PnL contract" work: make strict suppression-replay the *default* causal check for both the runner quick-run and the validation run (F3), pin the VectorBT Pro oracle's cash scale explicitly (F4), and lock in a regression test proving the validation gate's `net_return` is funding-inclusive (F2).
 
-**Architecture:** The engine kernel is already the single verdict PnL source (P0#2), so F2/F7/F8 are structurally resolved. This phase hardens the *causal* guarantee. The two-directional replay algorithm in `causality.py` is excellent but its suppression half (`scoped ⊆ expected`) runs only under `mode="strict"`, which today is reached only when `paper_readiness.enabled`. We flip strict to the default everywhere, auto-derive row-grid boundaries inside `check_hidden_lookahead`, and split the single `causality_verified` boolean into honest sub-flags (`emitted_replay_verified`, `strict_no_emission_verified`) so a run can never claim a verification it did not perform. We also collapse the byte-identical `_causality_evidence` duplication (an F12 sub-item) because F3 changes that function's contract and editing one correctness policy in two files is the exact risk the review flagged.
+**Architecture:** The engine kernel is already the single verdict PnL source (P0#2), so F2/F7/F8 are structurally resolved. This phase hardens the *causal* guarantee. The two-directional replay algorithm in `causality.py` is excellent but its suppression half (`scoped ⊆ expected`) runs only under `mode="strict"`, which today is reached only when `mechanical_thresholds.enabled`. We flip strict to the default everywhere, auto-derive row-grid boundaries inside `check_hidden_lookahead`, and split the single `causality_verified` boolean into honest sub-flags (`emitted_replay_verified`, `strict_no_emission_verified`) so a run can never claim a verification it did not perform. We also collapse the byte-identical `_causality_evidence` duplication (an F12 sub-item) because F3 changes that function's contract and editing one correctness policy in two files is the exact risk the review flagged.
 
 **Tech Stack:** Python 3.12, pydantic v2, pytest, conda env `quant`. Run commands with `conda run -n quant <cmd>`.
 
@@ -15,7 +15,7 @@
 | Finding | Status now | Phase-1 action |
 |---|---|---|
 | F2 funding-aware net | **Core resolved** — verdict gates on `EngineBackend.net_return = smoke.sum_signed_trade_activity_net` (funding-inclusive); `verdict_source="engine"` default | Add one regression test; deliberately **defer** funding-stress scenario (avoid speculative addition) |
-| F3 strict suppression-replay | **OPEN** — runner always `emitted`; validation strict only if `paper_readiness`; `TODOS.md` open | Make strict default for both; split evidence field; share boundary builder; close TODOS |
+| F3 strict suppression-replay | **OPEN** — runner always `emitted`; validation strict only if `mechanical_thresholds`; `TODOS.md` open | Make strict default for both; split evidence field; share boundary builder; close TODOS |
 | F4 real-vbt golden + init_cash | **Golden tests exist** (`test_..._runs_max_hold_decisions`, `test_golden_engine_and_vbt_agree_on_single_long`); **`init_cash` not set** | Pin `init_cash` explicitly; confirm golden tests unchanged |
 
 **Out of scope (deliberate):** funding-stress scenario (F2 secondary), RowContractMode collapse (F11/Phase 3), other seam dedup (F12/Phase 3). Replay strictness is decoupled from `RowContractMode` here; the `RETAINED` value's only remaining job (strict replay) becomes moot and is removed in Phase 3.
@@ -435,7 +435,7 @@ def _prepare_causality_evidence(
 - Modify: `src/quant_strategies/validation/__init__.py` (context `strict_replay` field:81/167; causality call:374-389; `_validation_row_contract_mode` coupling unchanged for the *row contract*, only replay decoupled)
 - Test: `tests/test_validation_lookahead.py` or `tests/test_validation_runner.py`
 
-- [ ] **Step 1 (TDD):** Add/confirm a validation-level test that a peek-to-suppress strategy fails the validation run (`hard_no` with `hidden_lookahead_suppression_detected`) even when `paper_readiness` is disabled (the default). If an equivalent test exists only under paper_readiness, add the default-path variant.
+- [ ] **Step 1 (TDD):** Add/confirm a validation-level test that a peek-to-suppress strategy fails the validation run (`mechanical_fail` with `hidden_lookahead_suppression_detected`) even when `mechanical_thresholds` is disabled (the default). If an equivalent test exists only under mechanical_thresholds, add the default-path variant.
 
 - [ ] **Step 2:** Run it: expect FAIL today (default validation = emitted).
 
@@ -464,7 +464,7 @@ def _prepare_causality_evidence(
 
 Remove the `strict_replay` field from the context dataclass (81) and its assignment (167); remove the now-unused `ReplayBoundary` import if nothing else uses it. Leave `_validation_row_contract_mode` (the row-contract strictness) intact — that is Phase 3's concern; only the *replay* strictness is decoupled here.
 
-- [ ] **Step 4:** Run `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_lookahead.py -q`. Fix fallout (paper_readiness tests that assumed emitted on the default path).
+- [ ] **Step 4:** Run `conda run -n quant pytest tests/test_validation_runner.py tests/test_validation_lookahead.py -q`. Fix fallout (mechanical_thresholds tests that assumed emitted on the default path).
 
 - [ ] **Step 5:** Commit: `git commit -am "Validation runs strict suppression-replay by default"`
 

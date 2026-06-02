@@ -11,7 +11,7 @@ from quant_strategies.validation.errors import ValidationError
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
 
-@pytest.mark.parametrize("decision", ["mechanical_complete", "watchlist", "mechanical_review_candidate"])
+@pytest.mark.parametrize("decision", ["mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"])
 def test_validate_cli_returns_zero_for_completed_advisory_decisions(
     decision: str,
     monkeypatch,
@@ -42,13 +42,13 @@ def test_validate_cli_returns_zero_for_completed_advisory_decisions(
     assert calls == [(Path("candidate/validation.toml"), tmp_path)]
 
 
-def test_validate_cli_returns_two_for_hard_no(monkeypatch, tmp_path: Path, capsys):
+def test_validate_cli_returns_two_for_mechanical_fail(monkeypatch, tmp_path: Path, capsys):
     monkeypatch.setattr(
         "quant_strategies.runner.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="hard_no", reasons=("nonpositive_net_return",)),
-            message="validation decision: hard_no",
+            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("nonpositive_net_return",)),
+            message="validation decision: mechanical_fail",
             run_completed=True,
             failure_stage=None,
         ),
@@ -57,7 +57,7 @@ def test_validate_cli_returns_two_for_hard_no(monkeypatch, tmp_path: Path, capsy
     code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
 
     assert code == 2
-    assert "hard_no" in capsys.readouterr().out
+    assert "mechanical_fail" in capsys.readouterr().out
 
 
 def test_validate_cli_returns_three_for_data_audit_failure(monkeypatch, tmp_path: Path, capsys):
@@ -65,8 +65,8 @@ def test_validate_cli_returns_three_for_data_audit_failure(monkeypatch, tmp_path
         "quant_strategies.runner.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="hard_no", reasons=("data_audit_failed",)),
-            message="validation decision: hard_no",
+            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("data_audit_failed",)),
+            message="validation decision: mechanical_fail",
             run_completed=True,
             failure_stage="data_audit",
         ),
@@ -75,7 +75,7 @@ def test_validate_cli_returns_three_for_data_audit_failure(monkeypatch, tmp_path
     code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
 
     assert code == 3
-    assert "hard_no" in capsys.readouterr().out
+    assert "mechanical_fail" in capsys.readouterr().out
 
 
 def test_validate_cli_returns_one_for_validation_error(monkeypatch, tmp_path: Path, capsys):
@@ -112,8 +112,8 @@ def test_validate_cli_events_jsonl_wires_validation_event_sink(
         )
         return ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="watchlist"),
-            message="validation decision: watchlist",
+            decision=ValidationPolicyDecision(decision="mechanical_caution"),
+            message="validation decision: mechanical_caution",
             run_completed=True,
             failure_stage=None,
         )
@@ -136,7 +136,7 @@ def test_validate_cli_events_jsonl_wires_validation_event_sink(
 
     assert code == 0
     assert calls == [(Path("candidate/validation.toml"), tmp_path, True)]
-    assert "watchlist" in captured.out
+    assert "mechanical_caution" in captured.out
     assert json.loads(captured.err)["event"] == "validation_stage"
     assert json.loads(captured.err)["stage"] == "window_execution"
 

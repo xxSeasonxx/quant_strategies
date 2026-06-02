@@ -136,7 +136,7 @@ def test_engine_backend_metrics_feed_backend_metrics_contract():
 
 def test_engine_backend_supports_threshold_exit_decisions():
     # F7: a stop-loss/take-profit decision is screenable by the engine. The vbt
-    # backend marked threshold_exit_policy "unsupported" -> hard_no; the engine
+    # backend marked threshold_exit_policy "unsupported" -> mechanical_fail; the engine
     # (the single verdict source) completes it, so quick-runnable candidates with
     # threshold exits are now validatable.
     result = EngineBackend().run(

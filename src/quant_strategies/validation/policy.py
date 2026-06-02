@@ -9,7 +9,7 @@ from quant_strategies.evidence_semantics import validation_evidence_semantics
 from quant_strategies.validation.backends import BackendMetrics, BackendRunResult, ScenarioBackendRunResult
 
 
-ValidationDecision = Literal["hard_no", "mechanical_complete", "watchlist", "mechanical_review_candidate"]
+ValidationDecision = Literal["mechanical_fail", "mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"]
 
 
 class ValidationPolicyDecision(BaseModel):
@@ -67,7 +67,7 @@ def classify_validation(
     min_trades: int,
     required_scenario_count: int | None = None,
     required_scenario_ids: Sequence[str] | None = None,
-    paper_readiness: object | None = None,
+    mechanical_thresholds: object | None = None,
     search_pressure: object | None = None,
 ) -> ValidationPolicyDecision:
     overfit_controls = overfit_controls_from_search_pressure(search_pressure)
@@ -76,8 +76,8 @@ def classify_validation(
         reasons = decision.reasons
         verdict = decision.decision
         search_pressure_reason = _search_pressure_downgrade_reason(overfit_controls)
-        if decision.decision == "mechanical_review_candidate" and search_pressure_reason:
-            verdict = "watchlist"
+        if decision.decision == "mechanical_threshold_pass" and search_pressure_reason:
+            verdict = "mechanical_caution"
             reasons = tuple(dict.fromkeys((*reasons, search_pressure_reason)))
         return decision.model_copy(
             update={
@@ -91,7 +91,7 @@ def classify_validation(
     if not data_passed:
         return finish(
             _decision(
-                "hard_no",
+                "mechanical_fail",
                 reasons=("data_audit_failed",),
                 failed=("data_audit",),
                 details={"data_audit": "failed"},
@@ -100,7 +100,7 @@ def classify_validation(
     if not backend_results:
         return finish(
             _decision(
-                "hard_no",
+                "mechanical_fail",
                 reasons=("no_backend_results",),
                 failed=("backend_results",),
                 details={"backend_results": "none"},
@@ -122,10 +122,10 @@ def classify_validation(
         return finish(backend_gate)
 
     return finish(
-        _paper_readiness_decision(
+        _mechanical_thresholds_decision(
             required_results,
             min_trades=min_trades,
-            paper_readiness=paper_readiness,
+            mechanical_thresholds=mechanical_thresholds,
             base_passed_gates=backend_gate.passed_gates,
             base_gate_details=backend_gate.gate_details,
         )
@@ -193,7 +193,7 @@ def _required_scenario_gate(
     actual_non_empty_ids = [item.scenario_id for item in required_results if item.scenario_id]
     if len(actual_non_empty_ids) != len(set(actual_non_empty_ids)):
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("duplicate_required_scenarios",),
             failed=("required_scenarios",),
             details={"required_scenarios": "duplicate required scenario ids"},
@@ -203,14 +203,14 @@ def _required_scenario_gate(
         actual_ids = [item.scenario_id for item in required_results]
         if len(actual_ids) != len(set(actual_ids)):
             return _decision(
-                "hard_no",
+                "mechanical_fail",
                 reasons=("duplicate_required_scenarios",),
                 failed=("required_scenarios",),
                 details={"required_scenarios": "duplicate required scenario ids"},
             )
         if set(actual_ids) != expected_ids:
             return _decision(
-                "hard_no",
+                "mechanical_fail",
                 reasons=("missing_required_scenarios",),
                 failed=("required_scenarios",),
                 details={
@@ -221,7 +221,7 @@ def _required_scenario_gate(
             )
     if required_scenario_count is not None and len(required_results) < required_scenario_count:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("missing_required_scenarios",),
             failed=("required_scenarios",),
             details={
@@ -234,7 +234,7 @@ def _required_scenario_gate(
         )
     if not required_results:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("no_required_backend_results",),
             failed=("required_backend_results",),
             details={"required_backend_results": "none"},
@@ -251,7 +251,7 @@ def _backend_execution_gate(
         result = item.result
         if result.status == "failed":
             return _decision(
-                "hard_no",
+                "mechanical_fail",
                 reasons=(f"{result.backend}_failed",),
                 failed=("required_backend_completed",),
                 details={"required_backend_completed": f"{item.scenario_id} failed"},
@@ -275,14 +275,14 @@ def _backend_execution_gate(
 
     if invalid_metrics:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("invalid_backend_metrics",),
             failed=("backend_metrics",),
             details={"backend_metrics": "missing or invalid net_return/trade_count"},
         )
     if insufficient_trades:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("insufficient_trades",),
             failed=("mechanical_min_trades",),
             details={"mechanical_min_trades": f"one or more required scenarios < {min_trades}"},
@@ -291,7 +291,7 @@ def _backend_execution_gate(
     unavailable = [item.result for item in required_results if item.result.status == "unavailable"]
     if unavailable:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("backend_unavailable",),
             failed=("required_backend_available",),
             details={"required_backend_available": f"{len(unavailable)} unavailable"},
@@ -304,7 +304,7 @@ def _backend_execution_gate(
     ]
     if unsupported:
         return _decision(
-            "hard_no",
+            "mechanical_fail",
             reasons=("unsupported_semantics",),
             failed=("required_backend_semantics",),
             details={"required_backend_semantics": f"{len(unsupported)} unsupported"},
@@ -320,22 +320,22 @@ def _backend_execution_gate(
     )
 
 
-_PAPER_READINESS_GATES: tuple[str, ...] = (
+_MECHANICAL_THRESHOLD_GATES: tuple[str, ...] = (
     "min_windows",
     "min_total_trades",
     "no_zero_trade_windows",
-    "realistic_net_activity_positive",
+    "realistic_activity_positive",
     "positive_window_fraction",
-    "stressed_net_floor",
-    "fill_lag_net_floor",
+    "stressed_activity_floor",
+    "fill_lag_activity_floor",
 )
 
 
-def _paper_readiness_decision(
+def _mechanical_thresholds_decision(
     required_results: tuple[ScenarioBackendRunResult, ...],
     *,
     min_trades: int,
-    paper_readiness: object | None,
+    mechanical_thresholds: object | None,
     base_passed_gates: tuple[str, ...],
     base_gate_details: dict[str, str],
 ) -> ValidationPolicyDecision:
@@ -350,22 +350,26 @@ def _paper_readiness_decision(
         if metrics is not None
     }
 
-    if not _paper_enabled(paper_readiness):
+    if not _mechanical_thresholds_enabled(mechanical_thresholds):
         return _decision(
             "mechanical_complete",
-            reasons=("paper_readiness_disabled",),
+            reasons=("mechanical_thresholds_disabled",),
             passed=base_passed_gates,
-            failed=("paper_readiness_enabled",),
-            details={**base_gate_details, "paper_readiness_enabled": "false"},
+            failed=("mechanical_thresholds_enabled",),
+            details={**base_gate_details, "mechanical_thresholds_enabled": "false"},
         )
 
-    min_windows = int(_settings_value(paper_readiness, "min_windows", 2))
-    min_total_trades = int(_settings_value(paper_readiness, "min_total_trades", 30))
+    min_windows = int(_settings_value(mechanical_thresholds, "min_windows", 2))
+    min_total_trades = int(_settings_value(mechanical_thresholds, "min_total_trades", 30))
     min_positive_window_fraction = float(
-        _settings_value(paper_readiness, "min_positive_window_fraction", 0.5)
+        _settings_value(mechanical_thresholds, "min_positive_window_fraction", 0.5)
     )
-    max_stressed_net_loss = float(_settings_value(paper_readiness, "max_stressed_net_loss", -0.02))
-    max_fill_lag_net_loss = float(_settings_value(paper_readiness, "max_fill_lag_net_loss", -0.02))
+    max_stressed_activity_loss = float(
+        _settings_value(mechanical_thresholds, "max_stressed_activity_loss", -0.02)
+    )
+    max_fill_lag_activity_loss = float(
+        _settings_value(mechanical_thresholds, "max_fill_lag_activity_loss", -0.02)
+    )
 
     realistic = tuple(item for item in required_results if _scenario_key(item) == "cost")
     stressed = tuple(item for item in required_results if _scenario_key(item) == "cost_stress")
@@ -417,7 +421,7 @@ def _paper_readiness_decision(
                 else "passed"
             ),
         ),
-        "realistic_net_activity_positive": (
+        "realistic_activity_positive": (
             positive_realistic_evidence,
             _gate_detail(realistic_net_activity, ">", 0.0)
             if has_realistic
@@ -429,15 +433,15 @@ def _paper_readiness_decision(
             if has_realistic
             else _missing_scenario_detail("cost"),
         ),
-        "stressed_net_floor": (
-            has_stressed and worst_stressed_net >= max_stressed_net_loss,
-            _gate_detail(worst_stressed_net, ">=", max_stressed_net_loss)
+        "stressed_activity_floor": (
+            has_stressed and worst_stressed_net >= max_stressed_activity_loss,
+            _gate_detail(worst_stressed_net, ">=", max_stressed_activity_loss)
             if has_stressed
             else _missing_scenario_detail("cost_stress"),
         ),
-        "fill_lag_net_floor": (
-            has_fill_lag and worst_fill_lag_net >= max_fill_lag_net_loss,
-            _gate_detail(worst_fill_lag_net, ">=", max_fill_lag_net_loss)
+        "fill_lag_activity_floor": (
+            has_fill_lag and worst_fill_lag_net >= max_fill_lag_activity_loss,
+            _gate_detail(worst_fill_lag_net, ">=", max_fill_lag_activity_loss)
             if has_fill_lag
             else _missing_scenario_detail("fill_lag"),
         ),
@@ -446,7 +450,7 @@ def _paper_readiness_decision(
     passed_gates = list(base_passed_gates)
     failed_gates: list[str] = []
     gate_details = dict(base_gate_details)
-    for gate_name in _PAPER_READINESS_GATES:
+    for gate_name in _MECHANICAL_THRESHOLD_GATES:
         passed, detail = gate_results[gate_name]
         if passed:
             passed_gates.append(gate_name)
@@ -459,21 +463,21 @@ def _paper_readiness_decision(
 
     if not failed:
         return _decision(
-            "mechanical_review_candidate",
+            "mechanical_threshold_pass",
             passed=passed,
             details=gate_details,
         )
     if positive_realistic_evidence:
         return _decision(
-            "watchlist",
-            reasons=("paper_readiness_gates_failed",),
+            "mechanical_caution",
+            reasons=("mechanical_threshold_gates_failed",),
             passed=passed,
             failed=failed,
             details=gate_details,
         )
     return _decision(
-        "hard_no",
-        reasons=("no_positive_realistic_cost_evidence",),
+        "mechanical_fail",
+        reasons=("no_positive_realistic_activity_evidence",),
         passed=passed,
         failed=failed,
         details=gate_details,
@@ -486,7 +490,7 @@ def _settings_value(settings: object | None, name: str, default: object) -> obje
     return getattr(settings, name, default)
 
 
-def _paper_enabled(settings: object | None) -> bool:
+def _mechanical_thresholds_enabled(settings: object | None) -> bool:
     return bool(_settings_value(settings, "enabled", True))
 
 

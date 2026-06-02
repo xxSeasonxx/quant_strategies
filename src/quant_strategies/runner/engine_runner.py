@@ -54,7 +54,7 @@ def build_request(
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id=strategy_id, decisions=tuple(decisions)),
         bars=engine_bars,
-        fill_model=FillModel(**fill_model.model_dump(exclude={"allow_same_bar_close_fill"})),
+        fill_model=FillModel(**fill_model.model_dump()),
         cost_model=CostModel(**cost_model.model_dump()),
     )
     _assert_fillable(request)

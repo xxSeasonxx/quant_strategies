@@ -113,13 +113,13 @@ class ValidationReadinessConfig(ValidationConfigModel):
         return fields
 
 
-class PaperReadinessConfig(ValidationConfigModel):
+class MechanicalThresholdsConfig(ValidationConfigModel):
     enabled: bool = True
     min_windows: int = Field(default=2, ge=1)
     min_total_trades: int = Field(default=30, ge=1)
     min_positive_window_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
-    max_stressed_net_loss: float = Field(default=-0.02, le=0.0)
-    max_fill_lag_net_loss: float = Field(default=-0.02, le=0.0)
+    max_stressed_activity_loss: float = Field(default=-0.02, le=0.0)
+    max_fill_lag_activity_loss: float = Field(default=-0.02, le=0.0)
 
 
 class SearchPressureConfig(ValidationConfigModel):
@@ -212,7 +212,9 @@ class ValidationConfig(ValidationConfigModel):
     cost_model: CostModelConfig
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig
-    paper_readiness: PaperReadinessConfig = Field(default_factory=PaperReadinessConfig)
+    mechanical_thresholds: MechanicalThresholdsConfig = Field(
+        default_factory=MechanicalThresholdsConfig
+    )
     search_pressure: SearchPressureConfig
 
     def model_post_init(self, context: Any, /) -> None:

@@ -46,18 +46,8 @@ class DataConfig(SharedConfigModel):
 
 class FillModelConfig(SharedConfigModel):
     price: Literal["open", "close", "quote"] = "close"
-    entry_lag_bars: int = Field(default=1, ge=0)
+    entry_lag_bars: int = Field(default=1, ge=1)
     exit_lag_bars: int = Field(default=0, ge=0)
-    allow_same_bar_close_fill: bool = False
-
-    @model_validator(mode="after")
-    def validate_fill_model(self) -> FillModelConfig:
-        if self.price == "close" and self.entry_lag_bars == 0 and not self.allow_same_bar_close_fill:
-            raise ValueError(
-                'fill_model.price = "close" with entry_lag_bars = 0 requires '
-                "fill_model.allow_same_bar_close_fill = true"
-            )
-        return self
 
 
 class CostModelConfig(SharedConfigModel):
@@ -82,6 +72,6 @@ class StrategyExecutionSpec:
     fill_model: FillModelConfig = field(default_factory=FillModelConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
     # The validation run sets this so a missing `validate_params` is a hard error
-    # (no paper-readiness verdict on unvalidated params); the runner quick-run
+    # (no mechanical-threshold verdict on unvalidated params); the runner quick-run
     # leaves it False and instead flags schema-less runs as exploratory.
     require_param_validator: bool = False

@@ -64,8 +64,8 @@ def test_docs_do_not_call_evaluation_validation_verdict():
 
     forbidden = [
         "evaluation verdict",
-        "evaluation hard_no",
-        "evaluation watchlist",
+        "evaluation mechanical_fail",
+        "evaluation mechanical_caution",
         "evaluation validates alpha",
         "evaluation proves alpha",
         "evaluation authorizes paper",

@@ -96,7 +96,7 @@ backend.
 | Quick run | Internal `quant_strategies.engine` path through `runner.engine_runner` |
 | Validation verdict | Internal `EngineBackend`, using the same engine path |
 | Evaluation run | VectorBT Pro portfolio evaluation backend |
-| VectorBT Pro agreement oracle | Optional validation agreement check and research workbench |
+| VectorBT Pro agreement oracle | Optional single-trade validation agreement check |
 
 The reason is semantic, not just implementation preference:
 
@@ -165,9 +165,9 @@ weight above `1.0`, non-close fills, and threshold exit policies.
 
 ## Correct Use
 
-Use VectorBT Pro when the question is portfolio or research evaluation:
+Within `quant_strategies`, use VectorBT Pro through the evaluation surface when
+the question is portfolio or research evaluation:
 
-- "How does this signal behave across parameter grids?"
 - "How sensitive is the strategy to fee/slippage assumptions?"
 - "What does the NAV path, drawdown, and trade distribution look like?"
 - "Does a simple one-trade price-path case agree with the project engine?"
@@ -188,6 +188,7 @@ Do not use VectorBT Pro as:
 - a proof that a strategy has alpha;
 - a replacement for data provenance and anti-lookahead checks;
 - the validation verdict source;
+- a candidate generation, parameter search, ranking, or stopping-rule engine;
 - multi-trade confidence for the project engine's linear activity sums;
 - a hidden dependency required for quick runs;
 - an excuse to put data loading, simulation, or artifact writing inside

@@ -196,7 +196,7 @@ def expected_row_records() -> list[dict[str, Any]]:
     ]
 
 
-def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
+def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_window(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -220,16 +220,16 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     assert not hasattr(result, "success")
     assert result.run_completed is True
     assert result.failure_stage is None
-    assert result.decision.decision == "watchlist"
-    assert result.decision.reasons == ("paper_readiness_gates_failed",)
+    assert result.decision.decision == "mechanical_caution"
+    assert result.decision.reasons == ("mechanical_threshold_gates_failed",)
     assert "min_windows" in result.decision.failed_gates
     assert "min_total_trades" in result.decision.failed_gates
-    assert "realistic_net_activity_positive" in result.decision.passed_gates
+    assert "realistic_activity_positive" in result.decision.passed_gates
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert decision_payload["decision"] == "watchlist"
+    assert decision_payload["decision"] == "mechanical_caution"
     assert decision_payload["evidence_class"] == "validation_advisory"
-    assert decision_payload["advisory_decision"] == "watchlist"
+    assert decision_payload["advisory_decision"] == "mechanical_caution"
     assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
@@ -285,13 +285,13 @@ def test_run_validation_writes_watchlist_artifacts_for_one_positive_window(
     legacy_sensitivity_artifact = "robustness" + "_matrix.json"
     assert not (result.result_dir / legacy_sensitivity_artifact).exists()
     cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
-    assert cost_fill_sensitivity["decision"]["decision"] == "watchlist"
+    assert cost_fill_sensitivity["decision"]["decision"] == "mechanical_caution"
     assert "min_windows" in cost_fill_sensitivity["decision"]["failed_gates"]
     assert len(cost_fill_sensitivity["scenarios"]) == 4
     assert cost_fill_sensitivity["failure_details"] == []
     report = (result.result_dir / "validation_report.md").read_text()
-    assert "Decision: `watchlist`" in report
-    assert "Reasons: paper_readiness_gates_failed" in report
+    assert "Decision: `mechanical_caution`" in report
+    assert "Reasons: mechanical_threshold_gates_failed" in report
     assert "Passed gates: " in report
     assert "Failed gates: " in report
     assert "Gate details:" in report
@@ -374,7 +374,7 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("hidden_lookahead_suppression_detected",)
     assert result.failure_stage == "data_audit"
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
@@ -402,7 +402,7 @@ def test_validation_marks_skipped_strict_probe_as_incomplete_evidence(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strict_suppression_replay_not_verified",)
     assert result.failure_stage == "data_audit"
     assert backend.calls == 0
@@ -449,7 +449,7 @@ def test_validation_rejects_nondeterministic_strategy_generation(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_not_deterministic",)
     assert result.failure_stage == "data_audit"
     assert backend.calls == 0
@@ -461,17 +461,17 @@ def test_validation_rejects_nondeterministic_strategy_generation(
     assert window["strict_suppression_verified"] is False
 
 
-def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_disabled(
+def test_validation_strict_replay_detects_suppression_even_with_mechanical_thresholds_disabled(
     tmp_path: Path,
     monkeypatch,
 ):
-    # F3: strict suppression replay is decoupled from paper_readiness. Even with
-    # paper_readiness explicitly disabled, a peek-to-suppress strategy is caught on
+    # F3: strict suppression replay is decoupled from mechanical_thresholds. Even with
+    # mechanical_thresholds explicitly disabled, a peek-to-suppress strategy is caught on
     # the default validation path (previously this path ran emitted-only replay).
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
         (candidate / "validation.toml").read_text()
-        + "\n[paper_readiness]\nenabled = false\n"
+        + "\n[mechanical_thresholds]\nenabled = false\n"
     )
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
@@ -498,7 +498,7 @@ def test_validation_strict_replay_detects_suppression_even_with_paper_readiness_
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("hidden_lookahead_suppression_detected",)
     assert result.failure_stage == "data_audit"
 
@@ -531,7 +531,7 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, event_sink=events.append)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert any(
         event["stage"] == "data_audit" and event["status"] == "failed"
         for event in events
@@ -564,7 +564,7 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
 
     result = run_validation(suppressed / "validation.toml", repo_root=tmp_path / "suppressed", event_sink=events.append)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert any(
         event["stage"] == "causality_check" and event["status"] == "failed"
         for event in events
@@ -734,13 +734,13 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.run_completed is True
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "mechanical_caution"
     assert result.decision.reasons == ("multiple_testing_not_corrected_advisory_only",)
     assert result.result_dir is not None
     assert backend.calls == 8
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert decision_payload["decision"] == "watchlist"
-    assert decision_payload["advisory_decision"] == "watchlist"
+    assert decision_payload["decision"] == "mechanical_caution"
+    assert decision_payload["advisory_decision"] == "mechanical_caution"
     assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
@@ -761,16 +761,16 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "realistic_net_activity_positive",
+        "realistic_activity_positive",
         "positive_window_fraction",
-        "stressed_net_floor",
-        "fill_lag_net_floor",
+        "stressed_activity_floor",
+        "fill_lag_activity_floor",
     }
     assert decision_payload["gate_details"]["min_windows"] == "2 >= 2"
     assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
 
     cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
-    assert cost_fill_sensitivity["decision"]["decision"] == "watchlist"
+    assert cost_fill_sensitivity["decision"]["decision"] == "mechanical_caution"
     assert cost_fill_sensitivity["decision"]["reasons"] == [
         "multiple_testing_not_corrected_advisory_only"
     ]
@@ -781,13 +781,13 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert cost_fill_sensitivity["failure_details"] == []
 
     report = (result.result_dir / "validation_report.md").read_text()
-    assert "Decision: `watchlist`" in report
+    assert "Decision: `mechanical_caution`" in report
     assert "Reasons: multiple_testing_not_corrected_advisory_only" in report
     assert "Passed gates: " in report
     assert "Failed gates: none" in report
     assert "Gate details:" in report
     assert "- min_total_trades: 40 >= 30" in report
-    assert "- stressed_net_floor: -0.005 >= -0.02" in report
+    assert "- stressed_activity_floor: -0.005 >= -0.02" in report
 
 
 def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
@@ -800,7 +800,7 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert "data_audit_failed" in result.decision.reasons
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
@@ -862,7 +862,7 @@ selection_rule = "manual shortlist"
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_import_failed",)
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -892,7 +892,7 @@ def test_run_validation_records_backend_selection_failure_details(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("backend_selection_failed",)
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -929,7 +929,7 @@ def test_run_validation_ignores_unconfigured_manifest_next_to_config(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "mechanical_caution"
     assert backend.calls == 4
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
@@ -1018,7 +1018,7 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("validation_readiness_failed",)
     assert backend.calls == 0
     assert result.result_dir is not None
@@ -1052,7 +1052,7 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("hidden_lookahead_detected",)
     assert backend.calls == 0
     assert result.result_dir is not None
@@ -1084,7 +1084,7 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("hidden_lookahead_check_failed",)
     assert backend.calls == 0
     assert result.result_dir is not None
@@ -1105,7 +1105,7 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert backend.calls == 0
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
@@ -1125,7 +1125,7 @@ def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch)
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert backend.calls == 0
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
@@ -1147,7 +1147,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
         (candidate / "validation.toml").read_text()
-        + "\n[paper_readiness]\nenabled = false\n"
+        + "\n[mechanical_thresholds]\nenabled = false\n"
     )
     (candidate / "strategy.py").write_text(
         (candidate / "strategy.py")
@@ -1160,7 +1160,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("engine_failed",)
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
@@ -1176,7 +1176,7 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     tmp_path: Path, monkeypatch
 ):
     # F7: a strategy with a stop-loss (threshold exit) was un-validatable under the
-    # vbt backend (unsupported -> hard_no). The engine verdict source completes it,
+    # vbt backend (unsupported -> mechanical_fail). The engine verdict source completes it,
     # so the validation step no longer forks away from the quick run.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
@@ -1217,7 +1217,7 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     statuses = {item["result"]["backend"]: item["result"]["status"] for item in backend_summary["results"]}
     # The capability gap is gone: the engine completes the threshold-exit decision
-    # across every scenario (vbt would have returned unsupported -> hard_no).
+    # across every scenario (vbt would have returned unsupported -> mechanical_fail).
     assert statuses == {"engine": "completed"}
     assert all(item["result"]["unsupported_semantics"] == [] for item in backend_summary["results"])
     assert "unsupported_semantics" not in result.decision.reasons
@@ -1305,7 +1305,7 @@ def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, mo
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "agreement_oracle"
     assert result.decision.reasons[0].startswith("backend_agreement_failed")
     assert "engine_return=0.05" in result.decision.reasons[0]
@@ -1375,7 +1375,7 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("engine_failed",)
     assert "strategy_generation_failed" not in result.decision.reasons
     assert result.result_dir is not None
@@ -1407,7 +1407,7 @@ def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, m
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert "insufficient_trades" in result.decision.reasons
     assert backend.calls == 4
 
@@ -1428,7 +1428,7 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "mechanical_caution"
     assert "min_total_trades" in result.decision.failed_gates
     assert len(loaded_row_ids) == 2
     assert backend.calls == 8
@@ -1467,7 +1467,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "mechanical_caution"
     configs = {item.scenario_id: item for item in backend.configs}
     decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
     assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.0
@@ -1516,7 +1516,7 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("param_validation_failed",)
     assert backend.calls == 0
     assert result.result_dir is not None
@@ -1550,7 +1550,7 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
     assert loaded_rows[0]["close"] == 100.0
     assert result.result_dir is not None
@@ -1574,7 +1574,7 @@ def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypat
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
     assert result.result_dir is not None
     audit = json.loads((result.result_dir / "data_audit.json").read_text())
@@ -1597,7 +1597,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
     assert result.decision.failed_gates == ("strategy_generation_failed",)
     assert result.result_dir is not None
@@ -1620,7 +1620,7 @@ def test_run_validation_writes_failure_artifacts_for_backend_exception(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("exploding_failed",)
     assert result.result_dir is not None
     assert (result.result_dir / "validation_decision.json").exists()
@@ -1669,7 +1669,7 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("malformed_failed",)
     assert result.result_dir is not None
     assert (result.result_dir / "validation_decision.json").exists()
@@ -1688,7 +1688,7 @@ def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypat
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("invalid_status_failed",)
     assert result.result_dir is not None
     summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
@@ -1721,7 +1721,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "decision_generation"
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -1741,7 +1741,7 @@ def test_run_validation_writes_failure_artifacts_for_validate_params_system_exit
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "param_validation"
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -1758,7 +1758,7 @@ def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "strategy_import"
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
@@ -1900,7 +1900,7 @@ def test_run_validation_artifact_initialization_failure_returns_structured_resul
     assert result.failure_stage == "artifact_initialization"
     assert result.result_dir is None
     assert result.run_completed is False
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert "artifact initialization failed" in result.message
 
 
@@ -1932,12 +1932,12 @@ def test_run_validation_artifact_write_failure_returns_structured_result(
     assert result.run_completed is False
     assert result.result_dir is not None
     # Verdict was computed before the failed write; the structured result still carries it.
-    assert result.decision.decision == "watchlist"
+    assert result.decision.decision == "mechanical_caution"
     assert "artifact write failed" in result.message
 
 
 def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkeypatch):
-    # F18: validation must not produce a paper-readiness verdict on unvalidated
+    # F18: validation must not produce a mechanical-threshold verdict on unvalidated
     # params. A schema-less strategy fails fast at the param_validation stage.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
@@ -1961,7 +1961,7 @@ def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkey
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("param_validation_failed",)
     assert result.failure_stage == "param_validation"
     assert backend.calls == 0
@@ -2029,7 +2029,7 @@ def test_run_validation_failure_path_artifact_write_error_returns_structured_res
     tmp_path: Path,
     monkeypatch,
 ):
-    # A hard_no path (here param_validation on a schema-less strategy) routes through
+    # A mechanical_fail path (here param_validation on a schema-less strategy) routes through
     # _failure_result; if its artifact write fails, the structured verdict must still
     # be returned, not raised -- API consumers have no CLI backstop.
     candidate = write_candidate(tmp_path)
@@ -2058,5 +2058,5 @@ def test_run_validation_failure_path_artifact_write_error_returns_structured_res
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
-    assert result.decision.decision == "hard_no"
+    assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "param_validation"

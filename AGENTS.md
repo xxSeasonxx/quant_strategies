@@ -20,8 +20,9 @@ clocks/RNG) but is not exhaustive; the contract plus review are the real
 guarantee.
 - Run explicit experiments through `src/quant_strategies/runner/` using TOML
 configs under `runs/` and generated artifacts under ignored `results/`.
-- `quant_autoresearch` should consume `quant_strategies.runner.run_config`  
-instead of owning a separate runner harness.
+- `quant_autoresearch` should consume the public `runner.run_config`,
+`validation.run_validation`, and `evaluation.run_evaluation` APIs instead of
+owning separate execution, validation, or evaluation harnesses.
 - Use public `quant_data` loader APIs only. Data materialization, refresh,  
 backfill, repair, and source joining belong upstream in `quant-data`.  
 Document and provide feedback to Season on any limitation of `quant_data`.
@@ -52,4 +53,3 @@ auditability, and research discipline.
 - Stale docs are worse than no docs. Any implementation that changes behavior,
 commands, workflow, artifact semantics, validation interpretation, or agent
 instructions must update the corresponding docs before completion.
-

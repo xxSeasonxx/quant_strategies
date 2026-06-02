@@ -10,23 +10,23 @@ from quant_strategies.validation.backends import (
     backend_metric_semantics,
     get_backend,
 )
-from quant_strategies.validation.config import PaperReadinessConfig
+from quant_strategies.validation.config import MechanicalThresholdsConfig
 from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
 
 
-def test_policy_declares_paper_readiness_gates_in_order():
+def test_policy_declares_mechanical_thresholds_gates_in_order():
     from quant_strategies.validation import policy
 
-    assert policy._PAPER_READINESS_GATES == (
+    assert policy._MECHANICAL_THRESHOLD_GATES == (
         "min_windows",
         "min_total_trades",
         "no_zero_trade_windows",
-        "realistic_net_activity_positive",
+        "realistic_activity_positive",
         "positive_window_fraction",
-        "stressed_net_floor",
-        "fill_lag_net_floor",
+        "stressed_activity_floor",
+        "fill_lag_activity_floor",
     )
-    assert len(policy._PAPER_READINESS_GATES) == len(set(policy._PAPER_READINESS_GATES))
+    assert len(policy._MECHANICAL_THRESHOLD_GATES) == len(set(policy._MECHANICAL_THRESHOLD_GATES))
 
 
 def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
@@ -112,7 +112,7 @@ def completed_scenario(
     )
 
 
-def paper_ready_scenarios(
+def mechanical_threshold_scenarios(
     *,
     cost_returns: tuple[float, float] = (0.02, 0.015),
     cost_trades: tuple[int, int] = (20, 20),
@@ -202,19 +202,19 @@ def test_get_backend_rejects_unknown_backend_name():
         raise AssertionError("expected ValueError")
 
 
-def test_policy_hard_no_for_data_failure():
+def test_policy_mechanical_fail_for_data_failure():
     decision = classify_validation(
         data_passed=False,
         backend_results=[],
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "data_audit_failed" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_required_unsupported_semantics():
+def test_policy_mechanical_fail_for_required_unsupported_semantics():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -229,12 +229,12 @@ def test_policy_hard_no_for_required_unsupported_semantics():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "unsupported_semantics" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_without_positive_realistic_cost_evidence_when_paper_enabled():
+def test_policy_mechanical_fail_without_positive_realistic_activity_evidence_when_mechanical_thresholds_enabled():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -249,29 +249,29 @@ def test_policy_hard_no_without_positive_realistic_cost_evidence_when_paper_enab
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_review_candidate_when_all_paper_gates_pass():
+def test_policy_mechanical_threshold_pass_when_all_threshold_gates_pass():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(),
+        backend_results=mechanical_threshold_scenarios(),
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_review_candidate"
+    assert decision.decision == "mechanical_threshold_pass"
     assert decision.reasons == ()
     assert decision.failed_gates == ()
     assert "mechanical_validation" in decision.passed_gates
     assert "min_windows" in decision.passed_gates
     assert "min_total_trades" in decision.passed_gates
     assert "no_zero_trade_windows" in decision.passed_gates
-    assert "realistic_net_activity_positive" in decision.passed_gates
+    assert "realistic_activity_positive" in decision.passed_gates
     assert "positive_window_fraction" in decision.passed_gates
-    assert "stressed_net_floor" in decision.passed_gates
-    assert "fill_lag_net_floor" in decision.passed_gates
+    assert "stressed_activity_floor" in decision.passed_gates
+    assert "fill_lag_activity_floor" in decision.passed_gates
     assert_advisory_only(decision)
 
 
@@ -304,8 +304,8 @@ def test_policy_gates_on_engine_funding_inclusive_net_return():
         backend_results=realistic(net_return=-0.01, gross_return=0.03) + floors,
         min_trades=10,
     )
-    assert "realistic_net_activity_positive" in funding_negative.failed_gates
-    assert funding_negative.decision != "mechanical_review_candidate"
+    assert "realistic_activity_positive" in funding_negative.failed_gates
+    assert funding_negative.decision != "mechanical_threshold_pass"
 
     # Same price path, funding-inclusive net positive -> the gate clears.
     funding_positive = classify_validation(
@@ -313,8 +313,8 @@ def test_policy_gates_on_engine_funding_inclusive_net_return():
         backend_results=realistic(net_return=0.02, gross_return=0.03) + floors,
         min_trades=10,
     )
-    assert "realistic_net_activity_positive" in funding_positive.passed_gates
-    assert funding_positive.decision == "mechanical_review_candidate"
+    assert "realistic_activity_positive" in funding_positive.passed_gates
+    assert funding_positive.decision == "mechanical_threshold_pass"
 
 
 def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
@@ -372,22 +372,22 @@ def test_policy_does_not_use_linear_funding_adjusted_return_for_net_gates():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "realistic_net_activity_positive" in decision.failed_gates
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
+    assert "realistic_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_zero_realistic_cost_evidence_when_paper_enabled():
+def test_policy_mechanical_fail_for_zero_realistic_activity_evidence_when_mechanical_thresholds_enabled():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(cost_returns=(0.0, 0.0)),
+        backend_results=mechanical_threshold_scenarios(cost_returns=(0.0, 0.0)),
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "realistic_net_activity_positive" in decision.failed_gates
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
+    assert "realistic_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -407,13 +407,13 @@ def test_policy_records_search_pressure_inputs_and_downgrades_review_candidate()
 
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(),
+        backend_results=mechanical_threshold_scenarios(),
         min_trades=10,
-        paper_readiness=PaperReadinessConfig(),
+        mechanical_thresholds=MechanicalThresholdsConfig(),
         search_pressure=search_pressure,
     )
 
-    assert decision.decision == "watchlist"
+    assert decision.decision == "mechanical_caution"
     assert decision.reasons == ("multiple_testing_not_corrected_advisory_only",)
     assert decision.overfit_controls == {
         "prior_search": "known",
@@ -444,19 +444,19 @@ def test_policy_unknown_search_pressure_downgrades_review_candidate():
 
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(),
+        backend_results=mechanical_threshold_scenarios(),
         min_trades=10,
-        paper_readiness=PaperReadinessConfig(),
+        mechanical_thresholds=MechanicalThresholdsConfig(),
         search_pressure=search_pressure,
     )
 
-    assert decision.decision == "watchlist"
+    assert decision.decision == "mechanical_caution"
     assert decision.reasons == ("search_pressure_unknown_advisory_only",)
     assert decision.overfit_controls["prior_search"] == "unknown"
     assert decision.paper_trade_eligible is False
 
 
-def test_policy_watchlist_for_one_cost_window():
+def test_policy_mechanical_caution_for_one_cost_window():
     decision = classify_validation(
         data_passed=True,
         backend_results=(
@@ -482,55 +482,55 @@ def test_policy_watchlist_for_one_cost_window():
         min_trades=10,
     )
 
-    assert decision.decision == "watchlist"
-    assert decision.reasons == ("paper_readiness_gates_failed",)
+    assert decision.decision == "mechanical_caution"
+    assert decision.reasons == ("mechanical_threshold_gates_failed",)
     assert "min_windows" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_watchlist_for_stressed_cost_collapse():
+def test_policy_mechanical_caution_for_stressed_cost_collapse():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(stress_returns=(-0.03, -0.03)),
+        backend_results=mechanical_threshold_scenarios(stress_returns=(-0.03, -0.03)),
         min_trades=10,
     )
 
-    assert decision.decision == "watchlist"
-    assert decision.reasons == ("paper_readiness_gates_failed",)
-    assert "stressed_net_floor" in decision.failed_gates
+    assert decision.decision == "mechanical_caution"
+    assert decision.reasons == ("mechanical_threshold_gates_failed",)
+    assert "stressed_activity_floor" in decision.failed_gates
     assert_advisory_only(decision)
 
 
 def test_policy_uses_worst_window_stressed_and_fill_lag_loss_floors():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(
+        backend_results=mechanical_threshold_scenarios(
             stress_returns=(-0.015, -0.015),
             fill_lag_returns=(-0.015, -0.015),
         ),
         min_trades=10,
     )
 
-    assert decision.decision == "mechanical_review_candidate"
-    assert "stressed_net_floor" in decision.passed_gates
-    assert "fill_lag_net_floor" in decision.passed_gates
-    assert decision.gate_details["stressed_net_floor"] == "-0.015 >= -0.02"
-    assert decision.gate_details["fill_lag_net_floor"] == "-0.015 >= -0.02"
+    assert decision.decision == "mechanical_threshold_pass"
+    assert "stressed_activity_floor" in decision.passed_gates
+    assert "fill_lag_activity_floor" in decision.passed_gates
+    assert decision.gate_details["stressed_activity_floor"] == "-0.015 >= -0.02"
+    assert decision.gate_details["fill_lag_activity_floor"] == "-0.015 >= -0.02"
     assert_advisory_only(decision)
 
 
-def test_policy_mechanical_complete_when_paper_readiness_disabled():
+def test_policy_mechanical_complete_when_mechanical_thresholds_disabled():
     decision = classify_validation(
         data_passed=True,
-        backend_results=paper_ready_scenarios(cost_returns=(-0.01, 0.0)),
+        backend_results=mechanical_threshold_scenarios(cost_returns=(-0.01, 0.0)),
         min_trades=10,
-        paper_readiness=PaperReadinessConfig(enabled=False),
+        mechanical_thresholds=MechanicalThresholdsConfig(enabled=False),
     )
 
     assert decision.decision == "mechanical_complete"
-    assert decision.decision not in {"watchlist", "mechanical_review_candidate"}
-    assert decision.reasons == ("paper_readiness_disabled",)
-    assert "paper_readiness_enabled" in decision.failed_gates
+    assert decision.decision not in {"mechanical_caution", "mechanical_threshold_pass"}
+    assert decision.reasons == ("mechanical_thresholds_disabled",)
+    assert "mechanical_thresholds_enabled" in decision.failed_gates
     assert_advisory_only(decision)
 
 
@@ -555,7 +555,7 @@ def test_policy_requires_all_expected_required_scenarios():
         required_scenario_count=2,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "missing_required_scenarios" in decision.reasons
     assert_advisory_only(decision)
 
@@ -598,7 +598,7 @@ def test_policy_requires_expected_required_scenario_ids():
         ),
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "duplicate_required_scenarios" in decision.reasons
     assert_advisory_only(decision)
 
@@ -639,12 +639,12 @@ def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
         ),
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "missing_required_scenarios" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_ignores_diagnostic_scenarios_before_paper_readiness_classification():
+def test_policy_ignores_diagnostic_scenarios_before_mechanical_threshold_classification():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -677,13 +677,13 @@ def test_policy_ignores_diagnostic_scenarios_before_paper_readiness_classificati
         required_scenario_count=1,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
     assert "unsupported_semantics" not in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_negative_realistic_cost_evidence():
+def test_policy_mechanical_fail_for_negative_realistic_activity_evidence():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -697,13 +697,13 @@ def test_policy_hard_no_for_negative_realistic_cost_evidence():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "realistic_net_activity_positive" in decision.failed_gates
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
+    assert "realistic_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_zero_realistic_cost_evidence():
+def test_policy_mechanical_fail_for_zero_realistic_activity_evidence():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -717,14 +717,14 @@ def test_policy_hard_no_for_zero_realistic_cost_evidence():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
-    assert decision.reasons == ("no_positive_realistic_cost_evidence",)
-    assert "realistic_net_activity_positive" in decision.failed_gates
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("no_positive_realistic_activity_evidence",)
+    assert "realistic_activity_positive" in decision.failed_gates
     assert_advisory_only(decision)
 
 
 def test_policy_uses_linear_realistic_net_activity_not_compounded_return():
-    scenarios = paper_ready_scenarios(cost_returns=(1.0, -0.5))
+    scenarios = mechanical_threshold_scenarios(cost_returns=(1.0, -0.5))
 
     decision = classify_validation(
         data_passed=True,
@@ -733,25 +733,25 @@ def test_policy_uses_linear_realistic_net_activity_not_compounded_return():
         required_scenario_ids=tuple(item.scenario_id for item in scenarios),
     )
 
-    assert decision.decision == "mechanical_review_candidate"
-    assert "realistic_net_activity_positive" in decision.passed_gates
-    assert decision.gate_details["realistic_net_activity_positive"] == "0.5 > 0.0"
+    assert decision.decision == "mechanical_threshold_pass"
+    assert "realistic_activity_positive" in decision.passed_gates
+    assert decision.gate_details["realistic_activity_positive"] == "0.5 > 0.0"
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_no_backend_results():
+def test_policy_mechanical_fail_for_no_backend_results():
     decision = classify_validation(
         data_passed=True,
         backend_results=[],
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "no_backend_results" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_non_completed_backend_status():
+def test_policy_mechanical_fail_for_non_completed_backend_status():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -766,12 +766,12 @@ def test_policy_hard_no_for_non_completed_backend_status():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "fake_failed" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_required_backend_unavailable():
+def test_policy_mechanical_fail_for_required_backend_unavailable():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -786,12 +786,12 @@ def test_policy_hard_no_for_required_backend_unavailable():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "backend_unavailable" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_invalid_completed_metrics_before_backend_unavailable():
+def test_policy_mechanical_fail_for_invalid_completed_metrics_before_backend_unavailable():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -825,12 +825,12 @@ def test_policy_hard_no_for_invalid_completed_metrics_before_backend_unavailable
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "invalid_backend_metrics" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_insufficient_completed_trades_before_unsupported_watchlist():
+def test_policy_mechanical_fail_for_insufficient_completed_trades_before_unsupported_mechanical_caution():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -857,12 +857,12 @@ def test_policy_hard_no_for_insufficient_completed_trades_before_unsupported_wat
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "insufficient_trades" in decision.reasons
     assert_advisory_only(decision)
 
 
-def test_policy_marks_missing_paper_scenario_group_details_as_missing():
+def test_policy_marks_missing_mechanical_threshold_scenario_group_details_as_missing():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -876,11 +876,11 @@ def test_policy_marks_missing_paper_scenario_group_details_as_missing():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert decision.gate_details["no_zero_trade_windows"] == "missing cost scenarios"
-    assert decision.gate_details["realistic_net_activity_positive"] == "missing cost scenarios"
-    assert decision.gate_details["stressed_net_floor"] == "missing cost_stress scenarios"
-    assert decision.gate_details["fill_lag_net_floor"] == "missing fill_lag scenarios"
+    assert decision.gate_details["realistic_activity_positive"] == "missing cost scenarios"
+    assert decision.gate_details["stressed_activity_floor"] == "missing cost_stress scenarios"
+    assert decision.gate_details["fill_lag_activity_floor"] == "missing fill_lag scenarios"
     assert_advisory_only(decision)
 
 
@@ -916,12 +916,12 @@ def test_policy_prioritizes_failed_required_result_over_unsupported_result():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert decision.reasons == ("fake_failed",)
     assert_advisory_only(decision)
 
 
-def test_policy_hard_no_for_insufficient_trades():
+def test_policy_mechanical_fail_for_insufficient_trades():
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -936,7 +936,7 @@ def test_policy_hard_no_for_insufficient_trades():
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "insufficient_trades" in decision.reasons
     assert_advisory_only(decision)
 
@@ -956,7 +956,7 @@ def test_policy_hard_no_for_insufficient_trades():
         {"net_return": 0.03, "trade_count": "abc"},
     ],
 )
-def test_policy_hard_no_for_invalid_backend_metrics(metrics):
+def test_policy_mechanical_fail_for_invalid_backend_metrics(metrics):
     decision = classify_validation(
         data_passed=True,
         backend_results=[
@@ -971,6 +971,6 @@ def test_policy_hard_no_for_invalid_backend_metrics(metrics):
         min_trades=10,
     )
 
-    assert decision.decision == "hard_no"
+    assert decision.decision == "mechanical_fail"
     assert "invalid_backend_metrics" in decision.reasons
     assert_advisory_only(decision)

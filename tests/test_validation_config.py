@@ -153,16 +153,16 @@ def test_load_validation_config_resolves_paths_from_config_directory(tmp_path: P
     assert config.windows[0].id == "validation_2026_h1"
     assert config.readiness.min_observations_per_decision == 1
     assert config.readiness.required_observation_fields == ("close",)
-    assert config.paper_readiness.enabled is True
-    assert config.paper_readiness.min_windows == 2
-    assert config.paper_readiness.min_total_trades == 30
-    assert config.paper_readiness.min_positive_window_fraction == 0.5
-    assert config.paper_readiness.max_stressed_net_loss == -0.02
-    assert config.paper_readiness.max_fill_lag_net_loss == -0.02
+    assert config.mechanical_thresholds.enabled is True
+    assert config.mechanical_thresholds.min_windows == 2
+    assert config.mechanical_thresholds.min_total_trades == 30
+    assert config.mechanical_thresholds.min_positive_window_fraction == 0.5
+    assert config.mechanical_thresholds.max_stressed_activity_loss == -0.02
+    assert config.mechanical_thresholds.max_fill_lag_activity_loss == -0.02
     assert config.search_pressure.prior_search == "none"
 
 
-def test_load_validation_config_accepts_paper_readiness_overrides(tmp_path: Path):
+def test_load_validation_config_accepts_mechanical_thresholds_overrides(tmp_path: Path):
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
@@ -171,24 +171,45 @@ def test_load_validation_config_accepts_paper_readiness_overrides(tmp_path: Path
         config_path.read_text()
         + """
 
-[paper_readiness]
+[mechanical_thresholds]
 enabled = false
 min_windows = 3
 min_total_trades = 45
 min_positive_window_fraction = 0.75
-max_stressed_net_loss = -0.05
-max_fill_lag_net_loss = -0.03
+max_stressed_activity_loss = -0.05
+max_fill_lag_activity_loss = -0.03
 """
     )
 
     config = load_validation_config(config_path)
 
-    assert config.paper_readiness.enabled is False
-    assert config.paper_readiness.min_windows == 3
-    assert config.paper_readiness.min_total_trades == 45
-    assert config.paper_readiness.min_positive_window_fraction == 0.75
-    assert config.paper_readiness.max_stressed_net_loss == -0.05
-    assert config.paper_readiness.max_fill_lag_net_loss == -0.03
+    assert config.mechanical_thresholds.enabled is False
+    assert config.mechanical_thresholds.min_windows == 3
+    assert config.mechanical_thresholds.min_total_trades == 45
+    assert config.mechanical_thresholds.min_positive_window_fraction == 0.75
+    assert config.mechanical_thresholds.max_stressed_activity_loss == -0.05
+    assert config.mechanical_thresholds.max_fill_lag_activity_loss == -0.03
+
+
+def test_load_validation_config_rejects_legacy_mechanical_threshold_section_name(
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    legacy_section = "paper" + "_readiness"
+    config_path.write_text(
+        config_path.read_text()
+        + f"""
+
+[{legacy_section}]
+enabled = false
+"""
+    )
+
+    with pytest.raises(ValidationConfigError, match=legacy_section):
+        load_validation_config(config_path)
 
 
 def test_load_validation_config_accepts_search_pressure_metadata(tmp_path: Path):
@@ -301,62 +322,62 @@ def test_load_validation_config_rejects_incomplete_known_search_pressure(
 
 
 @pytest.mark.parametrize(
-    ("paper_readiness_text", "message"),
+    ("mechanical_thresholds_text", "message"),
     [
         (
             """
-[paper_readiness]
+[mechanical_thresholds]
 min_windows = 0
 """,
             "greater than or equal to 1",
         ),
         (
             """
-[paper_readiness]
+[mechanical_thresholds]
 min_total_trades = 0
 """,
             "greater than or equal to 1",
         ),
         (
             """
-[paper_readiness]
+[mechanical_thresholds]
 min_positive_window_fraction = -0.1
 """,
             "greater than or equal to 0",
         ),
         (
             """
-[paper_readiness]
+[mechanical_thresholds]
 min_positive_window_fraction = 1.1
 """,
             "less than or equal to 1",
         ),
         (
             """
-[paper_readiness]
-max_stressed_net_loss = 0.01
+[mechanical_thresholds]
+max_stressed_activity_loss = 0.01
 """,
             "less than or equal to 0",
         ),
         (
             """
-[paper_readiness]
-max_fill_lag_net_loss = 0.01
+[mechanical_thresholds]
+max_fill_lag_activity_loss = 0.01
 """,
             "less than or equal to 0",
         ),
     ],
 )
-def test_load_validation_config_rejects_invalid_paper_readiness(
+def test_load_validation_config_rejects_invalid_mechanical_thresholds(
     tmp_path: Path,
-    paper_readiness_text: str,
+    mechanical_thresholds_text: str,
     message: str,
 ):
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
     write_config(config_path)
-    config_path.write_text(config_path.read_text() + paper_readiness_text)
+    config_path.write_text(config_path.read_text() + mechanical_thresholds_text)
 
     with pytest.raises(ValidationConfigError, match=message):
         load_validation_config(config_path)

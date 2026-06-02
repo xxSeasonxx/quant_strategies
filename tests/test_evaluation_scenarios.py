@@ -43,7 +43,6 @@ def test_expand_evaluation_scenarios_preserves_fill_fields_except_entry_lag():
             price="open",
             entry_lag_bars=3,
             exit_lag_bars=2,
-            allow_same_bar_close_fill=False,
         ),
     )
 
