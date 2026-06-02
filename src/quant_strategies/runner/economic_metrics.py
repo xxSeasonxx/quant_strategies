@@ -21,9 +21,9 @@ def summary_metrics(
     wins = [net for net in nets if net > 0]
     losses = [net for net in nets if net < 0]
     flats = [net for net in nets if net == 0]
-    gross = _float_or_none(trade_result.get("sum_signed_trade_activity_gross"))
-    cost = _float_or_none(trade_result.get("sum_signed_trade_activity_cost"))
-    funding = _float_or_none(trade_result.get("sum_signed_trade_activity_funding"))
+    gross = _optional_numeric_field(trade_result, "sum_signed_trade_activity_gross")
+    cost = _optional_numeric_field(trade_result, "sum_signed_trade_activity_cost")
+    funding = _optional_numeric_field(trade_result, "sum_signed_trade_activity_funding")
 
     payload = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
@@ -56,15 +56,26 @@ def diagnostic_slices(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
 
 def trades_from_engine_summary(engine: Mapping[str, Any]) -> list[dict[str, Any]]:
-    trades = engine.get("diagnostic_trades")
+    if "diagnostic_trades" not in engine:
+        raise ValueError("engine summary is missing diagnostic_trades")
+    trades = engine["diagnostic_trades"]
     if not isinstance(trades, Sequence) or isinstance(trades, str | bytes):
-        return []
-    return [dict(item) for item in trades if isinstance(item, Mapping)]
+        raise ValueError("engine diagnostic_trades must be a non-string sequence")
+    copied_trades = []
+    for index, item in enumerate(trades):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"engine diagnostic_trades[{index}] must be a mapping")
+        copied_trades.append(dict(item))
+    return copied_trades
 
 
 def trade_result_from_engine_summary(engine: Mapping[str, Any]) -> dict[str, Any]:
-    trade_result = engine.get("trade_result")
-    return dict(trade_result) if isinstance(trade_result, Mapping) else {}
+    if "trade_result" not in engine:
+        raise ValueError("engine summary is missing trade_result")
+    trade_result = engine["trade_result"]
+    if not isinstance(trade_result, Mapping):
+        raise ValueError("engine trade_result must be a mapping")
+    return dict(trade_result)
 
 
 def _group_summaries(
@@ -111,18 +122,35 @@ def _win_loss_distribution(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any
 
 
 def _net_return(trade: Mapping[str, Any]) -> float:
-    value = _float_or_none(trade.get("net_return"))
-    return 0.0 if value is None else value
-
-
-def _float_or_none(value: Any) -> float | None:
+    if "net_return" not in trade:
+        raise ValueError("trade is missing net_return")
+    value = trade["net_return"]
     if isinstance(value, bool) or value is None:
-        return None
+        raise ValueError("trade net_return must be finite numeric")
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError) as exc:
+        raise ValueError("trade net_return must be finite numeric") from exc
+    if not math.isfinite(numeric):
+        raise ValueError("trade net_return must be finite numeric")
+    return numeric
+
+
+def _optional_numeric_field(trade_result: Mapping[str, Any], field: str) -> float | None:
+    if field not in trade_result or trade_result[field] is None:
         return None
-    return numeric if math.isfinite(numeric) else None
+    value = trade_result[field]
+    if isinstance(value, bool):
+        raise ValueError(f"trade_result {field} must be finite numeric when provided")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"trade_result {field} must be finite numeric when provided"
+        ) from exc
+    if not math.isfinite(numeric):
+        raise ValueError(f"trade_result {field} must be finite numeric when provided")
+    return numeric
 
 
 def _average(values: Sequence[float]) -> float | None:

@@ -5,6 +5,8 @@ import pytest
 from quant_strategies.runner.economic_metrics import (
     diagnostic_slices,
     summary_metrics,
+    trade_result_from_engine_summary,
+    trades_from_engine_summary,
 )
 
 
@@ -113,6 +115,28 @@ def test_summary_metrics_null_cost_and_funding_shares_when_gross_is_zero():
     assert metrics["funding_share_of_abs_gross"] is None
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("sum_signed_trade_activity_gross", True),
+        ("sum_signed_trade_activity_gross", "not-numeric"),
+        ("sum_signed_trade_activity_gross", float("nan")),
+        ("sum_signed_trade_activity_cost", True),
+        ("sum_signed_trade_activity_cost", "not-numeric"),
+        ("sum_signed_trade_activity_cost", float("inf")),
+        ("sum_signed_trade_activity_funding", True),
+        ("sum_signed_trade_activity_funding", "not-numeric"),
+        ("sum_signed_trade_activity_funding", float("-inf")),
+    ],
+)
+def test_summary_metrics_rejects_malformed_trade_result_components(field, value):
+    result = trade_result(gross=0.01)
+    result[field] = value
+
+    with pytest.raises(ValueError):
+        summary_metrics([trade(0.01)], result)
+
+
 def test_diagnostic_slices_group_economic_summaries_and_distribution():
     slices = diagnostic_slices(
         [
@@ -138,3 +162,86 @@ def test_diagnostic_slices_group_economic_summaries_and_distribution():
         "sum_positive_net": 0.03,
         "sum_negative_net": -0.01,
     }
+
+
+def test_trades_from_engine_summary_returns_copied_trade_dicts():
+    source_trade = trade(0.01)
+    engine = {"diagnostic_trades": [source_trade]}
+
+    trades = trades_from_engine_summary(engine)
+
+    assert trades == [source_trade]
+    assert trades[0] is not source_trade
+
+    trades[0]["net_return"] = 0.02
+    assert source_trade["net_return"] == 0.01
+
+
+def test_trade_result_from_engine_summary_returns_copied_dict():
+    source_result = trade_result(gross=0.01)
+    engine = {"trade_result": source_result}
+
+    result = trade_result_from_engine_summary(engine)
+
+    assert result == source_result
+    assert result is not source_result
+
+    result["sum_signed_trade_activity_gross"] = 0.02
+    assert source_result["sum_signed_trade_activity_gross"] == 0.01
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
+        {},
+        {"diagnostic_trades": "not-a-sequence"},
+        {"diagnostic_trades": [trade(0.01), object()]},
+    ],
+)
+def test_trades_from_engine_summary_rejects_malformed_diagnostic_trades(engine):
+    with pytest.raises(ValueError):
+        trades_from_engine_summary(engine)
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
+        {},
+        {"trade_result": "not-a-mapping"},
+    ],
+)
+def test_trade_result_from_engine_summary_rejects_malformed_trade_result(engine):
+    with pytest.raises(ValueError):
+        trade_result_from_engine_summary(engine)
+
+
+@pytest.mark.parametrize(
+    "bad_trade",
+    [
+        {"symbol": "SPY", "side": "long", "exit_reason": "max_hold"},
+        trade(None),  # type: ignore[arg-type]
+        trade(True),  # type: ignore[arg-type]
+        trade("not-numeric"),  # type: ignore[arg-type]
+        trade(float("nan")),
+        trade(float("inf")),
+    ],
+)
+def test_summary_metrics_rejects_malformed_net_return(bad_trade):
+    with pytest.raises(ValueError):
+        summary_metrics([bad_trade], trade_result(gross=0.0))
+
+
+@pytest.mark.parametrize(
+    "bad_trade",
+    [
+        {"symbol": "SPY", "side": "long", "exit_reason": "max_hold"},
+        trade(None),  # type: ignore[arg-type]
+        trade(True),  # type: ignore[arg-type]
+        trade("not-numeric"),  # type: ignore[arg-type]
+        trade(float("nan")),
+        trade(float("inf")),
+    ],
+)
+def test_diagnostic_slices_rejects_malformed_net_return(bad_trade):
+    with pytest.raises(ValueError):
+        diagnostic_slices([bad_trade])
