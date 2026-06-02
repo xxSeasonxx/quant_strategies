@@ -115,7 +115,8 @@ portfolio, economic, and path evidence. Evaluation uses VectorBT Pro and writes
 detailed trace artifacts as Parquet through `pyarrow`; there is no JSONL fallback
 for trace-level evaluation artifacts.
 
-Python callers use `quant_strategies.evaluation.run_evaluation`.
+Python callers use `quant_strategies.evaluation.run_evaluation` and receive
+`EvaluationRunResult`.
 
 Evaluation is not validation. It does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 

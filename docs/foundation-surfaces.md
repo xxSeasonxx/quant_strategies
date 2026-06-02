@@ -134,15 +134,15 @@ CLI exit codes:
 Command:
 
 ```bash
-conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
+conda run -n quant quant-strategies evaluate candidate/evaluation.toml
 ```
 
-Python API:
+Python API: `quant_strategies.evaluation.run_evaluation`
 
 ```python
 from quant_strategies.evaluation import run_evaluation
 
-result = run_evaluation("path/to/candidate/evaluation.toml")
+result = run_evaluation("candidate/evaluation.toml")
 ```
 
 Purpose:

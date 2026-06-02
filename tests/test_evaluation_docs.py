@@ -10,22 +10,34 @@ def read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
-def test_public_docs_describe_evaluate_surface_without_promotion_authority():
+def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
     for path in [
         "README.md",
-        "PRD.md",
         "FOUNDATION_LOCK.md",
         "docs/foundation-surfaces.md",
         "docs/vectorbtpro.md",
     ]:
         text = read(path)
-        assert "quant-strategies evaluate" in text, path
-        assert "run_evaluation" in text, path
+        assert "quant-strategies evaluate candidate/evaluation.toml" in text, path
+        assert "quant_strategies.evaluation.run_evaluation" in text, path
+        assert "EvaluationRunResult" in text, path
         assert "evaluation.toml" in text, path
         assert "Parquet" in text, path
         assert "pyarrow" in text, path
         assert "does not authorize promotion, paper trading, or live trading" in text, path
         assert "Benchmark-relative metrics are deferred" in text, path
+
+
+def test_prd_owns_product_intent_not_evaluate_command_schema():
+    text = read("PRD.md")
+
+    assert "Research evaluation" in text
+    assert "frozen candidates" in text
+    assert "No foundation job authorizes promotion, paper trading, or" in text
+    assert "live trading" in text
+    assert "quant-strategies evaluate" not in text
+    assert "run_evaluation" not in text
+    assert "pyarrow" not in text
 
 
 def test_todos_collapses_c_to_follow_up_work_only():

@@ -25,6 +25,15 @@ retained-candidate mechanical evidence. It is not quant strategy evaluation.
 - **Promotion boundary:** validation does not authorize paper trading, live
 trading, or promotion. Promotion remains outside this foundation.
 - **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+- **Causality boundary:** complete deterministic, emitted, and strict
+suppression replay proof is the shared minimum for validation and evaluation
+evidence.
+- **Archive boundary:** ranked research handoff archives and search-loop records
+do not live in this repository. This repo keeps no pointer, symlink,
+compatibility path, or archive index for moved research records.
+- **Auto-research boundary:** `quant_autoresearch` owns candidate generation,
+search memory, variant ranking, stopping rules, and iteration decisions.
+`quant_strategies` evaluates supplied strategies and configs.
 - **Data boundary:** `quant_data` owns data acquisition, materialization,
 refresh, backfill, repair, and source joining.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
@@ -44,6 +53,8 @@ not be treated as multi-trade validation confidence.
 - Preserve the clarified contract: docs should distinguish quick run,
 mechanical evidence validation, and research evaluation without renaming
 current code, CLI commands, package paths, artifact names, or public APIs.
+- Keep research evaluation as the term for stateless frozen-candidate evidence;
+do not use it to mean the auto-research loop.
 - Keep the stateless research evaluation surface separate from validation and  
 quick-run hot paths.
 
