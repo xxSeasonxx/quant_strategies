@@ -269,9 +269,9 @@ under `trade_result.sum_signed_trade_activity_gross`,
 `sum_signed_trade_activity_funding`, `sum_signed_trade_activity_cost`, and
 `sum_signed_trade_activity_net`. Runner artifacts include `metric_semantics` for
 each trade-result field. These records declare the unit, base, aggregation,
-backend, return path model, comparability, tolerance, and asymmetry so ranking
-code does not compare trade-result activity sums to NAV-path backend returns by name
-alone.
+backend, return path model, comparability, tolerance, and asymmetry so downstream
+consumers do not compare trade-result activity sums to NAV-path backend returns
+by name alone.
 
 A strategy may return `[]` when it finds no opportunity. With quick checks disabled,
 this is a completed zero-trade result with zero trade-result metrics. With quick
@@ -304,7 +304,8 @@ especially `summary.json` for every completed run and `diagnostics.json` for
 diagnostic-profile runs. `summary.json.economic_metrics` is the stable compact
 factual economic summary for completed quick runs. It is derived from the engine
 trade ledger and is not a ranking policy, validation verdict, evaluation result,
-or promotion signal. Do not parse `notes.md` as the primary machine interface.
+promotion signal, paper-trading authority, or live-trading authority. Do not parse
+`notes.md` as the primary machine interface.
 The evidence-quality fields exposed on `RunResult` are also written to
 `summary.json` and `data_manifest.json` for audit and replay.
 
@@ -326,10 +327,10 @@ failure-result paths are returned as structured results, not raised.
 
 Treat all runner output as quick-run evidence for search. It is not market
 validation and does not authorize promotion, paper trading, or live trading.
-Use `assessment_status`, `causality_verified`, `data_availability_status`,
+`run_completed` only means the runner produced a structured result; interpret it
+with `assessment_status`, `causality_verified`, `data_availability_status`,
 `availability_coverage`, `row_contract`, `replayable_from_artifacts`, and
-`evidence_quality_warnings` as ranking filters before comparing trade results;
-never rank from `run_completed` alone.
+`evidence_quality_warnings` when reading trade-result evidence.
 Treat `quick_check_passed` as stronger mechanical evidence than `quick_check_unverified`;
 `quick_check_unverified` means the quick checks passed but row availability coverage
 was missing or partial, so the runner could not claim causality verification.
@@ -337,9 +338,9 @@ Missing `available_at` in search mode is warning evidence: non-fatal, but
 `causality_verified` remains false and the assessment stays `quick_check_unverified`
 when quick checks otherwise pass. Invalid `available_at` is a row contract failure.
 Set `row_contract = "validation"` to also make missing `available_at` a row
-contract failure. Treat `replayable_from_artifacts = false` artifacts as ranking
-evidence only; rerun retained candidates with `artifact_profile = "full"` before
-audit handoff to obtain replayable artifacts.
+contract failure. `replayable_from_artifacts = false` means the compact artifacts
+are not sufficient for artifact-only replay; rerun retained candidates with
+`artifact_profile = "full"` before audit handoff to obtain replayable artifacts.
 
 Route from stable row issue reasons and counts, not free-form issue messages.
 Runner `summary.json` and `data_manifest.json` expose reasons such as
@@ -453,7 +454,7 @@ metric. `net_return` declares no cross-backend tolerance because it is a linear
 per-trade sum, not a NAV path; validation sums it linearly for the
 `realistic_net_activity_positive` gate rather than compounding it. Use
 `net_return` as the mechanical review threshold input; do not treat it as a
-NAV/path return or standalone research-evaluation ranking signal. VectorBT Pro
+NAV/path return or standalone research-evaluation decision signal. VectorBT Pro
 is only an explicitly enabled single-trade agreement check:
 when enabled it cross-checks the engine price path (`gross_return`) and fails the run
 with `backend_agreement_failed` on divergence, but it never produces verdict metrics.
@@ -483,9 +484,9 @@ A downstream setup is correctly aligned when:
 - every runner call passes the candidate workspace as `repo_root`,
 - generated strategies return `StrategyDecision` objects,
 - search modifies only `strategy.py` and `experiment.toml`,
-- ranking reads structured artifacts under `results/`,
-- ranking treats `causality_verified` and `assessment_status` as evidence
-  quality filters before comparing trade-result activity scores,
+- downstream consumers read structured artifacts under `results/`,
+- downstream consumers interpret `causality_verified` and `assessment_status`
+  as evidence-quality fields alongside trade-result activity scores,
 - retained candidates are rerun with `artifact_profile = "full"` before audit
   handoff,
 - no autoresearch code imports engine or validation internals.

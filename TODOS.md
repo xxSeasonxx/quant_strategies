@@ -11,7 +11,7 @@ The closeout goal was not to make `quant_strategies` perfect. The goal was to
 make the foundation surfaces simple enough to use and honest enough to trust:
 
 ```text
-quick run                  -> diagnose one strategy version and decide whether to keep iterating
+quick run                  -> diagnose one strategy version with factual evidence
 mechanical evidence validation -> audit retained-candidate evidence integrity
 research evaluation        -> stateless frozen-candidate portfolio/economic/path evidence
 ```

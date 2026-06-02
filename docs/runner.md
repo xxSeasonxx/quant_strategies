@@ -52,7 +52,8 @@ signal.
 net, average win/loss net, profit factor, cost share of absolute gross activity,
 and funding share of absolute gross activity. Rates and averages that cannot be
 computed from completed trades are `null`; profit factor is also `null` when no
-losses exist, so artifacts never emit infinity.
+losses exist; cost and funding shares are `null` when gross activity is missing
+or zero, so artifacts never emit infinity.
 
 Diagnostic-profile runs additionally write
 `diagnostics.json.economic_slices`, grouped by symbol, direction, and exit
