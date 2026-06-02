@@ -246,13 +246,16 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         "examples/results",
         "tested/results",
         "untested/results",
-        "researched/results",
+        "outputs/demo",
     ],
 )
-def test_output_path_under_source_like_roots_is_rejected(tmp_path: Path, results_dir: str):
+def test_output_path_outside_generated_results_root_is_rejected(tmp_path: Path, results_dir: str):
     write_strategy(tmp_path)
 
-    with pytest.raises(ConfigError, match="output.results_dir must not resolve inside source"):
+    with pytest.raises(
+        ConfigError,
+        match="output.results_dir must resolve inside generated output directory",
+    ):
         load_config(write_config(tmp_path, results_dir=results_dir), repo_root=tmp_path)
 
 

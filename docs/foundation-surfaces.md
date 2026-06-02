@@ -60,7 +60,8 @@ Important sections:
 - top-level `strategy_path`, `strategy_id`, optional `row_contract`;
 - `[data]` loaded through `quant_data`;
 - `[params]`, `[fill_model]`, `[cost_model]`;
-- `[output]` with `results_dir`, artifact profile, and diagnostic sizing.
+- `[output]` with repo-local generated `results_dir` under `results/`, artifact
+profile, and diagnostic sizing.
 
 Output: `RunResult`. The CLI prints the result directory on success.
 
@@ -149,9 +150,14 @@ Purpose:
 
 - evaluate a frozen candidate through a stateless portfolio evidence surface;
 - require `validate_params`;
-- run strict row-contract and hidden-lookahead preflight;
+- run strict row-contract and complete causal replay preflight;
 - fan out the fixed six-scenario cost/fill matrix per configured window;
 - produce VectorBT Pro portfolio, economic, and path evidence.
+
+Evaluation fails before scenario expansion when deterministic, emitted, or
+strict suppression replay proof is incomplete. That failure returns
+`failure_stage="preflight"` and
+`assessment_status="evaluation_preflight_failed"`.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
@@ -165,8 +171,9 @@ Important sections:
 - `[metrics]` with `annualization_periods_per_year`;
 - `[output]` with candidate-local `results_dir`.
 
-Output: `EvaluationRunResult`. The CLI prints the result directory on success
-and exits `3` for data-load or row-contract failures.
+Output: `EvaluationRunResult`. The CLI prints the result directory on success,
+exits `3` for data-load or row-contract failures, and exits `1` for preflight
+causality failures.
 
 Control artifacts:
 
