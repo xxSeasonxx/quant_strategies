@@ -2,7 +2,7 @@
 
 **Status:** Draft v1
 **Owner:** Season Yang
-**Last updated:** 2026-06-01
+**Last updated:** 2026-06-02
 **Companion documents:** `AGENTS.md` (agent contract), `README.md` (current state),
 `FOUNDATION_LOCK.md` (locked foundation contracts),
 `docs/quant-autoresearch-consumer.md` (consumer contract).

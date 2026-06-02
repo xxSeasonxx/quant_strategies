@@ -1,14 +1,13 @@
-# Foundation Closeout TODOs
+# Foundation Handoff TODOs
 
-This file is the compact closeout record for the foundation-finalization work.
+This file is the compact active handoff for remaining foundation work.
 Do not restart a broad foundation review before reading:
 
 - `PRD.md`
 - `FOUNDATION_LOCK.md`
 - `docs/reviews/README.md`
 
-The closeout goal was not to make `quant_strategies` perfect. The goal was to
-make the foundation surfaces simple enough to use and honest enough to trust:
+Current foundation surfaces:
 
 ```text
 quick run                  -> diagnose one strategy version with factual evidence
@@ -18,14 +17,13 @@ research evaluation        -> stateless frozen-candidate portfolio/economic/path
 
 ## Status
 
-Foundation finalization is complete as of 2026-06-01. There are no open
-foundation-finalization PRs in this file. `FOUNDATION_LOCK.md` is the disposition
-anchor for locked contracts, accepted debt, deferred triggers, and review
-protocol.
+There are no open foundation-finalization PRs in this file. `FOUNDATION_LOCK.md`
+is the disposition anchor for locked contracts, accepted debt, deferred triggers,
+and review protocol.
 
 ## Current Open Work
 
-### C. Evaluation follow-ups
+### Evaluation follow-ups
 
 The stateless evaluation surface is implemented through
 `quant-strategies evaluate candidate/evaluation.toml` and
@@ -36,21 +34,7 @@ Detailed trace artifacts are Parquet through `pyarrow`.
 
 Remaining follow-up work is limited to benchmark-relative metrics,
 user-defined scenario matrices, and any residual backend limitations found
-during implementation.
-
-### B. Quick-run economic diagnostics improvement
-
-Implemented by the quick-run economic diagnostics work. Completed quick-run
-summaries now expose factual `economic_metrics` derived from the internal engine
-trade ledger, and diagnostic-profile runs expose bounded `economic_slices`.
-
-Preserved constraints:
-
-- quick run stays on the internal causality-controlled engine;
-- VectorBT Pro remains outside the quick-run hot path;
-- engine trade-activity sums are not relabeled as NAV/path returns;
-- quick run remains factual evidence output, not ranking, validation,
-  evaluation, promotion, paper-trading, or live-trading authority.
+during use.
 
 ## Locked Direction
 
@@ -69,14 +53,15 @@ as a fresh P1 without a regression or documented trigger. In short:
 
 ## Deferred Residuals
 
-- **F19 residual (low priority):** artifact I/O failures on the *mid-pipeline
-  success-path* writes — per-window rows, per-scenario decision/trade-ledger
-  records, and data manifests written while a run is progressing — still raise to
-  a direct API caller. The CLI backstops them as a clean exit `1`. Result-directory
-  creation, final artifact writes, and all `_failure_result` paths are routed to
-  structured `failure_stage` results. Closing the residual means wrapping those
-  loop writes or adding an outer guard; deferred as low-frequency disk-full
-  handling.
+- **Mid-pipeline artifact I/O residual (low priority):** some success-path
+  writes still raise raw `OSError` to direct API callers before the final
+  artifact-write guard: runner `data_manifest.json`, validation per-window row
+  JSONL, validation per-scenario decision JSONL, and validation per-scenario
+  trade-ledger JSONL. The CLI backstops escaped filesystem errors as clean exit
+  `1`. Result-directory/static artifact creation, final artifact writes, and
+  `_failure_result` paths are routed to structured `failure_stage` results.
+  Closing the residual means wrapping those mid-pipeline writes or adding an
+  outer guard; deferred as low-frequency disk-full handling.
 - **VectorBT Pro agreement residual (low priority):** the optional agreement
   check is single-trade only. It should not be treated as multi-trade validation
   confidence unless rebuilt around trade-ledger or path-level comparison.
@@ -91,7 +76,7 @@ runs, and evaluation preflight; see `causality.check_hidden_lookahead` and the
 
 ## Verification
 
-Suggested closeout checks:
+Suggested checks:
 
 ```bash
 rg -n "FOUNDATION_LOCK|accepted_debt|deferred_until_trigger|broad blind|delta reviews|quick run|validation run" FOUNDATION_LOCK.md docs/reviews/README.md TODOS.md
