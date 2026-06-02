@@ -30,16 +30,12 @@ def strategy_files() -> list[Path]:
     )
 
 
-def researched_strategy_files() -> list[Path]:
-    return sorted(Path("researched").glob("*/families/*/variants/*/strategy.py"))
-
-
 def example_strategy_files() -> list[Path]:
     return sorted(Path("examples/strategies").glob("*.py"))
 
 
 def all_strategy_files_for_contract() -> list[Path]:
-    return strategy_files() + researched_strategy_files() + example_strategy_files()
+    return strategy_files() + example_strategy_files()
 
 
 def strategy_python_files() -> list[Path]:
