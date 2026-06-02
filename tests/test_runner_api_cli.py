@@ -509,6 +509,19 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert diagnostics["assessment_status"] == summary["assessment_status"]
     assert diagnostics["trade_count"] == 1
     assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
+    slices = diagnostics["economic_slices"]
+    assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
+    assert slices["basis"] == "engine_trade_ledger"
+    assert slices["by_symbol"]["SPY"]["count"] == 1
+    assert slices["by_direction"]["long"]["count"] == 1
+    assert slices["by_exit_reason"]["max_hold"]["count"] == 1
+    assert set(slices["win_loss_distribution"]) == {
+        "largest_win_net",
+        "largest_loss_net",
+        "median_trade_net",
+        "sum_positive_net",
+        "sum_negative_net",
+    }
     assert diagnostics["by_symbol"]["SPY"]["count"] == 1
     assert len(diagnostics["sample_trades"]["largest_winners"]) == 1
     assert len(diagnostics["sample_trades"]["largest_losers"]) == 1

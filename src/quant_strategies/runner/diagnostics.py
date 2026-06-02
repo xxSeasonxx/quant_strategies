@@ -10,6 +10,7 @@ from typing import Any
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 from quant_strategies.runner.config import RunConfig
+from quant_strategies.runner.economic_metrics import diagnostic_slices
 
 
 SAMPLE_TRADE_FIELDS = (
@@ -52,6 +53,7 @@ def diagnostic_payload(
         "holding_period": _holding_period(trades),
         "concentration": _concentration(trades),
         "cost_funding_breakdown": _cost_funding_breakdown(trade_result),
+        "economic_slices": diagnostic_slices(trades),
         "sample_trades": _sample_trades(trades, config.output.diagnostic_sample_trades),
     }
 
