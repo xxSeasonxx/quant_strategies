@@ -92,8 +92,8 @@ CLI exit codes are `0` for structured usable evidence, `1` for infrastructure
 or execution failure, `2` for validation `hard_no`, and `3` for data readiness
 or audit failure.
 
-Use `--events-jsonl` to write the same stage events to stderr while keeping
-stdout as the result directory for scripts.
+Use `--events-jsonl` to write the same stage events to stderr while stdout
+remains the result directory for scripts.
 
 Relative paths in `experiment.toml` resolve inside `repo_root`, so
 `strategy_path = "strategy.py"` points at the candidate workspace file.
@@ -195,7 +195,7 @@ params.
 
 ## experiment.toml Contract
 
-`experiment.toml` is a normal runner config. For autoresearch, keep it next to
+`experiment.toml` is a normal runner config. For autoresearch, place it next to
 `strategy.py` and point `strategy_path` at the local file:
 
 ```toml
@@ -303,9 +303,9 @@ For downstream consumption, read structured artifacts from `result.result_dir`,
 especially `summary.json` for every completed run and `diagnostics.json` for
 diagnostic-profile runs. `summary.json.economic_metrics` is the stable compact
 factual economic summary for completed quick runs. It is derived from the engine
-trade ledger and is not a ranking policy, validation verdict, evaluation result,
-promotion signal, paper-trading authority, or live-trading authority. Do not parse
-`notes.md` as the primary machine interface.
+trade ledger and is not a comparative ordering rule, validation verdict,
+evaluation result, promotion signal, paper-trading authority, or live-trading
+authority. Do not parse `notes.md` as the primary machine interface.
 The evidence-quality fields exposed on `RunResult` are also written to
 `summary.json` and `data_manifest.json` for audit and replay.
 
@@ -422,12 +422,13 @@ fields are metadata, not statistical proof. Known prior search downgrades an oth
 `mechanical_review_candidate` verdict to `watchlist`; unknown prior search is also
 kept advisory.
 
-Treat validation verdicts as advisory routing labels only:
+Validation verdicts are advisory evidence labels, not routing policy:
 
-- `hard_no`: skip or return to strategy generation.
-- `mechanical_complete`: keep as mechanical evidence, not promotion evidence.
-- `watchlist`: keep only with the recorded caveat.
-- `mechanical_review_candidate`: escalate for human review.
+- `hard_no`: failed required mechanical evidence checks.
+- `mechanical_complete`: mechanically completed evidence with no promotion authority.
+- `watchlist`: mechanically completed evidence with recorded caveats.
+- `mechanical_review_candidate`: mechanically positive advisory evidence that
+  requires human interpretation.
 
 No validation verdict authorizes autonomous promotion, paper trading, or live
 trading.
@@ -468,12 +469,13 @@ hash-pinned under manifest `artifacts`. Recompute the gated metric by summing
 replayability and sets global `verdict_replayable = true` only when all required
 completed verdict scenarios have ledgers.
 
-Stop-loss, take-profit, and trailing-stop exits are checked against the engine's
-selected fill price series, not intrabar high/low paths. V1 audit artifacts use
-deterministic JSONL for rows, decisions, and trade ledgers.
+Stop-loss, take-profit, and trailing-stop exits are checked against the fill
+price series chosen by the engine, not intrabar high/low paths. V1 audit
+artifacts use deterministic JSONL for rows, decisions, and trade ledgers.
 
-The autoresearch output should be the selected `strategy.py`, selected
-`experiment.toml`, and the runner artifacts that explain why it was selected.
+A downstream candidate package should preserve `strategy.py`, `experiment.toml`,
+and the runner artifacts that explain the factual evidence produced for that
+candidate.
 
 ## Acceptance Checklist
 
