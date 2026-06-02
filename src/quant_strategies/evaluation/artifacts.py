@@ -25,6 +25,24 @@ _REQUIRED_TRACE_TABLES = {
     "per_asset_metrics": "tables/per_asset_metrics.parquet",
 }
 
+_REQUIRED_TRACE_TABLE_METADATA = {
+    "path",
+    "artifact_kind",
+    "format",
+    "compression",
+    "row_count",
+    "row_group_count",
+    "column_count",
+    "columns",
+    "arrow_schema",
+    "schema_sha256",
+    "file_sha256",
+    "byte_size",
+    "scenario_ids",
+}
+
+_SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
+
 _TRACE_COLUMN_TYPES = {
     "portfolio_path": {
         "scenario_id": "string",
@@ -176,7 +194,7 @@ def write_evaluation_manifest(
     table_artifacts: list[dict[str, Any]],
     scenario_summary: Mapping[str, Any],
 ) -> Path:
-    _validate_trace_table_artifacts(table_artifacts)
+    _validate_trace_table_artifacts(table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary)
     write_json_artifact(
         result_dir,
         "environment.json",
@@ -284,16 +302,29 @@ def _arrow_type(pa: Any, logical_type: str | None) -> Any:
     return None
 
 
-def _validate_trace_table_artifacts(table_artifacts: list[dict[str, Any]]) -> None:
+def _validate_trace_table_artifacts(
+    table_artifacts: list[dict[str, Any]],
+    *,
+    result_dir: Path,
+    scenario_summary: Mapping[str, Any],
+) -> None:
     kinds = []
     for index, item in enumerate(table_artifacts):
         if not isinstance(item, Mapping):
-            raise ValueError(f"trace table artifact at index {index} must be a mapping")
-        missing_keys = {"artifact_kind", "path", "format", "byte_size", "scenario_ids"} - set(item)
+            raise ValueError(f"trace table metadata at index {index} must be a mapping")
+        missing_keys = _REQUIRED_TRACE_TABLE_METADATA - set(item)
+        none_keys = {key for key in _REQUIRED_TRACE_TABLE_METADATA if key in item and item[key] is None}
         if missing_keys:
             missing = ", ".join(sorted(missing_keys))
-            raise ValueError(f"trace table artifact at index {index} is missing required metadata: {missing}")
-        kinds.append(item["artifact_kind"])
+            raise ValueError(f"trace table metadata at index {index} is missing required metadata: {missing}")
+        if none_keys:
+            missing = ", ".join(sorted(none_keys))
+            raise ValueError(f"trace table metadata at index {index} is missing required metadata: {missing}")
+
+        artifact_kind = item["artifact_kind"]
+        if not isinstance(artifact_kind, str) or not artifact_kind:
+            raise ValueError(f"trace table metadata at index {index} has invalid artifact_kind")
+        kinds.append(artifact_kind)
 
     required_kinds = set(_REQUIRED_TRACE_TABLES)
     actual_kinds = set(kinds)
@@ -301,27 +332,108 @@ def _validate_trace_table_artifacts(table_artifacts: list[dict[str, Any]]) -> No
         missing = ", ".join(sorted(required_kinds - actual_kinds)) or "none"
         extra = ", ".join(sorted(str(kind) for kind in actual_kinds - required_kinds)) or "none"
         raise ValueError(
-            "table_artifacts must contain exactly the required trace tables: "
+            "trace table metadata must contain exactly the required trace tables: "
             f"{', '.join(_REQUIRED_TRACE_TABLES)}; missing={missing}; extra={extra}"
         )
 
     by_kind = {item["artifact_kind"]: item for item in table_artifacts}
-    expected_scenario_ids: tuple[Any, ...] | None = None
+    expected_scenario_ids: set[Any] | None = None
     for kind, required_path in _REQUIRED_TRACE_TABLES.items():
         item = by_kind[kind]
-        if item["path"] != required_path:
-            raise ValueError(f"{kind} trace table path must be {required_path}")
-        if item["format"] != "parquet":
-            raise ValueError(f"{kind} trace table format must be parquet")
+        _validate_trace_table_metadata_item(item, kind=kind, required_path=required_path, result_dir=result_dir)
 
-        scenario_ids = item["scenario_ids"]
-        if not isinstance(scenario_ids, (list, tuple)):
-            raise ValueError(f"{kind} trace table scenario_ids must be a list or tuple")
-        scenario_ids_tuple = tuple(scenario_ids)
+        scenario_ids = _trace_table_scenario_ids(item, kind=kind)
         if expected_scenario_ids is None:
-            expected_scenario_ids = scenario_ids_tuple
-        elif scenario_ids_tuple != expected_scenario_ids:
+            expected_scenario_ids = scenario_ids
+        elif scenario_ids != expected_scenario_ids:
             raise ValueError("trace table scenario_ids must be consistent across required trace tables")
+
+    coverage_scenario_ids = _scenario_coverage_ids(scenario_summary)
+    if expected_scenario_ids is not None and expected_scenario_ids != coverage_scenario_ids:
+        raise ValueError(
+            "trace table scenario_ids must match scenario_summary scenario_coverage; "
+            f"table={sorted(expected_scenario_ids)!r}; coverage={sorted(coverage_scenario_ids)!r}"
+        )
+
+
+def _validate_trace_table_metadata_item(
+    item: Mapping[str, Any],
+    *,
+    kind: str,
+    required_path: str,
+    result_dir: Path,
+) -> None:
+    if not isinstance(item["path"], str):
+        raise ValueError(f"{kind} trace table metadata path must be a string")
+    try:
+        artifact_path = _artifact_path(result_dir, item["path"])
+    except ValueError as exc:
+        raise ValueError(f"{kind} trace table metadata path must stay inside result_dir") from exc
+    if artifact_path.suffix != ".parquet":
+        raise ValueError(f"{kind} trace table metadata path must have .parquet suffix")
+    if not artifact_path.is_file():
+        raise ValueError(f"{kind} trace table metadata path does not exist under result_dir")
+    if item["path"] != required_path:
+        raise ValueError(f"{kind} trace table metadata path must be {required_path}")
+
+    if item["format"] != "parquet":
+        raise ValueError(f"{kind} trace table metadata format must be parquet")
+
+    for hash_key in ("file_sha256", "schema_sha256"):
+        if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
+            raise ValueError(f"{kind} trace table metadata {hash_key} must be 64 hex characters")
+
+    _validate_non_negative_int(item, "row_count", kind=kind)
+    _validate_non_negative_int(item, "row_group_count", kind=kind)
+    _validate_positive_int(item, "column_count", kind=kind)
+    _validate_positive_int(item, "byte_size", kind=kind)
+
+    columns = item["columns"]
+    if not isinstance(columns, list) or not any(
+        isinstance(column, Mapping) and column.get("name") == "scenario_id" for column in columns
+    ):
+        raise ValueError(f"{kind} trace table metadata columns must include scenario_id")
+
+
+def _validate_non_negative_int(item: Mapping[str, Any], key: str, *, kind: str) -> None:
+    value = item[key]
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{kind} trace table metadata {key} must be >= 0")
+
+
+def _validate_positive_int(item: Mapping[str, Any], key: str, *, kind: str) -> None:
+    value = item[key]
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError(f"{kind} trace table metadata {key} must be > 0")
+
+
+def _trace_table_scenario_ids(item: Mapping[str, Any], *, kind: str) -> set[Any]:
+    scenario_ids = item["scenario_ids"]
+    if not isinstance(scenario_ids, (list, tuple)):
+        raise ValueError(f"{kind} trace table scenario_ids must be a list or tuple")
+    return set(scenario_ids)
+
+
+def _scenario_coverage_ids(scenario_summary: Mapping[str, Any]) -> set[Any]:
+    scenario_coverage = scenario_summary.get("scenario_coverage")
+    if not isinstance(scenario_coverage, Mapping):
+        raise ValueError("scenario_ids validation requires scenario_summary scenario_coverage")
+
+    expected_ids = _coverage_id_set(scenario_coverage.get("expected_ids"))
+    completed_ids = _coverage_id_set(scenario_coverage.get("completed_ids"))
+    if expected_ids is not None:
+        return expected_ids or completed_ids or set()
+    if completed_ids is not None:
+        return completed_ids
+    return set(scenario_coverage)
+
+
+def _coverage_id_set(value: Any) -> set[Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple, set)):
+        raise ValueError("scenario_ids coverage expected_ids/completed_ids must be arrays")
+    return set(value)
 
 
 def _compression_from_footer(metadata: Any) -> str | dict[str, str]:

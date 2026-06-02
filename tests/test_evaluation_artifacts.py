@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
@@ -120,7 +121,7 @@ def test_write_evaluation_manifest_rejects_partial_trace_table_artifacts(tmp_pat
             backend_name="unit-test",
             data_windows=[],
             table_artifacts=[table_metadata],
-            scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+            scenario_summary=_scenario_summary("base"),
         )
     except ValueError as exc:
         assert "required trace tables" in str(exc)
@@ -148,12 +149,69 @@ def test_write_evaluation_manifest_rejects_inconsistent_trace_scenario_ids(tmp_p
             backend_name="unit-test",
             data_windows=[],
             table_artifacts=table_artifacts,
-            scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+            scenario_summary=_scenario_summary("base"),
         )
     except ValueError as exc:
         assert "scenario_ids" in str(exc)
     else:
         raise AssertionError("inconsistent trace table scenario_ids should fail")
+
+
+@pytest.mark.parametrize("artifact_index", [0, 1, 2, 3])
+@pytest.mark.parametrize("missing_value", [True, False])
+def test_write_evaluation_manifest_rejects_missing_required_trace_table_metadata(
+    tmp_path: Path,
+    artifact_index: int,
+    missing_value: bool,
+):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    table_artifacts[artifact_index] = dict(table_artifacts[artifact_index])
+    if missing_value:
+        del table_artifacts[artifact_index]["file_sha256"]
+    else:
+        table_artifacts[artifact_index]["file_sha256"] = None
+
+    with pytest.raises(ValueError, match="trace table metadata"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=_scenario_summary("base"),
+        )
+
+
+def test_write_evaluation_manifest_rejects_trace_table_scenario_ids_missing_expected_coverage(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+
+    with pytest.raises(ValueError, match="scenario_ids"):
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary=_scenario_summary("base", "stress"),
+        )
 
 
 def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp_path: Path):
@@ -174,7 +232,7 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
         backend_name="unit-test",
         data_windows=[],
         table_artifacts=table_artifacts,
-        scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+        scenario_summary=_scenario_summary("base"),
     )
 
     manifest = json.loads((result_dir / "evaluation_manifest.json").read_text())
@@ -276,3 +334,13 @@ def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, .
             scenario_ids=scenario_ids,
         ),
     ]
+
+
+def _scenario_summary(*scenario_ids: str) -> dict[str, object]:
+    ids = list(scenario_ids)
+    return {
+        "scenario_coverage": {
+            "expected_ids": ids,
+            "completed_ids": ids,
+        }
+    }
