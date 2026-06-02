@@ -89,10 +89,13 @@ def test_table_metadata_is_stable_for_empty_table(tmp_path: Path):
 
     assert metadata["row_count"] == 0
     assert [column["name"] for column in metadata["columns"]] == ["scenario_id", "asset", "turnover"]
-    assert "scenario_id" in metadata["arrow_schema"]
+    logical_types = {column["name"]: column["logical_type"] for column in metadata["columns"]}
+    assert logical_types["scenario_id"] == "string"
+    assert logical_types["asset"] == "string"
+    assert logical_types["turnover"] == "double"
 
 
-def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp_path: Path):
+def test_write_evaluation_manifest_rejects_partial_trace_table_artifacts(tmp_path: Path):
     result_dir = tmp_path / "results"
     result_dir.mkdir()
     config_path = tmp_path / "evaluation_config.toml"
@@ -106,8 +109,61 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
         artifact_kind="portfolio_path",
         scenario_ids=("base",),
     )
-    for name in ("trades.parquet", "positions.parquet", "per_asset_metrics.parquet"):
-        (result_dir / "tables" / name).write_bytes(b"trace table placeholder")
+
+    try:
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=[table_metadata],
+            scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+        )
+    except ValueError as exc:
+        assert "required trace tables" in str(exc)
+    else:
+        raise AssertionError("partial trace table artifacts should fail")
+
+
+def test_write_evaluation_manifest_rejects_inconsistent_trace_scenario_ids(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
+    table_artifacts[-1] = {**table_artifacts[-1], "scenario_ids": ["stress"]}
+
+    try:
+        write_evaluation_manifest(
+            result_dir,
+            repo_root=tmp_path,
+            path_base=tmp_path,
+            config=SimpleNamespace(strategy_id="demo", strategy_path=strategy_path),
+            config_path=config_path,
+            backend_name="unit-test",
+            data_windows=[],
+            table_artifacts=table_artifacts,
+            scenario_summary={"scenario_coverage": {"base": {"included": True}}},
+        )
+    except ValueError as exc:
+        assert "scenario_ids" in str(exc)
+    else:
+        raise AssertionError("inconsistent trace table scenario_ids should fail")
+
+
+def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp_path: Path):
+    result_dir = tmp_path / "results"
+    result_dir.mkdir()
+    config_path = tmp_path / "evaluation_config.toml"
+    config_path.write_text("strategy_id = 'demo'\n")
+    strategy_path = tmp_path / "demo_strategy.py"
+    strategy_path.write_text('"""Demo strategy."""\n')
+    table_artifacts = _write_required_trace_tables(result_dir, scenario_ids=("base",))
 
     write_evaluation_manifest(
         result_dir,
@@ -117,7 +173,7 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
         config_path=config_path,
         backend_name="unit-test",
         data_windows=[],
-        table_artifacts=[table_metadata],
+        table_artifacts=table_artifacts,
         scenario_summary={"scenario_coverage": {"base": {"included": True}}},
     )
 
@@ -133,6 +189,7 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
     assert not any(path == f"tables/{name}" for path in artifact_paths for name in trace_table_names)
     assert manifest["tables"][0]["path"] == "tables/portfolio_path.parquet"
     assert manifest["tables"][0]["file_sha256"]
+    assert manifest["trace_artifacts"]["table_count"] == 4
 
 
 def test_write_json_artifact_rejects_path_escape(tmp_path: Path):
@@ -166,3 +223,56 @@ def test_create_evaluation_result_dir_uses_strategy_id_and_suffix(tmp_path: Path
 
     assert first.name == "2026-01-01T120000Z-demo_strategy"
     assert second.name == "2026-01-01T120000Z-demo_strategy-2"
+
+
+def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, ...]) -> list[dict[str, object]]:
+    return [
+        write_parquet_artifact(
+            result_dir,
+            "tables/portfolio_path.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": list(scenario_ids),
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
+                    "portfolio_value": [100.0 for _ in scenario_ids],
+                    "period_return": [0.0 for _ in scenario_ids],
+                    "drawdown": [0.0 for _ in scenario_ids],
+                }
+            ),
+            artifact_kind="portfolio_path",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/trades.parquet",
+            pd.DataFrame({"scenario_id": list(scenario_ids)}),
+            artifact_kind="trades",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/positions.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": list(scenario_ids),
+                    "asset": ["SPY" for _ in scenario_ids],
+                    "weight": [1.0 for _ in scenario_ids],
+                }
+            ),
+            artifact_kind="positions",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/per_asset_metrics.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": list(scenario_ids),
+                    "asset": ["SPY" for _ in scenario_ids],
+                    "turnover": [0.1 for _ in scenario_ids],
+                }
+            ),
+            artifact_kind="per_asset_metrics",
+            scenario_ids=scenario_ids,
+        ),
+    ]

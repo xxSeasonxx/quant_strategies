@@ -18,6 +18,37 @@ from quant_strategies.provenance import (
     text_sha256,
 )
 
+_REQUIRED_TRACE_TABLES = {
+    "portfolio_path": "tables/portfolio_path.parquet",
+    "trades": "tables/trades.parquet",
+    "positions": "tables/positions.parquet",
+    "per_asset_metrics": "tables/per_asset_metrics.parquet",
+}
+
+_TRACE_COLUMN_TYPES = {
+    "portfolio_path": {
+        "scenario_id": "string",
+        "timestamp": "timestamp_us_utc",
+        "portfolio_value": "float64",
+        "period_return": "float64",
+        "drawdown": "float64",
+    },
+    "trades": {
+        "scenario_id": "string",
+    },
+    "positions": {
+        "scenario_id": "string",
+        "asset": "string",
+        "weight": "float64",
+    },
+    "per_asset_metrics": {
+        "scenario_id": "string",
+        "asset": "string",
+        "trade_count": "int64",
+        "turnover": "float64",
+    },
+}
+
 
 def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: datetime | None = None) -> Path:
     timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
@@ -82,6 +113,7 @@ def write_parquet_artifact(
     path = _artifact_path(result_dir, name)
     path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pandas(frame, preserve_index=False)
+    table = _cast_known_trace_columns(pa, table, artifact_kind)
     pq.write_table(table, path, compression="zstd")
     return table_metadata(
         result_dir,
@@ -144,6 +176,7 @@ def write_evaluation_manifest(
     table_artifacts: list[dict[str, Any]],
     scenario_summary: Mapping[str, Any],
 ) -> Path:
+    _validate_trace_table_artifacts(table_artifacts)
     write_json_artifact(
         result_dir,
         "environment.json",
@@ -219,6 +252,76 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
     except ValueError as exc:
         raise ValueError("Artifact name must stay inside result_dir") from exc
     return path
+
+
+def _cast_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
+    column_types = _TRACE_COLUMN_TYPES.get(artifact_kind)
+    if column_types is None:
+        return table
+
+    fields = []
+    columns = []
+    for field in table.schema:
+        arrow_type = _arrow_type(pa, column_types.get(field.name))
+        if arrow_type is None:
+            fields.append(field)
+            columns.append(table[field.name])
+            continue
+        fields.append(pa.field(field.name, arrow_type, nullable=field.nullable))
+        columns.append(table[field.name].cast(arrow_type))
+    return pa.Table.from_arrays(columns, schema=pa.schema(fields))
+
+
+def _arrow_type(pa: Any, logical_type: str | None) -> Any:
+    if logical_type == "string":
+        return pa.string()
+    if logical_type == "float64":
+        return pa.float64()
+    if logical_type == "int64":
+        return pa.int64()
+    if logical_type == "timestamp_us_utc":
+        return pa.timestamp("us", tz="UTC")
+    return None
+
+
+def _validate_trace_table_artifacts(table_artifacts: list[dict[str, Any]]) -> None:
+    kinds = []
+    for index, item in enumerate(table_artifacts):
+        if not isinstance(item, Mapping):
+            raise ValueError(f"trace table artifact at index {index} must be a mapping")
+        missing_keys = {"artifact_kind", "path", "format", "byte_size", "scenario_ids"} - set(item)
+        if missing_keys:
+            missing = ", ".join(sorted(missing_keys))
+            raise ValueError(f"trace table artifact at index {index} is missing required metadata: {missing}")
+        kinds.append(item["artifact_kind"])
+
+    required_kinds = set(_REQUIRED_TRACE_TABLES)
+    actual_kinds = set(kinds)
+    if len(table_artifacts) != len(_REQUIRED_TRACE_TABLES) or actual_kinds != required_kinds or len(kinds) != len(actual_kinds):
+        missing = ", ".join(sorted(required_kinds - actual_kinds)) or "none"
+        extra = ", ".join(sorted(str(kind) for kind in actual_kinds - required_kinds)) or "none"
+        raise ValueError(
+            "table_artifacts must contain exactly the required trace tables: "
+            f"{', '.join(_REQUIRED_TRACE_TABLES)}; missing={missing}; extra={extra}"
+        )
+
+    by_kind = {item["artifact_kind"]: item for item in table_artifacts}
+    expected_scenario_ids: tuple[Any, ...] | None = None
+    for kind, required_path in _REQUIRED_TRACE_TABLES.items():
+        item = by_kind[kind]
+        if item["path"] != required_path:
+            raise ValueError(f"{kind} trace table path must be {required_path}")
+        if item["format"] != "parquet":
+            raise ValueError(f"{kind} trace table format must be parquet")
+
+        scenario_ids = item["scenario_ids"]
+        if not isinstance(scenario_ids, (list, tuple)):
+            raise ValueError(f"{kind} trace table scenario_ids must be a list or tuple")
+        scenario_ids_tuple = tuple(scenario_ids)
+        if expected_scenario_ids is None:
+            expected_scenario_ids = scenario_ids_tuple
+        elif scenario_ids_tuple != expected_scenario_ids:
+            raise ValueError("trace table scenario_ids must be consistent across required trace tables")
 
 
 def _compression_from_footer(metadata: Any) -> str | dict[str, str]:
