@@ -139,6 +139,11 @@ def test_finite_metric_or_none_rejects_nan_inf_and_booleans():
     assert finite_metric_or_none("1.0") is None
 
 
+def test_observed_returns_drops_first_raw_return_before_filtering_nonfinite_values():
+    assert backend_module._observed_returns([math.nan, 0.01, -0.02]) == [0.01, -0.02]
+    assert backend_module._observed_returns([0.0, math.nan, 0.03]) == [0.03]
+
+
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
 

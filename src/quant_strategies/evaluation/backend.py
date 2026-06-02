@@ -482,8 +482,7 @@ def _set_metric(payload: dict[str, MetricValue], name: str, value: Any) -> None:
 
 def _observed_returns(returns: Any | None) -> list[float]:
     values = _series_values(returns)
-    finite_returns = [float(value) for value in values if finite_metric_or_none(value) is not None]
-    return finite_returns[1:] if len(finite_returns) > 1 else []
+    return [float(value) for value in values[1:] if finite_metric_or_none(value) is not None]
 
 
 def _last_finite(values: Sequence[Any] | None) -> float | None:
