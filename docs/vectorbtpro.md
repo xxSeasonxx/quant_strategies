@@ -93,7 +93,7 @@ backend.
 
 | Surface | Backend |
 | --- | --- |
-| Quick run | Internal `quant_strategies.engine` path through `runner.engine_runner` |
+| Quick run | Internal `quant_strategies.engine` path through `core.engine_runner` |
 | Validation verdict | Internal `EngineBackend`, using the same engine path |
 | Evaluation run | VectorBT Pro for non-funding data; `project_perp_ledger_v1` for `crypto_perp_funding` |
 | VectorBT Pro agreement oracle | Optional single-trade validation agreement check |
@@ -119,6 +119,8 @@ The evaluation surface is an implemented stateless surface for
 frozen-candidate portfolio/economic/path evidence. It requires a candidate-local
 `evaluation.toml`, calls the data-kind-specific portfolio backend with explicit
 assumptions, and returns `EvaluationRunResult`.
+The checked-in example config is
+`examples/strategies/simple_momentum_spy_daily_evaluation.toml`.
 
 Detailed trace artifacts are Parquet only through `pyarrow`:
 

@@ -9,7 +9,7 @@ from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.core.config import StrategyExecutionSpec
-from quant_strategies.runner.errors import DataLoadError
+from quant_strategies.core.errors import DataLoadError
 
 _UNSET = object()
 

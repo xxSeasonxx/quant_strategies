@@ -13,8 +13,9 @@ import pytest
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
-from quant_strategies.runner import execution, run_config
-from quant_strategies.runner.data_loader import LoadedData
+from quant_strategies.core import execution
+from quant_strategies.runner import run_config
+from quant_strategies.core.data_loader import LoadedData
 from engine_helpers import decision_for
 
 
@@ -464,7 +465,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
         return original_execute(*args, **kwargs)
 
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=evaluation_rows()),
     )
     monkeypatch.setattr(evaluation_runner, "execute_strategy_run", counting_execute_strategy_run)

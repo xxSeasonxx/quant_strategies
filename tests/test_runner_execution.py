@@ -9,11 +9,11 @@ import pytest
 
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
-from quant_strategies.runner import execution
+from quant_strategies.core import execution
 from quant_strategies.runner.config import load_config
-from quant_strategies.runner.data_loader import LoadedData
-from quant_strategies.runner.errors import DataLoadError, StrategyLoadError
-from quant_strategies.runner.execution import (
+from quant_strategies.core.data_loader import LoadedData
+from quant_strategies.core.errors import DataLoadError, StrategyLoadError
+from quant_strategies.core.execution import (
     StrategyExecutionError,
     execute_strategy_run,
 )

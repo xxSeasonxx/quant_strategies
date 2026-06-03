@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from quant_strategies.evaluation import EvaluationRunResult
-from quant_strategies.runner import cli
+from quant_strategies import cli
 
 
 def test_evaluate_cli_prints_result_artifact_path_on_success(monkeypatch, tmp_path: Path, capsys):
@@ -21,7 +21,7 @@ def test_evaluate_cli_prints_result_artifact_path_on_success(monkeypatch, tmp_pa
             assessment_status="completed",
         )
 
-    monkeypatch.setattr("quant_strategies.runner.cli.run_evaluation", fake_run_evaluation)
+    monkeypatch.setattr("quant_strategies.cli.run_evaluation", fake_run_evaluation)
 
     code = cli.main(["evaluate", "--repo-root", str(tmp_path), "candidate/evaluation.toml"])
 
@@ -52,7 +52,7 @@ def test_evaluate_cli_events_jsonl_wires_evaluation_event_sink(monkeypatch, tmp_
             assessment_status="completed",
         )
 
-    monkeypatch.setattr("quant_strategies.runner.cli.run_evaluation", fake_run_evaluation)
+    monkeypatch.setattr("quant_strategies.cli.run_evaluation", fake_run_evaluation)
 
     code = cli.main(
         [
@@ -74,7 +74,7 @@ def test_evaluate_cli_events_jsonl_wires_evaluation_event_sink(monkeypatch, tmp_
 
 def test_evaluate_cli_returns_three_for_data_load_failure(monkeypatch, tmp_path: Path, capsys):
     monkeypatch.setattr(
-        "quant_strategies.runner.cli.run_evaluation",
+        "quant_strategies.cli.run_evaluation",
         lambda path, repo_root=None: EvaluationRunResult(
             result_dir=None,
             message="data source missing",
@@ -98,7 +98,7 @@ def test_evaluate_cli_returns_one_for_portfolio_failure_with_artifacts(
     result_dir = tmp_path / "evaluation_results" / "failed"
     result_dir.mkdir(parents=True)
     monkeypatch.setattr(
-        "quant_strategies.runner.cli.run_evaluation",
+        "quant_strategies.cli.run_evaluation",
         lambda path, repo_root=None: EvaluationRunResult(
             result_dir=result_dir,
             message="portfolio backend unavailable",
@@ -120,7 +120,7 @@ def test_evaluate_cli_backstops_oserror_without_traceback(monkeypatch, tmp_path:
     def raise_oserror(path: Path, repo_root: Path | None = None) -> EvaluationRunResult:
         raise OSError("disk full")
 
-    monkeypatch.setattr("quant_strategies.runner.cli.run_evaluation", raise_oserror)
+    monkeypatch.setattr("quant_strategies.cli.run_evaluation", raise_oserror)
 
     code = cli.main(["evaluate", "--repo-root", str(tmp_path), "candidate/evaluation.toml"])
     captured = capsys.readouterr()

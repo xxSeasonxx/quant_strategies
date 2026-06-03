@@ -8,7 +8,7 @@ import pytest
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner import data_readiness
-from quant_strategies.runner.errors import DataReadinessError
+from quant_strategies.core.errors import DataReadinessError
 
 
 DECISION_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)

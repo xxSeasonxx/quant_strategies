@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.engine_runner import build_request, evaluate_request
+from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
 from untested.krohn_mueller_whelan_fix_reversal import generate_decisions

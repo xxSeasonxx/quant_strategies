@@ -19,7 +19,7 @@ LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
     import quant_strategies.runner as runner_package
     import quant_strategies.runner.artifacts as artifacts
-    import quant_strategies.runner.execution as runner_execution
+    import quant_strategies.core.execution as runner_execution
 
     for module in (artifacts, runner_execution, runner_package):
         assert not hasattr(module, "RowSummary")
@@ -193,13 +193,13 @@ artifact_profile = "{artifact_profile}"
 
 
 def canonical_rows_jsonl(rows):
-    from quant_strategies.runner.artifact_profiles import canonical_rows_jsonl as impl
+    from quant_strategies.core.serialization import canonical_rows_jsonl as impl
 
     return impl(rows)
 
 
 def normalized_rows_sha256(rows):
-    from quant_strategies.runner.artifact_profiles import normalized_rows_sha256 as impl
+    from quant_strategies.core.serialization import normalized_rows_sha256 as impl
 
     return impl(rows)
 

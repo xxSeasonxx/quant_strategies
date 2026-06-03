@@ -35,6 +35,14 @@ background loops.
 Rows are loaded through public `quant_data` APIs, normalized at the boundary,
 and passed to strategies as plain mapping rows.
 
+Path anchoring:
+
+- quick-run relative paths are repo-root-relative;
+- validation/evaluation config paths are resolved from the current directory,
+  or from `--repo-root` when the CLI flag/API argument is provided;
+- after a validation/evaluation TOML is found, its `strategy_path` and
+  `output.results_dir` fields are resolved relative to the config directory.
+
 ## Quick Run
 
 Command:
@@ -118,9 +126,17 @@ Important sections:
 - `[search_pressure]`, plus optional `[mechanical_thresholds]` and
 `[agreement_oracle]`.
 
+Validation window IDs must be unique and must not collide after artifact-path
+sanitization. `[readiness]` requires at least one observation and one observed
+symbol per decision by default, plus `required_observation_fields`. For
+`crypto_perp_funding`, validation also requires `close`, `funding_timestamp`,
+`funding_rate`, and `has_funding_event` observations on every decision.
+
 Output: `ValidationRunResult`. Validation is mechanical evidence validation,
 not research evaluation. Its decision labels are advisory and never authorize
 promotion, paper trading, or live trading.
+Config-load failures return `result_dir=None`, `run_completed=False`, and
+`failure_stage="config_load"` instead of raising from the public API.
 
 Common artifacts include `validation_config.toml`, `strategy_snapshot.py`,
 `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`,
@@ -181,6 +197,8 @@ contract does not match perp funding cashflows.
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
 Primary config file: candidate-local `evaluation.toml`.
+The checked-in minimal example is
+`examples/strategies/simple_momentum_spy_daily_evaluation.toml`.
 
 Important sections:
 
@@ -189,6 +207,10 @@ Important sections:
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[metrics]` with `annualization_periods_per_year`;
 - `[output]` with candidate-local `results_dir`.
+
+Generated output roots `results/`, `validation_results/`, and
+`evaluation_results/` are ignored by the repository and should be regenerated
+instead of treated as source.
 
 Output: `EvaluationRunResult`. The CLI prints the result directory on success,
 exits `3` for data-load or row-contract failures, and exits `1` for preflight

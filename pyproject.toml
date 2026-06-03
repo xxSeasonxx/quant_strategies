@@ -24,7 +24,7 @@ evaluation = [
 ]
 
 [project.scripts]
-quant-strategies = "quant_strategies.runner.cli:main"
+quant-strategies = "quant_strategies.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,46 +1,19 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.core.serialization import json_safe_value
+from quant_strategies.core.serialization import json_safe_value, normalized_rows_sha256
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, trade_result_metric_semantics
 from quant_strategies.runner.config import RunConfig
 
 
 SUMMARY_SAMPLE_SIZE = 5
-
-
-def normalized_rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
-    digest = hashlib.sha256()
-    for line in iter_canonical_row_lines(rows):
-        digest.update(line.encode("utf-8"))
-        digest.update(b"\n")
-    return digest.hexdigest()
-
-
-def canonical_rows_jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
-    lines = list(canonical_row_lines(rows))
-    return "\n".join(lines) + ("\n" if lines else "")
-
-
-def canonical_row_lines(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
-    return tuple(iter_canonical_row_lines(rows))
-
-
-def iter_canonical_row_lines(rows: Iterable[Mapping[str, Any]]) -> Iterable[str]:
-    for row in rows:
-        yield canonical_row_line(row)
-
-
-def canonical_row_line(row: Mapping[str, Any]) -> str:
-    return json.dumps(json_safe_value(row), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
 def summary_profile_payload(

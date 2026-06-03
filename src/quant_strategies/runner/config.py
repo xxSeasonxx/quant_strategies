@@ -14,7 +14,7 @@ from quant_strategies.core.config import (
     StrategyExecutionSpec,
     default_repo_root,
 )
-from quant_strategies.runner.errors import ConfigError
+from quant_strategies.core.errors import ConfigError
 
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]

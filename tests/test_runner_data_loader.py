@@ -9,9 +9,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from quant_strategies.runner import data_loader
+from quant_strategies.core import data_loader
 from quant_strategies.runner.config import load_config
-from quant_strategies.runner.errors import DataLoadError
+from quant_strategies.core.errors import DataLoadError
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -77,7 +77,7 @@ def test_importing_data_loader_does_not_import_quant_data():
     env["PYTHONPATH"] = src_path if not pythonpath else os.pathsep.join((src_path, pythonpath))
     code = (
         "import sys\n"
-        "import quant_strategies.runner.data_loader\n"
+        "import quant_strategies.core.data_loader\n"
         "loaded = [\n"
         "    name for name in sys.modules\n"
         "    if name == 'quant_data' or name.startswith('quant_data.')\n"

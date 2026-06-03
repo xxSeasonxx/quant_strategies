@@ -454,6 +454,69 @@ def test_screen_exits_on_trailing_stop_after_favorable_move():
     assert trade.gross_return == pytest.approx(0.02)
 
 
+def test_screen_threshold_exits_ignore_intrabar_high_low_when_close_fill_is_configured():
+    bars = (
+        Bar(symbol="BTC", timestamp=DECISION, open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=31), open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=32), open=100.0, high=120.0, low=80.0, close=100.5),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=33), open=100.0, high=100.0, low=100.0, close=100.0),
+    )
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="close_sampled_thresholds",
+            decisions=(
+                decision_for(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=2,
+                    stop_loss_bps=100.0,
+                    take_profit_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars,
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "max_hold"
+    assert trade.exit_price == 100.0
+
+
+def test_screen_trailing_stop_uses_sampled_close_high_water_mark_not_intrabar_high():
+    bars = (
+        Bar(symbol="BTC", timestamp=DECISION, open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=31), open=100.0, high=100.0, low=100.0, close=100.0),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=32), open=100.0, high=110.0, low=99.0, close=100.5),
+        Bar(symbol="BTC", timestamp=DECISION.replace(minute=33), open=100.0, high=101.0, low=99.0, close=100.0),
+    )
+    request = EvaluationRequest(
+        spec=StrategySpec(
+            strategy_id="close_sampled_trailing_stop",
+            decisions=(
+                decision_for(
+                    symbol="BTC",
+                    decision_time=DECISION,
+                    side=Side.LONG,
+                    max_hold_bars=2,
+                    trailing_stop_bps=100.0,
+                ),
+            ),
+        ),
+        bars=bars,
+        fill_model=FillModel(price="close", entry_lag_bars=1),
+    )
+
+    trade = screen(request).trades[0]
+
+    assert trade.exit_time == DECISION.replace(minute=33)
+    assert trade.exit_reason == "max_hold"
+    assert trade.exit_price == 100.0
+
+
 def test_screen_short_take_profit_uses_falling_price():
     request = EvaluationRequest(
         spec=StrategySpec(

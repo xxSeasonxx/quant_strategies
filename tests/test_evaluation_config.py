@@ -12,6 +12,9 @@ from quant_strategies.evaluation.config import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def write_strategy(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -93,6 +96,18 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
         cost_model=CostModelConfig(fee_bps_per_side=0.5, slippage_bps_per_side=0.5),
         require_param_validator=True,
     )
+
+
+def test_checked_in_simple_momentum_evaluation_example_loads():
+    config_path = ROOT / "examples" / "strategies" / "simple_momentum_spy_daily_evaluation.toml"
+
+    config = load_evaluation_config(config_path)
+
+    assert config.base_dir == config_path.parent
+    assert config.strategy_path == ROOT / "examples" / "strategies" / "simple_momentum.py"
+    assert config.output.results_dir == ROOT / "examples" / "strategies" / "evaluation_results" / "simple_momentum"
+    assert config.strategy_id == "simple_momentum"
+    assert config.windows[0].id == "evaluation_2024_01"
 
 
 def test_resolve_evaluation_config_rejects_directory_path(tmp_path: Path):

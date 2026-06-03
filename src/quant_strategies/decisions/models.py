@@ -119,6 +119,13 @@ class PositionTarget(DecisionModel):
 
 
 class ExitPolicy(DecisionModel):
+    """Bar-sampled exit thresholds for the internal engine.
+
+    Stop, take-profit, and trailing values are evaluated against the configured
+    fill-price sample at each bar timestamp. They are not intrabar OHLC barrier
+    orders.
+    """
+
     max_hold_bars: int = Field(ge=1)
     stop_loss_bps: float | None = None
     take_profit_bps: float | None = None

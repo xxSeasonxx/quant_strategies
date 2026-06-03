@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.core.evidence_quality import compact_evidence_quality, compact_row_contract
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
@@ -23,10 +24,9 @@ from quant_strategies.provenance import (
     source_identity,
 )
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.engine_runner import EngineRun
+from quant_strategies.core.engine_runner import EngineRun
 
 
-ROW_CONTRACT_ISSUE_SAMPLE_SIZE = 25
 RUNNER_EVIDENCE_SCHEMA_VERSION = "quant_strategies.runner.evidence/v1"
 
 
@@ -125,71 +125,11 @@ def with_causality_verification(
     return payload
 
 
-def compact_evidence_quality(evidence_quality_payload: Mapping[str, Any]) -> dict[str, Any]:
-    payload = dict(evidence_quality_payload)
-    row_contract = payload.get("row_contract")
-    if isinstance(row_contract, Mapping):
-        payload["row_contract"] = _compact_row_contract(row_contract)
-    return payload
-
-
-def _compact_row_contract(row_contract: Mapping[str, Any]) -> dict[str, Any]:
-    payload = dict(row_contract)
-    issues = payload.get("issues")
-    if not isinstance(issues, list):
-        return payload
-
-    issue_count = payload.get("issue_count")
-    if not isinstance(issue_count, int):
-        issue_count = len(issues)
-    payload["issue_count"] = issue_count
-    if len(issues) <= ROW_CONTRACT_ISSUE_SAMPLE_SIZE:
-        payload["issue_sample_count"] = len(issues)
-        payload["issues_truncated"] = issue_count > len(issues)
-        return payload
-
-    payload["issues"] = _stratified_issue_sample(issues, ROW_CONTRACT_ISSUE_SAMPLE_SIZE)
-    payload["issue_sample_count"] = ROW_CONTRACT_ISSUE_SAMPLE_SIZE
-    payload["issues_truncated"] = True
-    return payload
-
-
-def _stratified_issue_sample(issues: Sequence[Any], sample_size: int) -> list[Any]:
-    selected: set[int] = set()
-    seen_keys: set[tuple[object, object, object]] = set()
-    for index, issue in enumerate(issues):
-        key = _issue_sample_key(issue)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        selected.add(index)
-        if len(selected) == sample_size:
-            return [issues[item] for item in sorted(selected)]
-
-    for index in range(len(issues)):
-        if index in selected:
-            continue
-        selected.add(index)
-        if len(selected) == sample_size:
-            break
-    return [issues[item] for item in sorted(selected)]
-
-
-def _issue_sample_key(issue: object) -> tuple[object, object, object]:
-    if isinstance(issue, Mapping):
-        return (
-            issue.get("severity"),
-            issue.get("reason"),
-            issue.get("field"),
-        )
-    return (None, None, None)
-
-
 def row_contract_status(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
 ) -> dict[str, Any]:
-    return _compact_row_contract(_normalized_rows(config, rows).row_contract_summary())
+    return compact_row_contract(_normalized_rows(config, rows).row_contract_summary())
 
 
 def write_data_manifest(

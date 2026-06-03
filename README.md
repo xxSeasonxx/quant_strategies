@@ -117,6 +117,10 @@ advisory retained-candidate mechanical evidence. It is an evidence audit, not
 research evaluation: never statistical significance, regime robustness,
 portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 `paper_trade_eligible` / `live_eligible` always stay false.
+Validation configs require unique window IDs and explicit `[readiness]`
+observation coverage. For `crypto_perp_funding`, readiness also requires
+decision observations for `close`, `funding_timestamp`, `funding_rate`, and
+`has_funding_event`.
 
 **Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
 
@@ -163,6 +167,13 @@ conda run -n quant quant-strategies run path/to/config.toml
 conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 ```
+
+Path anchoring differs by surface. Quick-run configs resolve relative paths
+against the repository root. Validation and evaluation configs are
+candidate-local: after the TOML file is found, `strategy_path` and
+`output.results_dir` resolve beside that config file. CLI `--repo-root` anchors
+relative config-path lookup; it does not turn candidate-local fields into
+repo-root-relative fields.
 
 ## Documentation
 

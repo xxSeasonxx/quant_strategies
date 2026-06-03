@@ -24,8 +24,8 @@ from quant_strategies.decisions.extended_ontology import (
     StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.engine_runner import build_request, evaluate_request, request_json
-from quant_strategies.runner.errors import RequestBuildError
+from quant_strategies.core.engine_runner import build_request, evaluate_request, request_json
+from quant_strategies.core.errors import RequestBuildError
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -132,7 +132,7 @@ def test_build_request_accepts_normalized_rows_without_timestamp_parsing(monkeyp
         for field in ("open", "high", "low", "close"):
             raw_row[field] = str(raw_row[field])
     normalized = NormalizedRows.from_rows(config(), raw_rows, mode="search")
-    import quant_strategies.runner.engine_runner as runner_engine_runner
+    import quant_strategies.core.engine_runner as runner_engine_runner
 
     monkeypatch.setattr(
         runner_engine_runner,
@@ -293,7 +293,7 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
 def test_evaluate_request_reuses_request_build_bar_index(monkeypatch: pytest.MonkeyPatch):
     import quant_strategies.engine.bar_index as shared_bar_index
     import quant_strategies.engine.evaluation as evaluation
-    import quant_strategies.runner.engine_runner as runner_engine_runner
+    import quant_strategies.core.engine_runner as runner_engine_runner
 
     build_calls = 0
     original_build_bar_index = shared_bar_index.build_bar_index
@@ -356,7 +356,7 @@ def test_build_request_rejects_missing_decision_bar():
 
 
 def test_runner_bar_index_builds_positions_by_symbol():
-    from quant_strategies.runner.engine_runner import _build_bar_index
+    from quant_strategies.core.engine_runner import _build_bar_index
 
     request = build_request(
         strategy_id="demo",
@@ -373,7 +373,7 @@ def test_runner_bar_index_builds_positions_by_symbol():
 
 
 def test_runner_bar_index_rejects_duplicate_symbol_timestamp():
-    from quant_strategies.runner.engine_runner import _build_bar_index
+    from quant_strategies.core.engine_runner import _build_bar_index
 
     request = build_request(
         strategy_id="demo",

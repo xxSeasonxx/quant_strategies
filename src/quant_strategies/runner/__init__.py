@@ -13,20 +13,20 @@ from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
 )
+from quant_strategies.core import engine_runner as _engine_runner
+from quant_strategies.core.errors import RunnerError
+from quant_strategies.core.execution import (
+    StrategyExecutionError,
+    StrategyExecutionResult,
+    execute_strategy_run,
+)
 from quant_strategies.runner import (
     artifacts,
     config as config_module,
     data_readiness,
     economic_metrics,
-    engine_runner,
 )
-from quant_strategies.runner.errors import RunnerError
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
-from quant_strategies.runner.execution import (
-    StrategyExecutionError,
-    StrategyExecutionResult,
-    execute_strategy_run,
-)
 
 
 @dataclass(frozen=True)
@@ -305,7 +305,7 @@ def _prepare_engine_request(
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
-) -> tuple[engine_runner.EvaluationRequest | None, RunResult | None]:
+) -> tuple[_engine_runner.EvaluationRequest | None, RunResult | None]:
     try:
         with event_emitter.stage(
             "request_build",
@@ -313,7 +313,7 @@ def _prepare_engine_request(
             decision_count=len(execution.decisions),
         ):
             _assert_row_contract_allows_engine_request(evidence_quality)
-            engine_runner.assert_supported_decisions(execution.decisions)
+            _engine_runner.assert_supported_decisions(execution.decisions)
     except RunnerError as exc:
         return None, _failure_result(
             config,
@@ -350,7 +350,7 @@ def _prepare_engine_request(
             row_count=len(execution.loaded_rows),
             decision_count=len(execution.decisions),
         ):
-            request = engine_runner.build_request(
+            request = _engine_runner.build_request(
                 strategy_id=config.strategy_id,
                 rows=execution.normalized_rows,
                 decisions=execution.decisions,
@@ -358,7 +358,7 @@ def _prepare_engine_request(
                 cost_model=config.cost_model,
             )
             if config.output.artifact_profile == "full":
-                artifacts.write_engine_request(result_dir, engine_runner.request_json(request))
+                artifacts.write_engine_request(result_dir, _engine_runner.request_json(request))
     except RunnerError as exc:
         return None, _failure_result(
             config,
@@ -401,12 +401,12 @@ def _row_contract_failure_message(row_contract: Mapping[str, object]) -> str:
 def _evaluate_engine_request(
     config: config_module.RunConfig,
     result_dir: Path,
-    request: engine_runner.EvaluationRequest | None,
+    request: _engine_runner.EvaluationRequest | None,
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
-) -> tuple[engine_runner.EngineRun | None, RunResult | None]:
+) -> tuple[_engine_runner.EngineRun | None, RunResult | None]:
     if request is None:
         raise ValueError("request is required when no failure was returned")
     try:
@@ -416,7 +416,7 @@ def _evaluate_engine_request(
             quick_checks=config.output.quick_checks,
         ):
             return (
-                engine_runner.evaluate_request(
+                _engine_runner.evaluate_request(
                     request,
                     mode=_engine_mode(config),
                     include_evidence=config.output.artifact_profile == "full",
@@ -440,7 +440,7 @@ def _write_completion_artifacts(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
-    engine_run: engine_runner.EngineRun | None,
+    engine_run: _engine_runner.EngineRun | None,
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
@@ -521,7 +521,7 @@ def _write_completion_artifacts(
     return assessment_status, notes.strip()
 
 
-def _engine_mode(config: config_module.RunConfig) -> engine_runner.EngineMode:
+def _engine_mode(config: config_module.RunConfig) -> _engine_runner.EngineMode:
     return "gate" if config.output.quick_checks else "screen"
 
 

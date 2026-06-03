@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.runner.data_loader import LoadedData
+from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.validation import run_validation
 
 
@@ -117,7 +117,7 @@ def test_validation_config_runs_with_fixture_loader_and_engine_backend(tmp_path:
         (source_dir / "simple_momentum_spy_daily_validation.toml").read_text()
     )
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(
             rows=bars_for([100.0, 101.0, 102.0, 103.0, 104.0])
         ),

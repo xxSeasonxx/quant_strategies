@@ -7,7 +7,7 @@ import pytest
 
 from quant_strategies.decisions import load_decision_strategy
 from quant_strategies.runner.config import load_config
-from quant_strategies.runner.errors import ConfigError
+from quant_strategies.core.errors import ConfigError
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

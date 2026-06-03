@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -35,3 +36,29 @@ def json_safe_value(value: Any) -> Any:
     except (TypeError, ValueError):
         return str(value)
     return value
+
+
+def normalized_rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
+    digest = hashlib.sha256()
+    for line in iter_canonical_row_lines(rows):
+        digest.update(line.encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def canonical_rows_jsonl(rows: Sequence[Mapping[str, Any]]) -> str:
+    lines = list(canonical_row_lines(rows))
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def canonical_row_lines(rows: Sequence[Mapping[str, Any]]) -> tuple[str, ...]:
+    return tuple(iter_canonical_row_lines(rows))
+
+
+def iter_canonical_row_lines(rows: Iterable[Mapping[str, Any]]) -> Iterable[str]:
+    for row in rows:
+        yield canonical_row_line(row)
+
+
+def canonical_row_line(row: Mapping[str, Any]) -> str:
+    return json.dumps(json_safe_value(row), sort_keys=True, separators=(",", ":"), allow_nan=False)

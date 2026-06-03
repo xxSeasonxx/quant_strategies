@@ -6,7 +6,7 @@ import math
 import pytest
 
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.runner.engine_runner import build_request, evaluate_request
+from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import ObservationRef, StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
 from untested.fx_triangular_residual_reversion import generate_decisions

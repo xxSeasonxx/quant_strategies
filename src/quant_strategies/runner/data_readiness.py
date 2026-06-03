@@ -7,7 +7,7 @@ from typing import Any
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.runner.errors import DataReadinessError
+from quant_strategies.core.errors import DataReadinessError
 
 
 AVAILABILITY_FIELD = "available_at"

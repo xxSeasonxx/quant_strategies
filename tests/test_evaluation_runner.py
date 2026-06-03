@@ -14,7 +14,7 @@ import quant_strategies.evaluation.runner as evaluation_runner
 from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.runner import run_evaluation
-from quant_strategies.runner.data_loader import LoadedData
+from quant_strategies.core.data_loader import LoadedData
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -253,7 +253,7 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     backend = PreparedFakeBackend()
     events: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=messy_raw_rows()),
     )
 
@@ -350,6 +350,21 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert all("duration_ms" in event for event in events if event["status"] == "completed")
 
 
+def test_run_evaluation_resolves_relative_config_path_from_cwd_when_repo_root_omitted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_candidate(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation("candidate/evaluation.toml", backend=FakeBackend())
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    assert result.result_dir.parent == tmp_path / "candidate" / "evaluation_results" / "demo"
+
+
 def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -369,7 +384,7 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
         }
     ]
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=funding_rows),
     )
     monkeypatch.setattr(
@@ -402,7 +417,7 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
 
 def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     candidate = write_candidate(tmp_path, with_param_validator=False)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
 
@@ -430,7 +445,7 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
 
     candidate = write_candidate(tmp_path)
     events: list[dict[str, object]] = []
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -470,7 +485,7 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path
             )
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=UnavailableBackend())
 
@@ -505,7 +520,7 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
 
     candidate = write_candidate(tmp_path)
     backend = UnavailablePreparedBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -551,7 +566,7 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
 
     candidate = write_candidate(tmp_path)
     backend = FailingPrepareBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -597,7 +612,7 @@ def test_run_evaluation_maps_run_prepared_failure_statuses(
 
     candidate = write_candidate(tmp_path)
     backend = FailingPreparedBackend()
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -626,7 +641,7 @@ def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
             return result.model_copy(update={"scenario_id": "duplicate_scenario"})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=DuplicateScenarioBackend())
 
@@ -661,7 +676,7 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
             )
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingTraceTablesBackend())
 
@@ -690,7 +705,7 @@ def test_run_evaluation_fails_when_completed_backend_metrics_are_incomplete(
             return result.model_copy(update={"metrics": {"total_return": 0.01, "trade_count": 1}})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=IncompleteMetricsBackend())
 
@@ -724,7 +739,7 @@ def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
             return result.model_copy(update={"metrics": metrics_without_funding})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingFundingMetricsBackend())
 
@@ -766,7 +781,7 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
     backend = BackendShouldNotBeCalled()
     invalid_rows = [{key: value for key, value in row.items() if key != "available_at"} for row in rows()]
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=invalid_rows),
     )
 
@@ -821,7 +836,7 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
     backend = BackendShouldNotBeCalled()
     events: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
@@ -872,7 +887,7 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
 
     candidate = write_candidate(tmp_path)
     monkeypatch.setattr(
-        "quant_strategies.runner.execution.load_data",
+        "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=[]),
     )
 
@@ -910,7 +925,7 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
             return super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=LateFailureBackend())
 
@@ -934,7 +949,7 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     real_write = evaluation_runner.write_parquet_artifact
     calls = 0
@@ -970,7 +985,7 @@ def test_run_evaluation_uses_staged_write_table_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
 
@@ -993,7 +1008,7 @@ def test_run_evaluation_removes_published_tables_when_manifest_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
 
     def failing_manifest(*args: Any, **kwargs: Any) -> None:
         raise OSError("manifest failed")

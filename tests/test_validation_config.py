@@ -511,6 +511,101 @@ def test_load_validation_config_rejects_empty_windows(tmp_path: Path):
         load_validation_config(config_path)
 
 
+def test_load_validation_config_rejects_duplicate_window_ids(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'end = "2026-06-30"\n\n[data]',
+            'end = "2026-06-30"\n\n'
+            '[[windows]]\n'
+            'id = "validation_2026_h1"\n'
+            'start = "2026-07-01"\n'
+            'end = "2026-12-31"\n\n'
+            '[data]',
+        )
+    )
+
+    with pytest.raises(ValidationConfigError, match="windows.id values must be unique"):
+        load_validation_config(config_path)
+
+
+def test_load_validation_config_rejects_sanitized_window_artifact_collisions(
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'id = "validation_2026_h1"',
+            'id = "a b"',
+        ).replace(
+            'end = "2026-06-30"\n\n[data]',
+            'end = "2026-06-30"\n\n'
+            '[[windows]]\n'
+            'id = "a:b"\n'
+            'start = "2026-07-01"\n'
+            'end = "2026-12-31"\n\n'
+            '[data]',
+        )
+    )
+
+    with pytest.raises(ValidationConfigError, match="artifact path sanitization"):
+        load_validation_config(config_path)
+
+
+def test_load_validation_config_rejects_casefold_window_artifact_collisions(
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'id = "validation_2026_h1"',
+            'id = "A"',
+        ).replace(
+            'end = "2026-06-30"\n\n[data]',
+            'end = "2026-06-30"\n\n'
+            '[[windows]]\n'
+            'id = "a"\n'
+            'start = "2026-07-01"\n'
+            'end = "2026-12-31"\n\n'
+            '[data]',
+        )
+    )
+
+    with pytest.raises(ValidationConfigError, match="artifact path sanitization"):
+        load_validation_config(config_path)
+
+
+def test_load_validation_config_rejects_window_artifact_file_directory_conflicts(
+    tmp_path: Path,
+):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'id = "validation_2026_h1"',
+            'id = "a"',
+        ).replace(
+            'end = "2026-06-30"\n\n[data]',
+            'end = "2026-06-30"\n\n'
+            '[[windows]]\n'
+            'id = "a.jsonl/b"\n'
+            'start = "2026-07-01"\n'
+            'end = "2026-12-31"\n\n'
+            '[data]',
+        )
+    )
+
+    with pytest.raises(ValidationConfigError, match="is a parent of"):
+        load_validation_config(config_path)
+
+
 def test_load_validation_config_requires_readiness_for_every_validation_config(
     tmp_path: Path,
 ):
@@ -529,6 +624,15 @@ def test_load_validation_config_requires_readiness_for_every_validation_config(
             """
 [readiness]
 min_observations_per_decision = 0
+required_observation_fields = ["close"]
+""",
+            "greater than or equal to 1",
+        ),
+        (
+            """
+[readiness]
+min_observations_per_decision = 1
+min_distinct_observation_symbols_per_decision = 0
 required_observation_fields = ["close"]
 """,
             "greater than or equal to 1",

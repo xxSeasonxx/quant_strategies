@@ -12,15 +12,13 @@ from quant_strategies.causality import (
 from quant_strategies.data_contract import NormalizedRows, RowContractMode
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
-from quant_strategies.runner.artifact_profiles import (
-    canonical_rows_jsonl,
-    normalized_rows_sha256,
-)
+from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
 from quant_strategies.core.config import default_repo_root
-from quant_strategies.runner.execution import (
+from quant_strategies.core.execution import (
     StrategyExecutionError,
     execute_strategy_run,
 )
+from quant_strategies.validation.artifact_names import safe_scenario_artifact_path
 from quant_strategies.validation.artifacts import (
     backend_runs_payload,
     canonical_jsonl_lines,
@@ -39,6 +37,7 @@ from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.config import load_validation_config
 from quant_strategies.validation.config import resolve_validation_config_path
 from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.validation.errors import ValidationConfigError
 from quant_strategies.validation.events import ValidationEventSink, ValidationStageEmitter
 from quant_strategies.validation.manifest import write_validation_manifest
 from quant_strategies.validation.matrix import MatrixScenario, expand_validation_matrix
@@ -50,7 +49,7 @@ from quant_strategies.validation.policy import (
 from quant_strategies.validation.readiness import check_validation_readiness
 
 if _TYPE_CHECKING:
-    from quant_strategies.runner.execution import StrategyExecutionResult as _StrategyExecutionResult
+    from quant_strategies.core.execution import StrategyExecutionResult as _StrategyExecutionResult
 
 
 @dataclass(frozen=True)
@@ -97,15 +96,24 @@ def run_validation(
     event_sink: ValidationEventSink | None = None,
 ) -> ValidationRunResult:
     events = ValidationStageEmitter(event_sink)
-    with events.stage(
-        "config_load",
-        config_path=str(config_path),
-        repo_root=str(repo_root) if repo_root is not None else None,
-    ):
-        root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
-        resolved_config_path = resolve_validation_config_path(config_path, repo_root=repo_root)
-        config = load_validation_config(resolved_config_path)
-        path_base = config.base_dir
+    try:
+        with events.stage(
+            "config_load",
+            config_path=str(config_path),
+            repo_root=str(repo_root) if repo_root is not None else None,
+        ):
+            root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
+            resolved_config_path = resolve_validation_config_path(config_path, repo_root=repo_root)
+            config = load_validation_config(resolved_config_path)
+            path_base = config.base_dir
+    except ValidationConfigError as exc:
+        return ValidationRunResult(
+            result_dir=None,
+            decision=_mechanical_fail_decision("validation_config_failed"),
+            message=str(exc),
+            run_completed=False,
+            failure_stage="config_load",
+        )
 
     try:
         with events.stage("artifact_initialization", strategy_id=config.strategy_id):
@@ -407,7 +415,11 @@ def _audit_window_execution(
             audit_payload["violations"] = list(audit.violations) + list(causality_violations)
 
     if audit_payload["passed"]:
-        readiness_violations = check_validation_readiness(decisions, context.config.readiness)
+        readiness_violations = check_validation_readiness(
+            decisions,
+            context.config.readiness,
+            data_kind=context.config.data.kind,
+        )
         if readiness_violations:
             state.failure_reasons.append("validation_readiness_failed")
             if state.failure_stage is None:
@@ -830,7 +842,7 @@ def _write_scenario_jsonl(
     records: Sequence[Any],
 ) -> tuple[str, str]:
     # Single home for the per-scenario JSONL artifact path + hash contract.
-    artifact_name = f"backend_runs/{subdir}/{_safe_scenario_artifact_path(scenario_id)}.jsonl"
+    artifact_name = f"backend_runs/{subdir}/{safe_scenario_artifact_path(scenario_id)}.jsonl"
     path = write_text_artifact(result_dir, artifact_name, canonical_jsonl_lines(list(records)))
     return path.relative_to(result_dir).as_posix(), file_sha256(path)
 
@@ -864,20 +876,11 @@ def _write_window_rows(
     window_id: str,
     rows: Sequence[Mapping[str, Any]],
 ) -> tuple[str, str]:
-    artifact_name = f"data_rows/{_safe_scenario_artifact_path(window_id)}.jsonl"
+    artifact_name = f"data_rows/{safe_scenario_artifact_path(window_id)}.jsonl"
     payload = canonical_rows_jsonl(rows)
     path = write_text_artifact(result_dir, artifact_name, payload)
     written_payload = payload if payload.endswith("\n") else f"{payload}\n"
     return path.relative_to(result_dir).as_posix(), text_sha256(written_payload)
-
-
-def _safe_scenario_artifact_path(scenario_id: str) -> str:
-    safe_parts = [
-        "".join(char if char.isalnum() or char in "_.-" else "-" for char in part).strip(".")
-        for part in scenario_id.split("/")
-    ]
-    safe_parts = [part or "scenario" for part in safe_parts]
-    return "/".join(safe_parts)
 
 
 def _backend_name(backend: ValidationBackend, fallback: str) -> str:

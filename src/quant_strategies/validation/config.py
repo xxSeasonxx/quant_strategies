@@ -22,6 +22,7 @@ from quant_strategies.core.config import (
     FillModelConfig,
     StrategyExecutionSpec,
 )
+from quant_strategies.validation.artifact_names import validation_artifact_path_collisions
 from quant_strategies.validation.errors import ValidationConfigError
 
 
@@ -100,6 +101,7 @@ class ValidationOutputConfig(ValidationConfigModel):
 
 class ValidationReadinessConfig(ValidationConfigModel):
     min_observations_per_decision: int = Field(ge=1)
+    min_distinct_observation_symbols_per_decision: int = Field(default=1, ge=1)
     required_observation_fields: tuple[str, ...] = Field(min_length=1)
 
     @field_validator("required_observation_fields")
@@ -238,6 +240,21 @@ class ValidationConfig(ValidationConfigModel):
         if not strategy_id:
             raise ValueError("strategy_id cannot be empty")
         return strategy_id
+
+    @model_validator(mode="after")
+    def validate_window_identity(self) -> ValidationConfig:
+        window_ids = [window.id for window in self.windows]
+        duplicate_ids = sorted({window_id for window_id in window_ids if window_ids.count(window_id) > 1})
+        if duplicate_ids:
+            raise ValueError(f"windows.id values must be unique: {duplicate_ids}")
+
+        collisions = validation_artifact_path_collisions(window_ids)
+        if collisions:
+            raise ValueError(
+                "windows.id values must not collide after validation artifact path sanitization: "
+                + "; ".join(collisions)
+            )
+        return self
 
     def to_execution_spec(self, window: ValidationWindow) -> StrategyExecutionSpec:
         # Validation adapts directly into the neutral execution kernel input — it

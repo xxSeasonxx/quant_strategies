@@ -85,7 +85,10 @@ def main(argv: list[str] | None = None) -> int:
             # artifact-failure handling.
             print(f"validation failed: {exc}")
             return 1
-        print(f"{result.message}; artifacts: {result.result_dir}")
+        if result.result_dir is None:
+            print(f"validation failed: {result.message}")
+        else:
+            print(f"{result.message}; artifacts: {result.result_dir}")
         return _validation_exit_code(result)
 
     if args.command == "evaluate":

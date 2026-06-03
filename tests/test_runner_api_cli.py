@@ -11,10 +11,11 @@ import pytest
 
 from quant_strategies.data_contract import NormalizedRows
 import quant_strategies.runner.artifacts as artifacts
-import quant_strategies.runner.execution as execution
-from quant_strategies.runner import RunResult, config as config_module, engine_runner, run_config
-from quant_strategies.runner.data_loader import LoadedData
-from quant_strategies.runner.errors import DataLoadError, EvaluationRunError, RunnerError
+from quant_strategies.core import engine_runner
+import quant_strategies.core.execution as execution
+from quant_strategies.runner import RunResult, config as config_module, run_config
+from quant_strategies.core.data_loader import LoadedData
+from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
 
 
 SUMMARY_KEYS = {
@@ -786,7 +787,7 @@ def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
@@ -2098,7 +2099,7 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -2119,7 +2120,7 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
@@ -2147,7 +2148,7 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
@@ -2162,7 +2163,7 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
 
 
 def test_cli_reports_failure_with_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     notes = tmp_path / "results" / "run" / "notes.md"
     notes.parent.mkdir(parents=True)
@@ -2190,7 +2191,7 @@ def test_cli_returns_three_for_data_readiness_failure(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     notes = tmp_path / "results" / "run" / "notes.md"
     notes.parent.mkdir(parents=True)
@@ -2309,12 +2310,12 @@ def test_run_config_completion_write_failure_returns_structured_result(
 
 
 def test_run_cli_backstops_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
-    import quant_strategies.runner.cli as cli
+    import quant_strategies.cli as cli
 
     def raise_oserror(path, repo_root=None, **_kwargs):
         raise PermissionError("results dir not writable")
 
-    monkeypatch.setattr("quant_strategies.runner.cli.run_config", raise_oserror)
+    monkeypatch.setattr("quant_strategies.cli.run_config", raise_oserror)
 
     code = cli.main(["run", "--repo-root", str(tmp_path), "run.toml"])
 

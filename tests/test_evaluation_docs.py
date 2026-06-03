@@ -28,6 +28,22 @@ def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
         assert "Benchmark-relative metrics are deferred" in text, path
 
 
+def test_docs_describe_evaluation_example_and_path_anchoring():
+    foundation = read("docs/foundation-surfaces.md")
+    readme = read("README.md")
+    vectorbt = read("docs/vectorbtpro.md")
+
+    for text in (foundation, vectorbt):
+        assert "examples/strategies/simple_momentum_spy_daily_evaluation.toml" in text
+
+    assert "candidate-local" in foundation
+    assert "candidate-local" in readme
+    assert "--repo-root" in foundation
+    assert "--repo-root" in readme
+    assert "output.results_dir" in foundation
+    assert "output.results_dir" in readme
+
+
 def test_prd_owns_product_intent_not_evaluate_command_schema():
     text = read("PRD.md")
 

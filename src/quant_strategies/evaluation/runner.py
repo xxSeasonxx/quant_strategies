@@ -31,7 +31,7 @@ from quant_strategies.evaluation.errors import EvaluationConfigError
 from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
 from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
-from quant_strategies.runner.execution import (
+from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
     execute_strategy_run,
@@ -98,7 +98,7 @@ def run_evaluation(
             repo_root=str(repo_root) if repo_root is not None else None,
         ):
             root = Path(repo_root).resolve() if repo_root is not None else default_repo_root()
-            resolved_config_path = resolve_evaluation_config_path(config_path, repo_root=root)
+            resolved_config_path = resolve_evaluation_config_path(config_path, repo_root=repo_root)
             config = load_evaluation_config(resolved_config_path)
     except EvaluationConfigError as exc:
         return EvaluationRunResult(
