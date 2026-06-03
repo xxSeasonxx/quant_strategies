@@ -78,6 +78,10 @@ full-profile artifacts. Completed quick-run `summary.json` files include
 ledger. Diagnostic-profile runs additionally write `diagnostics.json` with
 `economic_slices`.
 
+Engine stop-loss, take-profit, and trailing thresholds are sampled threshold
+exits: they are evaluated on the configured bar fill price (`close` or `quote`)
+at bar timestamps, not as intrabar high/low barrier orders.
+
 ## Validation Run
 
 Command:
@@ -161,12 +165,18 @@ Purpose:
 - require `validate_params`;
 - run strict row-contract and complete causal replay preflight;
 - fan out the fixed six-scenario cost/fill matrix per configured window;
-- produce VectorBT Pro portfolio, economic, and path evidence.
+- produce portfolio, economic, and path evidence through VectorBT Pro for
+  non-funding data and `project_perp_ledger_v1` for `crypto_perp_funding`.
 
 Evaluation fails before scenario expansion when deterministic, emitted, or
 strict suppression replay proof is incomplete. That failure returns
 `failure_stage="preflight"` and
 `assessment_status="evaluation_preflight_failed"`.
+
+For `crypto_perp_funding`, evaluation uses a project-owned perpetual futures
+ledger. Its NAV path includes price PnL, configured fees/slippage, and funding
+cashflows. VectorBT Pro `cash_dividends` is not used for funding because its
+contract does not match perp funding cashflows.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
@@ -192,10 +202,11 @@ Control artifacts:
 | `evaluation_config.toml`   | copied evaluation config                                                                                                   |
 | `strategy_snapshot.py`     | copied strategy file                                                                                                       |
 | `data_manifest.json`       | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, and decision count |
-| `evaluation_metrics.json`  | metric semantics and per-scenario portfolio metrics                                                                        |
+| `evaluation_metrics.json`  | metric semantics and per-scenario portfolio metrics, including return-sample coverage                                     |
 | `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, and unsupported semantics                                                   |
 | `evaluation_manifest.json` | hashes, scenario coverage, table metadata, metric semantics, replayability, provenance, and artifact inventory             |
-| `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro`                                          |
+| `evaluation_failure.json`  | failure stage, status, message, warnings, unsupported semantics, data windows reached, and scenario coverage when failed   |
+| `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro` when present                             |
 | `notes.md`                 | human-readable evaluation notes                                                                                            |
 
 
@@ -209,6 +220,7 @@ There is no JSONL fallback path for evaluation traces.
 | `tables/trades.parquet`                  | aggregate trade trace rows by `scenario_id`                                                                                                              |
 | `tables/target_positions.parquet`        | aggregate target-position entry/exit events by `scenario_id`, timestamp, and asset; this is target schedule evidence, not realized broker position state |
 | `tables/target_exposure_summary.parquet` | aggregate target exposure decision counts and target round-trip turnover by `scenario_id` and asset                                                      |
+| `tables/funding_cashflows.parquet`       | aggregate funding cashflow rows by `scenario_id`, timestamp, and asset; empty but schema-valid for non-funding evaluations                               |
 
 
 ## What This Project Does Not Decide

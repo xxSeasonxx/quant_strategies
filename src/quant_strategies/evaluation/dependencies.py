@@ -32,3 +32,10 @@ def require_evaluation_dependencies() -> EvaluationDependencies:
     except ImportError as exc:
         raise EvaluationDependencyError(f"vectorbtpro import failed: {exc}") from exc
     return EvaluationDependencies(pandas=pd, pyarrow=pa, vectorbtpro=vbt)
+
+
+def require_pandas_dependency() -> Any:
+    try:
+        return import_module("pandas")
+    except ImportError as exc:
+        raise EvaluationDependencyError(f"pandas import failed: {exc}") from exc

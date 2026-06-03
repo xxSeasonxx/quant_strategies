@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
+import quant_strategies.evaluation.backend as backend_module
 import quant_strategies.evaluation.runner as evaluation_runner
 from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
@@ -78,10 +79,16 @@ def messy_raw_rows() -> list[dict[str, Any]]:
     return messy
 
 
-def write_candidate(tmp_path: Path, *, with_param_validator: bool = True) -> Path:
+def write_candidate(
+    tmp_path: Path,
+    *,
+    with_param_validator: bool = True,
+    data_kind: str = "bars",
+) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     validator = "def validate_params(params):\n    return dict(params)\n" if with_param_validator else ""
+    dataset_line = 'dataset = "demo_bars"\n' if data_kind == "bars" else ""
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, "
         "PositionTarget, StrategyDecision\n"
@@ -111,8 +118,8 @@ start = "2026-01-01"
 end = "2026-06-30"
 
 [data]
-kind = "crypto_perp_funding"
-symbols = ["BTC-PERP"]
+kind = "''' + data_kind + '''"
+''' + dataset_line + '''symbols = ["BTC-PERP"]
 strict = true
 start = "2026-01-01"
 end = "2026-06-30"
@@ -166,14 +173,30 @@ class FakeBackend:
             target_exposure_summary=pd.DataFrame(
                 {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
             ),
+            funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
         return PortfolioEvaluationResult(
             scenario_id=scenario.scenario_id,
             backend=self.name,
             status="completed",
-            metrics={"total_return": 0.01, "trade_count": 1},
+            metrics=completed_metrics(),
             tables=tables,
         )
+
+
+def completed_metrics() -> dict[str, int | float | str]:
+    return {
+        "total_return": 0.01,
+        "ending_value": 101.0,
+        "max_drawdown": -0.01,
+        "trade_count": 1,
+        "return_total_count_excluding_initial": 1,
+        "return_sample_count": 1,
+        "return_nonfinite_count": 0,
+        "funding_cashflow_total": 0.0,
+        "funding_event_count": 0,
+        "funding_model": "none",
+    }
 
 
 class PreparedFakeBackend(FakeBackend):
@@ -193,6 +216,36 @@ class PreparedFakeBackend(FakeBackend):
             scenario=scenario,
             metrics=metrics,
         )
+
+
+def assert_failure_artifacts(
+    result: evaluation_runner.EvaluationRunResult,
+    *,
+    failure_stage: str,
+    assessment_status: str,
+    message_fragment: str | None = None,
+    unsupported_semantics: Sequence[str] = (),
+) -> dict[str, Any]:
+    assert result.result_dir is not None
+    failure_path = result.result_dir / "evaluation_failure.json"
+    notes_path = result.result_dir / "notes.md"
+    assert failure_path.exists()
+    assert notes_path.exists()
+    payload = json.loads(failure_path.read_text())
+    assert payload["schema_version"] == "quant_strategies.evaluation.failure/v1"
+    assert payload["strategy_id"] == "demo"
+    assert payload["failure_stage"] == failure_stage
+    assert payload["assessment_status"] == assessment_status
+    assert payload["not_authority"] == "not validation, promotion, paper trading, or live trading authority"
+    assert "generated_at_utc" in payload
+    assert "scenario_coverage" in payload["scenario_summary"]
+    assert "data_windows" in payload
+    if message_fragment is not None:
+        assert message_fragment in payload["message"]
+        assert message_fragment in notes_path.read_text()
+    for semantic in unsupported_semantics:
+        assert semantic in payload["unsupported_semantics"]
+    return payload
 
 
 def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -226,6 +279,7 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert (result.result_dir / "tables" / "trades.parquet").exists()
     assert (result.result_dir / "tables" / "target_positions.parquet").exists()
     assert (result.result_dir / "tables" / "target_exposure_summary.parquet").exists()
+    assert (result.result_dir / "tables" / "funding_cashflows.parquet").exists()
     assert not (result.result_dir / "tables_staging").exists()
     assert len(backend.prepare_calls) == 1
     assert len(backend.run_prepared_scenario_ids) == 6
@@ -251,18 +305,20 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["evaluation"]["evidence_class"] == "research_evaluation"
     assert manifest["evaluation"]["not_authority"] == "not validation, promotion, paper trading, or live trading authority"
-    assert len(manifest["tables"]) == 4
+    assert len(manifest["tables"]) == 5
     assert {item["artifact_kind"] for item in manifest["tables"]} == {
         "portfolio_path",
         "trades",
         "target_positions",
         "target_exposure_summary",
+        "funding_cashflows",
     }
     assert {item["path"] for item in manifest["tables"]} == {
         "tables/portfolio_path.parquet",
         "tables/trades.parquet",
         "tables/target_positions.parquet",
         "tables/target_exposure_summary.parquet",
+        "tables/funding_cashflows.parquet",
     }
     assert all(len(item["scenario_ids"]) == 6 for item in manifest["tables"])
     assert manifest["scenario_coverage"]["expected_count"] == 6
@@ -294,6 +350,56 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert all("duration_ms" in event for event in events if event["status"] == "completed")
 
 
+def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, data_kind="crypto_perp_funding")
+    events: list[dict[str, object]] = []
+    funding_rows = rows() + [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "open": 104.0,
+            "high": 104.0,
+            "low": 104.0,
+            "close": 104.0,
+            "has_funding_event": False,
+        }
+    ]
+    monkeypatch.setattr(
+        "quant_strategies.runner.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=funding_rows),
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: (_ for _ in ()).throw(AssertionError("VectorBT Pro should not be required")),
+    )
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        event_sink=events.append,
+    )
+
+    assert result.run_completed is True
+    assert result.failure_stage is None
+    assert result.assessment_status == "evaluation_complete"
+    assert result.result_dir is not None
+    assert (result.result_dir / "tables" / "funding_cashflows.parquet").exists()
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    assert {item["metrics"]["funding_model"] for item in metrics_payload["scenarios"]} == {
+        "project_perp_ledger_v1"
+    }
+    assert {item["backend"] for item in metrics_payload["scenarios"]} == {"project_perp_ledger_v1"}
+    manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
+    assert manifest["evaluation"]["backend"]["name"] == "project_perp_ledger_v1"
+    assert "funding_cashflows" in {item["artifact_kind"] for item in manifest["tables"]}
+    assert not [event for event in events if event["status"] == "failed"]
+
+
 def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     candidate = write_candidate(tmp_path, with_param_validator=False)
     monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
@@ -304,6 +410,12 @@ def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: py
     assert result.failure_stage == "param_validation"
     assert result.assessment_status == "evaluation_failed"
     assert "param validation failed" in result.message
+    assert_failure_artifacts(
+        result,
+        failure_stage="param_validation",
+        assessment_status="evaluation_failed",
+        message_fragment="param validation failed",
+    )
 
 
 def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -331,6 +443,13 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
     assert result.failure_stage == "portfolio_evaluation"
     assert result.assessment_status == "portfolio_evaluation_failed"
     assert "non_target_weight_sizing" in result.message
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="non_target_weight_sizing",
+        unsupported_semantics=("non_target_weight_sizing",),
+    )
     failed_events = [event for event in events if event["status"] == "failed"]
     assert any(
         event["event"] == "evaluation_stage"
@@ -359,6 +478,12 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path
     assert result.failure_stage == "portfolio_evaluation"
     assert result.assessment_status == "portfolio_backend_unavailable"
     assert "vectorbtpro import failed" in result.message
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_backend_unavailable",
+        message_fragment="vectorbtpro import failed",
+    )
 
 
 def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
@@ -390,6 +515,12 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
     assert result.message == "vectorbtpro import failed"
     assert backend.prepare_calls == 1
     assert backend.run_prepared_calls == 0
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_backend_unavailable",
+        message_fragment="vectorbtpro import failed",
+    )
 
 
 @pytest.mark.parametrize(
@@ -430,6 +561,12 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
     assert result.message == expected_message
     assert backend.prepare_calls == 1
     assert backend.run_prepared_calls == 0
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment=expected_message,
+    )
 
 
 @pytest.mark.parametrize(
@@ -470,6 +607,13 @@ def test_run_evaluation_maps_run_prepared_failure_statuses(
     assert message_fragment in result.message
     assert len(backend.prepare_calls) == 1
     assert len(backend.run_prepared_scenario_ids) == 1
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status=assessment_status,
+        message_fragment=message_fragment,
+        unsupported_semantics=(message_fragment,) if backend_status == "unsupported" else (),
+    )
 
 
 def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
@@ -494,6 +638,12 @@ def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="scenario coverage mismatch",
+    )
 
 
 def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
@@ -506,7 +656,7 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
                 status="completed",
-                metrics={"total_return": 0.01, "trade_count": 1},
+                metrics=completed_metrics(),
                 tables=None,
             )
 
@@ -522,6 +672,72 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="no trace tables",
+    )
+
+
+def test_run_evaluation_fails_when_completed_backend_metrics_are_incomplete(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class IncompleteMetricsBackend(FakeBackend):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+            return result.model_copy(update={"metrics": {"total_return": 0.01, "trade_count": 1}})
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=IncompleteMetricsBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert "invalid completed metrics: ending_value" in result.message
+    assert result.result_dir is not None
+    assert not (result.result_dir / "tables").exists()
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="invalid completed metrics: ending_value",
+    )
+
+
+def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class MissingFundingMetricsBackend(FakeBackend):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+            metrics_without_funding = {
+                key: value
+                for key, value in completed_metrics().items()
+                if not key.startswith("funding_")
+            }
+            return result.model_copy(update={"metrics": metrics_without_funding})
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.runner.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingFundingMetricsBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert "invalid completed metrics: funding_cashflow_total" in result.message
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="invalid completed metrics: funding_cashflow_total",
+    )
 
 
 def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
@@ -563,6 +779,12 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
     assert backend.prepare_calls == 0
     assert backend.run_calls == 0
     assert backend.run_prepared_calls == 0
+    assert_failure_artifacts(
+        result,
+        failure_stage="data_load",
+        assessment_status="evaluation_failed",
+        message_fragment="row contract failed",
+    )
 
 
 def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
@@ -620,6 +842,13 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
     assert backend.run_calls == 0
     assert backend.run_prepared_calls == 0
     assert "RuntimeError: prefix too short" in result.evidence_quality_warnings
+    payload = assert_failure_artifacts(
+        result,
+        failure_stage="preflight",
+        assessment_status="evaluation_preflight_failed",
+        message_fragment="strict_suppression_replay_not_verified",
+    )
+    assert "RuntimeError: prefix too short" in payload["evidence_quality_warnings"]
     failed_events = [event for event in events if event["status"] == "failed"]
     assert any(
         event["event"] == "evaluation_stage"
@@ -653,6 +882,12 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
     assert result.failure_stage == "data_load"
     assert result.assessment_status == "evaluation_failed"
     assert "row_contract_not_evaluated:no_rows" in result.message
+    assert_failure_artifacts(
+        result,
+        failure_stage="data_load",
+        assessment_status="evaluation_failed",
+        message_fragment="row_contract_not_evaluated:no_rows",
+    )
 
 
 def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fails(
@@ -686,6 +921,12 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="portfolio_evaluation",
+        assessment_status="portfolio_evaluation_failed",
+        message_fragment="late scenario failed",
+    )
 
 
 def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
@@ -701,7 +942,7 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     def failing_write(*args: Any, **kwargs: Any) -> dict[str, Any]:
         nonlocal calls
         calls += 1
-        if calls == 4:
+        if calls == 5:
             raise TypeError("arrow conversion failed")
         return real_write(*args, **kwargs)
 
@@ -716,6 +957,12 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     assert result.result_dir is not None
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "tables_staging").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="arrow conversion failed",
+    )
 
 
 def test_run_evaluation_uses_staged_write_table_metadata(
@@ -737,6 +984,7 @@ def test_run_evaluation_uses_staged_write_table_metadata(
         "trades",
         "target_positions",
         "target_exposure_summary",
+        "funding_cashflows",
     ]
 
 
@@ -762,3 +1010,9 @@ def test_run_evaluation_removes_published_tables_when_manifest_write_fails(
     assert not (result.result_dir / "evaluation_manifest.json").exists()
     assert not (result.result_dir / "tables").exists()
     assert not (result.result_dir / "tables_staging").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="manifest failed",
+    )

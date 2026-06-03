@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import math
 import shutil
+from inspect import Parameter, signature
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +65,22 @@ class _EvaluationState:
     data_windows: list[dict[str, Any]] = field(default_factory=list)
     expected_scenario_ids: list[str] = field(default_factory=list)
     all_warnings: list[str] = field(default_factory=list)
+
+
+_REQUIRED_COMPLETED_FLOAT_METRICS = (
+    "total_return",
+    "ending_value",
+    "max_drawdown",
+    "funding_cashflow_total",
+)
+_REQUIRED_COMPLETED_COUNT_METRICS = (
+    "trade_count",
+    "return_total_count_excluding_initial",
+    "return_sample_count",
+    "return_nonfinite_count",
+    "funding_event_count",
+)
+_REQUIRED_COMPLETED_FUNDING_MODELS = {"none", "project_perp_ledger_v1"}
 
 
 def run_evaluation(
@@ -162,19 +182,19 @@ def _run_evaluation_window(
                 message = f"evaluation row contract {row_contract['status']}"
                 window_event.fail(message)
                 return _failure_result(
-                    context.result_dir,
+                    context,
+                    state,
                     "data_load",
                     "evaluation_failed",
                     message,
-                    warnings=tuple(state.all_warnings),
                 )
     except StrategyExecutionError as exc:
         return _failure_result(
-            context.result_dir,
+            context,
+            state,
             exc.stage,
             "evaluation_failed",
             str(exc),
-            warnings=tuple(state.all_warnings),
         )
 
     causality_failure = _run_causality_check(context, state, window, execution)
@@ -229,11 +249,11 @@ def _run_causality_check(
             message = "; ".join(causality_violations)
             causality_event.fail(message)
             return _failure_result(
-                context.result_dir,
+                context,
+                state,
                 "preflight",
                 "evaluation_preflight_failed",
                 message,
-                warnings=tuple(state.all_warnings),
             )
     return None
 
@@ -291,42 +311,44 @@ def _prepare_portfolio_inputs(
             "portfolio_input_preparation",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            backend=_backend_name(context.selected_backend),
+            backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
             decision_count=len(execution.decisions),
             row_count=len(projection_rows),
             scenario_count=scenario_count,
         ):
             prepared = (
-                context.selected_backend.prepare_inputs(
+                _call_backend_method(
+                    context.selected_backend.prepare_inputs,
                     decisions=execution.decisions,
                     rows=projection_rows,
+                    data_kind=context.config.data.kind,
                 )
                 if hasattr(context.selected_backend, "prepare_inputs")
                 else None
             )
     except EvaluationDependencyError as exc:
         return None, _failure_result(
-            context.result_dir,
+            context,
+            state,
             "portfolio_evaluation",
             "portfolio_backend_unavailable",
             str(exc),
-            warnings=tuple(state.all_warnings),
         )
     except ValueError as exc:
         return None, _failure_result(
-            context.result_dir,
+            context,
+            state,
             "portfolio_evaluation",
             "portfolio_evaluation_failed",
             str(exc),
-            warnings=tuple(state.all_warnings),
         )
     except Exception as exc:
         return None, _failure_result(
-            context.result_dir,
+            context,
+            state,
             "portfolio_evaluation",
             "portfolio_evaluation_failed",
             f"portfolio input preparation failed: {exc}",
-            warnings=tuple(state.all_warnings),
         )
     return prepared, None
 
@@ -346,7 +368,7 @@ def _run_portfolio_scenario(
         strategy_id=context.config.strategy_id,
         window_id=window.id,
         scenario_id=scenario.scenario_id,
-        backend=_backend_name(context.selected_backend),
+        backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
     ) as scenario_event:
         scenario_result = (
             context.selected_backend.run_prepared(
@@ -356,10 +378,14 @@ def _run_portfolio_scenario(
             )
             if prepared is not None and hasattr(context.selected_backend, "run_prepared")
             else context.selected_backend.run(
-                decisions=execution.decisions,
-                rows=projection_rows,
-                scenario=scenario,
-                metrics=context.config.metrics,
+                **_backend_kwargs(
+                    context.selected_backend.run,
+                    decisions=execution.decisions,
+                    rows=projection_rows,
+                    scenario=scenario,
+                    metrics=context.config.metrics,
+                    data_kind=context.config.data.kind,
+                )
             )
         )
         state.backend_results.append(_strip_trace_tables(scenario_result))
@@ -372,21 +398,31 @@ def _run_portfolio_scenario(
             message = _backend_failure_message(scenario_result)
             scenario_event.fail(message, backend_status=scenario_result.status)
             return _failure_result(
-                context.result_dir,
+                context,
+                state,
                 "portfolio_evaluation",
                 status,
                 message,
-                warnings=tuple(state.all_warnings),
+            )
+        metric_failure = _completed_metric_failure(scenario_result)
+        if metric_failure is not None:
+            scenario_event.fail(metric_failure, backend_status=scenario_result.status)
+            return _failure_result(
+                context,
+                state,
+                "portfolio_evaluation",
+                "portfolio_evaluation_failed",
+                metric_failure,
             )
         if scenario_result.tables is None:
             message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
             scenario_event.fail(message, backend_status=scenario_result.status)
             return _failure_result(
-                context.result_dir,
+                context,
+                state,
                 "portfolio_evaluation",
                 "portfolio_evaluation_failed",
                 message,
-                warnings=tuple(state.all_warnings),
             )
         state.trace_results.append(scenario_result)
     return None
@@ -408,15 +444,15 @@ def _check_scenario_coverage(
         "portfolio_evaluation",
         strategy_id=context.config.strategy_id,
         scenario_id="scenario_coverage",
-        backend=_backend_name(context.selected_backend),
+        backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
     ) as coverage_event:
         coverage_event.fail(message)
     return _failure_result(
-        context.result_dir,
+        context,
+        state,
         "portfolio_evaluation",
         "portfolio_evaluation_failed",
         message,
-        warnings=tuple(state.all_warnings),
     )
 
 
@@ -460,7 +496,7 @@ def _write_completion_artifacts(
                 path_base=context.config.base_dir,
                 config=context.config,
                 config_path=context.config_path,
-                backend_name=_backend_name(context.selected_backend),
+                backend_name=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
                 data_windows=state.data_windows,
                 table_artifacts=table_artifacts,
                 scenario_summary=scenario_summary,
@@ -468,22 +504,50 @@ def _write_completion_artifacts(
     except Exception as exc:
         _cleanup_trace_table_dirs(context.result_dir)
         return _failure_result(
-            context.result_dir,
+            context,
+            state,
             "artifact_write",
             "evaluation_failed",
             f"artifact write failed: {exc}",
-            warnings=tuple(state.all_warnings),
         )
     return None
 
 
-def _backend_name(backend: Any) -> str:
+def _backend_name(backend: Any, *, data_kind: str | None = None) -> str:
+    if data_kind is not None:
+        name_for_data_kind = getattr(backend, "name_for_data_kind", None)
+        if callable(name_for_data_kind):
+            return str(name_for_data_kind(data_kind))
     return getattr(backend, "name", "unknown")
+
+
+def _call_backend_method(method: Any, **kwargs: Any) -> Any:
+    return method(**_backend_kwargs(method, **kwargs))
+
+
+def _backend_kwargs(method: Any, **kwargs: Any) -> dict[str, Any]:
+    if _accepts_keyword(method, "data_kind"):
+        return kwargs
+    return {key: value for key, value in kwargs.items() if key != "data_kind"}
+
+
+def _accepts_keyword(method: Any, name: str) -> bool:
+    try:
+        parameters = signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in parameters or any(parameter.kind is Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
 def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:
     scenario_ids = tuple(result.scenario_id for result in results)
-    artifact_kinds = ("portfolio_path", "trades", "target_positions", "target_exposure_summary")
+    artifact_kinds = (
+        "portfolio_path",
+        "trades",
+        "target_positions",
+        "target_exposure_summary",
+        "funding_cashflows",
+    )
     frames = {artifact_kind: _combine_trace_frames(results, artifact_kind) for artifact_kind in artifact_kinds}
     final_dir = result_dir / "tables"
     staging_dir = result_dir / "tables_staging"
@@ -530,7 +594,10 @@ def _combine_trace_frames(results: list[PortfolioEvaluationResult], table_name: 
     frames = []
     for result in results:
         assert result.tables is not None
-        frames.append(getattr(result.tables, table_name))
+        frame = getattr(result.tables, table_name)
+        if frame is None:
+            frame = pd.DataFrame({"scenario_id": []})
+        frames.append(frame)
     if not frames:
         return pd.DataFrame({"scenario_id": []})
     return pd.concat(frames, ignore_index=True)
@@ -547,22 +614,109 @@ def _backend_failure_message(result: PortfolioEvaluationResult) -> str:
     return ": ".join(parts)
 
 
+def _completed_metric_failure(result: PortfolioEvaluationResult) -> str | None:
+    for name in _REQUIRED_COMPLETED_FLOAT_METRICS:
+        if _finite_float_metric(result.metrics.get(name)) is None:
+            return f"{result.scenario_id}: invalid completed metrics: {name}"
+    for name in _REQUIRED_COMPLETED_COUNT_METRICS:
+        if _non_negative_int_metric(result.metrics.get(name)) is None:
+            return f"{result.scenario_id}: invalid completed metrics: {name}"
+    if result.metrics.get("funding_model") not in _REQUIRED_COMPLETED_FUNDING_MODELS:
+        return f"{result.scenario_id}: invalid completed metrics: funding_model"
+    return None
+
+
+def _finite_float_metric(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    metric = float(value)
+    return metric if math.isfinite(metric) else None
+
+
+def _non_negative_int_metric(value: Any) -> int | None:
+    metric = _finite_float_metric(value)
+    if metric is None or not metric.is_integer() or metric < 0.0:
+        return None
+    return int(metric)
+
+
 def _failure_result(
-    result_dir: Path | None,
+    context: _EvaluationContext,
+    state: _EvaluationState,
     failure_stage: str,
     assessment_status: str,
     message: str,
     *,
-    warnings: Sequence[str],
+    unsupported_semantics: Sequence[str] = (),
 ) -> EvaluationRunResult:
+    warnings = tuple(state.all_warnings)
+    unsupported = tuple(dict.fromkeys([*unsupported_semantics, *_unsupported_semantics(state)]))
+    _write_failure_artifacts(
+        context,
+        state,
+        failure_stage=failure_stage,
+        assessment_status=assessment_status,
+        message=message,
+        warnings=warnings,
+        unsupported_semantics=unsupported,
+    )
     return EvaluationRunResult(
-        result_dir=result_dir,
+        result_dir=context.result_dir,
         message=message,
         run_completed=False,
         failure_stage=failure_stage,
         assessment_status=assessment_status,
-        evidence_quality_warnings=tuple(warnings),
+        evidence_quality_warnings=warnings,
     )
+
+
+def _write_failure_artifacts(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    *,
+    failure_stage: str,
+    assessment_status: str,
+    message: str,
+    warnings: Sequence[str],
+    unsupported_semantics: Sequence[str],
+) -> None:
+    scenario_summary = _scenario_summary(state.backend_results, state.expected_scenario_ids)
+    payload = {
+        "schema_version": "quant_strategies.evaluation.failure/v1",
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "strategy_id": context.config.strategy_id,
+        "backend": _backend_name(context.selected_backend, data_kind=context.config.data.kind),
+        "failure_stage": failure_stage,
+        "assessment_status": assessment_status,
+        "message": message,
+        "evidence_quality_warnings": list(warnings),
+        "unsupported_semantics": list(unsupported_semantics),
+        "data_windows": state.data_windows,
+        "scenario_summary": scenario_summary,
+        "not_authority": "not validation, promotion, paper trading, or live trading authority",
+    }
+    try:
+        write_json_artifact(context.result_dir, "evaluation_failure.json", payload)
+        write_text_artifact(
+            context.result_dir,
+            "notes.md",
+            _failure_notes(
+                context.config.strategy_id,
+                failure_stage=failure_stage,
+                assessment_status=assessment_status,
+                message=message,
+                scenario_count=len(state.backend_results),
+            ),
+        )
+    except Exception:
+        pass
+
+
+def _unsupported_semantics(state: _EvaluationState) -> tuple[str, ...]:
+    values: list[str] = []
+    for result in state.backend_results:
+        values.extend(result.unsupported_semantics)
+    return tuple(dict.fromkeys(values))
 
 
 def _scenario_summary(results: list[PortfolioEvaluationResult], expected_ids: list[str]) -> dict[str, Any]:
@@ -603,5 +757,25 @@ def _notes(strategy_id: str, results: list[PortfolioEvaluationResult]) -> str:
         f"- Strategy: `{strategy_id}`\n"
         f"- Scenarios: {len(results)}\n"
         "- Evidence class: research evaluation\n"
+        "- Authority: evidence only; not validation, promotion, paper trading, or live trading authority.\n"
+    )
+
+
+def _failure_notes(
+    strategy_id: str,
+    *,
+    failure_stage: str,
+    assessment_status: str,
+    message: str,
+    scenario_count: int,
+) -> str:
+    return (
+        "# Evaluation Notes\n\n"
+        f"- Strategy: `{strategy_id}`\n"
+        f"- Status: `{assessment_status}`\n"
+        f"- Failure stage: `{failure_stage}`\n"
+        f"- Message: {message}\n"
+        f"- Scenarios reached: {scenario_count}\n"
+        "- Evidence class: failed research evaluation\n"
         "- Authority: evidence only; not validation, promotion, paper trading, or live trading authority.\n"
     )

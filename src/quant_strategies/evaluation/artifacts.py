@@ -23,6 +23,7 @@ _REQUIRED_TRACE_TABLES = {
     "trades": "tables/trades.parquet",
     "target_positions": "tables/target_positions.parquet",
     "target_exposure_summary": "tables/target_exposure_summary.parquet",
+    "funding_cashflows": "tables/funding_cashflows.parquet",
 }
 
 _REQUIRED_TRACE_TABLE_METADATA = {
@@ -83,6 +84,15 @@ _TRACE_COLUMN_TYPES = {
         "asset": "string",
         "decision_count": "int64",
         "target_round_trip_turnover": "float64",
+    },
+    "funding_cashflows": {
+        "scenario_id": "string",
+        "timestamp": "timestamp_us_utc",
+        "asset": "string",
+        "funding_rate": "float64",
+        "position_units": "float64",
+        "mark_price": "float64",
+        "funding_cashflow": "float64",
     },
 }
 
@@ -302,6 +312,7 @@ def write_evaluation_manifest(
                 "trades.parquet",
                 "target_positions.parquet",
                 "target_exposure_summary.parquet",
+                "funding_cashflows.parquet",
             },
             recursive=True,
         ),
@@ -333,7 +344,10 @@ def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) ->
         if column_name in table.schema.names:
             field = table.schema.field(column_name)
             fields.append(pa.field(column_name, arrow_type, nullable=field.nullable))
-            columns.append(table[column_name].cast(arrow_type))
+            if table.num_rows == 0 and not field.type.equals(arrow_type):
+                columns.append(pa.nulls(0, type=arrow_type))
+            else:
+                columns.append(table[column_name].cast(arrow_type))
         else:
             fields.append(pa.field(column_name, arrow_type, nullable=True))
             columns.append(pa.nulls(table.num_rows, type=arrow_type))

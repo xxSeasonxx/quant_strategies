@@ -43,7 +43,7 @@ flowchart TD
     pnl --> valid["quant-strategies validate<br/>windows × scenarios → advisory evidence"]
     evidence --> eval["quant-strategies evaluate<br/>frozen candidate → portfolio/path evidence"]
     valid -. "opt-in single-trade check" .-> oracle["VectorBT Pro<br/>single-trade check"]
-    eval --> vbt["VectorBT Pro<br/>portfolio evidence · Parquet traces"]
+    eval --> vbt["portfolio backends<br/>VectorBT Pro · project perp ledger · Parquet traces"]
     valid --> human["human promotion review<br/>(outside the code)"]
 ```
 
@@ -57,13 +57,13 @@ The design has one spine:
   → freeze inputs → typed decisions → strict causal replay.
 - **One PnL contract for quick run and validation.** The shared engine result is
   the single source of trade-level PnL, so **the number a human audits is the
-  number the validation decision is computed from.** Evaluation branches from
-  the same frozen rows and decisions into VectorBT Pro portfolio evidence.
+	  number the validation decision is computed from.** Evaluation branches from
+	  the same frozen rows and decisions into portfolio/path evidence.
 - **Three implemented public surfaces today.** A fast *quick run* for diagnostic
   evidence, an *advisory validation run* for retained-candidate mechanical
-  evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
-  economic, and path evidence. VectorBT Pro remains out of validation verdict
-  metrics and is required by evaluation.
+	  evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
+	  economic, and path evidence. VectorBT Pro remains out of validation verdict
+	  metrics and is the non-funding evaluation backend.
 - **One internal execution engine.** `quant_strategies.engine` is an internal
   kernel used by the quick-run and validation surfaces, not a fourth user-facing
   API. Internal imports and tests can use it; consumers should use the three
@@ -91,6 +91,9 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 - **Typed output.** The default output is `StrategyDecision` — a stable
   `decision_id`, instrument, `open` intent, decision/as-of times, target,
   `ExitPolicy`, and `ObservationRef` lineage for consumed rows.
+- **Sampled threshold exits.** `ExitPolicy` stop-loss, take-profit, and trailing
+  thresholds are evaluated on the configured bar fill-price sample (`close` or
+  `quote`) at bar timestamps. They are not intrabar high/low barrier orders.
 - **Narrow default ontology.** Equities/ETFs, FX pairs, and crypto perps with
   `open` intent and `target_weight` sizing. Futures, options, multi-leg, book
   side, and other sizings live behind explicit imports from
@@ -118,9 +121,9 @@ portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 **Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
 
 Runs a frozen candidate through the research evaluation surface and writes
-portfolio, economic, and path evidence. Evaluation uses VectorBT Pro and writes
-detailed trace artifacts as Parquet through `pyarrow`; there is no JSONL fallback
-for trace-level evaluation artifacts.
+portfolio, economic, and path evidence. Evaluation uses VectorBT Pro for
+non-funding data and the project perp ledger for `crypto_perp_funding`; detailed
+trace artifacts are Parquet through `pyarrow`, with no JSONL fallback.
 
 Python callers use `quant_strategies.evaluation.run_evaluation` and receive
 `EvaluationRunResult`.
@@ -135,6 +138,11 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
+- **Evaluation owns funding-aware perp NAV for research evidence.**
+  `crypto_perp_funding` evaluation uses the project-owned
+  `project_perp_ledger_v1` cash ledger so NAV, drawdown, trade stats, fees,
+  slippage, and funding cashflows share one accounting path. VectorBT Pro remains
+  the non-funding portfolio backend.
 - **The engine package is internal.** Do not build user workflows on
   `quant_strategies.engine`; call quick run, validation run, or evaluation run.
 - **Research evaluation is separate from validation.** Historical portfolio,

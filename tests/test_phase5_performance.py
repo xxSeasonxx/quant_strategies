@@ -204,6 +204,23 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
             artifact_kind="target_exposure_summary",
             scenario_ids=scenario_ids,
         ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/funding_cashflows.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": [],
+                    "timestamp": [],
+                    "asset": [],
+                    "funding_rate": [],
+                    "position_units": [],
+                    "mark_price": [],
+                    "funding_cashflow": [],
+                }
+            ),
+            artifact_kind="funding_cashflows",
+            scenario_ids=scenario_ids,
+        ),
     ]
 
 
@@ -287,7 +304,8 @@ start = "2026-01-01"
 end = "2026-06-30"
 
 [data]
-kind = "crypto_perp_funding"
+kind = "bars"
+dataset = "demo_bars"
 symbols = ["BTC-PERP"]
 strict = true
 start = "2026-01-01"
@@ -345,14 +363,30 @@ class FakeEvaluationBackend:
             target_exposure_summary=pd.DataFrame(
                 {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
             ),
+            funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
         return PortfolioEvaluationResult(
             scenario_id=scenario.scenario_id,
             backend=self.name,
             status="completed",
-            metrics={"total_return": 0.01, "trade_count": 1},
+            metrics=completed_evaluation_metrics(),
             tables=tables,
         )
+
+
+def completed_evaluation_metrics() -> dict[str, int | float | str]:
+    return {
+        "total_return": 0.01,
+        "ending_value": 101.0,
+        "max_drawdown": -0.01,
+        "trade_count": 1,
+        "return_total_count_excluding_initial": 1,
+        "return_sample_count": 1,
+        "return_nonfinite_count": 0,
+        "funding_cashflow_total": 0.0,
+        "funding_event_count": 0,
+        "funding_model": "none",
+    }
 
 
 def test_large_engine_screen_completes_under_runtime_budget():
@@ -454,12 +488,13 @@ def test_strip_trace_tables_removes_dataframe_payload_from_summaries():
         trades=pd.DataFrame({"scenario_id": ["base"], "trade_id": [1]}),
         target_positions=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "target_weight": [0.25]}),
         target_exposure_summary=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "decision_count": [1]}),
+        funding_cashflows=pd.DataFrame({"scenario_id": []}),
     )
     result = PortfolioEvaluationResult(
         scenario_id="base",
         backend="fake",
         status="completed",
-        metrics={"total_return": 0.01, "trade_count": 1},
+        metrics=completed_evaluation_metrics(),
         tables=tables,
     )
 

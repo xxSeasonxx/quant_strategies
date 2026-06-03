@@ -95,7 +95,7 @@ backend.
 | --- | --- |
 | Quick run | Internal `quant_strategies.engine` path through `runner.engine_runner` |
 | Validation verdict | Internal `EngineBackend`, using the same engine path |
-| Evaluation run | VectorBT Pro portfolio evaluation backend |
+| Evaluation run | VectorBT Pro for non-funding data; `project_perp_ledger_v1` for `crypto_perp_funding` |
 | VectorBT Pro agreement oracle | Optional single-trade validation agreement check |
 
 `quant_strategies.engine` is internal to the quick-run and validation paths in
@@ -106,7 +106,8 @@ The reason is semantic, not just implementation preference:
 - The project engine reports linear signed per-trade activity sums.
 - VectorBT Pro portfolio returns are NAV-path portfolio returns.
 - Those objects only match in narrow cases.
-- Funding semantics belong to the project engine, not to VectorBT Pro.
+- Funding-aware evaluation semantics belong to the project perp ledger, not to
+  VectorBT Pro.
 - Strategy purity still forbids calling VectorBT Pro inside strategy files.
 
 VectorBT Pro evaluation output is named as portfolio/path evidence, not as a
@@ -116,8 +117,8 @@ project engine validation decision. Evaluation is not validation and does not au
 
 The evaluation surface is an implemented stateless surface for
 frozen-candidate portfolio/economic/path evidence. It requires a candidate-local
-`evaluation.toml`, calls VectorBT Pro with explicit portfolio assumptions, and
-returns `EvaluationRunResult`.
+`evaluation.toml`, calls the data-kind-specific portfolio backend with explicit
+assumptions, and returns `EvaluationRunResult`.
 
 Detailed trace artifacts are Parquet only through `pyarrow`:
 
@@ -127,6 +128,7 @@ Detailed trace artifacts are Parquet only through `pyarrow`:
 | `tables/trades.parquet` | trade traces by scenario |
 | `tables/target_positions.parquet` | target-position entry/exit events by scenario; this is target schedule evidence, not realized broker position state |
 | `tables/target_exposure_summary.parquet` | target exposure decision counts and target round-trip turnover by scenario and asset |
+| `tables/funding_cashflows.parquet` | funding cashflow trace rows by scenario; empty but schema-valid for non-funding evaluations |
 
 The companion JSON artifacts include `evaluation_metrics.json`,
 `scenario_summary.json`, `data_manifest.json`, `evaluation_manifest.json`,
@@ -165,6 +167,13 @@ The oracle:
 The adapter rejects unsupported semantics such as non-`open` intent, non-project
 instrument ontology, `flat` target, non-`target_weight` sizing, leveraged target
 weight above `1.0`, non-close fills, and threshold exit policies.
+
+The research evaluation surface supports `crypto_perp_funding` through the
+project-owned `project_perp_ledger_v1` ledger. Funding-aware scenarios do not
+use VectorBT Pro `cash_dividends`; that contract was rejected because perp
+funding is a position cashflow over `entry_time < funding_timestamp <= exit_time`,
+not an asset dividend stream. VectorBT Pro remains the evaluation backend for
+non-funding scenarios.
 
 ## Correct Use
 

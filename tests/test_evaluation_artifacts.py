@@ -166,6 +166,19 @@ def test_table_metadata_reads_scenario_ids_from_parquet_footer(tmp_path: Path):
                 "target_round_trip_turnover": "double",
             },
         ),
+        (
+            "funding_cashflows",
+            pd.DataFrame({"scenario_id": []}),
+            {
+                "scenario_id": "string",
+                "timestamp": "timestamp[us, tz=UTC]",
+                "asset": "string",
+                "funding_rate": "double",
+                "position_units": "double",
+                "mark_price": "double",
+                "funding_cashflow": "double",
+            },
+        ),
     ],
 )
 def test_write_parquet_artifact_materializes_empty_trace_table_schema(
@@ -408,7 +421,7 @@ def test_write_evaluation_manifest_treats_empty_expected_coverage_as_declared(tm
         )
 
 
-@pytest.mark.parametrize("artifact_index", [0, 1, 2, 3])
+@pytest.mark.parametrize("artifact_index", [0, 1, 2, 3, 4])
 @pytest.mark.parametrize("missing_value", [True, False])
 def test_write_evaluation_manifest_rejects_missing_required_trace_table_metadata(
     tmp_path: Path,
@@ -491,7 +504,7 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
     assert not any(path.endswith(".parquet") for path in artifact_paths)
     assert manifest["tables"][0]["path"] == "tables/portfolio_path.parquet"
     assert manifest["tables"][0]["file_sha256"]
-    assert manifest["trace_artifacts"]["table_count"] == 4
+    assert manifest["trace_artifacts"]["table_count"] == 5
 
 
 def test_write_json_artifact_rejects_path_escape(tmp_path: Path):
@@ -579,6 +592,23 @@ def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, .
                 }
             ),
             artifact_kind="target_exposure_summary",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/funding_cashflows.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": [],
+                    "timestamp": [],
+                    "asset": [],
+                    "funding_rate": [],
+                    "position_units": [],
+                    "mark_price": [],
+                    "funding_cashflow": [],
+                }
+            ),
+            artifact_kind="funding_cashflows",
             scenario_ids=scenario_ids,
         ),
     ]
