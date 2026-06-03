@@ -20,6 +20,8 @@ observables, rule, assumptions, provenance, and falsifier.
 evidence. It is not validation.
 - **Validation run:** validation requires `validate_params` and returns advisory
 retained-candidate mechanical evidence. It is not quant strategy evaluation.
+The production verdict backend is the internal engine only; VectorBT Pro
+validation support is limited to the explicit opt-in agreement oracle.
 - **Evaluation run:** evaluation uses
 `quant-strategies evaluate candidate/evaluation.toml` or
 `quant_strategies.evaluation.run_evaluation` and returns
@@ -48,14 +50,17 @@ quick-run artifacts are intentionally not full replay chains.
 - Full NAV and portfolio accounting belong to the evaluation surface; they are
 not quick-run or validation metrics.
 - The VectorBT Pro agreement check is optional and single-trade only; it should
-not be treated as multi-trade validation confidence.
+  not be treated as multi-trade validation confidence.
 - Runtime sandboxing is deferred unless strategy code becomes untrusted.
 
 ## Approved Next Direction
 
 - Preserve the clarified contract: docs should distinguish quick run,
 mechanical evidence validation, and research evaluation without renaming
-current code, CLI commands, package paths, artifact names, or public APIs.
+current CLI commands, package paths, or artifact names.
+- Keep the quick-run Python result model nested as `RunResult.outcome` and
+`RunResult.evidence`; do not add flat compatibility aliases for retired runner
+result fields.
 - Keep research evaluation as the term for stateless frozen-candidate evidence;
 do not use it to mean the auto-research loop.
 - Keep the stateless research evaluation surface separate from validation and  

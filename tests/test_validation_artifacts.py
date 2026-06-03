@@ -9,10 +9,12 @@ from pydantic import BaseModel
 
 import quant_strategies.validation.artifacts as artifacts
 from quant_strategies.validation.artifacts import (
+    backend_runs_payload,
     create_validation_result_dir,
     write_json_artifact,
     write_text_artifact,
 )
+from quant_strategies.validation.backends import BackendRunResult, ScenarioBackendRunResult
 
 
 class ArtifactPayload(BaseModel):
@@ -118,3 +120,20 @@ def test_write_text_artifact_normalizes_newline_and_creates_parent_dir(tmp_path:
     assert path == tmp_path / "notes" / "summary.md"
     assert path.read_text() == "line\n"
     assert existing_newline.read_text() == "line\n"
+
+
+def test_backend_runs_payload_rejects_unknown_agreement_oracle_status():
+    item = ScenarioBackendRunResult(
+        window_id="validation_2026_h1",
+        scenario_id="validation_2026_h1/base",
+        required=True,
+        result=BackendRunResult(
+            backend="engine",
+            status="completed",
+            metrics={"net_return": 0.01, "trade_count": 1},
+        ),
+        agreement_oracle_status="bogus",  # type: ignore[arg-type]
+    )
+
+    with pytest.raises(ValueError, match="unsupported agreement_oracle status"):
+        backend_runs_payload([item])

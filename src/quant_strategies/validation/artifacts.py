@@ -13,6 +13,16 @@ from pydantic import BaseModel
 from quant_strategies.validation.backends import ScenarioBackendRunResult, backend_metric_semantics
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
+_AGREEMENT_ORACLE_STATUSES = {
+    "disabled",
+    "not_run",
+    "skipped",
+    "pass",
+    "fail",
+    "unavailable",
+    "inconclusive",
+}
+
 
 def create_validation_result_dir(results_root: Path, strategy_id: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
@@ -96,10 +106,19 @@ def _json_value(value: Any) -> Any:
 
 
 def agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
-    # Emitted only when the opt-in oracle ran, so default artifacts are unchanged.
-    if item.agreement is None:
-        return {}
-    return {"agreement": item.agreement.as_dict()}
+    if item.agreement_oracle_status not in _AGREEMENT_ORACLE_STATUSES:
+        raise ValueError(f"unsupported agreement_oracle status: {item.agreement_oracle_status}")
+    payload = {
+        "agreement_oracle": {
+            "status": item.agreement_oracle_status,
+            "enabled": item.agreement_oracle_status != "disabled",
+            "ran": item.agreement is not None,
+            "note": item.agreement.note if item.agreement is not None else item.agreement_oracle_note,
+        }
+    }
+    if item.agreement is not None:
+        payload["agreement"] = item.agreement.as_dict()
+    return payload
 
 
 def scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str, ...]:

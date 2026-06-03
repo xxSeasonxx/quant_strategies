@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +84,8 @@ def write_candidate(
     *,
     with_param_validator: bool = True,
     data_kind: str = "bars",
+    window_ids: Sequence[str] = ("eval_2026_h1",),
+    annualization: int = 365,
 ) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
@@ -107,19 +109,25 @@ def write_candidate(
         "field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
+    windows_toml = "\n".join(
+        f'''
+[[windows]]
+id = "{window_id}"
+start = "2026-01-01"
+end = "2026-06-30"
+'''.strip()
+        for window_id in window_ids
+    )
     (candidate / "evaluation.toml").write_text(
-        '''
+        f'''
 strategy_path = "strategy.py"
 strategy_id = "demo"
 
-[[windows]]
-id = "eval_2026_h1"
-start = "2026-01-01"
-end = "2026-06-30"
+{windows_toml}
 
 [data]
-kind = "''' + data_kind + '''"
-''' + dataset_line + '''symbols = ["BTC-PERP"]
+kind = "{data_kind}"
+{dataset_line}symbols = ["BTC-PERP"]
 strict = true
 start = "2026-01-01"
 end = "2026-06-30"
@@ -137,7 +145,7 @@ fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
 [metrics]
-annualization_periods_per_year = 365
+annualization_periods_per_year = {annualization}
 
 [output]
 results_dir = "evaluation_results/demo"
@@ -181,6 +189,57 @@ class FakeBackend:
             status="completed",
             metrics=completed_metrics(),
             tables=tables,
+        )
+
+
+class CadenceFakeBackend(FakeBackend):
+    def __init__(self, timestamps: Sequence[datetime]) -> None:
+        self._timestamps = tuple(timestamps)
+
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        frame = pd.DataFrame(
+            {
+                "scenario_id": [scenario.scenario_id] * len(self._timestamps),
+                "timestamp": list(self._timestamps),
+                "portfolio_value": [100.0 + index for index, _timestamp in enumerate(self._timestamps)],
+                "period_return": [0.0, *([0.01] * (len(self._timestamps) - 1))],
+                "drawdown": [0.0] * len(self._timestamps),
+            }
+        )
+        tables = PortfolioTraceTables(
+            portfolio_path=frame,
+            trades=pd.DataFrame({"scenario_id": [scenario.scenario_id], "trade_id": [1]}),
+            target_positions=pd.DataFrame(
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "timestamp": [self._timestamps[0]],
+                    "asset": ["BTC-PERP"],
+                    "target_weight": [0.25],
+                }
+            ),
+            target_exposure_summary=pd.DataFrame(
+                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
+            ),
+            funding_cashflows=pd.DataFrame({"scenario_id": []}),
+        )
+        return PortfolioEvaluationResult(
+            scenario_id=scenario.scenario_id,
+            backend=self.name,
+            status="completed",
+            metrics=completed_metrics(),
+            tables=tables,
+        )
+
+
+class MixedCadenceFakeBackend(CadenceFakeBackend):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        spacing = timedelta(minutes=1) if scenario.scenario_id.endswith("/zero_costs/base_fill") else timedelta(days=1)
+        timestamps = [AS_OF + spacing * index for index in range(4)]
+        return CadenceFakeBackend(timestamps).run(
+            decisions=decisions,
+            rows=rows,
+            scenario=scenario,
+            metrics=metrics,
         )
 
 
@@ -275,6 +334,14 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert (result.result_dir / "scenario_summary.json").exists()
     assert (result.result_dir / "notes.md").exists()
     assert (result.result_dir / "evaluation_manifest.json").exists()
+    input_row_files = list((result.result_dir / "audit" / "input_rows").glob("*.parquet"))
+    decision_record_files = list((result.result_dir / "audit" / "decision_records").glob("*.jsonl"))
+    assert len(input_row_files) == 1
+    assert len(decision_record_files) == 1
+    input_rows_path = input_row_files[0]
+    decision_records_path = decision_record_files[0]
+    assert input_rows_path.exists()
+    assert decision_records_path.exists()
     assert (result.result_dir / "tables" / "portfolio_path.parquet").exists()
     assert (result.result_dir / "tables" / "trades.parquet").exists()
     assert (result.result_dir / "tables" / "target_positions.parquet").exists()
@@ -302,9 +369,38 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
     assert data_manifest["windows"][0]["row_contract"]["mode"] == "validation"
     assert data_manifest["windows"][0]["decision_count"] == 1
+    assert data_manifest["windows"][0]["input_rows_artifact"]["path"] == input_rows_path.relative_to(
+        result.result_dir
+    ).as_posix()
+    assert data_manifest["windows"][0]["input_rows_artifact"]["row_count"] == 4
+    assert len(data_manifest["windows"][0]["input_rows_artifact"]["file_sha256"]) == 64
+    assert data_manifest["windows"][0]["input_rows_artifact"]["normalized_rows_sha256"] == (
+        data_manifest["windows"][0]["normalized_rows_sha256"]
+    )
+    assert data_manifest["windows"][0]["decision_records_artifact"]["path"] == decision_records_path.relative_to(
+        result.result_dir
+    ).as_posix()
+    assert data_manifest["windows"][0]["decision_records_artifact"]["row_count"] == 1
+    assert len(data_manifest["windows"][0]["decision_records_artifact"]["sha256"]) == 64
+    input_rows = pd.read_parquet(input_rows_path)
+    assert input_rows["symbol"].tolist() == ["BTC-PERP", "BTC-PERP", "BTC-PERP", "BTC-PERP"]
+    assert input_rows["close"].tolist() == [100.0, 101.0, 102.0, 103.0]
+    decision_records = decision_records_path.read_text().splitlines()
+    assert len(decision_records) == 1
+    decision_payload = json.loads(decision_records[0])
+    assert decision_payload["strategy_id"] == "demo"
+    assert decision_payload["decision_id"].startswith("demo:")
+    assert decision_payload["instrument"]["symbol"] == "BTC-PERP"
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["evaluation"]["evidence_class"] == "research_evaluation"
     assert manifest["evaluation"]["not_authority"] == "not validation, promotion, paper trading, or live trading authority"
+    assert manifest["audit_artifacts"]["input_rows"] == [data_manifest["windows"][0]["input_rows_artifact"]]
+    assert manifest["audit_artifacts"]["decision_records"] == [
+        data_manifest["windows"][0]["decision_records_artifact"]
+    ]
+    assert manifest["replayability"]["replayable_from_artifacts"] is True
+    assert manifest["replayability"]["input_rows_embedded"] is True
+    assert manifest["replayability"]["decision_records_embedded"] is True
     assert len(manifest["tables"]) == 5
     assert {item["artifact_kind"] for item in manifest["tables"]} == {
         "portfolio_path",
@@ -348,6 +444,116 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
         manifest["scenario_coverage"]["expected_ids"]
     )
     assert all("duration_ms" in event for event in events if event["status"] == "completed")
+
+
+def test_run_evaluation_records_matching_annualization_cadence_without_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=CadenceFakeBackend(timestamps),
+    )
+
+    assert result.run_completed is True
+    assert result.evidence_quality_warnings == ()
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    assert "full-grid periodic portfolio returns" in metrics_payload["metric_semantics"]["annualized_return"]["base"]
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "ok"
+    assert cadence["configured_periods_per_year"] == 365
+    assert cadence["observed_median_spacing_seconds"] == pytest.approx(86_400.0)
+    assert cadence["implied_periods_per_year"] == pytest.approx(365.2425)
+    assert cadence["warning"] is None
+    assert metrics_payload["evidence_quality_warnings"] == []
+    manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
+    assert manifest["annualization_cadence"] == cadence
+    assert manifest["evaluation"]["evidence_quality_warnings"] == []
+
+
+def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    timestamps = [AS_OF + timedelta(minutes=index) for index in range(4)]
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=CadenceFakeBackend(timestamps),
+    )
+
+    assert result.run_completed is True
+    assert len(result.evidence_quality_warnings) == 1
+    assert result.evidence_quality_warnings[0].startswith("annualization_cadence_mismatch:")
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "warning"
+    assert cadence["configured_periods_per_year"] == 365
+    assert cadence["observed_median_spacing_seconds"] == pytest.approx(60.0)
+    assert cadence["implied_periods_per_year"] == pytest.approx(525_949.2)
+    assert cadence["mismatch_factor"] > 1000.0
+    assert cadence["warning"] == result.evidence_quality_warnings[0]
+    assert metrics_payload["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
+    manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
+    assert manifest["annualization_cadence"] == cadence
+    assert manifest["evaluation"]["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
+
+
+def test_run_evaluation_warns_when_one_completed_scenario_has_mismatched_cadence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=MixedCadenceFakeBackend(()),
+    )
+
+    assert result.run_completed is True
+    assert len(result.evidence_quality_warnings) == 1
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "warning"
+    assert cadence["offending_scenario_ids"] == ["eval_2026_h1/zero_costs/base_fill"]
+    assert cadence["observed_median_spacing_seconds"] == pytest.approx(60.0)
+    assert cadence["warning"] == result.evidence_quality_warnings[0]
+
+
+def test_run_evaluation_uses_collision_proof_audit_paths_for_window_ids(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, window_ids=("eval/2026", "eval 2026"))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=PreparedFakeBackend())
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
+    row_paths = [window["input_rows_artifact"]["path"] for window in data_manifest["windows"]]
+    decision_paths = [window["decision_records_artifact"]["path"] for window in data_manifest["windows"]]
+    assert len(row_paths) == 2
+    assert len(decision_paths) == 2
+    assert len(set(row_paths)) == 2
+    assert len(set(decision_paths)) == 2
+    for path in [*row_paths, *decision_paths]:
+        assert (result.result_dir / path).exists()
+    assert [item["path"] for item in manifest["audit_artifacts"]["input_rows"]] == row_paths
+    assert [item["path"] for item in manifest["audit_artifacts"]["decision_records"]] == decision_paths
+    assert manifest["replayability"]["replayable_from_artifacts"] is True
 
 
 def test_run_evaluation_resolves_relative_config_path_from_cwd_when_repo_root_omitted(
@@ -977,6 +1183,191 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
         failure_stage="artifact_write",
         assessment_status="evaluation_failed",
         message_fragment="arrow conversion failed",
+    )
+
+
+def test_run_evaluation_failure_artifacts_include_window_when_audit_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    def failing_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise OSError("audit rows failed")
+
+    monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", failing_input_rows)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    payload = assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="audit rows failed",
+    )
+    assert payload["data_windows"][0]["window_id"] == "eval_2026_h1"
+    assert payload["data_windows"][0]["row_count"] == 4
+    assert payload["data_windows"][0]["decision_count"] == 1
+    assert "input_rows_artifact" not in payload["data_windows"][0]
+
+
+def test_run_evaluation_reports_failure_artifact_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class FailingBackend(FakeBackend):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+            return PortfolioEvaluationResult(
+                scenario_id=scenario.scenario_id,
+                backend=self.name,
+                status="failed",
+                warnings=("backend failed",),
+            )
+
+    candidate = write_candidate(tmp_path)
+    events: list[dict[str, object]] = []
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    def failing_failure_json(*args: Any, **kwargs: Any) -> None:
+        raise OSError("failure artifact disk full")
+
+    monkeypatch.setattr(evaluation_runner, "write_json_artifact", failing_failure_json)
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=FailingBackend(),
+        event_sink=events.append,
+    )
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.assessment_status == "portfolio_evaluation_failed"
+    assert "backend failed" in result.message
+    assert (
+        "evaluation_failure_artifact_write_failed: OSError: failure artifact disk full"
+        in result.evidence_quality_warnings
+    )
+    assert result.result_dir is not None
+    assert not (result.result_dir / "evaluation_failure.json").exists()
+    assert any(
+        event["event"] == "evaluation_stage"
+        and event["stage"] == "failure_artifact_writes"
+        and event["status"] == "failed"
+        and "failure artifact disk full" in str(event["error"])
+        for event in events
+    )
+
+
+def test_run_evaluation_rejects_mismatched_audit_artifact_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    real_write = evaluation_runner.write_decision_records_artifact
+
+    def bad_decision_records(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        metadata = real_write(*args, **kwargs)
+        metadata["sha256"] = "0" * 64
+        return metadata
+
+    monkeypatch.setattr(evaluation_runner, "write_decision_records_artifact", bad_decision_records)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    assert result.result_dir is not None
+    assert not (result.result_dir / "evaluation_manifest.json").exists()
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="decision_records audit artifact sha256 does not match file",
+    )
+
+
+def test_run_evaluation_rejects_audit_artifact_bound_to_wrong_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    real_write = evaluation_runner.write_input_rows_artifact
+
+    def wrong_window_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return real_write(*args, **{**kwargs, "window_id": "other_window"})
+
+    monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", wrong_window_input_rows)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="input_rows audit artifact path does not match data window",
+    )
+
+
+def test_run_evaluation_rejects_audit_row_count_not_bound_to_data_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    real_write = evaluation_runner.write_input_rows_artifact
+
+    def truncated_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return real_write(*args, **{**kwargs, "rows": rows()[:1]})
+
+    monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", truncated_input_rows)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="input_rows audit artifact row_count does not match data window row_count",
+    )
+
+
+def test_run_evaluation_rejects_audit_decision_count_not_bound_to_data_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    real_write = evaluation_runner.write_decision_records_artifact
+
+    def empty_decision_records(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return real_write(*args, **{**kwargs, "decisions": []})
+
+    monkeypatch.setattr(evaluation_runner, "write_decision_records_artifact", empty_decision_records)
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+
+    assert result.run_completed is False
+    assert result.failure_stage == "artifact_write"
+    assert result.assessment_status == "evaluation_failed"
+    assert_failure_artifacts(
+        result,
+        failure_stage="artifact_write",
+        assessment_status="evaluation_failed",
+        message_fragment="decision_records audit artifact row_count does not match data window decision_count",
     )
 
 

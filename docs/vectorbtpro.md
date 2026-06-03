@@ -105,6 +105,9 @@ The reason is semantic, not just implementation preference:
 
 - The project engine reports linear signed per-trade activity sums.
 - VectorBT Pro portfolio returns are NAV-path portfolio returns.
+- Evaluation annualized metrics use full-grid portfolio returns from
+  `portfolio_path`, including flat/no-position bars, and completed runs emit an
+  `annualization_cadence` warning on obvious configured-cadence mismatches.
 - Those objects only match in narrow cases.
 - Funding-aware evaluation semantics belong to the project perp ledger, not to
   VectorBT Pro.
@@ -135,7 +138,12 @@ Detailed trace artifacts are Parquet only through `pyarrow`:
 The companion JSON artifacts include `evaluation_metrics.json`,
 `scenario_summary.json`, `data_manifest.json`, `evaluation_manifest.json`,
 `environment.json`, and `notes.md`. There is no JSONL fallback path for
-evaluation traces.
+evaluation row snapshots or traces. Evaluation also writes
+`audit/input_rows/{safe_window}-{hash}.parquet` normalized row snapshots and
+`audit/decision_records/{safe_window}-{hash}.jsonl` decision records so
+completed metrics can be traced through the artifact package.
+`evaluation_metrics.json` and `evaluation_manifest.json` include the advisory
+annualization cadence summary.
 
 ## Agreement Oracle
 

@@ -85,6 +85,13 @@ class _ValidationState:
     failure_stage: str | None = None
 
 
+@dataclass(frozen=True)
+class _AgreementOracleOutcome:
+    status: str
+    note: str = ""
+    agreement: Any | None = None
+
+
 _MIN_VALIDATION_TRADES = 10
 
 
@@ -547,7 +554,7 @@ def _run_scenario_backend(
             scenario_id=scenario.id,
             trades=backend_result.trades,
         )
-    agreement = _run_agreement_oracle(
+    agreement_outcome = _run_agreement_oracle(
         context,
         scenario_config,
         scenario_decisions,
@@ -566,7 +573,9 @@ def _run_scenario_backend(
         decision_records_sha256=decision_records_sha256,
         trade_ledger_path=trade_ledger_path,
         trade_ledger_sha256=trade_ledger_sha256,
-        agreement=agreement,
+        agreement=agreement_outcome.agreement,
+        agreement_oracle_status=agreement_outcome.status,
+        agreement_oracle_note=agreement_outcome.note,
     )
 
 
@@ -585,13 +594,18 @@ def _run_agreement_oracle(
     recorded as inconclusive and never crashes the run.
     """
     oracle = context.config.agreement_oracle
-    if not oracle.enabled or backend_result.status != "completed":
-        return None
+    if not oracle.enabled:
+        return _AgreementOracleOutcome(status="disabled", note="agreement_oracle_disabled")
+    if backend_result.status != "completed":
+        return _AgreementOracleOutcome(
+            status="not_run",
+            note=f"backend_status:{backend_result.status}",
+        )
 
     from quant_strategies.validation.agreement import AgreementResult, evaluate_agreement
 
     try:
-        return evaluate_agreement(
+        agreement = evaluate_agreement(
             engine_metrics=backend_result.metrics,
             decisions=list(decisions),
             rows=execution.normalized_rows.projection_rows(),
@@ -599,8 +613,18 @@ def _run_agreement_oracle(
             tolerance_abs=oracle.tolerance_abs,
             tolerance_rel=oracle.tolerance_rel,
         )
+        return _AgreementOracleOutcome(
+            status=agreement.status,
+            note=agreement.note,
+            agreement=agreement,
+        )
     except Exception as exc:  # never let the cross-check crash the verdict
-        return AgreementResult(status="inconclusive", note=f"agreement_oracle_error:{exc}")
+        agreement = AgreementResult(status="inconclusive", note=f"agreement_oracle_error:{exc}")
+        return _AgreementOracleOutcome(
+            status=agreement.status,
+            note=agreement.note,
+            agreement=agreement,
+        )
 
 
 def _classify_validation_state(

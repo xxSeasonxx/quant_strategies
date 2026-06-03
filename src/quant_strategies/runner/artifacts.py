@@ -264,39 +264,7 @@ def _safe_name(value: str) -> str:
     return name or "strategy"
 
 
-# --- result/summary/notes shaping (relocated out of the runner orchestrator) ---
-
-
-def run_result_evidence_fields(evidence_quality: dict[str, object] | None) -> dict[str, object]:
-    if evidence_quality is None:
-        return {}
-    return {
-        "data_availability_status": _optional_str(evidence_quality.get("data_availability_status")),
-        "availability_coverage": _optional_dict(evidence_quality.get("availability_coverage")),
-        "row_contract": _optional_dict(evidence_quality.get("row_contract")),
-        "causality_verified": bool(evidence_quality.get("causality_verified")),
-        "emitted_replay_verified": bool(evidence_quality.get("emitted_replay_verified")),
-        "strict_no_emission_verified": bool(evidence_quality.get("strict_no_emission_verified")),
-        "evidence_quality_warnings": _string_tuple(evidence_quality.get("evidence_quality_warnings")),
-    }
-
-
-def _optional_str(value: object) -> str | None:
-    return value if isinstance(value, str) else None
-
-
-def _optional_dict(value: object) -> dict[str, object] | None:
-    return dict(value) if isinstance(value, Mapping) else None
-
-
-def _string_tuple(value: object) -> tuple[str, ...]:
-    if value is None:
-        return ()
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, list | tuple):
-        return tuple(str(item) for item in value)
-    return (str(value),)
+# --- summary/notes shaping (relocated out of the runner orchestrator) ---
 
 
 def summary_payload(

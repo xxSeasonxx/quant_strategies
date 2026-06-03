@@ -10,6 +10,7 @@ from quant_strategies.provenance import (
     source_identity,
 )
 from quant_strategies.validation.artifacts import write_json_artifact
+from quant_strategies.validation.artifacts import agreement_payload
 from quant_strategies.validation.backends import ScenarioBackendRunResult
 
 
@@ -96,6 +97,7 @@ def _backend_summary(
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),
+                **agreement_payload(item),
             }
         )
     return {

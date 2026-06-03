@@ -11,6 +11,15 @@ from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
 
 AgreementStatus = Literal["pass", "fail", "skipped", "inconclusive", "unavailable"]
+AgreementOracleStatus = Literal[
+    "disabled",
+    "not_run",
+    "skipped",
+    "pass",
+    "fail",
+    "unavailable",
+    "inconclusive",
+]
 
 
 @dataclass(frozen=True)

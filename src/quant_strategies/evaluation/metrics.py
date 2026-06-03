@@ -19,7 +19,7 @@ def finite_metric_or_none(value: Any) -> float | None:
 
 def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     nav_base = "portfolio NAV path"
-    returns_base = "periodic portfolio returns"
+    returns_base = "full-grid periodic portfolio returns, including flat/no-position bars"
     trades_base = "portfolio trade records"
     backend = "vectorbtpro for non-funding evaluations; project_perp_ledger_v1 for crypto_perp_funding"
     cost_scope = (

@@ -119,10 +119,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_exit_code(result: object) -> int:
-    failure_stage = getattr(result, "failure_stage", None)
+    outcome = result.outcome
+    failure_stage = outcome.failure_stage
     if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if failure_stage is not None or not getattr(result, "run_completed", False):
+    if failure_stage is not None or not outcome.completed:
         return 1
     return 0
 

@@ -16,11 +16,27 @@ from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError
 from quant_strategies.validation import run_validation
-from quant_strategies.validation.backends import BackendRunResult, FakeBackend
+from quant_strategies.validation.backends import BackendRunResult
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+
+
+class FakeBackend:
+    name = "fake"
+
+    def __init__(self, result: BackendRunResult | None = None) -> None:
+        self._result = result or BackendRunResult(
+            backend=self.name,
+            status="completed",
+            metrics={"net_return": 0.0, "trade_count": 0},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+
+    def run(self, *, decisions, rows, config):
+        return self._result
 
 
 def _validated(generate):
@@ -257,10 +273,16 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         "decision_count": 1,
         "decision_records_path": base_decision_path,
         "decision_records_sha256": file_sha256(base_decision_file),
-        "trade_ledger_path": None,
-        "trade_ledger_sha256": None,
-        "result": {
-            "backend": "fake",
+            "trade_ledger_path": None,
+            "trade_ledger_sha256": None,
+            "agreement_oracle": {
+                "enabled": False,
+                "ran": False,
+                "status": "disabled",
+                "note": "agreement_oracle_disabled",
+            },
+            "result": {
+                "backend": "fake",
             "status": "completed",
             "metrics": {"net_return": 0.02, "trade_count": 20},
             "warnings": [],
@@ -1308,6 +1330,102 @@ def _enable_oracle(candidate: Path) -> None:
     toml.write_text(toml.read_text() + "\n[agreement_oracle]\nenabled = true\n")
 
 
+def _agreement_oracle_statuses(result) -> dict[str, set[str]]:
+    assert result.result_dir is not None
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    cost_fill = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    return {
+        "backend_summary": {item["agreement_oracle"]["status"] for item in backend_summary["results"]},
+        "cost_fill": {item["agreement_oracle"]["status"] for item in cost_fill["scenarios"]},
+        "manifest": {item["agreement_oracle"]["status"] for item in manifest["backend"]["scenarios"]},
+    }
+
+
+def _assert_agreement_oracle_status(result, expected: str, *, raw_agreement_present: bool) -> None:
+    assert _agreement_oracle_statuses(result) == {
+        "backend_summary": {expected},
+        "cost_fill": {expected},
+        "manifest": {expected},
+    }
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    cost_fill = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
+    for payloads in (
+        backend_summary["results"],
+        cost_fill["scenarios"],
+        manifest["backend"]["scenarios"],
+    ):
+        assert all(("agreement" in item) is raw_agreement_present for item in payloads)
+
+
+def test_run_validation_agreement_oracle_disabled_status_is_explicit(tmp_path: Path, monkeypatch):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    _assert_agreement_oracle_status(result, "disabled", raw_agreement_present=False)
+
+
+def test_run_validation_agreement_oracle_not_run_status_when_backend_does_not_complete(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(tmp_path)
+    _enable_oracle(candidate)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="failed",
+            metrics={},
+            warnings=("backend failed",),
+            unsupported_semantics=(),
+        )
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    _assert_agreement_oracle_status(result, "not_run", raw_agreement_present=False)
+
+
+@pytest.mark.parametrize("status", ["pass", "skipped", "unavailable", "inconclusive"])
+def test_run_validation_agreement_oracle_result_status_is_explicit_everywhere(
+    tmp_path: Path,
+    monkeypatch,
+    status: str,
+):
+    from quant_strategies.validation.agreement import AgreementResult
+
+    candidate = write_candidate(tmp_path)
+    _enable_oracle(candidate)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+    )
+    monkeypatch.setattr(
+        "quant_strategies.validation.agreement.evaluate_agreement",
+        lambda **_kwargs: AgreementResult(status=status, note=f"forced {status}"),
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.01, "trade_count": 1, "gross_return": 0.01},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    _assert_agreement_oracle_status(result, status, raw_agreement_present=True)
+
+
 def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path, monkeypatch):
     pytest.importorskip("vectorbtpro")
     candidate = write_candidate(tmp_path)
@@ -1355,6 +1473,7 @@ def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, mo
     assert result.decision.reasons[0].startswith("backend_agreement_failed")
     assert "engine_return=0.05" in result.decision.reasons[0]
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert backend_summary["results"][0]["agreement_oracle"]["status"] == "fail"
     assert backend_summary["results"][0]["agreement"]["status"] == "fail"
 
 

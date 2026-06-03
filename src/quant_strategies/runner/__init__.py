@@ -30,25 +30,40 @@ from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 
 
 @dataclass(frozen=True)
-class RunResult:
-    result_dir: Path | None
-    notes_path: Path | None
-    message: str
-    run_completed: bool = False
+class RunCausalityEvidence:
+    verified: bool = False
+    emitted_replay_verified: bool = False
+    strict_no_emission_verified: bool = False
+
+
+@dataclass(frozen=True)
+class RunEvidence:
+    replayable_from_artifacts: bool | None = None
+    data_availability_status: str | None = None
+    availability_coverage: dict[str, object] | None = None
+    row_contract: dict[str, object] | None = None
+    causality: RunCausalityEvidence = RunCausalityEvidence()
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    completed: bool = False
     failure_stage: str | None = None
     assessment_status: str = "runner_failed"
     promotion_eligible: bool = False
     # "validated" / "unvalidated_passthrough" on a completed run; "unknown" on a
     # run that failed before the param contract was conclusively determined.
     param_contract: str = "unknown"
-    replayable_from_artifacts: bool | None = None
-    data_availability_status: str | None = None
-    availability_coverage: dict[str, object] | None = None
-    row_contract: dict[str, object] | None = None
-    causality_verified: bool = False
-    emitted_replay_verified: bool = False
-    strict_no_emission_verified: bool = False
-    evidence_quality_warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RunResult:
+    result_dir: Path | None
+    notes_path: Path | None
+    message: str
+    outcome: RunOutcome = RunOutcome()
+    evidence: RunEvidence = RunEvidence()
 
 
 def run_config(
@@ -72,7 +87,7 @@ def run_config(
             result_dir=None,
             notes_path=None,
             message=str(exc),
-            failure_stage="config_load",
+            outcome=RunOutcome(failure_stage="config_load"),
         )
 
     try:
@@ -84,9 +99,11 @@ def run_config(
             result_dir=None,
             notes_path=None,
             message=f"artifact initialization failed: {exc}",
-            failure_stage="artifact_initialization",
-            replayable_from_artifacts=replayable_from_artifacts_for_profile(
-                config.output.artifact_profile
+            outcome=RunOutcome(failure_stage="artifact_initialization"),
+            evidence=RunEvidence(
+                replayable_from_artifacts=replayable_from_artifacts_for_profile(
+                    config.output.artifact_profile
+                )
             ),
         )
 
@@ -181,22 +198,21 @@ def run_config(
             result_dir=result_dir,
             notes_path=None,
             message=f"artifact write failed: {exc}",
-            failure_stage="artifact_write",
-            replayable_from_artifacts=replayable_from_artifacts_for_profile(
-                config.output.artifact_profile
-            ),
+            outcome=RunOutcome(failure_stage="artifact_write"),
+            evidence=_run_evidence(config, evidence_quality),
         )
     return RunResult(
         result_dir=result_dir,
         notes_path=result_dir / "notes.md",
         message=notes.strip(),
-        run_completed=True,
-        failure_stage=None,
-        assessment_status=assessment_status,
-        promotion_eligible=False,
-        param_contract=execution.param_contract,
-        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
-        **artifacts.run_result_evidence_fields(evidence_quality),
+        outcome=RunOutcome(
+            completed=True,
+            failure_stage=None,
+            assessment_status=assessment_status,
+            promotion_eligible=False,
+            param_contract=execution.param_contract,
+        ),
+        evidence=_run_evidence(config, evidence_quality),
     )
 
 
@@ -640,13 +656,57 @@ def _failure_result(
         result_dir=result_dir,
         notes_path=notes_path,
         message=notes.strip(),
-        run_completed=True,
-        failure_stage=stage,
-        assessment_status="runner_failed",
-        promotion_eligible=False,
-        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
-        **artifacts.run_result_evidence_fields(quality),
+        outcome=RunOutcome(
+            completed=True,
+            failure_stage=stage,
+            assessment_status="runner_failed",
+            promotion_eligible=False,
+        ),
+        evidence=_run_evidence(config, quality),
     )
 
 
-__all__ = ["RunResult", "run_config"]
+def _run_evidence(
+    config: config_module.RunConfig,
+    evidence_quality: dict[str, object] | None,
+) -> RunEvidence:
+    quality = evidence_quality or {}
+    return RunEvidence(
+        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
+        data_availability_status=_optional_str(quality.get("data_availability_status")),
+        availability_coverage=_optional_dict(quality.get("availability_coverage")),
+        row_contract=_optional_dict(quality.get("row_contract")),
+        causality=RunCausalityEvidence(
+            verified=bool(quality.get("causality_verified")),
+            emitted_replay_verified=bool(quality.get("emitted_replay_verified")),
+            strict_no_emission_verified=bool(quality.get("strict_no_emission_verified")),
+        ),
+        warnings=_string_tuple(quality.get("evidence_quality_warnings")),
+    )
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _optional_dict(value: object) -> dict[str, object] | None:
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list | tuple):
+        return tuple(str(item) for item in value)
+    return (str(value),)
+
+
+__all__ = [
+    "RunCausalityEvidence",
+    "RunEvidence",
+    "RunOutcome",
+    "RunResult",
+    "run_config",
+]

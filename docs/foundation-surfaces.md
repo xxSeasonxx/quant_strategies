@@ -43,6 +43,35 @@ Path anchoring:
 - after a validation/evaluation TOML is found, its `strategy_path` and
   `output.results_dir` fields are resolved relative to the config directory.
 
+Foundation pre-run verification:
+
+```bash
+conda run -n quant python -m pip install -e .
+conda run -n quant quant-strategies --help
+conda run -n quant pytest
+conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
+```
+
+Run this when the local `quant` environment may have stale console-script
+metadata or before relying on VectorBT Pro evaluation behavior.
+
+## Status And Result Interpretation
+
+The public workflow vocabulary is `run`, `validate`, and `evaluate`.
+Implementation labels such as engine screen/gate modes are artifact-level
+details, not promotion language.
+
+| Surface | Python status fields | Success condition | Failure interpretation |
+| --- | --- | --- | --- |
+| Quick run | `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `outcome.completed` is true and `outcome.failure_stage is None` | `outcome.failure_stage` names the failed stage; `outcome.assessment_status` stays diagnostic-only |
+| Validation run | `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `run_completed` is true and `failure_stage is None`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
+| Evaluation run | `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `run_completed` is true and `failure_stage is None` | stateless frozen-candidate evidence only |
+
+Quick-run Python evidence is nested under `RunResult.evidence`, including
+`evidence.replayable_from_artifacts`, `evidence.row_contract`,
+`evidence.causality.verified`, and `evidence.warnings`. There are no flat
+compatibility aliases for the previous runner result fields.
+
 ## Quick Run
 
 Command:
@@ -76,7 +105,9 @@ Important sections:
 - `[output]` with repo-local generated `results_dir` under `results/`, artifact
 profile, and diagnostic sizing.
 
-Output: `RunResult`. The CLI prints the result directory on success.
+Output: `RunResult`. The CLI prints the result directory on success. Python
+callers read terminal status from `result.outcome` and evidence quality from
+`result.evidence`.
 
 Common artifacts include `config.toml`, `strategy_snapshot.py`,
 `run_manifest.json`, `summary.json`, `environment.json`, `notes.md`,
@@ -142,7 +173,9 @@ Common artifacts include `validation_config.toml`, `strategy_snapshot.py`,
 `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`,
 trade-ledger JSONL files, `cost_fill_sensitivity.json`,
 `validation_decision.json`, `validation_manifest.json`, `environment.json`, and
-`validation_report.md`.
+`validation_report.md`. Per-scenario backend summaries always include an
+`agreement_oracle` status; the raw `agreement` payload appears only when the
+opt-in oracle actually ran.
 
 CLI exit codes:
 
@@ -193,6 +226,10 @@ For `crypto_perp_funding`, evaluation uses a project-owned perpetual futures
 ledger. Its NAV path includes price PnL, configured fees/slippage, and funding
 cashflows. VectorBT Pro `cash_dividends` is not used for funding because its
 contract does not match perp funding cashflows.
+Annualized metrics use full-grid portfolio returns from the `portfolio_path`
+trace, including flat/no-position bars. The configured
+`annualization_periods_per_year` must match the bar cadence; completed runs emit
+an advisory `annualization_cadence` summary and warning on obvious mismatches.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
 
@@ -223,17 +260,20 @@ Control artifacts:
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `evaluation_config.toml`   | copied evaluation config                                                                                                   |
 | `strategy_snapshot.py`     | copied strategy file                                                                                                       |
-| `data_manifest.json`       | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, and decision count |
-| `evaluation_metrics.json`  | metric semantics and per-scenario portfolio metrics, including return-sample coverage                                     |
+| `data_manifest.json`       | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, decision count, and audit artifact links |
+| `evaluation_metrics.json`  | metric semantics, annualization cadence, evidence-quality warnings, and per-scenario portfolio metrics, including return-sample coverage |
 | `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, and unsupported semantics                                                   |
-| `evaluation_manifest.json` | hashes, scenario coverage, table metadata, metric semantics, replayability, provenance, and artifact inventory             |
+| `evaluation_manifest.json` | hashes, scenario coverage, annualization cadence, audit metadata, table metadata, metric semantics, replayability, provenance, and artifact inventory |
+| `audit/input_rows/{safe_window}-{hash}.parquet` | normalized strategy input rows for each evaluation window that reaches strategy execution          |
+| `audit/decision_records/{safe_window}-{hash}.jsonl` | typed strategy decisions for each evaluation window that reaches strategy execution             |
 | `evaluation_failure.json`  | failure stage, status, message, warnings, unsupported semantics, data windows reached, and scenario coverage when failed   |
 | `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro` when present                             |
 | `notes.md`                 | human-readable evaluation notes                                                                                            |
 
 
-Detailed trace artifacts are Parquet only and require pyarrow.
-There is no JSONL fallback path for evaluation traces.
+Normalized row snapshots and detailed trace artifacts are Parquet only and
+require pyarrow. There is no JSONL fallback path for evaluation row snapshots
+or traces. Decision records are JSONL for direct audit.
 
 
 | Trace artifact                           | Contents                                                                                                                                                 |

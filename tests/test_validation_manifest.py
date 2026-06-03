@@ -15,6 +15,7 @@ def scenario(
     required: bool = True,
     status: str = "completed",
     trade_ledger_path: str | None = None,
+    agreement_oracle_status: str = "disabled",
 ) -> ScenarioBackendRunResult:
     return ScenarioBackendRunResult(
         window_id="validation_2026_h1",
@@ -28,6 +29,7 @@ def scenario(
         scenario_kind="cost",
         trade_ledger_path=trade_ledger_path,
         trade_ledger_sha256="abc" if trade_ledger_path else None,
+        agreement_oracle_status=agreement_oracle_status,
     )
 
 
@@ -108,3 +110,19 @@ def test_validation_manifest_ignores_incomplete_required_scenarios_for_global_re
     assert manifest["validation"]["verdict_replayable"] is True
     scenarios = {item["scenario_id"]: item for item in manifest["backend"]["scenarios"]}
     assert scenarios["failed"]["replayable_from_trade_ledger"] is False
+
+
+def test_validation_manifest_always_reports_agreement_oracle_status(tmp_path: Path):
+    manifest = write_manifest(
+        tmp_path,
+        [
+            scenario("base", agreement_oracle_status="disabled"),
+            scenario("not_run", status="failed", agreement_oracle_status="not_run"),
+        ],
+    )
+
+    scenarios = {item["scenario_id"]: item for item in manifest["backend"]["scenarios"]}
+    assert scenarios["base"]["agreement_oracle"]["status"] == "disabled"
+    assert scenarios["not_run"]["agreement_oracle"]["status"] == "not_run"
+    assert "agreement" not in scenarios["base"]
+    assert "agreement" not in scenarios["not_run"]

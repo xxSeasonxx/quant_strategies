@@ -12,7 +12,7 @@ from quant_strategies.engine.models import Trade
 from quant_strategies.validation.config import ScenarioRunConfig
 
 if TYPE_CHECKING:
-    from quant_strategies.validation.agreement import AgreementResult
+    from quant_strategies.validation.agreement import AgreementOracleStatus, AgreementResult
 
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
@@ -178,8 +178,12 @@ class ScenarioBackendRunResult:
     # as sum(trade.net_return). None when the backend emitted no trades.
     trade_ledger_path: str | None = None
     trade_ledger_sha256: str | None = None
-    # Set only when the opt-in agreement oracle ran for this scenario.
+    # Raw agreement is set only when the opt-in oracle actually ran. The explicit
+    # status is always present so uncorroborated evidence cannot be mistaken for
+    # agreement evidence.
     agreement: "AgreementResult | None" = None
+    agreement_oracle_status: "AgreementOracleStatus" = "disabled"
+    agreement_oracle_note: str = ""
 
 
 class ValidationBackend(Protocol):
@@ -195,37 +199,9 @@ class ValidationBackend(Protocol):
         raise NotImplementedError
 
 
-class FakeBackend:
-    name = "fake"
-
-    def __init__(self, result: BackendRunResult | None = None) -> None:
-        self._result = result or BackendRunResult(
-            backend=self.name,
-            status="completed",
-            metrics={"net_return": 0.0, "trade_count": 0},
-            warnings=(),
-            unsupported_semantics=(),
-        )
-
-    def run(
-        self,
-        *,
-        decisions: list[StrategyDecision],
-        rows: Sequence[Mapping[str, Any]],
-        config: ScenarioRunConfig,
-    ) -> BackendRunResult:
-        return self._result
-
-
 def get_backend(name: str) -> ValidationBackend:
     if name == "engine":
         from quant_strategies.validation.engine_backend import EngineBackend
 
         return EngineBackend()
-    if name == "fake":
-        return FakeBackend()
-    if name == "vectorbtpro":
-        from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
-
-        return VectorBTProBackend()
     raise ValueError(f"unsupported validation backend: {name}")

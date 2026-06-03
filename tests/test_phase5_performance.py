@@ -410,7 +410,7 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.run_completed is True
+    assert result.outcome.completed is True
     assert result.result_dir is not None
     assert artifact_bytes(result.result_dir) < 75_000
     profile = json.loads((result.result_dir / "artifact_profile_summary.json").read_text())

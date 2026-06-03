@@ -5,7 +5,6 @@ import pytest
 from quant_strategies.validation.backends import (
     BackendMetrics,
     BackendRunResult,
-    FakeBackend,
     ScenarioBackendRunResult,
     backend_metric_semantics,
     get_backend,
@@ -57,6 +56,16 @@ def completed_backend_result(net_return: float, trade_count: int) -> BackendRunR
         warnings=(),
         unsupported_semantics=(),
     )
+
+
+class FakeBackend:
+    name = "fake"
+
+    def __init__(self, result: BackendRunResult) -> None:
+        self._result = result
+
+    def run(self, *, decisions, rows, config):
+        return self._result
 
 
 def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
@@ -147,7 +156,7 @@ def mechanical_threshold_scenarios(
     return tuple(scenarios)
 
 
-def test_fake_backend_returns_configured_result():
+def test_local_fake_backend_fixture_returns_configured_result():
     backend = FakeBackend(
         BackendRunResult(
             backend="fake",
@@ -200,6 +209,13 @@ def test_get_backend_rejects_unknown_backend_name():
         assert "unsupported validation backend" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_get_backend_exposes_only_engine_backend():
+    assert get_backend("engine").name == "engine"
+    for name in ("fake", "vectorbtpro"):
+        with pytest.raises(ValueError, match="unsupported validation backend"):
+            get_backend(name)
 
 
 def test_policy_mechanical_fail_for_data_failure():

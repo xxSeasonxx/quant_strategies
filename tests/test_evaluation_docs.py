@@ -44,6 +44,26 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
     assert "output.results_dir" in readme
 
 
+def test_docs_include_installed_cli_refresh_smoke():
+    for path in ["README.md", "docs/foundation-surfaces.md"]:
+        text = read(path)
+        assert "conda run -n quant python -m pip install -e ." in text, path
+        assert "conda run -n quant quant-strategies --help" in text, path
+        assert (
+            "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
+            "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
+        ) in text, path
+
+
+def test_docs_describe_full_grid_returns_and_annualization_cadence_warnings():
+    for path in ["README.md", "docs/foundation-surfaces.md", "docs/vectorbtpro.md"]:
+        text = read(path)
+        assert "full-grid portfolio returns" in text, path
+        assert "flat/no-position bars" in text, path
+        assert "annualization cadence" in text, path
+        assert "annualization_cadence" in text, path
+
+
 def test_prd_owns_product_intent_not_evaluate_command_schema():
     text = read("PRD.md")
 

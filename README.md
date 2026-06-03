@@ -57,8 +57,9 @@ The design has one spine:
   → freeze inputs → typed decisions → strict causal replay.
 - **One PnL contract for quick run and validation.** The shared engine result is
   the single source of trade-level PnL, so **the number a human audits is the
-	  number the validation decision is computed from.** Evaluation branches from
-	  the same frozen rows and decisions into portfolio/path evidence.
+  number the validation decision is computed from.** Evaluation branches from
+  the same frozen rows and decisions into portfolio/NAV evidence instead of
+  treating NAV metrics and linear trade-activity sums as interchangeable.
 - **Three implemented public surfaces today.** A fast *quick run* for diagnostic
   evidence, an *advisory validation run* for retained-candidate mechanical
 	  evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
@@ -108,7 +109,10 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 Loads rows, runs the pure strategy, validates the decision contract, replays for
 hidden lookahead, and computes trade-level diagnostic evidence for one strategy
 version. Completed quick-run summaries include engine-derived
-`economic_metrics` from the internal trade ledger.
+`economic_metrics` from the internal trade ledger. Python callers receive
+`RunResult`; status lives under `result.outcome`, while replayability,
+row-contract, causality, and warning fields live under `result.evidence`.
+The runner API does not keep flat compatibility aliases for older result fields.
 
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 
@@ -120,7 +124,9 @@ portfolio quality, capacity, or promotion authority. `promotion_eligible` /
 Validation configs require unique window IDs and explicit `[readiness]`
 observation coverage. For `crypto_perp_funding`, readiness also requires
 decision observations for `close`, `funding_timestamp`, `funding_rate`, and
-`has_funding_event`.
+`has_funding_event`. Per-scenario validation artifacts always expose
+`agreement_oracle.status`; raw `agreement` details are emitted only when the
+opt-in oracle ran.
 
 **Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
 
@@ -128,6 +134,14 @@ Runs a frozen candidate through the research evaluation surface and writes
 portfolio, economic, and path evidence. Evaluation uses VectorBT Pro for
 non-funding data and the project perp ledger for `crypto_perp_funding`; detailed
 trace artifacts are Parquet through `pyarrow`, with no JSONL fallback.
+Evaluation also writes normalized input row snapshots as Parquet and decision
+records as JSONL so completed evaluation metrics can be traced through the
+artifact package.
+Annualized evaluation metrics use full-grid portfolio returns from
+`portfolio_path`, including flat/no-position bars. The configured
+`annualization_periods_per_year` must match the bar cadence; completed runs emit
+an advisory annualization cadence summary, `annualization_cadence`, and warning
+on obvious mismatches.
 
 Python callers use `quant_strategies.evaluation.run_evaluation` and receive
 `EvaluationRunResult`.
@@ -162,11 +176,17 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 Use the `quant` conda environment for all Python commands:
 
 ```bash
+conda run -n quant python -m pip install -e .
+conda run -n quant quant-strategies --help
 conda run -n quant pytest
+conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
 conda run -n quant quant-strategies run path/to/config.toml
 conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 ```
+
+Run the editable-install refresh, `--help` smoke, full test suite, and optional
+VectorBT Pro smoke before relying on the local environment for foundation runs.
 
 Path anchoring differs by surface. Quick-run configs resolve relative paths
 against the repository root. Validation and evaluation configs are

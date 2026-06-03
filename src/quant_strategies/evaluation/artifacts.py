@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import shutil
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,17 @@ _REQUIRED_TRACE_TABLE_METADATA = {
     "byte_size",
     "scenario_ids",
 }
+
+_REQUIRED_DECISION_RECORD_METADATA = {
+    "path",
+    "artifact_kind",
+    "format",
+    "row_count",
+    "sha256",
+    "byte_size",
+}
+
+_REQUIRED_INPUT_ROWS_METADATA = _REQUIRED_TRACE_TABLE_METADATA | {"normalized_rows_sha256"}
 
 _TRACE_TABLE_METADATA_COMPARE_FIELDS = (
     "path",
@@ -162,6 +174,49 @@ def write_data_manifest(result_dir: Path, *, windows: list[dict[str, Any]]) -> P
     )
 
 
+def write_input_rows_artifact(
+    result_dir: Path,
+    *,
+    window_id: str,
+    rows: Sequence[Mapping[str, Any]],
+    normalized_rows_sha256: str,
+) -> dict[str, Any]:
+    import pandas as pd
+
+    artifact_name = f"audit/input_rows/{_audit_artifact_stem(window_id)}.parquet"
+    frame = pd.DataFrame([dict(row) for row in rows])
+    metadata = dict(
+        write_parquet_artifact(
+            result_dir,
+            artifact_name,
+            frame,
+            artifact_kind="normalized_input_rows",
+            scenario_ids=(),
+        )
+    )
+    metadata["normalized_rows_sha256"] = normalized_rows_sha256
+    return metadata
+
+
+def write_decision_records_artifact(
+    result_dir: Path,
+    *,
+    window_id: str,
+    decisions: Sequence[Any],
+) -> dict[str, Any]:
+    artifact_name = f"audit/decision_records/{_audit_artifact_stem(window_id)}.jsonl"
+    payload = _canonical_jsonl_lines(decisions)
+    path = write_text_artifact(result_dir, artifact_name, payload)
+    return {
+        "path": path.relative_to(result_dir).as_posix(),
+        "artifact_kind": "decision_records",
+        "format": "jsonl",
+        "row_count": len(decisions),
+        "sha256": file_sha256(path),
+        "byte_size": path.stat().st_size,
+    }
+
+
 def write_parquet_artifact(
     result_dir: Path,
     name: str,
@@ -252,9 +307,14 @@ def write_evaluation_manifest(
     data_windows: list[dict[str, Any]],
     table_artifacts: list[dict[str, Any]],
     scenario_summary: Mapping[str, Any],
+    annualization_cadence: Mapping[str, Any] | None = None,
+    evidence_quality_warnings: Sequence[str] = (),
 ) -> Path:
     _validate_trace_table_artifacts(table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary)
     manifest_table_artifacts = [dict(item) for item in table_artifacts]
+    audit_artifacts = _validated_audit_artifacts_from_windows(data_windows, result_dir=result_dir)
+    input_rows_embedded = bool(data_windows)
+    decision_records_embedded = bool(data_windows)
     write_json_artifact(
         result_dir,
         "environment.json",
@@ -279,6 +339,7 @@ def write_evaluation_manifest(
             "config_sha256": file_sha256(config_path),
             "assessment_status": "evaluation_complete",
             "evidence_class": "research_evaluation",
+            "evidence_quality_warnings": list(evidence_quality_warnings),
             "not_authority": "not validation, promotion, paper trading, or live trading authority",
         },
         "strategy": {
@@ -290,13 +351,20 @@ def write_evaluation_manifest(
             "windows": data_windows,
         },
         "metric_semantics": evaluation_metric_semantics(),
+        "annualization_cadence": json_safe_value(annualization_cadence or {}),
         "scenario_summary": json_safe_value(scenario_summary),
         "scenario_coverage": scenario_summary["scenario_coverage"],
+        "audit_artifacts": audit_artifacts,
         "tables": manifest_table_artifacts,
         "replayability": {
-            "basis": "candidate config, strategy snapshot, normalized row hash, scenario assumptions, and Parquet trace tables",
-            "input_rows_embedded": False,
-            "limitation": "input rows are identified by normalized hash and upstream data config; raw rows are not embedded in evaluation artifacts",
+            "basis": (
+                "candidate config, strategy snapshot, normalized input row snapshots, "
+                "decision records, scenario assumptions, and Parquet trace tables"
+            ),
+            "replayable_from_artifacts": input_rows_embedded and decision_records_embedded,
+            "input_rows_embedded": input_rows_embedded,
+            "decision_records_embedded": decision_records_embedded,
+            "limitation": "upstream data provenance is recorded, but vendor truth still belongs to quant_data",
         },
         "trace_artifacts": {
             "format": "parquet",
@@ -313,11 +381,203 @@ def write_evaluation_manifest(
                 "target_positions.parquet",
                 "target_exposure_summary.parquet",
                 "funding_cashflows.parquet",
+                *(Path(item["path"]).name for item in audit_artifacts["input_rows"]),
             },
             recursive=True,
         ),
     }
     return write_json_artifact(result_dir, "evaluation_manifest.json", payload)
+
+
+def _validated_audit_artifacts_from_windows(
+    data_windows: list[dict[str, Any]],
+    *,
+    result_dir: Path,
+) -> dict[str, list[dict[str, Any]]]:
+    input_rows: list[dict[str, Any]] = []
+    decision_records: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for window in data_windows:
+        window_id = _data_window_string(window, "window_id")
+        expected_input_path = f"audit/input_rows/{_audit_artifact_stem(window_id)}.parquet"
+        expected_decision_path = f"audit/decision_records/{_audit_artifact_stem(window_id)}.jsonl"
+        row_count = _data_window_non_negative_int(window, "row_count")
+        decision_count = _data_window_non_negative_int(window, "decision_count")
+        normalized_rows_hash = _data_window_sha256(window, "normalized_rows_sha256")
+        input_rows_artifact = window.get("input_rows_artifact")
+        decision_records_artifact = window.get("decision_records_artifact")
+        if not isinstance(input_rows_artifact, Mapping):
+            raise ValueError(f"data window {window_id!r} is missing input_rows audit artifact metadata")
+        if not isinstance(decision_records_artifact, Mapping):
+            raise ValueError(f"data window {window_id!r} is missing decision_records audit artifact metadata")
+
+        _validate_input_rows_audit_artifact(
+            input_rows_artifact,
+            result_dir=result_dir,
+            expected_path=expected_input_path,
+            expected_row_count=row_count,
+            expected_normalized_rows_sha256=normalized_rows_hash,
+        )
+        _record_unique_audit_path(input_rows_artifact["path"], seen_paths)
+        _validate_decision_records_audit_artifact(
+            decision_records_artifact,
+            result_dir=result_dir,
+            expected_path=expected_decision_path,
+            expected_row_count=decision_count,
+        )
+        _record_unique_audit_path(decision_records_artifact["path"], seen_paths)
+        input_rows.append(dict(input_rows_artifact))
+        decision_records.append(dict(decision_records_artifact))
+    return {
+        "input_rows": input_rows,
+        "decision_records": decision_records,
+    }
+
+
+def _validate_input_rows_audit_artifact(
+    item: Mapping[str, Any],
+    *,
+    result_dir: Path,
+    expected_path: str,
+    expected_row_count: int,
+    expected_normalized_rows_sha256: str,
+) -> None:
+    missing_keys = _REQUIRED_INPUT_ROWS_METADATA - set(item)
+    none_keys = {key for key in _REQUIRED_INPUT_ROWS_METADATA if key in item and item[key] is None}
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise ValueError(f"input_rows audit artifact is missing required metadata: {missing}")
+    if none_keys:
+        missing = ", ".join(sorted(none_keys))
+        raise ValueError(f"input_rows audit artifact is missing required metadata: {missing}")
+
+    if item["artifact_kind"] != "normalized_input_rows":
+        raise ValueError("input_rows audit artifact artifact_kind must be normalized_input_rows")
+    if item["format"] != "parquet":
+        raise ValueError("input_rows audit artifact format must be parquet")
+    if item["scenario_ids"] != []:
+        raise ValueError("input_rows audit artifact scenario_ids must be empty")
+    if item["path"] != expected_path:
+        raise ValueError("input_rows audit artifact path does not match data window")
+    artifact_path = _validated_audit_path(result_dir, item["path"], suffix=".parquet", label="input_rows")
+    for hash_key in ("file_sha256", "schema_sha256"):
+        if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
+            raise ValueError(f"input_rows audit artifact {hash_key} must be 64 hex characters")
+    if file_sha256(artifact_path) != item["file_sha256"]:
+        raise ValueError("input_rows audit artifact file_sha256 does not match file")
+    if item["normalized_rows_sha256"] != expected_normalized_rows_sha256:
+        raise ValueError("input_rows audit artifact normalized_rows_sha256 does not match data window")
+
+    _validate_non_negative_int(item, "row_count", kind="input_rows audit artifact")
+    if item["row_count"] != expected_row_count:
+        raise ValueError("input_rows audit artifact row_count does not match data window row_count")
+    _validate_non_negative_int(item, "row_group_count", kind="input_rows audit artifact")
+    _validate_positive_int(item, "column_count", kind="input_rows audit artifact")
+    _validate_positive_int(item, "byte_size", kind="input_rows audit artifact")
+    actual_metadata = table_metadata(
+        result_dir,
+        artifact_path,
+        artifact_kind="normalized_input_rows",
+        logical_name=item["path"],
+        include_file_hash=False,
+    )
+    for key in _TRACE_TABLE_METADATA_COMPARE_FIELDS:
+        if item[key] != actual_metadata[key]:
+            raise ValueError(f"input_rows audit artifact metadata does not match Parquet file for {key}")
+
+
+def _validate_decision_records_audit_artifact(
+    item: Mapping[str, Any],
+    *,
+    result_dir: Path,
+    expected_path: str,
+    expected_row_count: int,
+) -> None:
+    missing_keys = _REQUIRED_DECISION_RECORD_METADATA - set(item)
+    none_keys = {key for key in _REQUIRED_DECISION_RECORD_METADATA if key in item and item[key] is None}
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise ValueError(f"decision_records audit artifact is missing required metadata: {missing}")
+    if none_keys:
+        missing = ", ".join(sorted(none_keys))
+        raise ValueError(f"decision_records audit artifact is missing required metadata: {missing}")
+    if item["artifact_kind"] != "decision_records":
+        raise ValueError("decision_records audit artifact artifact_kind must be decision_records")
+    if item["format"] != "jsonl":
+        raise ValueError("decision_records audit artifact format must be jsonl")
+    if item["path"] != expected_path:
+        raise ValueError("decision_records audit artifact path does not match data window")
+    artifact_path = _validated_audit_path(result_dir, item["path"], suffix=".jsonl", label="decision_records")
+    if not isinstance(item["sha256"], str) or not _SHA256_PATTERN.fullmatch(item["sha256"]):
+        raise ValueError("decision_records audit artifact sha256 must be 64 hex characters")
+    if file_sha256(artifact_path) != item["sha256"]:
+        raise ValueError("decision_records audit artifact sha256 does not match file")
+    _validate_non_negative_int(item, "row_count", kind="decision_records audit artifact")
+    if item["row_count"] != expected_row_count:
+        raise ValueError("decision_records audit artifact row_count does not match data window decision_count")
+    _validate_non_negative_int(item, "byte_size", kind="decision_records audit artifact")
+    if item["byte_size"] != artifact_path.stat().st_size:
+        raise ValueError("decision_records audit artifact byte_size does not match file")
+    lines = artifact_path.read_text().splitlines()
+    if len(lines) != item["row_count"]:
+        raise ValueError("decision_records audit artifact row_count does not match file")
+    for line in lines:
+        json.loads(line)
+
+
+def _data_window_string(window: Mapping[str, Any], key: str) -> str:
+    value = window.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"data window {key} must be a non-empty string")
+    return value
+
+
+def _data_window_non_negative_int(window: Mapping[str, Any], key: str) -> int:
+    value = window.get(key)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"data window {key} must be a non-negative integer")
+    return value
+
+
+def _data_window_sha256(window: Mapping[str, Any], key: str) -> str:
+    value = window.get(key)
+    if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
+        raise ValueError(f"data window {key} must be 64 hex characters")
+    return value
+
+
+def _validated_audit_path(result_dir: Path, path: Any, *, suffix: str, label: str) -> Path:
+    if not isinstance(path, str):
+        raise ValueError(f"{label} audit artifact path must be a string")
+    try:
+        artifact_path = _artifact_path(result_dir, path)
+    except ValueError as exc:
+        raise ValueError(f"{label} audit artifact path must stay inside result_dir") from exc
+    if artifact_path.suffix != suffix:
+        raise ValueError(f"{label} audit artifact path must have {suffix} suffix")
+    if not artifact_path.is_file():
+        raise ValueError(f"{label} audit artifact path does not exist under result_dir")
+    return artifact_path
+
+
+def _record_unique_audit_path(path: str, seen_paths: set[str]) -> None:
+    if path in seen_paths:
+        raise ValueError(f"audit artifact paths must be unique: {path}")
+    seen_paths.add(path)
+
+
+def _canonical_jsonl_lines(items: Sequence[Any]) -> str:
+    lines = [
+        json.dumps(_canonical_record_value(item), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        for item in items
+    ]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def _canonical_record_value(value: Any) -> Any:
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return value.model_dump(mode="json")
+    return json_safe_value(value)
 
 
 def _artifact_path(result_dir: Path, name: str) -> Path:
@@ -575,6 +835,11 @@ def _compression_from_footer(metadata: Any) -> str | dict[str, str]:
 
 def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()).strip("_") or "evaluation"
+
+
+def _audit_artifact_stem(window_id: str) -> str:
+    digest = hashlib.sha256(window_id.encode("utf-8")).hexdigest()[:12]
+    return f"{_safe_name(window_id)}-{digest}"
 
 
 def _optional_hash(path: Path) -> str | None:

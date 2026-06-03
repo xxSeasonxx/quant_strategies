@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import shutil
 from inspect import Parameter, signature
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from numbers import Real
@@ -19,7 +19,9 @@ from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
     initialize_evaluation_artifacts,
     write_data_manifest,
+    write_decision_records_artifact,
     write_evaluation_manifest,
+    write_input_rows_artifact,
     write_json_artifact,
     write_parquet_artifact,
     write_text_artifact,
@@ -81,6 +83,8 @@ _REQUIRED_COMPLETED_COUNT_METRICS = (
     "funding_event_count",
 )
 _REQUIRED_COMPLETED_FUNDING_MODELS = {"none", "project_perp_ledger_v1"}
+_SECONDS_PER_YEAR = 365.2425 * 24 * 60 * 60
+_ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 2.0
 
 
 def run_evaluation(
@@ -141,7 +145,19 @@ def run_evaluation(
     if coverage_failure is not None:
         return coverage_failure
 
-    artifact_failure = _write_completion_artifacts(context, state, scenario_summary)
+    annualization_cadence = _annualization_cadence_summary(
+        state.trace_results,
+        configured_periods_per_year=context.config.metrics.annualization_periods_per_year,
+    )
+    if annualization_cadence["warning"] is not None:
+        state.all_warnings.append(str(annualization_cadence["warning"]))
+
+    artifact_failure = _write_completion_artifacts(
+        context,
+        state,
+        scenario_summary,
+        annualization_cadence=annualization_cadence,
+    )
     if artifact_failure is not None:
         return artifact_failure
 
@@ -175,10 +191,9 @@ def _run_evaluation_window(
                 require_passed_row_contract=True,
             )
             row_contract = execution.normalized_rows.row_contract_summary()
-            state.data_windows.append(
-                _data_window_payload(window, execution_spec, execution, row_contract)
-            )
+            data_window = _data_window_payload(window, execution_spec, execution, row_contract)
             if row_contract["status"] != "passed":
+                state.data_windows.append(data_window)
                 message = f"evaluation row contract {row_contract['status']}"
                 window_event.fail(message)
                 return _failure_result(
@@ -187,6 +202,21 @@ def _run_evaluation_window(
                     "data_load",
                     "evaluation_failed",
                     message,
+                )
+            audit_artifacts, audit_failure = _write_window_audit_artifacts(
+                context,
+                window,
+                execution,
+            )
+            data_window.update(audit_artifacts)
+            state.data_windows.append(data_window)
+            if audit_failure is not None:
+                return _failure_result(
+                    context,
+                    state,
+                    "artifact_write",
+                    "evaluation_failed",
+                    audit_failure,
                 )
     except StrategyExecutionError as exc:
         return _failure_result(
@@ -220,6 +250,37 @@ def _data_window_payload(
         "evidence_quality": execution.evidence_quality,
         "decision_count": len(execution.decisions),
     }
+
+
+def _write_window_audit_artifacts(
+    context: _EvaluationContext,
+    window: Any,
+    execution: StrategyExecutionResult,
+) -> tuple[dict[str, Any], str | None]:
+    artifacts: dict[str, Any] = {}
+    try:
+        with context.event_emitter.stage(
+            "artifact_writes",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            artifact_kind="evaluation_audit",
+        ):
+            input_rows_artifact = write_input_rows_artifact(
+                context.result_dir,
+                window_id=window.id,
+                rows=execution.normalized_rows.projection_rows(),
+                normalized_rows_sha256=execution.normalized_rows_sha256,
+            )
+            artifacts["input_rows_artifact"] = input_rows_artifact
+            decision_records_artifact = write_decision_records_artifact(
+                context.result_dir,
+                window_id=window.id,
+                decisions=execution.decisions,
+            )
+            artifacts["decision_records_artifact"] = decision_records_artifact
+    except Exception as exc:
+        return artifacts, f"evaluation audit artifact write failed: {exc}"
+    return artifacts, None
 
 
 def _run_causality_check(
@@ -460,9 +521,13 @@ def _write_completion_artifacts(
     context: _EvaluationContext,
     state: _EvaluationState,
     scenario_summary: dict[str, Any],
+    *,
+    annualization_cadence: Mapping[str, Any],
 ) -> EvaluationRunResult | None:
     metrics_payload = {
         "metric_semantics": evaluation_metric_semantics(),
+        "annualization_cadence": annualization_cadence,
+        "evidence_quality_warnings": list(state.all_warnings),
         "scenarios": [
             {
                 "scenario_id": item.scenario_id,
@@ -500,6 +565,8 @@ def _write_completion_artifacts(
                 data_windows=state.data_windows,
                 table_artifacts=table_artifacts,
                 scenario_summary=scenario_summary,
+                annualization_cadence=annualization_cadence,
+                evidence_quality_warnings=tuple(state.all_warnings),
             )
     except Exception as exc:
         _cleanup_trace_table_dirs(context.result_dir)
@@ -511,6 +578,129 @@ def _write_completion_artifacts(
             f"artifact write failed: {exc}",
         )
     return None
+
+
+def _annualization_cadence_summary(
+    results: list[PortfolioEvaluationResult],
+    *,
+    configured_periods_per_year: int,
+) -> dict[str, Any]:
+    groups = _portfolio_path_cadence_groups(
+        results,
+        configured_periods_per_year=configured_periods_per_year,
+    )
+    spacing_count = sum(int(group["spacing_observation_count"]) for group in groups)
+    summary: dict[str, Any] = {
+        "configured_periods_per_year": configured_periods_per_year,
+        "observed_median_spacing_seconds": None,
+        "implied_periods_per_year": None,
+        "mismatch_factor": None,
+        "spacing_observation_count": spacing_count,
+        "observed_group_count": len(groups),
+        "offending_scenario_ids": [],
+        "status": "insufficient",
+        "warning": None,
+    }
+    if not groups:
+        return summary
+
+    offending_groups = [
+        group
+        for group in groups
+        if group["mismatch_factor"] > _ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD
+    ]
+    representative = max(
+        offending_groups or groups,
+        key=lambda group: group["mismatch_factor"],
+    )
+    summary.update(
+        {
+            "observed_median_spacing_seconds": representative["observed_median_spacing_seconds"],
+            "implied_periods_per_year": representative["implied_periods_per_year"],
+            "mismatch_factor": representative["mismatch_factor"],
+            "status": "ok",
+        }
+    )
+    if offending_groups:
+        offending_ids = sorted(str(group["scenario_id"]) for group in offending_groups)
+        warning = (
+            "annualization_cadence_mismatch:"
+            f"configured_periods_per_year={configured_periods_per_year}:"
+            f"offending_scenario_ids={','.join(offending_ids)}:"
+            f"observed_median_spacing_seconds={representative['observed_median_spacing_seconds']:g}:"
+            f"implied_periods_per_year={representative['implied_periods_per_year']:.6g}:"
+            f"mismatch_factor={representative['mismatch_factor']:.6g}"
+        )
+        summary["status"] = "warning"
+        summary["offending_scenario_ids"] = offending_ids
+        summary["warning"] = warning
+    return summary
+
+
+def _portfolio_path_cadence_groups(
+    results: list[PortfolioEvaluationResult],
+    *,
+    configured_periods_per_year: int,
+) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    for result in results:
+        if result.status != "completed" or result.tables is None:
+            continue
+        frame = result.tables.portfolio_path
+        if frame is None or "timestamp" not in getattr(frame, "columns", ()):
+            continue
+        frame_groups = (
+            (
+                (str(scenario_id), group)
+                for scenario_id, group in frame.groupby("scenario_id")
+            )
+            if "scenario_id" in frame.columns and hasattr(frame, "groupby")
+            else ((result.scenario_id, frame),)
+        )
+        for scenario_id, group in frame_groups:
+            spacings = _timestamp_spacing_seconds(group["timestamp"])
+            if not spacings:
+                continue
+            median_spacing = _median(spacings)
+            if median_spacing <= 0.0 or not math.isfinite(median_spacing):
+                continue
+            implied_periods_per_year = _SECONDS_PER_YEAR / median_spacing
+            mismatch_factor = max(
+                configured_periods_per_year / implied_periods_per_year,
+                implied_periods_per_year / configured_periods_per_year,
+            )
+            groups.append(
+                {
+                    "scenario_id": scenario_id,
+                    "observed_median_spacing_seconds": median_spacing,
+                    "implied_periods_per_year": implied_periods_per_year,
+                    "mismatch_factor": mismatch_factor,
+                    "spacing_observation_count": len(spacings),
+                }
+            )
+    return groups
+
+
+def _timestamp_spacing_seconds(values: Any) -> list[float]:
+    import pandas as pd
+
+    timestamps = pd.to_datetime(values, utc=True, errors="coerce").dropna()
+    if len(timestamps) < 2:
+        return []
+    unique_timestamps = sorted(dict.fromkeys(timestamps))
+    return [
+        float((current - previous).total_seconds())
+        for previous, current in zip(unique_timestamps, unique_timestamps[1:])
+        if current > previous
+    ]
+
+
+def _median(values: Sequence[float]) -> float:
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[midpoint])
+    return (float(ordered[midpoint - 1]) + float(ordered[midpoint])) / 2.0
 
 
 def _backend_name(backend: Any, *, data_kind: str | None = None) -> str:
@@ -651,7 +841,7 @@ def _failure_result(
 ) -> EvaluationRunResult:
     warnings = tuple(state.all_warnings)
     unsupported = tuple(dict.fromkeys([*unsupported_semantics, *_unsupported_semantics(state)]))
-    _write_failure_artifacts(
+    artifact_warning = _write_failure_artifacts(
         context,
         state,
         failure_stage=failure_stage,
@@ -660,6 +850,8 @@ def _failure_result(
         warnings=warnings,
         unsupported_semantics=unsupported,
     )
+    if artifact_warning is not None:
+        warnings = (*warnings, artifact_warning)
     return EvaluationRunResult(
         result_dir=context.result_dir,
         message=message,
@@ -679,7 +871,7 @@ def _write_failure_artifacts(
     message: str,
     warnings: Sequence[str],
     unsupported_semantics: Sequence[str],
-) -> None:
+) -> str | None:
     scenario_summary = _scenario_summary(state.backend_results, state.expected_scenario_ids)
     payload = {
         "schema_version": "quant_strategies.evaluation.failure/v1",
@@ -696,20 +888,26 @@ def _write_failure_artifacts(
         "not_authority": "not validation, promotion, paper trading, or live trading authority",
     }
     try:
-        write_json_artifact(context.result_dir, "evaluation_failure.json", payload)
-        write_text_artifact(
-            context.result_dir,
-            "notes.md",
-            _failure_notes(
-                context.config.strategy_id,
-                failure_stage=failure_stage,
-                assessment_status=assessment_status,
-                message=message,
-                scenario_count=len(state.backend_results),
-            ),
-        )
-    except Exception:
-        pass
+        with context.event_emitter.stage(
+            "failure_artifact_writes",
+            strategy_id=context.config.strategy_id,
+            failure_stage=failure_stage,
+        ):
+            write_json_artifact(context.result_dir, "evaluation_failure.json", payload)
+            write_text_artifact(
+                context.result_dir,
+                "notes.md",
+                _failure_notes(
+                    context.config.strategy_id,
+                    failure_stage=failure_stage,
+                    assessment_status=assessment_status,
+                    message=message,
+                    scenario_count=len(state.backend_results),
+                ),
+            )
+    except Exception as exc:
+        return f"evaluation_failure_artifact_write_failed: {type(exc).__name__}: {exc}"
+    return None
 
 
 def _unsupported_semantics(state: _EvaluationState) -> tuple[str, ...]:

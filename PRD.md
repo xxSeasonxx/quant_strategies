@@ -147,11 +147,11 @@ sum of per-trade results).
 
 - A single ontology for strategy output. The engine consumes it directly; no parallel
 representation in the math layer.
-- A single execution-model contract that any PnL backend implements.
-- A single causal-invariant kernel shared by quick runs, validation, and
-evaluation for import, data loading, decision generation, and replay checks;
-portfolio evaluation then branches to a portfolio/NAV-specific backend rather
-than the engine PnL contract.
+- A single shared strategy execution kernel for import, params, data loading,
+row normalization, decision generation, and causal-invariant replay checks.
+- Separate explicit evidence-model contracts for linear engine trade-activity
+PnL and portfolio/NAV evaluation. Do not force validation engine evidence and
+evaluation portfolio evidence behind one interchangeable PnL backend protocol.
 - A single declared freezing idiom for `params` / `rows` / `metadata`.
 - Each module has one main reason to change. Orchestrator god-functions are forbidden.
 
@@ -347,8 +347,8 @@ clear which of those jobs are implemented today.
 - **Performance.** Typical diagnostic quick runs complete in seconds, not minutes. Overhead
 the strategy did not request (eager imports, redundant deepcopies, per-run database
 reconnects, unwanted artifact writes) does not dominate wall-clock time.
-- **Code quality.** A single ontology, a single execution-model contract, a single shared
-kernel between runner and validation, and no orchestrator god-functions.
+- **Code quality.** A single strategy ontology, one shared execution kernel,
+explicit evidence-model contracts, and no orchestrator god-functions.
 
 ---
 
