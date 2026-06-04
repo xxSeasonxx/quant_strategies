@@ -6,7 +6,7 @@
 from `PRD.md` and locked with Season. Five independent fresh-context lenses
 (onboarding, architecture, senior-engineering, adversarial/`the-fool`,
 quant-math/`quant-math-code-review`) plus my own re-derivation of the core math.
-**Independence:** I did **not** read `review-codex.md` (your prior Codex review) to keep this
+**Independence:** I did **not** read the prior Codex review to keep this
 uncontaminated. I treated `PRD.md`, `README.md`, `FOUNDATION_LOCK.md`, and
 `docs/foundation-surfaces.md` as **claims to audit**, not binding constraints — per your
 "challenge the design / don't be biased by existing output" instruction.
@@ -468,7 +468,7 @@ lint scope; agreement comparator + dev=0.0; 261 math tests pass.
 `quant_autoresearch` field consumption; CI `conda` behavior; full timezone/DST edge behavior;
 exhaustive review of all ~50 test files. Residual risk noted inline.
 
-**No source files were modified** — this is a review artifact only (`review-claude.md`, +1 file).
+**No source files were modified** — this is a review artifact only.
 
 ---
 

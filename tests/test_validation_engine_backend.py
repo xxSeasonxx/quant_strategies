@@ -58,13 +58,20 @@ def decision(*, max_hold_bars: int = 1, direction: str = "long", size: float = 1
     )
 
 
-def scenario_config(*, fee_bps: float = 0.0, slippage_bps: float = 0.0):
+def scenario_config(
+    *,
+    fee_bps: float = 0.0,
+    slippage_bps: float = 0.0,
+    data_kind: str = "bars",
+):
+    dataset = "demo_bars" if data_kind == "bars" else None
     return ScenarioRunConfig(
         scenario_id="realistic",
         fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=fee_bps, slippage_bps_per_side=slippage_bps),
         data=DataConfig(
-            kind="crypto_perp_funding",
+            kind=data_kind,
+            dataset=dataset,
             symbols=("BTC-PERP",),
             start=date(2026, 1, 1),
             end=date(2026, 1, 1),
@@ -97,7 +104,11 @@ def test_engine_backend_extras_are_internally_consistent():
 
 def test_engine_backend_net_return_is_funding_inclusive():
     # A long position paying funding: net_return must be below the pure price path.
-    result = EngineBackend().run(decisions=[decision()], rows=funding_rows(), config=scenario_config())
+    result = EngineBackend().run(
+        decisions=[decision()],
+        rows=funding_rows(),
+        config=scenario_config(data_kind="crypto_perp_funding"),
+    )
     m = result.metrics
     assert m["funding_return"] == pytest.approx(-0.0003)  # long pays positive funding
     assert m["net_return"] == pytest.approx(m["gross_return"] + m["funding_return"])
@@ -116,7 +127,11 @@ def test_engine_backend_funding_can_flip_gated_net_negative():
         "funding_rate": 0.05,  # large positive funding rate; a long pays it
         "has_funding_event": True,
     }
-    result = EngineBackend().run(decisions=[decision()], rows=big_funding, config=scenario_config())
+    result = EngineBackend().run(
+        decisions=[decision()],
+        rows=big_funding,
+        config=scenario_config(data_kind="crypto_perp_funding"),
+    )
     m = result.metrics
     assert m["gross_return"] > 0.0  # price path alone is profitable
     assert m["funding_return"] == pytest.approx(-0.05)
@@ -147,6 +162,18 @@ def test_engine_backend_supports_threshold_exit_decisions():
     assert result.status == "completed"
     assert result.unsupported_semantics == ()
     assert result.metrics["trade_count"] == 1
+
+
+def test_engine_backend_allows_crypto_perp_trade_without_funding_events_as_zero_funding():
+    result = EngineBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        config=scenario_config(data_kind="crypto_perp_funding"),
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["funding_return"] == pytest.approx(0.0)
+    assert result.warnings == ()
 
 
 def test_engine_backend_returns_failed_on_unfillable_window():

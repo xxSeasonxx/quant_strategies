@@ -55,7 +55,7 @@ def large_engine_request(
                 )
             )
     return EvaluationRequest(
-        spec=StrategySpec(strategy_id="phase5_perf", decisions=tuple(decisions)),
+        spec=StrategySpec(strategy_id="performance_regression", decisions=tuple(decisions)),
         bars=tuple(bars),
         fill_model=FillModel(price="close", entry_lag_bars=1),
     )
@@ -75,7 +75,7 @@ def strategy_source() -> str:
         "        symbol_rows = [row for row in rows if row['symbol'] == symbol]\n"
         "        timestamp = symbol_rows[1]['timestamp']\n"
         "        decisions.append(StrategyDecision(\n"
-        "            strategy_id='phase5_summary',\n"
+        "            strategy_id='summary_profile',\n"
         "            instrument=InstrumentRef(kind='equity_or_etf', symbol=symbol),\n"
         "            decision_time=timestamp,\n"
         "            as_of_time=timestamp,\n"
@@ -87,14 +87,14 @@ def strategy_source() -> str:
 
 
 def runner_config(tmp_path: Path) -> Path:
-    strategy = tmp_path / "tested" / "phase5_summary.py"
+    strategy = tmp_path / "strategies" / "summary_profile.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text(strategy_source())
     config_path = tmp_path / "run.toml"
     config_path.write_text(
         '''
-strategy_path = "tested/phase5_summary.py"
-strategy_id = "phase5_summary"
+strategy_path = "strategies/summary_profile.py"
+strategy_id = "summary_profile"
 
 [data]
 kind = "bars"
@@ -309,8 +309,6 @@ kind = "bars"
 dataset = "demo_bars"
 symbols = ["BTC-PERP"]
 strict = true
-start = "2026-01-01"
-end = "2026-06-30"
 
 [params]
 weight = 0.25

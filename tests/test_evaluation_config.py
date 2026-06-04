@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig, StrategyExecutionSpec
+from quant_strategies.core.config import (
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+    StrategyExecutionSpec,
+    WindowedDataConfig,
+)
 from quant_strategies.evaluation.config import (
+    EvaluationConfig,
     EvaluationConfigError,
     load_evaluation_config,
     resolve_evaluation_config_path,
@@ -49,8 +57,6 @@ kind = "bars"
 dataset = "equity_1min"
 symbols = ["SPY", "QQQ"]
 strict = true
-start = "2026-01-01"
-end = "2026-06-30"
 
 [params]
 weight = 0.5
@@ -87,7 +93,10 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
     assert config.output.results_dir == candidate / "evaluation_results" / "demo"
     assert config.strategy_id == "demo"
     assert config.windows[0].id == "eval_2026_h1"
+    assert EvaluationConfig.model_fields["data"].annotation is WindowedDataConfig
     assert config.data.symbols == ("SPY", "QQQ")
+    assert not hasattr(config.data, "start")
+    assert not hasattr(config.data, "end")
     assert config.metrics.annualization_periods_per_year == 252
     assert config.metrics.min_annualized_samples == 20
     assert config.to_execution_spec(config.windows[0]) == StrategyExecutionSpec(
@@ -157,6 +166,25 @@ def test_load_evaluation_config_accepts_min_annualized_samples_override(tmp_path
     config = load_evaluation_config(candidate / "evaluation.toml")
 
     assert config.metrics.min_annualized_samples == 4
+
+
+def test_load_evaluation_config_accepts_legacy_data_window_dates_but_uses_windows(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "evaluation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            "strict = true\n\n[params]",
+            'strict = true\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
+        )
+    )
+
+    config = load_evaluation_config(config_path)
+    spec = config.to_execution_spec(config.windows[0])
+
+    assert spec.data.start == date(2026, 1, 1)
+    assert spec.data.end == date(2026, 6, 30)
 
 
 def test_load_evaluation_config_rejects_min_annualized_samples_below_two(tmp_path: Path):
@@ -237,6 +265,27 @@ required = false
     assert config.scenarios[1].cost_model is None
     assert config.scenarios[1].fill_model is None
     assert config.scenarios[1].required is False
+
+
+def test_load_evaluation_config_rejects_all_optional_custom_scenarios(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra='''
+
+[[scenarios]]
+id = "optional_a"
+required = false
+
+[[scenarios]]
+id = "optional_b"
+required = false
+''',
+    )
+
+    with pytest.raises(EvaluationConfigError, match="at least one required scenario"):
+        load_evaluation_config(candidate / "evaluation.toml")
 
 
 def test_load_evaluation_config_rejects_duplicate_custom_scenario_ids(tmp_path: Path):

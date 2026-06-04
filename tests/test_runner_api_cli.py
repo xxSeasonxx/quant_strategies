@@ -101,7 +101,7 @@ def rows(
 
 
 def write_strategy(repo_root: Path, *, fixed_quote_signal: bool = False) -> None:
-    strategy = repo_root / "tested" / "demo.py"
+    strategy = repo_root / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     if fixed_quote_signal:
         strategy.write_text(
@@ -161,7 +161,7 @@ def write_config(
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         f'''
-strategy_path = "tested/demo.py"
+strategy_path = "strategies/demo.py"
 strategy_id = "demo"
 {row_contract_line}
 [data]
@@ -592,7 +592,7 @@ def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, quick_checks=False)
@@ -634,7 +634,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -703,7 +703,7 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, quick_checks=True)
@@ -809,11 +809,24 @@ def test_consumer_contract_run_completed_does_not_make_runner_failed_rankable(
     assert result.outcome.completed is False
     assert result.outcome.failure_stage == "data_load"
     assert result.outcome.assessment_status == "runner_failed"
+    assert cli._run_exit_code(result) == 3
+
+
+def test_run_cli_exit_code_prefers_derived_succeeded_contract():
+    from types import SimpleNamespace
+
+    import quant_strategies.cli as cli
+
+    result = SimpleNamespace(
+        succeeded=False,
+        outcome=RunOutcome(completed=True, failure_stage=None),
+    )
+
     assert cli._run_exit_code(result) == 1
 
 
 def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("VALUE = 1\n")
     config_path = write_config(tmp_path)
@@ -834,7 +847,7 @@ def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch:
 
 
 def test_strategy_path_directory_failure_writes_summary(tmp_path: Path):
-    strategy_dir = tmp_path / "tested" / "demo.py"
+    strategy_dir = tmp_path / "strategies" / "demo.py"
     strategy_dir.mkdir(parents=True)
     config_path = write_config(tmp_path)
 
@@ -1040,7 +1053,7 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -1140,7 +1153,7 @@ def test_runner_catches_peek_to_suppress_with_strict_replay(
     # nothing; strict row-grid replay re-runs at the suppressed bar without the
     # future and emits the trade -> suppression detected. Emitted-only replay would
     # miss it because there is no emitted boundary to replay.
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -1196,7 +1209,7 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from datetime import datetime, timezone\n"
@@ -1278,7 +1291,7 @@ def test_run_config_records_engine_invalid_row_contract_before_engine_request(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('stop')\n")
     config_path = write_config(tmp_path)
@@ -1518,7 +1531,7 @@ def test_full_profile_strategy_input_rows_hash_mismatch_fails_artifact_write(
 
 
 def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('boom')\n")
     config_path = write_config(tmp_path)
@@ -1542,7 +1555,7 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
 
 
 def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def generate_decisions(rows, params):\n"
@@ -1565,7 +1578,7 @@ def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest
 
 
 def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def generate_decisions(rows, params):\n"
@@ -1586,7 +1599,7 @@ def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pyte
 
 
 def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def validate_params(params):\n"
@@ -1620,7 +1633,7 @@ def test_runner_rejects_non_mapping_validate_params_return(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def validate_params(params):\n"
@@ -1643,7 +1656,7 @@ def test_runner_rejects_non_mapping_validate_params_return(
 
 
 def test_runner_structures_validate_params_system_exit(tmp_path: Path):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def validate_params(params):\n"
@@ -1669,7 +1682,7 @@ def test_runner_structures_strategy_execution_system_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "def generate_decisions(rows, params):\n"
@@ -1689,7 +1702,7 @@ def test_runner_structures_strategy_execution_system_exit(
 
 
 def test_runner_structures_strategy_import_system_exit(tmp_path: Path):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("raise SystemExit('import exited')\n")
     config_path = write_config(tmp_path)
@@ -1771,7 +1784,7 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -1806,7 +1819,7 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return 'not decisions'\n")
     config_path = write_config(tmp_path)
@@ -1834,7 +1847,7 @@ def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -1874,7 +1887,7 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -1986,10 +1999,21 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, kind="crypto_perp_funding", symbol="BTC-PERP", dataset=None)
+    funding_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+    for row in funding_rows:
+        row["symbol"] = "BTC-PERP"
+    funding_rows[3].update(
+        {
+            "funding_timestamp": funding_rows[3]["timestamp"],
+            "funding_rate": 0.0001,
+            "funding_ingested_at": funding_rows[3]["available_at"],
+            "has_funding_event": True,
+        }
+    )
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(rows=funding_rows),
     )
 
     result = run_config(config_path, repo_root=tmp_path)

@@ -27,27 +27,34 @@ validation support is limited to the explicit opt-in agreement oracle.
 `quant_strategies.evaluation.run_evaluation` and returns
 `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
 `pyarrow`.
+- **Decision/spec kernel:** the public surfaces use one shared decision/spec
+kernel plus separate price-evidence paths: internal engine trade-activity
+evidence for quick run and validation, and portfolio/NAV evidence for
+evaluation.
 - **Strategy readiness:** a strategy may be quick-run-only. A strategy is not
 validation/evaluation-ready until it has `validate_params`, passes the relevant
 row-contract and causality checks, and does not depend on future rows during
 signal generation.
-- **Result success:** programmatic success requires `completed` /
-`run_completed` to be true and `failure_stage is None`. Quick-run and
-evaluation failures set the terminal flag false when `failure_stage` is set.
+- **Result success:** programmatic consumers should prefer `result.succeeded`.
+It is derived from `completed` / `run_completed` being true and
+`failure_stage is None`; the underlying fields remain the audit detail.
 - **Promotion boundary:** validation does not authorize paper trading, live
 trading, or promotion. Promotion remains outside this foundation.
 - **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only and do not authorize ranking or promotion.
 - **Annualized metric trust boundary:** annualized/risk metrics are guarded by
   annualization cadence (`annualization_cadence.status == "ok"`) and the
   minimum return-sample floor `[metrics].min_annualized_samples` (default
-  `20`). Cadence warnings or insufficient samples null `annualized_return`,
+  `20`). Any non-ok cadence status or insufficient samples null `annualized_return`,
   `volatility`, `sharpe`, `sortino`, and `calmar` without nulling core
-  economics.
+  economics. Sortino uses downside semivariance over the full return sample and
+  returns `None`, not infinity, when undefined.
 - **Causality and audit boundary:** usable validation and evaluation evidence
 requires a passed row contract, decision-row / observation-dependency audit, and
 complete deterministic, emitted, and strict suppression replay proof. Evaluation
 must not be weaker than validation on decision lineage before portfolio metrics
-are trusted.
+are trusted. hidden-lookahead replay proves point-in-time causal replay; it does
+not prove out-of-sample validity and it does not prove freedom from in-sample
+fitting.
 - **Archive boundary:** ranked research handoff archives and search-loop records
 do not live in this repository. This repo keeps no pointer, symlink,
 compatibility path, or archive index for moved research records.
@@ -56,7 +63,15 @@ search memory, variant ranking, stopping rules, and iteration decisions.
 `quant_strategies` evaluates supplied strategies and configs.
 - **Data boundary:** `quant_data` owns data acquisition, materialization,
 refresh, backfill, repair, and source joining. Package metadata bounds the
-supported `quant-data` contract as `>=0.1.0,<0.2.0`.
+supported `quant-data` contract as `>=0.1.0,<0.2.0`. `quant_data` owns stable
+row ordering for supplied rows; `quant_strategies` preserves supplied row order
+for strategy input, hashing, and execution and does not sort rows locally before
+hashing or execution.
+- **Funding basis:** Engine funding is linear trade-activity funding folded into
+validation `net_return`; evaluation funding is NAV-ledger cashflow through the
+project perp ledger. Fillable crypto perp windows with no funding events in
+the open interval accrue zero funding; flagged funding rows still fail when
+malformed, conflicting, or mark-misaligned.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
 quick-run artifacts are intentionally not full replay chains.
 

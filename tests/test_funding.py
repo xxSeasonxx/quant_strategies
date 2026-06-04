@@ -265,18 +265,26 @@ def test_perp_ledger_funding_signs_longs_and_shorts(rate: float, long_funding: f
     assert long.metrics["funding_model"] == "project_perp_ledger_v1"
 
 
-def test_perp_ledger_excludes_entry_timestamp_funding_and_includes_exit_timestamp_funding():
+def test_perp_ledger_excludes_entry_timestamp_funding_from_coverage_and_includes_exit_timestamp_funding():
     entry_event = _run_ledger(rows=_ledger_rows(events=((1, 1, 0.01),)))
     exit_event = _run_ledger(rows=_ledger_rows(events=((3, 3, 0.01),)))
 
     assert entry_event.status == "completed"
     assert entry_event.metrics["funding_cashflow_total"] == pytest.approx(0.0)
     assert entry_event.metrics["funding_event_count"] == 0
-    assert entry_event.tables is not None
-    assert entry_event.tables.funding_cashflows.empty
     assert exit_event.status == "completed"
     assert exit_event.metrics["funding_cashflow_total"] == pytest.approx(-1.0)
     assert exit_event.metrics["funding_event_count"] == 1
+
+
+def test_perp_ledger_allows_active_window_without_funding_events_as_zero_cashflow():
+    result = _run_ledger(rows=_ledger_rows(events=()))
+
+    assert result.status == "completed"
+    assert result.metrics["funding_cashflow_total"] == pytest.approx(0.0)
+    assert result.metrics["funding_event_count"] == 0
+    assert result.tables is not None
+    assert result.tables.funding_cashflows.empty
 
 
 def test_perp_ledger_full_weight_exposure_pays_funding():
@@ -353,13 +361,13 @@ def test_perp_ledger_allows_same_symbol_exit_and_reentry_on_same_timestamp():
     ]
     result = _run_ledger(
         decisions=decisions,
-        rows=_ledger_rows(events=((2, 2, 0.01),)),
+        rows=_ledger_rows(events=((2, 2, 0.01), (3, 3, 0.01))),
     )
 
     assert result.status == "completed"
     assert result.metrics["trade_count"] == 2
-    assert result.metrics["funding_cashflow_total"] == pytest.approx(-1.0)
-    assert list(result.tables.funding_cashflows["timestamp"]) == [_ts(2)]
+    assert result.metrics["funding_cashflow_total"] == pytest.approx(-1.99)
+    assert list(result.tables.funding_cashflows["timestamp"]) == [_ts(2), _ts(3)]
 
 
 def test_perp_ledger_conflicting_duplicate_funding_rates_fail():
@@ -381,7 +389,7 @@ def test_perp_ledger_missing_funding_timestamp_alignment_fails():
 def test_perp_ledger_fees_and_slippage_affect_realized_pnl():
     scenario = _ledger_scenario(fee_bps_per_side=100.0, slippage_bps_per_side=100.0)
     result = _run_ledger(
-        rows=_ledger_rows(closes=(100.0, 100.0, 110.0)),
+        rows=_ledger_rows(closes=(100.0, 100.0, 110.0), events=((2, 2, 0.0),)),
         scenario=scenario,
         max_hold_bars=1,
     )

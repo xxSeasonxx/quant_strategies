@@ -13,7 +13,7 @@ from quant_strategies.decisions import (
 
 
 def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Path):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
@@ -39,7 +39,7 @@ def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Pa
 
 
 def test_load_decision_strategy_rejects_file_without_generate_decisions(tmp_path: Path):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text("def generate_signals(rows, params):\n    return []\n")
 
@@ -48,7 +48,7 @@ def test_load_decision_strategy_rejects_file_without_generate_decisions(tmp_path
 
 
 def test_load_decision_strategy_rejects_directory_path(tmp_path: Path):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.mkdir(parents=True)
 
     with pytest.raises(DecisionStrategyLoadError, match="must be a file"):

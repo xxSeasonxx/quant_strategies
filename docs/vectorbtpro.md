@@ -15,7 +15,7 @@ Local package inspection in Season's `quant` environment on 2026-06-01:
 | Package root | `/opt/anaconda3/envs/quant/lib/python3.12/site-packages/vectorbtpro/` |
 | `Portfolio` module | `vectorbtpro/portfolio/base.py` |
 | Project optional extra | `pip install -e '.[vectorbtpro]'` installs `pandas>=2.2` and `vectorbtpro` |
-| Evaluation extra | `pip install -e '.[evaluation]'` installs `pandas>=2.2`, `pyarrow>=16`, and `vectorbtpro` |
+| Evaluation extra | `pip install -e '.[evaluation]'` installs `pandas>=2.2`, `pyarrow>=16`, and `vectorbtpro`; controlled evaluation runs should use `constraints/evaluation.txt` |
 
 Verify the local install with:
 
@@ -107,17 +107,27 @@ The reason is semantic, not just implementation preference:
 - VectorBT Pro portfolio returns are NAV-path portfolio returns.
 - Evaluation annualized metrics use full-grid portfolio returns from
   `portfolio_path`, including flat/no-position bars, and completed runs emit an
-  `annualization_cadence` warning on configured-cadence mismatches.
+  `annualization_cadence` warning on configured-cadence mismatches or
+  insufficient observed spacing.
 - Annualized/risk metrics (`annualized_return`, `volatility`, `sharpe`,
   `sortino`, and `calmar`) are emitted only when `annualization_cadence.status`
   is `ok` and `return_sample_count` meets the minimum return-sample floor,
-  `[metrics].min_annualized_samples` (default `20`). Cadence warnings or
+  `[metrics].min_annualized_samples` (default `20`). Any non-ok cadence status or
   insufficient samples null that annualized/risk metrics family without nulling
   core economics such as `total_return`, `ending_value`, `max_drawdown`,
-  `return_sample_count`, or `worst_period_return`.
+  `return_sample_count`, or `worst_period_return`. Sortino uses downside
+  semivariance over the full return sample and returns `None`, not infinity,
+  when undefined.
 - Those objects only match in narrow cases.
 - Funding-aware evaluation semantics belong to the project perp ledger, not to
   VectorBT Pro.
+- Engine funding is linear trade-activity funding folded into validation
+  `net_return`; evaluation funding is NAV-ledger cashflow through
+  `project_perp_ledger_v1`. Fillable crypto perp windows with no funding events
+  in the open interval accrue zero funding; flagged funding rows still fail
+  when malformed, conflicting, or mark-misaligned.
+- hidden-lookahead replay proves point-in-time causal replay; it does not prove
+  out-of-sample validity and it does not prove freedom from in-sample fitting.
 - Strategy purity still forbids calling VectorBT Pro inside strategy files.
 
 VectorBT Pro evaluation output is named as portfolio/path evidence, not as a

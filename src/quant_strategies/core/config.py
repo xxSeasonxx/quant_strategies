@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -20,13 +21,22 @@ class SharedConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class DataConfig(SharedConfigModel):
+class WindowedDataConfig(SharedConfigModel):
     kind: DataKind
     dataset: str | None = None
     symbols: tuple[str, ...] = Field(min_length=1)
-    start: date
-    end: date
     strict: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_window_dates(cls, value: Any) -> Any:
+        if cls is WindowedDataConfig and isinstance(value, Mapping):
+            return {
+                field_name: field_value
+                for field_name, field_value in value.items()
+                if field_name not in {"start", "end"}
+            }
+        return value
 
     @field_validator("symbols")
     @classmethod
@@ -37,11 +47,20 @@ class DataConfig(SharedConfigModel):
         return symbols
 
     @model_validator(mode="after")
-    def validate_window(self) -> DataConfig:
-        if self.end < self.start:
-            raise ValueError("data.end must be on or after data.start")
+    def validate_dataset(self) -> Self:
         if self.kind == "bars" and not self.dataset:
             raise ValueError("data.dataset is required when data.kind = 'bars'")
+        return self
+
+
+class DataConfig(WindowedDataConfig):
+    start: date
+    end: date
+
+    @model_validator(mode="after")
+    def validate_window(self) -> Self:
+        if self.end < self.start:
+            raise ValueError("data.end must be on or after data.start")
         return self
 
 

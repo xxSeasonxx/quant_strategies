@@ -53,7 +53,7 @@ def decision(
 
 
 def write_strategy(repo_root: Path, body: str) -> None:
-    strategy = repo_root / "tested" / "demo.py"
+    strategy = repo_root / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(body)
 
@@ -62,7 +62,7 @@ def write_config(repo_root: Path):
     config_path = repo_root / "run.toml"
     config_path.write_text(
         """
-strategy_path = "tested/demo.py"
+strategy_path = "strategies/demo.py"
 strategy_id = "demo"
 
 [data]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from quant_strategies.evaluation import EvaluationRunResult
 from quant_strategies import cli
@@ -88,6 +89,16 @@ def test_evaluate_cli_returns_three_for_data_load_failure(monkeypatch, tmp_path:
 
     assert code == 3
     assert capsys.readouterr().out == "evaluation failed: data source missing\n"
+
+
+def test_evaluate_cli_exit_code_prefers_derived_succeeded_contract():
+    result = SimpleNamespace(
+        succeeded=False,
+        run_completed=True,
+        failure_stage=None,
+    )
+
+    assert cli._evaluation_exit_code(result) == 1
 
 
 def test_evaluate_cli_returns_one_for_portfolio_failure_with_artifacts(

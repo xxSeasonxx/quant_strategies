@@ -65,6 +65,10 @@ class RunResult:
     outcome: RunOutcome = RunOutcome()
     evidence: RunEvidence = RunEvidence()
 
+    @property
+    def succeeded(self) -> bool:
+        return self.outcome.completed and self.outcome.failure_stage is None
+
 
 def run_config(
     config_path: str | Path,

@@ -10,8 +10,6 @@ end = "2024-01-31"
 kind = "bars"
 dataset = "equity_1min"
 symbols = ["SPY"]
-start = "2024-01-01"
-end = "2024-01-31"
 strict = true
 
 [params]

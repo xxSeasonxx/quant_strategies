@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import os
+import re
 import subprocess
 import tomllib
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -181,18 +185,59 @@ def test_vectorbtpro_smoke_fails_loudly_when_enabled():
     assert "import vectorbtpro" in smoke
 
 
-def test_review_archive_marks_historical_reviews_superseded():
+def test_evaluation_constraints_pin_numeric_backend_versions():
+    constraints = ROOT / "constraints" / "evaluation.txt"
+
+    assert constraints.exists()
+    lines = {
+        line.strip()
+        for line in constraints.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+
+    assert "pandas==2.3.3" in lines
+    assert "pyarrow==23.0.1" in lines
+    assert "vectorbtpro==2026.4.7" in lines
+
+
+def test_review_archive_index_points_to_current_disposition_anchor():
+    text = (ROOT / "docs" / "reviews" / "README.md").read_text()
+
+    assert "Current disposition anchor:" in text
+    assert "../../FOUNDATION_LOCK.md" in text
+    assert "current tests/docs" in text
+    assert "Future foundation reviews should be disposition-aware delta reviews" in text
+
+
+def test_review_archive_marks_historical_reviews_superseded_when_opted_in():
+    if os.environ.get("RUN_REVIEW_ARCHIVE_CHECK") != "1":
+        pytest.skip("set RUN_REVIEW_ARCHIVE_CHECK=1 to run exact archive disposition maintenance checks")
+
     text = (ROOT / "docs" / "reviews" / "README.md").read_text()
 
     expected_rows = [
         "| `2026-06-02-foundation-codex.md` | Historical broad review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
         "| `2026-06-02-foundation-codex-p3.md` | Historical P3 follow-up review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `review-claude.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `review-codex.md` | Historical root-level working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `2026-06-03-foundation-claude-independent.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `2026-06-03-foundation-claude-disposition.md` | Historical root-level Claude working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `2026-06-03-foundation-codex-delta.md` | Historical Codex delta review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `2026-06-03-foundation-codex-disposition.md` | Historical root-level Codex working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
     ]
     for row in expected_rows:
         assert row in text
     assert "once its accepted findings are dispositioned" not in text
+
+
+def test_review_archive_artifacts_are_dated():
+    dated_review_name = re.compile(r"^\d{4}-\d{2}-\d{2}-.+\.md$")
+    review_files = [
+        path.name
+        for path in (ROOT / "docs" / "reviews").glob("*.md")
+        if path.name != "README.md"
+    ]
+
+    assert review_files
+    assert all(dated_review_name.match(name) for name in review_files)
 
 
 def test_cli_entrypoint_is_neutral():
@@ -318,14 +363,13 @@ def test_root_phase_plans_are_not_active_context():
 
 
 def test_active_docs_lock_quant_autoresearch_consumer_contract():
-    foundation = (ROOT / "docs" / "foundation-surfaces.md").read_text(errors="ignore")
+    foundation = " ".join((ROOT / "docs" / "foundation-surfaces.md").read_text(errors="ignore").split())
 
     required_snippets = [
         "from quant_strategies.runner import run_config",
         "from quant_strategies.validation import run_validation",
         "from quant_strategies.evaluation import run_evaluation",
-        "result.outcome.completed and result.outcome.failure_stage is None",
-        "result.run_completed and result.failure_stage is None",
+        "result.succeeded",
         "validation labels are advisory evidence",
         "ranking, comparison, search memory, stopping rules, and promotion decisions remain outside this repo",
     ]

@@ -55,7 +55,8 @@ def scenario_config():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=5.0, slippage_bps_per_side=2.0),
         data=DataConfig(
-            kind="crypto_perp_funding",
+            kind="bars",
+            dataset="demo_bars",
             symbols=("BTC-PERP",),
             start=date(2026, 1, 1),
             end=date(2026, 1, 1),

@@ -6,6 +6,7 @@ from quant_strategies.core.config import (
     DataKind,
     FillModelConfig,
     SharedConfigModel,
+    WindowedDataConfig,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "DataKind",
     "FillModelConfig",
     "SharedConfigModel",
+    "WindowedDataConfig",
 ]

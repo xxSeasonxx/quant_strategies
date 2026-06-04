@@ -243,6 +243,21 @@ def test_build_request_preserves_funding_fields_for_engine_accounting():
     assert run.screen_summary["trades"][0]["net_return"] == pytest.approx(0.099)
 
 
+def test_build_request_allows_active_trade_without_funding_events_as_zero_funding():
+    request = build_request(
+        strategy_id="demo",
+        rows=bars(100.0, 100.0, 101.0),
+        decisions=[decision(index=0, max_hold_bars=1)],
+        fill_model=close_fill(),
+        cost_model=zero_cost(),
+    )
+
+    run = evaluate_request(request, mode="screen")
+
+    assert run.screen_summary["trades"][0]["funding_return"] == pytest.approx(0.0)
+    assert run.screen_summary["trade_count"] == 1
+
+
 def test_evaluate_request_reuses_request_build_bar_index(monkeypatch: pytest.MonkeyPatch):
     import quant_strategies.engine.bar_index as shared_bar_index
     import quant_strategies.engine.evaluation as evaluation

@@ -155,8 +155,6 @@ strategy_id = "demo"
 kind = "{data_kind}"
 {dataset_line}symbols = ["BTC-PERP"]
 strict = true
-start = "2026-01-01"
-end = "2026-06-30"
 
 [params]
 weight = 0.25
@@ -261,6 +259,32 @@ class MixedCadenceFakeBackend(CadenceFakeBackend):
     def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
         spacing = timedelta(minutes=1) if scenario.scenario_id.endswith("/zero_costs/base_fill") else timedelta(days=1)
         timestamps = [AS_OF + spacing * index for index in range(4)]
+        return CadenceFakeBackend(timestamps).run(
+            decisions=decisions,
+            rows=rows,
+            scenario=scenario,
+            metrics=metrics,
+        )
+
+
+class MixedSparseCadenceFakeBackend(FakeBackend):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        if scenario.scenario_id.endswith("/sparse"):
+            return FakeBackend.run(self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+        timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
+        return CadenceFakeBackend(timestamps).run(
+            decisions=decisions,
+            rows=rows,
+            scenario=scenario,
+            metrics=metrics,
+        )
+
+
+class MixedMismatchAndSparseCadenceFakeBackend(FakeBackend):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        if scenario.scenario_id.endswith("/sparse"):
+            return FakeBackend.run(self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+        timestamps = [AS_OF + timedelta(minutes=index) for index in range(4)]
         return CadenceFakeBackend(timestamps).run(
             decisions=decisions,
             rows=rows,
@@ -825,6 +849,133 @@ def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
     assert manifest["evaluation"]["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
 
 
+def test_run_evaluation_nulls_annualized_metrics_when_cadence_is_insufficient(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=FakeBackend(),
+    )
+
+    assert result.run_completed is True
+    assert result.evidence_quality_warnings == (
+        "annualization_cadence_insufficient:spacing_observation_count=0:"
+        "insufficient_scenario_ids=eval_2026_h1/realistic_costs/base_fill,"
+        "eval_2026_h1/realistic_costs/fill_lag_plus_1,"
+        "eval_2026_h1/stressed_costs/base_fill,"
+        "eval_2026_h1/stressed_costs/fill_lag_plus_1,"
+        "eval_2026_h1/zero_costs/base_fill,"
+        "eval_2026_h1/zero_costs/fill_lag_plus_1",
+    )
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "insufficient"
+    assert cadence["warning"] == result.evidence_quality_warnings[0]
+    assert cadence["insufficient_scenario_ids"] == [
+        "eval_2026_h1/realistic_costs/base_fill",
+        "eval_2026_h1/realistic_costs/fill_lag_plus_1",
+        "eval_2026_h1/stressed_costs/base_fill",
+        "eval_2026_h1/stressed_costs/fill_lag_plus_1",
+        "eval_2026_h1/zero_costs/base_fill",
+        "eval_2026_h1/zero_costs/fill_lag_plus_1",
+    ]
+    for item in metrics_payload["scenarios"]:
+        metrics = item["metrics"]
+        for name in ANNUALIZED_RISK_METRICS:
+            assert metrics[name] is None
+        assert metrics["total_return"] == pytest.approx(0.01)
+        assert metrics["ending_value"] == pytest.approx(101.0)
+        assert metrics["max_drawdown"] == pytest.approx(-0.01)
+        assert metrics["worst_period_return"] == pytest.approx(-0.005)
+        assert "annualized_metrics_null_due_to_insufficient_cadence" in item["warnings"]
+        assert "annualized_metrics_null_due_to_cadence_mismatch" not in item["warnings"]
+
+
+def test_run_evaluation_marks_cadence_insufficient_when_any_completed_scenario_has_no_spacing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    (candidate / "evaluation.toml").write_text(
+        (candidate / "evaluation.toml").read_text()
+        + '''
+
+[[scenarios]]
+id = "dense"
+
+[[scenarios]]
+id = "sparse"
+'''
+    )
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=MixedSparseCadenceFakeBackend(),
+    )
+
+    assert result.run_completed is True
+    assert len(result.evidence_quality_warnings) == 1
+    assert result.evidence_quality_warnings[0].startswith("annualization_cadence_insufficient:")
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "insufficient"
+    assert cadence["insufficient_scenario_ids"] == ["eval_2026_h1/sparse"]
+    assert cadence["observed_group_count"] == 1
+    assert "eval_2026_h1/sparse" in cadence["warning"]
+    assert "eval_2026_h1/dense" not in cadence["warning"]
+    for item in metrics_payload["scenarios"]:
+        for name in ANNUALIZED_RISK_METRICS:
+            assert item["metrics"][name] is None
+        assert item["metrics"]["total_return"] == pytest.approx(0.01)
+        assert item["metrics"]["ending_value"] == pytest.approx(101.0)
+        assert item["metrics"]["max_drawdown"] == pytest.approx(-0.01)
+        assert item["metrics"]["worst_period_return"] == pytest.approx(-0.005)
+        assert "annualized_metrics_null_due_to_insufficient_cadence" in item["warnings"]
+
+
+def test_run_evaluation_keeps_offending_cadence_ids_when_other_scenarios_are_insufficient(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    (candidate / "evaluation.toml").write_text(
+        (candidate / "evaluation.toml").read_text()
+        + '''
+
+[[scenarios]]
+id = "fast"
+
+[[scenarios]]
+id = "sparse"
+'''
+    )
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=MixedMismatchAndSparseCadenceFakeBackend(),
+    )
+
+    assert result.run_completed is True
+    assert len(result.evidence_quality_warnings) == 1
+    assert result.evidence_quality_warnings[0].startswith("annualization_cadence_insufficient:")
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "insufficient"
+    assert cadence["insufficient_scenario_ids"] == ["eval_2026_h1/sparse"]
+    assert cadence["offending_scenario_ids"] == ["eval_2026_h1/fast"]
+    assert "eval_2026_h1/sparse" in cadence["warning"]
+    assert "eval_2026_h1/fast" not in cadence["warning"]
+
+
 def test_run_evaluation_warns_when_one_completed_scenario_has_mismatched_cadence(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -901,7 +1052,14 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
 ):
     candidate = write_candidate(tmp_path, data_kind="crypto_perp_funding")
     events: list[dict[str, object]] = []
-    funding_rows = rows() + [
+    funding_rows = rows()
+    funding_rows[3] = {
+        **funding_rows[3],
+        "funding_timestamp": funding_rows[3]["timestamp"],
+        "funding_rate": 0.0003,
+        "has_funding_event": True,
+    }
+    funding_rows = funding_rows + [
         {
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
@@ -910,7 +1068,9 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
             "high": 104.0,
             "low": 104.0,
             "close": 104.0,
-            "has_funding_event": False,
+            "funding_timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "funding_rate": 0.0003,
+            "has_funding_event": True,
         }
     ]
     monkeypatch.setattr(
@@ -943,6 +1103,45 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
     assert manifest["evaluation"]["backend"]["name"] == "project_perp_ledger_v1"
     assert "funding_cashflows" in {item["artifact_kind"] for item in manifest["tables"]}
     assert not [event for event in events if event["status"] == "failed"]
+
+
+def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding_events(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, data_kind="crypto_perp_funding")
+    no_event_rows = rows() + [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "open": 104.0,
+            "high": 104.0,
+            "low": 104.0,
+            "close": 104.0,
+            "has_funding_event": False,
+        }
+    ]
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=no_event_rows),
+    )
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: (_ for _ in ()).throw(AssertionError("VectorBT Pro should not be required")),
+    )
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path)
+
+    assert result.run_completed is True
+    assert result.failure_stage is None
+    assert result.result_dir is not None
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    for scenario in metrics_payload["scenarios"]:
+        assert scenario["backend"] == "project_perp_ledger_v1"
+        assert scenario["metrics"]["funding_cashflow_total"] == 0.0
+        assert scenario["metrics"]["funding_event_count"] == 0
 
 
 def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

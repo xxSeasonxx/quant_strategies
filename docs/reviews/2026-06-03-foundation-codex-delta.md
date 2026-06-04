@@ -70,9 +70,9 @@ Not inspected or not proven:
 | Large real runs at the PRD scale of up to 1M rows | Tests cover correctness and some performance discipline, not end-to-end production-scale timing. |
 | Market validity or alpha | Explicitly out of scope. These outputs are advisory evidence, not proof of edge. |
 
-## Cross-Compare With `review-claude.md`
+## Cross-Compare With `2026-06-03-foundation-claude-independent.md`
 
-I cross-checked `review-claude.md` against the current source before importing findings. I did not copy claims that were already covered, false in the current repo, or too speculative for the action map.
+I cross-checked the Claude independent review against the current source before importing findings. I did not copy claims that were already covered, false in the current repo, or too speculative for the action map.
 
 | Claude-only point | Disposition | Reason |
 |---|---|---|
@@ -405,7 +405,7 @@ Verified:
 - Source CLI help: printed `{run,validate,evaluate}` through `quant_strategies.cli.main`.
 - CLI/docs/config tests: `68 passed` in `0.46s`.
 - Cross-review focused suite for disputed findings: `52 passed, 1 skipped` across funding/perp ledger, agreement oracle, evaluation config, and evaluation backend tests.
-- Cross-review source check against `review-claude.md`: accepted only verified gaps; rejected the overstated "no validation/evaluation TOML" and "no perp ledger numeric pin tests" claims.
+- Cross-review source check against the Claude independent review: accepted only verified gaps; rejected the overstated "no validation/evaluation TOML" and "no perp ledger numeric pin tests" claims.
 - Source trace for PnL, funding, costs, row contracts, causality, validation policy, evaluation metrics, and artifact manifests.
 - Repository boundary tests that guard against research archive pointers, ignored generated result roots, runner-internal coupling, and legacy `quant-engine` dependency.
 

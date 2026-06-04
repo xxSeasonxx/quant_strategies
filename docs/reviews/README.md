@@ -26,8 +26,12 @@ Historical review disposition:
 | --- | --- |
 | `2026-06-02-foundation-codex.md` | Historical broad review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
 | `2026-06-02-foundation-codex-p3.md` | Historical P3 follow-up review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
-| `review-claude.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
-| `review-codex.md` | Historical root-level working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-03-foundation-claude-independent.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-03-foundation-claude-disposition.md` | Historical root-level Claude working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-03-foundation-codex-delta.md` | Historical Codex delta review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-03-foundation-codex-disposition.md` | Historical root-level Codex working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-04-foundation-claude.md` | Historical Claude foundation working review; cleanup findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-04-foundation-codex.md` | Historical Codex foundation working review; cleanup findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
 
 Future foundation reviews should be disposition-aware delta reviews by default:
 read the current disposition anchor first, then classify findings as `new`,

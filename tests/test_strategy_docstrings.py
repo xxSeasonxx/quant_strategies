@@ -24,8 +24,7 @@ PROVENANCE_ANCHOR_PATTERN = re.compile(
 def strategy_files() -> list[Path]:
     return sorted(
         path
-        for directory in (Path("tested"), Path("untested"))
-        for path in directory.glob("*.py")
+        for path in Path("untested").glob("*.py")
         if path.name != "__init__.py"
     )
 
@@ -41,8 +40,7 @@ def all_strategy_files_for_contract() -> list[Path]:
 def strategy_python_files() -> list[Path]:
     return sorted(
         path
-        for directory in (Path("tested"), Path("untested"))
-        for path in directory.rglob("*.py")
+        for path in Path("untested").rglob("*.py")
         if "__pycache__" not in path.parts
     )
 
@@ -74,7 +72,7 @@ def test_strategy_layout_is_flat():
     offenders = [
         path
         for path in strategy_python_files()
-        if path.name != "__init__.py" and path.parent not in {Path("tested"), Path("untested")}
+        if path.name != "__init__.py" and path.parent != Path("untested")
     ]
 
     assert offenders == []

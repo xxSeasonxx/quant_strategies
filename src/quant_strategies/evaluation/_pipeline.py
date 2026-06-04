@@ -85,6 +85,9 @@ _SECONDS_PER_YEAR = 365.2425 * 24 * 60 * 60
 _ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 1.1
 _ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
 _ANNUALIZED_CADENCE_NULL_WARNING = "annualized_metrics_null_due_to_cadence_mismatch"
+_ANNUALIZED_CADENCE_INSUFFICIENT_NULL_WARNING = (
+    "annualized_metrics_null_due_to_insufficient_cadence"
+)
 
 
 def run_evaluation(
@@ -747,13 +750,21 @@ def _completion_artifact_results(
     *,
     annualization_cadence: Mapping[str, Any],
 ) -> list[PortfolioEvaluationResult]:
-    if annualization_cadence.get("status") != "warning":
+    if annualization_cadence.get("status") == "ok":
         return list(results)
-    return [_null_annualized_risk_metrics_due_to_cadence(result) for result in results]
+    return [
+        _null_annualized_risk_metrics_due_to_cadence(
+            result,
+            cadence_status=str(annualization_cadence.get("status") or "unknown"),
+        )
+        for result in results
+    ]
 
 
 def _null_annualized_risk_metrics_due_to_cadence(
     result: PortfolioEvaluationResult,
+    *,
+    cadence_status: str,
 ) -> PortfolioEvaluationResult:
     if result.status != "completed":
         return result
@@ -762,8 +773,13 @@ def _null_annualized_risk_metrics_due_to_cadence(
         if name in metrics:
             metrics[name] = None
     warnings = result.warnings
-    if _ANNUALIZED_CADENCE_NULL_WARNING not in warnings:
-        warnings = (*warnings, _ANNUALIZED_CADENCE_NULL_WARNING)
+    null_warning = (
+        _ANNUALIZED_CADENCE_INSUFFICIENT_NULL_WARNING
+        if cadence_status == "insufficient"
+        else _ANNUALIZED_CADENCE_NULL_WARNING
+    )
+    if null_warning not in warnings:
+        warnings = (*warnings, null_warning)
     return result.model_copy(update={"metrics": metrics, "warnings": warnings})
 
 
@@ -777,6 +793,10 @@ def _annualization_cadence_summary(
         configured_periods_per_year=configured_periods_per_year,
     )
     spacing_count = sum(int(group["spacing_observation_count"]) for group in groups)
+    measured_scenario_ids = {str(group["scenario_id"]) for group in groups}
+    insufficient_scenario_ids = sorted(
+        set(_completed_portfolio_path_scenario_ids(results)) - measured_scenario_ids
+    )
     summary: dict[str, Any] = {
         "configured_periods_per_year": configured_periods_per_year,
         "observed_median_spacing_seconds": None,
@@ -785,10 +805,15 @@ def _annualization_cadence_summary(
         "spacing_observation_count": spacing_count,
         "observed_group_count": len(groups),
         "offending_scenario_ids": [],
+        "insufficient_scenario_ids": insufficient_scenario_ids,
         "status": "insufficient",
         "warning": None,
     }
     if not groups:
+        summary["warning"] = _annualization_cadence_insufficient_warning(
+            spacing_count,
+            insufficient_scenario_ids,
+        )
         return summary
 
     offending_groups = [
@@ -796,6 +821,7 @@ def _annualization_cadence_summary(
         for group in groups
         if group["mismatch_factor"] > _ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD
     ]
+    offending_ids = sorted(str(group["scenario_id"]) for group in offending_groups)
     representative = max(
         offending_groups or groups,
         key=lambda group: group["mismatch_factor"],
@@ -805,11 +831,18 @@ def _annualization_cadence_summary(
             "observed_median_spacing_seconds": representative["observed_median_spacing_seconds"],
             "implied_periods_per_year": representative["implied_periods_per_year"],
             "mismatch_factor": representative["mismatch_factor"],
+            "offending_scenario_ids": offending_ids,
             "status": "ok",
         }
     )
+    if insufficient_scenario_ids:
+        summary["status"] = "insufficient"
+        summary["warning"] = _annualization_cadence_insufficient_warning(
+            spacing_count,
+            insufficient_scenario_ids,
+        )
+        return summary
     if offending_groups:
-        offending_ids = sorted(str(group["scenario_id"]) for group in offending_groups)
         warning = (
             "annualization_cadence_mismatch:"
             f"configured_periods_per_year={configured_periods_per_year}:"
@@ -822,6 +855,36 @@ def _annualization_cadence_summary(
         summary["offending_scenario_ids"] = offending_ids
         summary["warning"] = warning
     return summary
+
+
+def _annualization_cadence_insufficient_warning(
+    spacing_count: int,
+    scenario_ids: Sequence[str],
+) -> str:
+    warning = f"annualization_cadence_insufficient:spacing_observation_count={spacing_count}"
+    if scenario_ids:
+        warning += f":insufficient_scenario_ids={','.join(scenario_ids)}"
+    return warning
+
+
+def _completed_portfolio_path_scenario_ids(
+    results: Sequence[PortfolioEvaluationResult],
+) -> tuple[str, ...]:
+    scenario_ids: list[str] = []
+    for result in results:
+        if result.status != "completed" or result.tables is None:
+            continue
+        frame = result.tables.portfolio_path
+        columns = getattr(frame, "columns", ())
+        if frame is None or "timestamp" not in columns:
+            scenario_ids.append(result.scenario_id)
+            continue
+        if "scenario_id" in columns and hasattr(frame, "groupby"):
+            group_ids = [str(scenario_id) for scenario_id, _group in frame.groupby("scenario_id")]
+            scenario_ids.extend(group_ids or [result.scenario_id])
+            continue
+        scenario_ids.append(result.scenario_id)
+    return tuple(dict.fromkeys(scenario_ids))
 
 
 def _portfolio_path_cadence_groups(

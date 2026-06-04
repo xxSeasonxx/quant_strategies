@@ -13,3 +13,7 @@ class ValidationRunResult:
     message: str
     run_completed: bool = True
     failure_stage: str | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.run_completed and self.failure_stage is None

@@ -23,10 +23,11 @@ changed.
 
 Per Season's instruction, this review treats all prior reviews as **unverified claims**. I
 re-derived the engine, funding, NAV, annualization, and causality math directly from source and
-backed conclusions with executed tests. `review-codex.md` at the repo root was read only for
-artifact *format* before scope-lock; its technical conclusions were not used as input. The four
+backed conclusions with executed tests. The then-root-level `review-codex.md`
+was read only for artifact *format* before scope-lock; its technical
+conclusions were not used as input. The four
 lens subagents (onboarding, architecture, senior-engineering, adversarial) were explicitly barred
-from reading `review-codex.md`, `review-claude.md`, and `docs/reviews/**`, so their findings are
+from reading the root review working notes and `docs/reviews/**`, so their findings are
 uncontaminated by prior reviews. Where this review independently *confirms* or *contradicts* a
 codex claim, that is stated explicitly.
 
@@ -78,7 +79,8 @@ Scope:
 - Objective source: `PRD.md` (three public jobs §2/§4; non-goals §4.2/§8; math-correctness goal G2).
 - Math scope locked to **engine/validation/evaluation semantics + audit boundaries**; the four
   `untested/*.py` strategies were treated as opaque inputs (strategy alpha out of scope).
-- Artifact requested: this root-level `review-claude.md`.
+- Artifact originally requested as root-level `review-claude.md`; archived as
+  `docs/reviews/2026-06-03-foundation-claude-disposition.md`.
 
 Evidence inspected directly (source, not docs):
 

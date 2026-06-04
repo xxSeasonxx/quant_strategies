@@ -59,3 +59,7 @@ class EvaluationRunResult:
     failure_stage: str | None = None
     assessment_status: str = "evaluation_failed"
     evidence_quality_warnings: tuple[str, ...] = ()
+
+    @property
+    def succeeded(self) -> bool:
+        return self.run_completed and self.failure_stage is None

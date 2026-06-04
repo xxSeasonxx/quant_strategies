@@ -11,17 +11,18 @@ from quant_strategies.validation.errors import ValidationConfigError
 
 
 def test_shared_config_primitives_are_neutral_not_runner_owned():
-    from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+    from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig, WindowedDataConfig
     from quant_strategies.runner import config as runner_config
     from quant_strategies.validation.config import ScenarioRunConfig, ValidationConfig
 
     assert DataConfig.__module__ == "quant_strategies.core.config"
+    assert WindowedDataConfig.__module__ == "quant_strategies.core.config"
     assert FillModelConfig.__module__ == "quant_strategies.core.config"
     assert CostModelConfig.__module__ == "quant_strategies.core.config"
     assert runner_config.DataConfig is DataConfig
     assert runner_config.FillModelConfig is FillModelConfig
     assert runner_config.CostModelConfig is CostModelConfig
-    assert ValidationConfig.model_fields["data"].annotation is DataConfig
+    assert ValidationConfig.model_fields["data"].annotation is WindowedDataConfig
     assert ValidationConfig.model_fields["fill_model"].annotation is FillModelConfig
     assert ValidationConfig.model_fields["cost_model"].annotation is CostModelConfig
     assert ScenarioRunConfig.model_fields["data"].annotation is DataConfig
@@ -75,8 +76,6 @@ end = "2026-06-30"
 kind = "crypto_perp_funding"
 symbols = ["BTC-PERP"]
 strict = true
-start = "2026-01-01"
-end = "2026-06-30"
 
 [params]
 weight = 1.0
@@ -151,6 +150,8 @@ def test_load_validation_config_resolves_paths_from_config_directory(tmp_path: P
     assert config.strategy_path == candidate / "strategy.py"
     assert config.output.results_dir == candidate / "validation_results" / "demo"
     assert config.windows[0].id == "validation_2026_h1"
+    assert not hasattr(config.data, "start")
+    assert not hasattr(config.data, "end")
     assert config.readiness.min_observations_per_decision == 1
     assert config.readiness.required_observation_fields == ("close",)
     assert config.mechanical_thresholds.enabled is True
@@ -388,12 +389,6 @@ def test_validation_config_converts_to_execution_spec_with_config_base_dir(tmp_p
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
     write_config(config_path)
-    config_path.write_text(
-        config_path.read_text().replace(
-            'strict = true\nstart = "2026-01-01"\nend = "2026-06-30"',
-            'strict = true\nstart = "2025-01-01"\nend = "2026-12-31"',
-        )
-    )
     config = load_validation_config(config_path)
 
     spec = config.to_execution_spec(config.windows[0])
@@ -402,6 +397,25 @@ def test_validation_config_converts_to_execution_spec_with_config_base_dir(tmp_p
     assert spec.strategy_id == "demo"
     assert spec.fill_model == config.fill_model
     assert spec.cost_model == config.cost_model
+    assert spec.data.start == date(2026, 1, 1)
+    assert spec.data.end == date(2026, 6, 30)
+
+
+def test_load_validation_config_accepts_legacy_data_window_dates_but_uses_windows(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            "strict = true\n\n[params]",
+            'strict = true\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
+        )
+    )
+
+    config = load_validation_config(config_path)
+    spec = config.to_execution_spec(config.windows[0])
+
     assert spec.data.start == date(2026, 1, 1)
     assert spec.data.end == date(2026, 6, 30)
 

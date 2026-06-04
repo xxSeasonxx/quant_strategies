@@ -21,6 +21,7 @@ from quant_strategies.core.config import (
     DataConfig,
     FillModelConfig,
     StrategyExecutionSpec,
+    WindowedDataConfig,
 )
 from quant_strategies.evaluation.errors import EvaluationConfigError
 
@@ -121,7 +122,7 @@ class EvaluationConfig(EvaluationConfigModel):
     strategy_path: Path
     strategy_id: str = Field(min_length=1)
     windows: tuple[EvaluationWindow, ...] = Field(min_length=1)
-    data: DataConfig
+    data: WindowedDataConfig
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
@@ -160,6 +161,8 @@ class EvaluationConfig(EvaluationConfigModel):
         scenario_ids = tuple(scenario.id for scenario in self.scenarios)
         if len(scenario_ids) != len(set(scenario_ids)):
             raise ValueError("scenario ids cannot contain duplicates")
+        if self.scenarios and not any(scenario.required for scenario in self.scenarios):
+            raise ValueError("custom evaluation scenarios require at least one required scenario")
         if self.benchmark is not None and self.benchmark.symbol not in self.data.symbols:
             raise ValueError("benchmark.symbol must be included in data.symbols")
         return self
@@ -168,7 +171,11 @@ class EvaluationConfig(EvaluationConfigModel):
         return StrategyExecutionSpec(
             strategy_path=self.strategy_path,
             strategy_id=self.strategy_id,
-            data=self.data.model_copy(update={"start": window.start, "end": window.end}),
+            data=DataConfig(
+                **self.data.model_dump(),
+                start=window.start,
+                end=window.end,
+            ),
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,

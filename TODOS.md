@@ -56,7 +56,7 @@ residual backend limitations found during use.
 The P1 annualized metric trust guards are implemented. Annualized/risk metrics
 are emitted only when `annualization_cadence.status` is `ok` and
 `return_sample_count` meets the minimum return-sample floor,
-`[metrics].min_annualized_samples`; cadence warnings or insufficient samples
+`[metrics].min_annualized_samples`; any non-ok cadence status or insufficient samples
 null the annualized/risk metrics family without nulling core economics.
 
 ## Locked Direction

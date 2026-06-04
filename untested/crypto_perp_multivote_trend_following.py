@@ -41,7 +41,7 @@ ends instead of reproducing upstream portfolio state or signal flips.
 Falsifier:
 If decisions fail causal data audit, require overlapping same-symbol exposure to
 work, or depend on unmodeled flat exits/signal flips for most return, reject
-this port before moving it to tested/.
+this port before any promotion decision.
 """
 
 from collections.abc import Mapping, Sequence

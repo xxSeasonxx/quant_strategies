@@ -43,7 +43,8 @@ Scope:
 - Repo: `/Users/Season_Yang/Personal/quant_strategies`.
 - Objective source: `PRD.md`, especially the three public jobs and explicit non-goals in `PRD.md:23`, `PRD.md:52`, and `PRD.md:67`.
 - Added concern: autoresearch ranking and comparison are not this project's job.
-- Artifact requested: this root-level `review-codex.md`.
+- Artifact originally requested as root-level `review-codex.md`; archived as
+  `docs/reviews/2026-06-03-foundation-codex-disposition.md`.
 
 Evidence inspected:
 

@@ -149,7 +149,7 @@ def config(
 ):
     from quant_strategies.runner.config import load_config
 
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = tmp_path / "run.toml"
@@ -160,7 +160,7 @@ def config(
     )
     config_path.write_text(
         f'''
-strategy_path = "tested/demo.py"
+strategy_path = "strategies/demo.py"
 strategy_id = "demo"
 
 [data]

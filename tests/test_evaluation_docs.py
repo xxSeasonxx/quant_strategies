@@ -10,6 +10,10 @@ def read(path: str) -> str:
     return (ROOT / path).read_text()
 
 
+def compact(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
     for path in [
         "README.md",
@@ -44,6 +48,18 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
     assert "output.results_dir" in readme
 
 
+def test_validation_and_evaluation_examples_keep_window_dates_out_of_data_sections():
+    for path in [
+        "examples/strategies/simple_momentum_spy_daily_validation.toml",
+        "examples/strategies/simple_momentum_spy_daily_evaluation.toml",
+    ]:
+        text = read(path)
+        data_section = text.split("[data]", 1)[1].split("\n[", 1)[0]
+
+        assert "start =" not in data_section, path
+        assert "end =" not in data_section, path
+
+
 def test_docs_include_installed_cli_refresh_smoke():
     for path in ["README.md", "docs/foundation-surfaces.md"]:
         text = read(path)
@@ -69,8 +85,47 @@ def test_docs_describe_full_grid_returns_and_annualization_cadence_warnings():
         assert "minimum return-sample floor" in text, path
 
 
+def test_docs_lock_row_order_policy_and_shared_kernel_boundaries():
+    docs = compact(
+        "\n".join(read(path) for path in ["README.md", "FOUNDATION_LOCK.md", "docs/foundation-surfaces.md"])
+    ).replace("`", "")
+
+    assert "one shared decision/spec kernel plus separate price-evidence paths" in docs
+    assert "quant_data owns stable row ordering for supplied rows" in docs
+    assert "quant_strategies preserves supplied row order for strategy input, hashing, and execution" in docs
+    assert "does not sort rows locally before hashing or execution" in docs
+
+
+def test_docs_lock_sortino_funding_and_no_lookahead_semantics():
+    docs = compact(
+        "\n".join(
+            read(path)
+            for path in [
+                "README.md",
+                "FOUNDATION_LOCK.md",
+                "docs/foundation-surfaces.md",
+                "docs/vectorbtpro.md",
+            ]
+        )
+    )
+
+    assert "Sortino uses downside semivariance over the full return sample" in docs
+    assert "returns `None`, not infinity, when undefined" in docs
+    assert "Engine funding is linear trade-activity funding folded into validation `net_return`" in docs
+    assert "evaluation funding is NAV-ledger cashflow" in docs
+    assert "no funding events in the open interval accrue zero funding" in docs
+    assert "flagged funding rows still fail when malformed, conflicting, or mark-misaligned" in docs
+    assert "hidden-lookahead replay proves point-in-time causal replay" in docs
+    assert "does not prove out-of-sample validity" in docs
+    assert "does not prove freedom from in-sample fitting" in docs
+
+
 def test_lock_todos_and_review_track_p1_annualized_metric_guards():
-    for path in ["FOUNDATION_LOCK.md", "TODOS.md", "review-claude.md"]:
+    for path in [
+        "FOUNDATION_LOCK.md",
+        "TODOS.md",
+        "docs/reviews/2026-06-03-foundation-claude-disposition.md",
+    ]:
         text = read(path)
         assert "min_annualized_samples" in text, path
         assert "annualized/risk metrics" in text, path

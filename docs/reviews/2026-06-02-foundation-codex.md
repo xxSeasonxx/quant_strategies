@@ -42,7 +42,7 @@ adding more evaluation features.
   `src/quant_strategies/data_contract.py`, `src/quant_strategies/causality.py`.
 - Config and package surfaces: `pyproject.toml`, `runs/*.toml`,
   `src/quant_strategies/core/config.py`.
-- Strategy and archive state: `untested/`, `tested/`, `researched/`.
+- Strategy and archive state: `untested/`, `researched/`.
 - Docs treated as claims: `PRD.md`, `README.md`, `FOUNDATION_LOCK.md`,
   `TODOS.md`, `docs/foundation-surfaces.md`, `docs/vectorbtpro.md`,
   `plans/phase1-p1-trust.md`.

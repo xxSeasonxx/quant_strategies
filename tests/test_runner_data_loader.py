@@ -37,7 +37,7 @@ def make_config(
     dataset: str | None = "equity_1min",
     fill_price: str = "close",
 ):
-    strategy = tmp_path / "tested" / "demo.py"
+    strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params): return []\n")
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
@@ -45,7 +45,7 @@ def make_config(
     config_path = tmp_path / "run.toml"
     config_path.write_text(
         f'''
-strategy_path = "tested/demo.py"
+strategy_path = "strategies/demo.py"
 strategy_id = "demo"
 
 [data]

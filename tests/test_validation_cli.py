@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -76,6 +77,35 @@ def test_validate_cli_returns_three_for_data_audit_failure(monkeypatch, tmp_path
 
     assert code == 3
     assert "mechanical_fail" in capsys.readouterr().out
+
+
+def test_validate_cli_returns_three_for_data_load_failure(monkeypatch, tmp_path: Path, capsys):
+    monkeypatch.setattr(
+        "quant_strategies.cli.run_validation",
+        lambda path, repo_root=None: ValidationRunResult(
+            result_dir=tmp_path / "validation_results" / "run",
+            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("data_load_failed",)),
+            message="validation decision: mechanical_fail",
+            run_completed=True,
+            failure_stage="data_load",
+        ),
+    )
+
+    code = cli.main(["validate", "--repo-root", str(tmp_path), "candidate/validation.toml"])
+
+    assert code == 3
+    assert "mechanical_fail" in capsys.readouterr().out
+
+
+def test_validate_cli_exit_code_prefers_derived_succeeded_contract():
+    result = SimpleNamespace(
+        succeeded=False,
+        run_completed=True,
+        failure_stage=None,
+        decision=ValidationPolicyDecision(decision="mechanical_caution"),
+    )
+
+    assert cli._validation_exit_code(result) == 1
 
 
 def test_validate_cli_omits_artifacts_when_config_load_returns_no_result_dir(

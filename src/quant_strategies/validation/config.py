@@ -21,6 +21,7 @@ from quant_strategies.core.config import (
     DataConfig,
     FillModelConfig,
     StrategyExecutionSpec,
+    WindowedDataConfig,
 )
 from quant_strategies.validation.artifact_names import validation_artifact_path_collisions
 from quant_strategies.validation.errors import ValidationConfigError
@@ -208,7 +209,7 @@ class ValidationConfig(ValidationConfigModel):
     verdict_source: VerdictSource = "engine"
     agreement_oracle: AgreementOracleConfig = Field(default_factory=AgreementOracleConfig)
     windows: tuple[ValidationWindow, ...] = Field(min_length=1)
-    data: DataConfig
+    data: WindowedDataConfig
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
@@ -262,7 +263,11 @@ class ValidationConfig(ValidationConfigModel):
         return StrategyExecutionSpec(
             strategy_path=self.strategy_path,
             strategy_id=self.strategy_id,
-            data=self.data.model_copy(update={"start": window.start, "end": window.end}),
+            data=DataConfig(
+                **self.data.model_dump(),
+                start=window.start,
+                end=window.end,
+            ),
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,

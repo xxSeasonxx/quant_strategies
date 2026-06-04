@@ -63,7 +63,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "no observed finite returns after the synthetic first return, any non-finite post-initial return is present, return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or total return <= -100%",
+            "null_when": "no observed finite returns after the synthetic first return, any non-finite post-initial return is present, return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is not ok, or total return <= -100%",
         },
         "volatility": {
             "unit": "decimal_fraction_per_year",
@@ -73,7 +73,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or fewer than two observed returns after the synthetic first return",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is not ok, or fewer than two observed returns after the synthetic first return",
         },
         "sharpe": {
             "unit": "ratio",
@@ -83,7 +83,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or volatility is unavailable or zero",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is not ok, or volatility is unavailable or zero",
         },
         "sortino": {
             "unit": "ratio",
@@ -93,7 +93,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is not ok, or downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
         },
         "calmar": {
             "unit": "ratio",
@@ -103,7 +103,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is not ok, annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
         },
         "max_drawdown": {
             "unit": "decimal_fraction",

@@ -95,8 +95,6 @@ kind = "bars"
 dataset = "unit-test-bars"
 symbols = ["BTC-PERP"]
 strict = true
-start = "2026-01-01"
-end = "2026-06-30"
 
 [params]
 weight = 1.0
@@ -1618,14 +1616,6 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
 def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml")
-        .read_text()
-        .replace(
-            'strict = true\nstart = "2026-01-01"\nend = "2026-06-30"',
-            'strict = true\nstart = "2025-01-01"\nend = "2026-12-31"',
-        )
-    )
     monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
     backend = RecordingBackend()
 

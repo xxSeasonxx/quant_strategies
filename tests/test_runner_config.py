@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def write_strategy(repo_root: Path) -> None:
-    strategy = repo_root / "tested" / "demo.py"
+    strategy = repo_root / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
 
@@ -22,7 +22,7 @@ def write_strategy(repo_root: Path) -> None:
 def write_config(
     repo_root: Path,
     *,
-    strategy_path: str = "tested/demo.py",
+    strategy_path: str = "strategies/demo.py",
     data_kind: str = "bars",
     dataset: str | None = "equity_1min",
     quick_checks: bool | None = None,
@@ -78,7 +78,7 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     write_strategy(tmp_path)
     config = load_config(write_config(tmp_path), repo_root=tmp_path)
 
-    assert config.strategy_path == tmp_path / "tested" / "demo.py"
+    assert config.strategy_path == tmp_path / "strategies" / "demo.py"
     assert config.strategy_id == "demo"
     assert config.data.symbols == ("SPY",)
     assert config.output.results_dir == tmp_path / "results"
@@ -140,7 +140,7 @@ def test_readme_does_not_document_named_run_configs():
     ("content", "message"),
     [
         ("strategy_id = 'demo'\n", "strategy_path"),
-        ("strategy_path = 'tested/demo.py'\nstrategy_id = 'demo'\n", "data"),
+        ("strategy_path = 'strategies/demo.py'\nstrategy_id = 'demo'\n", "data"),
     ],
 )
 def test_missing_required_config_fields_are_rejected(tmp_path: Path, content: str, message: str):
@@ -243,7 +243,7 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         "docs/results",
         "runs/results",
         "examples/results",
-        "tested/results",
+        "strategies/results",
         "untested/results",
         "outputs/demo",
     ],

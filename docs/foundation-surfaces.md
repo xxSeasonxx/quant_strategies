@@ -34,7 +34,15 @@ background loops.
 
 Rows are loaded through public `quant_data` APIs, normalized at the boundary,
 and passed to strategies as plain mapping rows. Package metadata bounds the
-supported upstream data contract as `quant-data>=0.1.0,<0.2.0`.
+supported upstream data contract as `quant-data>=0.1.0,<0.2.0`. `quant_data`
+owns stable row ordering for supplied rows; `quant_strategies` preserves
+supplied row order for strategy input, hashing, and execution and does not sort
+rows locally before hashing or execution.
+
+All three surfaces use one shared decision/spec kernel plus separate
+price-evidence paths: quick run and validation use the engine trade-activity
+path, while evaluation uses portfolio/NAV evidence through VectorBT Pro for
+non-funding data or the project perp ledger for `crypto_perp_funding`.
 
 Path anchoring:
 
@@ -51,6 +59,7 @@ make check
 make check-vectorbtpro-smoke
 
 conda run -n quant python -m pip install -e .
+conda run -n quant python -m pip install -e '.[evaluation]' -c constraints/evaluation.txt
 conda run -n quant quant-strategies --help
 conda run -n quant pytest
 conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
@@ -63,6 +72,9 @@ The smoke is skipped by default only when the test is invoked without
 `RUN_VECTORBTPRO_SMOKE=1`; when enabled, missing `pandas`, `pyarrow`, or
 `vectorbtpro` fails the check. Run `make check-vectorbtpro-smoke` directly when
 only the real backend smoke matters.
+Controlled evaluation runs should install the optional evaluation stack with
+`constraints/evaluation.txt`; `pyproject.toml` keeps broad optional dependency
+ranges for installability.
 
 ## Status And Result Interpretation
 
@@ -72,9 +84,9 @@ details, not promotion language.
 
 | Surface | Python status fields | Success condition | Failure interpretation |
 | --- | --- | --- | --- |
-| Quick run | `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `outcome.completed` is true and `outcome.failure_stage is None` | `outcome.completed` is false, `outcome.failure_stage` names the failed stage, and `outcome.assessment_status` stays diagnostic-only |
-| Validation run | `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `run_completed` is true and `failure_stage is None`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
-| Evaluation run | `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `run_completed` is true and `failure_stage is None` | stateless frozen-candidate evidence only |
+| Quick run | `RunResult.succeeded`, `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `result.succeeded` | `outcome.completed` is false, `outcome.failure_stage` names the failed stage, and `outcome.assessment_status` stays diagnostic-only |
+| Validation run | `ValidationRunResult.succeeded`, `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `result.succeeded`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
+| Evaluation run | `EvaluationRunResult.succeeded`, `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `result.succeeded` | stateless frozen-candidate evidence only |
 
 Quick-run Python evidence is nested under `RunResult.evidence`, including
 `evidence.replayable_from_artifacts`, `evidence.row_contract`,
@@ -90,11 +102,11 @@ from quant_strategies.validation import run_validation
 from quant_strategies.evaluation import run_evaluation
 ```
 
-The supported success checks are
-`result.outcome.completed and result.outcome.failure_stage is None` for quick
-runs and `result.run_completed and result.failure_stage is None` for validation
+The supported success check is `result.succeeded` for quick run, validation,
 and evaluation; validation labels are advisory evidence, and `mechanical_fail`
-is not promotion logic. Artifacts are evidence and rerunnable; ranking, comparison, search memory, stopping rules, and promotion decisions remain outside this repo.
+is not promotion logic. Artifacts are evidence and rerunnable; ranking,
+comparison, search memory, stopping rules, and promotion decisions remain
+outside this repo.
 
 ## Quick Run
 
@@ -210,7 +222,7 @@ CLI exit codes:
 | --------- | ------------------------------------------------------------ |
 | `0`       | validation completed with a non-`mechanical_fail` advisory decision |
 | `2`       | validation completed with `mechanical_fail`                  |
-| `3`       | data readiness or audit failure                              |
+| `3`       | data load, readiness, row-contract, validation-readiness, or audit failure |
 | `1`       | config, infrastructure, artifact, or other execution failure |
 
 
@@ -259,14 +271,25 @@ contract does not match perp funding cashflows.
 Annualized metrics use full-grid portfolio returns from the `portfolio_path`
 trace, including flat/no-position bars. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
-an advisory `annualization_cadence` summary and warning on mismatches.
+an advisory `annualization_cadence` summary with warnings for cadence mismatches
+or insufficient observed spacing.
 Annualized/risk metrics (`annualized_return`, `volatility`, `sharpe`,
 `sortino`, and `calmar`) are emitted only when `annualization_cadence.status`
 is `ok` and `return_sample_count` meets the minimum return-sample floor,
-`[metrics].min_annualized_samples` (default `20`). Cadence warnings or
+`[metrics].min_annualized_samples` (default `20`). Any non-ok cadence status or
 insufficient samples null that annualized/risk metrics family without nulling
 core economics such as `total_return`, `ending_value`, `max_drawdown`,
 `return_sample_count`, or `worst_period_return`.
+Sortino uses downside semivariance over the full return sample and returns
+`None`, not infinity, when undefined.
+
+Engine funding is linear trade-activity funding folded into validation
+`net_return`; evaluation funding is NAV-ledger cashflow through the project
+perp ledger. Fillable crypto perp windows with no funding events in the open
+interval accrue zero funding; flagged funding rows still fail when malformed,
+conflicting, or mark-misaligned. hidden-lookahead replay proves point-in-time
+causal replay; it does not prove out-of-sample validity and it does not prove
+freedom from in-sample fitting.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading.
 Benchmark-relative metrics are evidence only: when optional `[benchmark]` is

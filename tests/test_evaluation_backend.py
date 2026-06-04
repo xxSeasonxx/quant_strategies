@@ -7,7 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
+import quant_strategies.evaluation._portfolio_common as common_module
 import quant_strategies.evaluation.vectorbtpro_backend as backend_module
+import quant_strategies.evaluation.project_perp_ledger as perp_module
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
 from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
@@ -22,6 +24,12 @@ from quant_strategies.evaluation.scenarios import EvaluationScenario
 
 
 ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
+
+
+def test_vectorbtpro_backend_remains_public_compatibility_adapter():
+    from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend as imported
+
+    assert imported is VectorBTProEvaluationBackend
 
 
 def test_vectorbtpro_backend_satisfies_evaluation_backend_protocols():
@@ -52,6 +60,14 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
     assert "turnover" not in semantics
 
 
+def test_evaluation_backend_split_keeps_project_perp_ledger_in_dedicated_module():
+    backend = VectorBTProEvaluationBackend()
+
+    assert common_module.prepared_decision_windows
+    assert perp_module.run_perp_ledger
+    assert backend.name_for_data_kind("crypto_perp_funding") == perp_module.PROJECT_PERP_FUNDING_MODEL
+
+
 def test_finite_metric_or_none_rejects_nan_inf_and_booleans():
     from quant_strategies.evaluation.metrics import finite_metric_or_none
 
@@ -66,8 +82,8 @@ def test_finite_metric_or_none_rejects_nan_inf_and_booleans():
 
 
 def test_observed_returns_drops_first_raw_return_before_filtering_nonfinite_values():
-    assert backend_module._observed_returns([math.nan, 0.01, -0.02]) == [0.01, -0.02]
-    assert backend_module._observed_returns([0.0, math.nan, 0.03]) == [0.03]
+    assert common_module.observed_returns([math.nan, 0.01, -0.02]) == [0.01, -0.02]
+    assert common_module.observed_returns([0.0, math.nan, 0.03]) == [0.03]
 
 
 def test_portfolio_metrics_use_explicit_annualized_formulas():
@@ -522,7 +538,7 @@ def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(portfoli
     trades = pd.DataFrame({"net_pnl": [1.0]})
 
     with pytest.raises(ValueError, match="invalid_required_metric:ending_value"):
-        backend_module._perp_ledger_metrics(
+        perp_module.perp_ledger_metrics(
             portfolio_path,
             trades,
             annualization_periods_per_year=252,
@@ -542,7 +558,7 @@ def test_perp_ledger_metrics_null_annualized_family_when_return_sample_is_too_sh
     )
     trades = pd.DataFrame({"net_pnl": [0.5]})
 
-    payload = backend_module._perp_ledger_metrics(
+    payload = perp_module.perp_ledger_metrics(
         portfolio_path,
         trades,
         annualization_periods_per_year=252,
@@ -917,6 +933,38 @@ def test_vectorbtpro_evaluation_backend_reports_unsupported_threshold_exit():
     assert result.tables is None
 
 
+def test_crypto_perp_funding_unsupported_result_uses_project_ledger_backend_name():
+    bad = decision()
+    bad = bad.model_copy(update={"exit_policy": ExitPolicy(max_hold_bars=1, stop_loss_bps=100.0)})
+
+    result = VectorBTProEvaluationBackend().run(
+        decisions=[bad],
+        rows=rows(),
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        data_kind="crypto_perp_funding",
+    )
+
+    assert result.status == "unsupported"
+    assert result.backend == "project_perp_ledger_v1"
+
+
+def test_crypto_perp_funding_prepare_failure_uses_project_ledger_backend_name():
+    result = VectorBTProEvaluationBackend().run(
+        decisions=[decision()],
+        rows=[
+            {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 100.0},
+            {"symbol": "ETH-PERP", "timestamp": DECISION, "close": 101.0},
+        ],
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        data_kind="crypto_perp_funding",
+    )
+
+    assert result.status == "failed"
+    assert result.backend == "project_perp_ledger_v1"
+
+
 def test_vectorbtpro_evaluation_backend_reports_leveraged_target_weight():
     result = VectorBTProEvaluationBackend().run(
         decisions=[decision(size=1.25)],
@@ -1000,7 +1048,7 @@ def test_prepared_decision_windows_reject_same_symbol_overlap_after_different_en
     )
 
     with pytest.raises(ValueError, match="^overlapping_decision_window:BTC-PERP:"):
-        backend_module._prepared_decision_windows(prepared, scenario())
+        common_module.prepared_decision_windows(prepared, scenario())
 
 
 def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():

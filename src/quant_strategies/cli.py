@@ -14,6 +14,7 @@ from quant_strategies.validation.events import jsonl_event_sink as validation_js
 
 
 _DATA_FAILURE_STAGES = {
+    "data_load",
     "data_readiness",
     "observation_audit",
     "data_audit",
@@ -123,7 +124,7 @@ def _run_exit_code(result: object) -> int:
     failure_stage = outcome.failure_stage
     if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if failure_stage is not None or not outcome.completed:
+    if not getattr(result, "succeeded", outcome.completed and failure_stage is None):
         return 1
     return 0
 
@@ -132,7 +133,7 @@ def _validation_exit_code(result: object) -> int:
     failure_stage = getattr(result, "failure_stage", None)
     if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if failure_stage is not None or not getattr(result, "run_completed", False):
+    if not getattr(result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None):
         return 1
     decision = getattr(getattr(result, "decision", None), "decision", None)
     if decision == "mechanical_fail":
@@ -142,8 +143,8 @@ def _validation_exit_code(result: object) -> int:
 
 def _evaluation_exit_code(result: object) -> int:
     failure_stage = getattr(result, "failure_stage", None)
-    if failure_stage in _DATA_FAILURE_STAGES or failure_stage == "data_load":
+    if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if failure_stage is not None or not getattr(result, "run_completed", False):
+    if not getattr(result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None):
         return 1
     return 0
