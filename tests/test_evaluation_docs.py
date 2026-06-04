@@ -25,7 +25,7 @@ def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
         assert "Parquet" in text, path
         assert "pyarrow" in text, path
         assert "does not authorize promotion, paper trading, or live trading" in text, path
-        assert "Benchmark-relative metrics are deferred" in text, path
+        assert "Benchmark-relative metrics are evidence only" in text, path
 
 
 def test_docs_describe_evaluation_example_and_path_anchoring():
@@ -47,6 +47,8 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
 def test_docs_include_installed_cli_refresh_smoke():
     for path in ["README.md", "docs/foundation-surfaces.md"]:
         text = read(path)
+        assert "make check" in text, path
+        assert "make check-vectorbtpro-smoke" in text, path
         assert "conda run -n quant python -m pip install -e ." in text, path
         assert "conda run -n quant quant-strategies --help" in text, path
         assert (
@@ -80,8 +82,8 @@ def test_todos_collapses_c_to_follow_up_work_only():
     text = read("TODOS.md")
 
     assert "Research evaluation surface MVP" not in text
-    assert "benchmark-relative metrics" in text
-    assert "user-defined scenario matrices" in text
+    assert "benchmark-relative metrics and user-defined scenario matrices are implemented" in text
+    assert "Remaining follow-up work is limited to benchmark-relative metrics" not in text
 
 
 def test_docs_do_not_call_evaluation_validation_verdict():

@@ -27,6 +27,9 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
         "excludes borrow, financing, and market impact"
     )
     not_authority = "not validation, promotion, paper trading, or live trading authority"
+    benchmark_not_authority = (
+        "benchmark-relative evidence only; not ranking, promotion, paper trading, or live trading authority"
+    )
     annualization = "explicit_config.annualization_periods_per_year"
 
     return {
@@ -188,5 +191,29 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "backend": backend,
             "not_authority": not_authority,
             "null_when": "never for completed scenarios; project_perp_ledger_v1 for crypto_perp_funding and none otherwise",
+        },
+        "benchmark_symbol": {
+            "unit": "label",
+            "base": "configured benchmark symbol",
+            "aggregation": "scenario label",
+            "backend": "computed from normalized evaluation rows when [benchmark] is configured",
+            "not_authority": benchmark_not_authority,
+            "null_when": "absent when no benchmark is configured",
+        },
+        "benchmark_total_return": {
+            "unit": "decimal_fraction",
+            "base": "benchmark close path",
+            "aggregation": "window final close / first close - 1",
+            "backend": "computed from normalized evaluation rows when [benchmark] is configured",
+            "not_authority": benchmark_not_authority,
+            "null_when": "absent when no benchmark is configured; missing or invalid benchmark rows fail evaluation",
+        },
+        "excess_total_return": {
+            "unit": "decimal_fraction",
+            "base": "scenario total_return and benchmark_total_return",
+            "aggregation": "total_return - benchmark_total_return",
+            "backend": "computed from normalized evaluation rows when [benchmark] is configured",
+            "not_authority": benchmark_not_authority,
+            "null_when": "absent when no benchmark is configured",
         },
     }

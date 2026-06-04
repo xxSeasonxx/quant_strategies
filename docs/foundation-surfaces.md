@@ -46,14 +46,18 @@ Path anchoring:
 Foundation pre-run verification:
 
 ```bash
+make check
+make check-vectorbtpro-smoke
+
 conda run -n quant python -m pip install -e .
 conda run -n quant quant-strategies --help
 conda run -n quant pytest
 conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
 ```
 
-Run this when the local `quant` environment may have stale console-script
-metadata or before relying on VectorBT Pro evaluation behavior.
+Run `make check` when the local `quant` environment may have stale
+console-script metadata. Run `make check-vectorbtpro-smoke` before relying on
+real VectorBT Pro evaluation behavior.
 
 ## Status And Result Interpretation
 
@@ -71,6 +75,21 @@ Quick-run Python evidence is nested under `RunResult.evidence`, including
 `evidence.replayable_from_artifacts`, `evidence.row_contract`,
 `evidence.causality.verified`, and `evidence.warnings`. There are no flat
 compatibility aliases for the previous runner result fields.
+
+Downstream consumers such as `quant_autoresearch` should use only the public
+surface imports:
+
+```python
+from quant_strategies.runner import run_config
+from quant_strategies.validation import run_validation
+from quant_strategies.evaluation import run_evaluation
+```
+
+The supported success checks are
+`result.outcome.completed and result.outcome.failure_stage is None` for quick
+runs and `result.run_completed and result.failure_stage is None` for validation
+and evaluation; validation labels are advisory evidence, and `mechanical_fail`
+is not promotion logic. Artifacts are evidence and rerunnable; ranking, comparison, search memory, stopping rules, and promotion decisions remain outside this repo.
 
 ## Quick Run
 
@@ -212,14 +231,18 @@ Purpose:
 
 - evaluate a frozen candidate through a stateless portfolio evidence surface;
 - require `validate_params`;
-- run strict row-contract and complete causal replay preflight;
-- fan out the fixed six-scenario cost/fill matrix per configured window;
+- run strict row-contract, decision-row data audit, and complete causal replay
+  preflight;
+- fan out configured `[[scenarios]]` per window, or the default fixed
+  six-scenario cost/fill matrix when no custom scenarios are configured;
 - produce portfolio, economic, and path evidence through VectorBT Pro for
   non-funding data and `project_perp_ledger_v1` for `crypto_perp_funding`.
 
-Evaluation fails before scenario expansion when deterministic, emitted, or
-strict suppression replay proof is incomplete. That failure returns
-`failure_stage="preflight"` and
+Evaluation fails before scenario expansion when the decision-row/observation
+dependency audit fails or when deterministic, emitted, or strict suppression
+replay proof is incomplete. Data-audit failures return
+`failure_stage="data_audit"`; replay-preflight failures return
+`failure_stage="preflight"`. Both use
 `assessment_status="evaluation_preflight_failed"`.
 
 For `crypto_perp_funding`, evaluation uses a project-owned perpetual futures
@@ -231,7 +254,11 @@ trace, including flat/no-position bars. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
 an advisory `annualization_cadence` summary and warning on obvious mismatches.
 
-Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+Evaluation is not validation and does not authorize promotion, paper trading, or live trading.
+Benchmark-relative metrics are evidence only: when optional `[benchmark]` is
+configured, evaluation reports `benchmark_symbol`, `benchmark_total_return`,
+and `excess_total_return` for each scenario without ranking or promotion
+authority.
 
 Primary config file: candidate-local `evaluation.toml`.
 The checked-in minimal example is
@@ -243,6 +270,10 @@ Important sections:
 - `[[windows]]`;
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[metrics]` with `annualization_periods_per_year`;
+- optional `[benchmark]` with `symbol`, which must also be present in
+  `data.symbols`;
+- optional `[[scenarios]]` entries with `id`, labels, `required`, and optional
+  nested `[scenarios.cost_model]` / `[scenarios.fill_model]` overrides;
 - `[output]` with candidate-local `results_dir`.
 
 Generated output roots `results/`, `validation_results/`, and
@@ -250,8 +281,8 @@ Generated output roots `results/`, `validation_results/`, and
 instead of treated as source.
 
 Output: `EvaluationRunResult`. The CLI prints the result directory on success,
-exits `3` for data-load or row-contract failures, and exits `1` for preflight
-causality failures.
+exits `3` for data-load, row-contract, or data-audit failures, and exits `1`
+for preflight causality failures.
 
 Control artifacts:
 
@@ -260,13 +291,13 @@ Control artifacts:
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `evaluation_config.toml`   | copied evaluation config                                                                                                   |
 | `strategy_snapshot.py`     | copied strategy file                                                                                                       |
-| `data_manifest.json`       | per-window data config, row-contract summary, row counts/ranges, normalized row hash, evidence quality, decision count, and audit artifact links |
+| `data_manifest.json`       | per-window data config, row-contract summary, data-audit payload, row counts/ranges, normalized row hash, evidence quality, decision count, and audit artifact links |
 | `evaluation_metrics.json`  | metric semantics, annualization cadence, evidence-quality warnings, and per-scenario portfolio metrics, including return-sample coverage |
 | `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, and unsupported semantics                                                   |
 | `evaluation_manifest.json` | hashes, scenario coverage, annualization cadence, audit metadata, table metadata, metric semantics, replayability, provenance, and artifact inventory |
 | `audit/input_rows/{safe_window}-{hash}.parquet` | normalized strategy input rows for each evaluation window that reaches strategy execution          |
 | `audit/decision_records/{safe_window}-{hash}.jsonl` | typed strategy decisions for each evaluation window that reaches strategy execution             |
-| `evaluation_failure.json`  | failure stage, status, message, warnings, unsupported semantics, data windows reached, and scenario coverage when failed   |
+| `evaluation_failure.json`  | failure stage, status, message, warnings, unsupported semantics, data windows reached with any data-audit payload, and scenario coverage when failed |
 | `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro` when present                             |
 | `notes.md`                 | human-readable evaluation notes                                                                                            |
 

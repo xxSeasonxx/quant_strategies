@@ -25,7 +25,13 @@ def write_strategy(path: Path) -> None:
     )
 
 
-def write_config(path: Path, *, strategy_path: str = "strategy.py", annualization: int = 252) -> None:
+def write_config(
+    path: Path,
+    *,
+    strategy_path: str = "strategy.py",
+    annualization: int = 252,
+    extra: str = "",
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'''
@@ -62,6 +68,7 @@ annualization_periods_per_year = {annualization}
 
 [output]
 results_dir = "evaluation_results/demo"
+{extra}
 '''.lstrip()
     )
 
@@ -108,6 +115,7 @@ def test_checked_in_simple_momentum_evaluation_example_loads():
     assert config.output.results_dir == ROOT / "examples" / "strategies" / "evaluation_results" / "simple_momentum"
     assert config.strategy_id == "simple_momentum"
     assert config.windows[0].id == "evaluation_2024_01"
+    assert config.metrics.annualization_periods_per_year == 525949
 
 
 def test_resolve_evaluation_config_rejects_directory_path(tmp_path: Path):
@@ -153,4 +161,111 @@ end = "2026-12-31"
     (candidate / "evaluation.toml").write_text(payload)
 
     with pytest.raises(EvaluationConfigError, match="window ids cannot contain duplicates"):
+        load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_load_evaluation_config_accepts_custom_scenarios_and_benchmark(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra='''
+
+[benchmark]
+symbol = "SPY"
+
+[[scenarios]]
+id = "realistic_base"
+cost_scenario = "realistic_costs"
+fill_scenario = "base_fill"
+required = true
+
+[scenarios.cost_model]
+fee_bps_per_side = 0.25
+slippage_bps_per_side = 0.75
+
+[scenarios.fill_model]
+price = "close"
+entry_lag_bars = 2
+exit_lag_bars = 1
+
+[[scenarios]]
+id = "stress_fill"
+cost_scenario = "custom_costs"
+fill_scenario = "custom_fill"
+required = false
+''',
+    )
+
+    config = load_evaluation_config(candidate / "evaluation.toml")
+
+    assert config.benchmark is not None
+    assert config.benchmark.symbol == "SPY"
+    assert [item.id for item in config.scenarios] == ["realistic_base", "stress_fill"]
+    assert config.scenarios[0].cost_model == CostModelConfig(
+        fee_bps_per_side=0.25,
+        slippage_bps_per_side=0.75,
+    )
+    assert config.scenarios[0].fill_model == FillModelConfig(
+        price="close",
+        entry_lag_bars=2,
+        exit_lag_bars=1,
+    )
+    assert config.scenarios[1].cost_model is None
+    assert config.scenarios[1].fill_model is None
+    assert config.scenarios[1].required is False
+
+
+def test_load_evaluation_config_rejects_duplicate_custom_scenario_ids(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra='''
+
+[[scenarios]]
+id = "dup"
+
+[[scenarios]]
+id = "dup"
+''',
+    )
+
+    with pytest.raises(EvaluationConfigError, match="scenario ids cannot contain duplicates"):
+        load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_load_evaluation_config_rejects_benchmark_symbol_outside_data_symbols(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra='''
+
+[benchmark]
+symbol = "IWM"
+''',
+    )
+
+    with pytest.raises(EvaluationConfigError, match="benchmark.symbol must be included in data.symbols"):
+        load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_load_evaluation_config_rejects_invalid_custom_scenario_model(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra='''
+
+[[scenarios]]
+id = "bad_cost"
+
+[scenarios.cost_model]
+fee_bps_per_side = -0.01
+slippage_bps_per_side = 0.0
+''',
+    )
+
+    with pytest.raises(EvaluationConfigError, match="fee_bps_per_side"):
         load_evaluation_config(candidate / "evaluation.toml")

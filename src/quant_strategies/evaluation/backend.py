@@ -769,10 +769,8 @@ def _perp_ledger_metrics(
     values = portfolio_path["portfolio_value"] if "portfolio_value" in portfolio_path else []
     returns = portfolio_path["period_return"] if "period_return" in portfolio_path else []
     drawdowns = portfolio_path["drawdown"] if "drawdown" in portfolio_path else []
-    ending_value = _last_finite(values)
+    ending_value = _required_final_metric("ending_value", values)
     max_drawdown = min(_series_values(drawdowns)) if _series_values(drawdowns) else None
-    if ending_value is None:
-        raise ValueError("invalid_required_metric:ending_value")
     if finite_metric_or_none(max_drawdown) is None:
         raise ValueError("invalid_required_metric:max_drawdown")
 
@@ -853,10 +851,7 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> P
 
     payload: dict[str, MetricValue] = {}
     payload["total_return"] = _required_float_metric("total_return", total_return)
-    ending_value = _last_finite(values)
-    if ending_value is None:
-        raise ValueError("invalid_required_metric:ending_value")
-    payload["ending_value"] = ending_value
+    payload["ending_value"] = _required_final_metric("ending_value", values)
     payload["max_drawdown"] = _required_float_metric("max_drawdown", max_drawdown)
     payload["trade_count"] = _required_trade_count_metric(trade_count)
     _set_metric(payload, "win_rate", win_rate)
@@ -1090,6 +1085,16 @@ def _required_float_metric(name: str, value: Any) -> float:
     return metric
 
 
+def _required_final_metric(name: str, values: Any | None) -> float:
+    sampled_values = _series_values(values)
+    if not sampled_values:
+        raise ValueError(f"invalid_required_metric:{name}")
+    metric = finite_metric_or_none(sampled_values[-1])
+    if metric is None:
+        raise ValueError(f"invalid_required_metric:{name}")
+    return metric
+
+
 def _required_trade_count_metric(value: Any) -> int:
     metric = finite_metric_or_none(value)
     if metric is None or not metric.is_integer() or metric < 0.0:
@@ -1156,12 +1161,6 @@ def _return_coverage(returns: Any | None) -> _ReturnCoverage:
         sample_count=len(observed),
         nonfinite_count=len(sampled_values) - len(observed),
     )
-
-
-def _last_finite(values: Sequence[Any] | None) -> float | None:
-    finite = [finite_metric_or_none(value) for value in _series_values(values)]
-    finite = [value for value in finite if value is not None]
-    return finite[-1] if finite else None
 
 
 def _series_values(values: Any | None) -> list[Any]:

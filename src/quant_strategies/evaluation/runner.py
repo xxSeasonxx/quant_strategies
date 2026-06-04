@@ -26,13 +26,16 @@ from quant_strategies.evaluation.artifacts import (
     write_parquet_artifact,
     write_text_artifact,
 )
+from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.backend import PortfolioEvaluationResult, VectorBTProEvaluationBackend
+from quant_strategies.evaluation.backends import EvaluationBackend
 from quant_strategies.evaluation.config import load_evaluation_config, resolve_evaluation_config_path
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.errors import EvaluationConfigError
 from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
 from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
+from quant_strategies.validation.data_audit import audit_decision_rows
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
@@ -56,7 +59,7 @@ class _EvaluationContext:
     config: Any
     config_path: Path
     result_dir: Path
-    selected_backend: Any
+    selected_backend: EvaluationBackend
     event_emitter: EvaluationStageEmitter
 
 
@@ -66,6 +69,7 @@ class _EvaluationState:
     trace_results: list[PortfolioEvaluationResult] = field(default_factory=list)
     data_windows: list[dict[str, Any]] = field(default_factory=list)
     expected_scenario_ids: list[str] = field(default_factory=list)
+    required_scenario_ids: list[str] = field(default_factory=list)
     all_warnings: list[str] = field(default_factory=list)
 
 
@@ -91,7 +95,7 @@ def run_evaluation(
     config_path: str | Path,
     *,
     repo_root: Path | None = None,
-    backend: Any | None = None,
+    backend: EvaluationBackend | None = None,
     event_sink: EvaluationEventSink | None = None,
 ) -> EvaluationRunResult:
     events = EvaluationStageEmitter(event_sink)
@@ -140,7 +144,11 @@ def run_evaluation(
         if failure is not None:
             return failure
 
-    scenario_summary = _scenario_summary(state.backend_results, state.expected_scenario_ids)
+    scenario_summary = _scenario_summary(
+        state.backend_results,
+        state.expected_scenario_ids,
+        required_ids=state.required_scenario_ids,
+    )
     coverage_failure = _check_scenario_coverage(context, state, scenario_summary)
     if coverage_failure is not None:
         return coverage_failure
@@ -227,6 +235,9 @@ def _run_evaluation_window(
             str(exc),
         )
 
+    audit_failure = _run_data_audit(context, state, window, execution, data_window)
+    if audit_failure is not None:
+        return audit_failure
     causality_failure = _run_causality_check(context, state, window, execution)
     if causality_failure is not None:
         return causality_failure
@@ -283,6 +294,51 @@ def _write_window_audit_artifacts(
     return artifacts, None
 
 
+def _run_data_audit(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    execution: StrategyExecutionResult,
+    data_window: dict[str, Any],
+) -> EvaluationRunResult | None:
+    try:
+        with context.event_emitter.stage(
+            "data_audit",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            row_contract_mode="validation",
+            decision_count=len(execution.decisions),
+        ) as audit_event:
+            audit = audit_decision_rows(execution.normalized_rows, execution.decisions)
+            data_window["data_audit"] = {"window_id": window.id, **audit.model_dump(mode="json")}
+            if audit.passed:
+                return None
+            message = "; ".join(audit.violations) if audit.violations else "data_audit_failed"
+            audit_event.fail(message)
+            return _failure_result(
+                context,
+                state,
+                "data_audit",
+                "evaluation_preflight_failed",
+                message,
+            )
+    except Exception as exc:
+        data_window["data_audit"] = {
+            "window_id": window.id,
+            "row_count": len(execution.normalized_rows),
+            "decision_count": len(execution.decisions),
+            "passed": False,
+            "violations": [f"data_audit_failed: {exc}"],
+        }
+        return _failure_result(
+            context,
+            state,
+            "data_audit",
+            "evaluation_preflight_failed",
+            f"data_audit_failed: {exc}",
+        )
+
+
 def _run_causality_check(
     context: _EvaluationContext,
     state: _EvaluationState,
@@ -329,9 +385,14 @@ def _run_window_portfolio_evaluation(
         window=window,
         base_costs=context.config.cost_model,
         base_fill=context.config.fill_model,
+        configured_scenarios=context.config.scenarios,
     )
     state.expected_scenario_ids.extend(scenario.scenario_id for scenario in scenarios)
+    state.required_scenario_ids.extend(scenario.scenario_id for scenario in scenarios if scenario.required)
     projection_rows = execution.normalized_rows.projection_rows()
+    benchmark_metrics, benchmark_failure = _window_benchmark_metrics(context, state, window, projection_rows)
+    if benchmark_failure is not None:
+        return benchmark_failure
     prepared, preparation_failure = _prepare_portfolio_inputs(
         context,
         state,
@@ -352,10 +413,42 @@ def _run_window_portfolio_evaluation(
             projection_rows,
             scenario,
             prepared=prepared,
+            benchmark_metrics=benchmark_metrics,
         )
         if scenario_failure is not None:
             return scenario_failure
     return None
+
+
+def _window_benchmark_metrics(
+    context: _EvaluationContext,
+    state: _EvaluationState,
+    window: Any,
+    projection_rows: Sequence[dict[str, Any]],
+) -> tuple[dict[str, Any], EvaluationRunResult | None]:
+    if context.config.benchmark is None:
+        return {}, None
+    try:
+        with context.event_emitter.stage(
+            "benchmark_metrics",
+            strategy_id=context.config.strategy_id,
+            window_id=window.id,
+            benchmark_symbol=context.config.benchmark.symbol,
+        ) as benchmark_event:
+            metrics = benchmark_metrics_for_rows(
+                projection_rows,
+                symbol=context.config.benchmark.symbol,
+            )
+    except ValueError as exc:
+        message = f"{window.id}: {exc}"
+        return {}, _failure_result(
+            context,
+            state,
+            "benchmark_metrics",
+            "portfolio_evaluation_failed",
+            message,
+        )
+    return metrics, None
 
 
 def _prepare_portfolio_inputs(
@@ -423,6 +516,7 @@ def _run_portfolio_scenario(
     scenario: Any,
     *,
     prepared: Any | None,
+    benchmark_metrics: Mapping[str, Any],
 ) -> EvaluationRunResult | None:
     with context.event_emitter.stage(
         "portfolio_evaluation",
@@ -449,14 +543,30 @@ def _run_portfolio_scenario(
                 )
             )
         )
-        state.backend_results.append(_strip_trace_tables(scenario_result))
+        if scenario_result.status == "completed":
+            scenario_result = _with_benchmark_metrics(scenario_result, benchmark_metrics)
+        id_mismatch_failure = _scenario_id_mismatch_failure(scenario, scenario_result)
+        if id_mismatch_failure is not None:
+            state.backend_results.append(_strip_trace_tables(scenario_result))
+            scenario_event.fail(id_mismatch_failure, backend_status=scenario_result.status)
+            return _failure_result(
+                context,
+                state,
+                "portfolio_evaluation",
+                "portfolio_evaluation_failed",
+                id_mismatch_failure,
+            )
         if scenario_result.status != "completed":
+            state.backend_results.append(_strip_trace_tables(scenario_result))
             status = (
                 "portfolio_backend_unavailable"
                 if scenario_result.status == "unavailable"
                 else "portfolio_evaluation_failed"
             )
             message = _backend_failure_message(scenario_result)
+            if not scenario.required:
+                _record_optional_scenario_failure(state, scenario, message)
+                return None
             scenario_event.fail(message, backend_status=scenario_result.status)
             return _failure_result(
                 context,
@@ -467,6 +577,10 @@ def _run_portfolio_scenario(
             )
         metric_failure = _completed_metric_failure(scenario_result)
         if metric_failure is not None:
+            if not scenario.required:
+                state.backend_results.append(_strip_trace_tables(_failed_optional_result(scenario_result, metric_failure)))
+                _record_optional_scenario_failure(state, scenario, metric_failure)
+                return None
             scenario_event.fail(metric_failure, backend_status=scenario_result.status)
             return _failure_result(
                 context,
@@ -477,6 +591,10 @@ def _run_portfolio_scenario(
             )
         if scenario_result.tables is None:
             message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
+            if not scenario.required:
+                state.backend_results.append(_strip_trace_tables(_failed_optional_result(scenario_result, message)))
+                _record_optional_scenario_failure(state, scenario, message)
+                return None
             scenario_event.fail(message, backend_status=scenario_result.status)
             return _failure_result(
                 context,
@@ -485,8 +603,48 @@ def _run_portfolio_scenario(
                 "portfolio_evaluation_failed",
                 message,
             )
+        state.backend_results.append(_strip_trace_tables(scenario_result))
         state.trace_results.append(scenario_result)
     return None
+
+
+def _scenario_id_mismatch_failure(scenario: Any, result: PortfolioEvaluationResult) -> str | None:
+    if result.scenario_id == scenario.scenario_id:
+        return None
+    return (
+        "backend scenario id mismatch: "
+        f"expected={scenario.scenario_id} actual={result.scenario_id}"
+    )
+
+
+def _failed_optional_result(result: PortfolioEvaluationResult, message: str) -> PortfolioEvaluationResult:
+    return result.model_copy(
+        update={
+            "status": "failed",
+            "warnings": (*result.warnings, message),
+            "tables": None,
+        }
+    )
+
+
+def _record_optional_scenario_failure(state: _EvaluationState, scenario: Any, message: str) -> None:
+    state.all_warnings.append(f"optional_scenario_failed:{scenario.scenario_id}:{message}")
+
+
+def _with_benchmark_metrics(
+    result: PortfolioEvaluationResult,
+    benchmark_metrics: Mapping[str, Any],
+) -> PortfolioEvaluationResult:
+    if not benchmark_metrics:
+        return result
+    benchmark_return = _finite_float_metric(benchmark_metrics.get("benchmark_total_return"))
+    total_return = _finite_float_metric(result.metrics.get("total_return"))
+    if benchmark_return is None or total_return is None:
+        return result
+    metrics = dict(result.metrics)
+    metrics.update(benchmark_metrics)
+    metrics["excess_total_return"] = total_return - benchmark_return
+    return result.model_copy(update={"metrics": metrics})
 
 
 def _check_scenario_coverage(
@@ -872,7 +1030,11 @@ def _write_failure_artifacts(
     warnings: Sequence[str],
     unsupported_semantics: Sequence[str],
 ) -> str | None:
-    scenario_summary = _scenario_summary(state.backend_results, state.expected_scenario_ids)
+    scenario_summary = _scenario_summary(
+        state.backend_results,
+        state.expected_scenario_ids,
+        required_ids=state.required_scenario_ids,
+    )
     payload = {
         "schema_version": "quant_strategies.evaluation.failure/v1",
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -917,22 +1079,37 @@ def _unsupported_semantics(state: _EvaluationState) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
-def _scenario_summary(results: list[PortfolioEvaluationResult], expected_ids: list[str]) -> dict[str, Any]:
+def _scenario_summary(
+    results: list[PortfolioEvaluationResult],
+    expected_ids: list[str],
+    *,
+    required_ids: list[str],
+) -> dict[str, Any]:
     status_counts: dict[str, int] = {}
     for result in results:
         status_counts[result.status] = status_counts.get(result.status, 0) + 1
     completed_ids = [result.scenario_id for result in results if result.status == "completed"]
-    unexpected_ids = sorted(set(completed_ids) - set(expected_ids))
-    missing_ids = sorted(set(expected_ids) - set(completed_ids))
+    expected_id_set = set(expected_ids)
+    required_id_set = set(required_ids)
+    optional_ids = [scenario_id for scenario_id in expected_ids if scenario_id not in required_id_set]
+    unexpected_ids = sorted(set(completed_ids) - expected_id_set)
+    missing_required_ids = sorted(required_id_set - set(completed_ids))
+    missing_optional_ids = sorted(set(optional_ids) - set(completed_ids))
     return {
         "scenario_count": len(results),
         "status_counts": dict(sorted(status_counts.items())),
         "scenario_coverage": {
             "expected_count": len(expected_ids),
+            "required_count": len(required_ids),
+            "optional_count": len(optional_ids),
             "completed_count": len(completed_ids),
             "expected_ids": expected_ids,
+            "required_ids": required_ids,
+            "optional_ids": optional_ids,
             "completed_ids": completed_ids,
-            "missing_ids": missing_ids,
+            "missing_ids": missing_required_ids,
+            "missing_required_ids": missing_required_ids,
+            "missing_optional_ids": missing_optional_ids,
             "unexpected_ids": unexpected_ids,
         },
         "scenarios": [

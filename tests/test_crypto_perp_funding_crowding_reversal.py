@@ -6,7 +6,7 @@ import pytest
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
-from untested.crypto_perp_funding_crowding_reversal import generate_decisions
+from untested.crypto_perp_funding_crowding_reversal import generate_decisions, validate_params
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -82,6 +82,64 @@ def auditable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 
 def test_generate_decisions_returns_empty_for_empty_input():
     assert generate_decisions([], {}) == []
+
+
+def test_validate_params_returns_typed_defaults():
+    parsed = validate_params({})
+
+    assert parsed["funding_lookback_events"] == 3
+    assert isinstance(parsed["funding_lookback_events"], int)
+    assert parsed["return_lookback_minutes"] == 240
+    assert parsed["decision_lag_minutes"] == 1
+    assert parsed["weight"] == pytest.approx(1.0)
+    assert isinstance(parsed["weight"], float)
+    assert parsed["session_start_hour"] == 0
+    assert parsed["session_end_hour"] == 24
+
+
+def test_validate_params_normalizes_valid_overrides():
+    parsed = validate_params(
+        {
+            "funding_lookback_events": "2",
+            "return_lookback_minutes": "30",
+            "decision_interval_minutes": "15",
+            "decision_lag_minutes": "0",
+            "top_n": "2",
+            "min_cross_section": "3",
+            "min_abs_funding_bps": "0.5",
+            "min_abs_return_bps": "10.25",
+            "weight": "0.25",
+            "max_hold_bars": "6",
+            "take_profit_bps": "12.5",
+            "session_start_hour": "1",
+            "session_end_hour": "23",
+        }
+    )
+
+    assert parsed["funding_lookback_events"] == 2
+    assert parsed["decision_lag_minutes"] == 0
+    assert parsed["weight"] == pytest.approx(0.25)
+    assert parsed["take_profit_bps"] == pytest.approx(12.5)
+    assert parsed["session_start_hour"] == 1
+    assert parsed["session_end_hour"] == 23
+
+
+def test_validate_params_rejects_invalid_and_unknown_values():
+    with pytest.raises(ValueError, match="funding_lookback_events"):
+        validate_params({"funding_lookback_events": 0})
+    with pytest.raises(ValueError, match="session_start_hour"):
+        validate_params({"session_start_hour": 24})
+    with pytest.raises(ValueError, match="session_end_hour"):
+        validate_params({"session_start_hour": 12, "session_end_hour": 12})
+    with pytest.raises(ValueError, match="unknown params: typo"):
+        validate_params({"typo": 1})
+
+
+def test_generate_decisions_preserves_behavior_with_validated_params():
+    bars = symbol_rows("BTC-PERP", 100.0, 101.0, 102.0, 0.0003)
+    raw_params = params(min_cross_section="1", weight="0.25", max_hold_bars="3")
+
+    assert generate_payloads(bars, validate_params(raw_params)) == generate_payloads(bars, raw_params)
 
 
 def test_generate_decisions_requires_expected_crypto_fields():

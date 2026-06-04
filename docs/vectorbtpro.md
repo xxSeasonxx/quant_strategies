@@ -114,7 +114,8 @@ The reason is semantic, not just implementation preference:
 - Strategy purity still forbids calling VectorBT Pro inside strategy files.
 
 VectorBT Pro evaluation output is named as portfolio/path evidence, not as a
-project engine validation decision. Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+project engine validation decision. Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only; configured benchmarks add passive and excess return evidence
+without ranking or promotion authority.
 
 ## Evaluation Surface
 

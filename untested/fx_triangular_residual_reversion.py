@@ -49,11 +49,27 @@ from quant_strategies.decisions import (
 )
 
 
-__all__ = ["generate_decisions"]
+__all__ = ["generate_decisions", "validate_params"]
 
 _Triangle = tuple[str, str, int, str, int]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "close"}
+_EXIT_CONTROL_KEYS = ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps")
+_PARAM_KEYS = {
+    "triangle_set",
+    "zscore_window_bars",
+    "zscore_window_minutes",
+    "min_zscore_observations",
+    "entry_zscore",
+    "min_abs_residual_bps",
+    "attribution_bars",
+    "attribution_minutes",
+    "decision_lag_minutes",
+    "crossing_only",
+    "weight",
+    "max_hold_bars",
+    *_EXIT_CONTROL_KEYS,
+}
 _OUTSIDE_VIEW_8_TRIANGLES: tuple[_Triangle, ...] = (
     ("EURJPY", "EURUSD", 1, "USDJPY", 1),
     ("GBPJPY", "GBPUSD", 1, "USDJPY", 1),
@@ -71,6 +87,42 @@ _ADDITIONAL_AVAILABLE_TRIANGLES: tuple[_Triangle, ...] = (
 )
 
 
+def validate_params(params: Mapping[str, object]) -> dict[str, object]:
+    _reject_unknown_params(params, _PARAM_KEYS)
+    triangle_set = str(params.get("triangle_set", "outside_view_8"))
+    _triangles_for(triangle_set)
+
+    parsed: dict[str, object] = {
+        "triangle_set": triangle_set,
+        "zscore_window_bars": _positive_int(
+            _param_or_alias(params, "zscore_window_bars", "zscore_window_minutes", 240),
+            "zscore_window_bars",
+        ),
+        "min_zscore_observations": _positive_int(
+            params.get("min_zscore_observations", 120),
+            "min_zscore_observations",
+        ),
+        "entry_zscore": _positive_float(params.get("entry_zscore", 2.5), "entry_zscore"),
+        "min_abs_residual_bps": _non_negative_float(
+            params.get("min_abs_residual_bps", 1.0),
+            "min_abs_residual_bps",
+        ),
+        "attribution_bars": _positive_int(
+            _param_or_alias(params, "attribution_bars", "attribution_minutes", 5),
+            "attribution_bars",
+        ),
+        "decision_lag_minutes": _non_negative_int(
+            params.get("decision_lag_minutes", 1),
+            "decision_lag_minutes",
+        ),
+        "crossing_only": _bool_param(params.get("crossing_only", True), "crossing_only"),
+        "weight": _positive_float(params.get("weight", 1.0), "weight"),
+        "max_hold_bars": _positive_int(params.get("max_hold_bars", 30), "max_hold_bars"),
+    }
+    parsed.update(_exit_controls(params))
+    return parsed
+
+
 def generate_decisions(
     bars: Sequence[Mapping[str, object]],
     params: Mapping[str, object],
@@ -79,27 +131,22 @@ def generate_decisions(
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
 
-    zscore_window_bars = _positive_int(
-        params.get("zscore_window_bars", params.get("zscore_window_minutes", 240)),
-        "zscore_window_bars",
-    )
-    min_zscore_observations = _positive_int(params.get("min_zscore_observations", 120), "min_zscore_observations")
-    entry_zscore = _positive_float(params.get("entry_zscore", 2.5), "entry_zscore")
-    min_abs_residual_bps = _non_negative_float(params.get("min_abs_residual_bps", 1.0), "min_abs_residual_bps")
-    attribution_bars = _positive_int(
-        params.get("attribution_bars", params.get("attribution_minutes", 5)),
-        "attribution_bars",
-    )
-    decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
-    crossing_only = bool(params.get("crossing_only", True))
-    weight = float(params.get("weight", 1.0))
-    max_hold_bars = _positive_int(params.get("max_hold_bars", 30), "max_hold_bars")
-    exit_controls = _exit_controls(params)
+    parsed = validate_params(params)
+    zscore_window_bars = int(parsed["zscore_window_bars"])
+    min_zscore_observations = int(parsed["min_zscore_observations"])
+    entry_zscore = float(parsed["entry_zscore"])
+    min_abs_residual_bps = float(parsed["min_abs_residual_bps"])
+    attribution_bars = int(parsed["attribution_bars"])
+    decision_lag_minutes = int(parsed["decision_lag_minutes"])
+    crossing_only = bool(parsed["crossing_only"])
+    weight = float(parsed["weight"])
+    max_hold_bars = int(parsed["max_hold_bars"])
+    exit_controls = {name: parsed[name] for name in _EXIT_CONTROL_KEYS if name in parsed}
 
     close_by_key, timestamps, symbols = _close_table(bars)
 
     candidates: dict[tuple[str, datetime], list[dict[str, Any]]] = {}
-    for triangle in _triangles_for(str(params.get("triangle_set", "outside_view_8"))):
+    for triangle in _triangles_for(str(parsed["triangle_set"])):
         if not set(_triangle_symbols(triangle)).issubset(symbols):
             continue
         points = _residual_points(triangle, timestamps, close_by_key)
@@ -161,28 +208,56 @@ def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) ->
 
 
 def _positive_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
 
 
 def _non_negative_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed < 0:
         raise ValueError(f"{name} must be non-negative")
     return parsed
 
 
+def _integer(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(parsed) or not parsed.is_integer():
+        raise ValueError(f"{name} must be an integer")
+    return int(parsed)
+
+
+def _bool_param(value: object, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be a bool")
+    return value
+
+
 def _positive_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
 
 
 def _non_negative_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and non-negative")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and non-negative") from exc
     if not math.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
     return parsed
@@ -191,7 +266,12 @@ def _non_negative_float(value: object, name: str) -> float:
 def _optional_positive_float(value: object, name: str) -> float | None:
     if value is None:
         return None
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
@@ -199,11 +279,25 @@ def _optional_positive_float(value: object, name: str) -> float | None:
 
 def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
     controls: dict[str, object] = {}
-    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+    for name in _EXIT_CONTROL_KEYS:
         value = _optional_positive_float(params.get(name), name)
         if value is not None:
             controls[name] = value
     return controls
+
+
+def _param_or_alias(params: Mapping[str, object], canonical: str, alias: str, default: object) -> object:
+    if canonical in params:
+        return params[canonical]
+    if alias in params:
+        return params[alias]
+    return default
+
+
+def _reject_unknown_params(params: Mapping[str, object], allowed: set[str]) -> None:
+    unknown = sorted(set(params).difference(allowed))
+    if unknown:
+        raise ValueError(f"unknown params: {', '.join(unknown)}")
 
 
 def _close_table(

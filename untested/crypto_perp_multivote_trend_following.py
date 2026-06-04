@@ -1,4 +1,4 @@
-"""Strategy: crypto_perp_autoresearch_ensemble
+"""Strategy: crypto_perp_multivote_trend_following
 
 Source / provenance:
 Exp102-inspired hybrid port of the upstream Nunchi autoresearch crypto
@@ -59,12 +59,12 @@ from quant_strategies.decisions import (
 )
 
 
-__all__ = ["generate_decisions"]
+__all__ = ["generate_decisions", "validate_params"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "open", "high", "low", "close"}
 _DEFAULT_SYMBOLS = ("BTC-PERP", "ETH-PERP", "SOL-PERP")
-_DEFAULT_STRATEGY_ID = "crypto_perp_autoresearch_ensemble"
-_SIGNAL_FAMILY = "crypto_perp_autoresearch_ensemble"
+_DEFAULT_STRATEGY_ID = "crypto_perp_multivote_trend_following"
+_SIGNAL_FAMILY = "crypto_perp_multivote_trend_following"
 _UPSTREAM_DEFAULTS = {
     "BASE_POSITION_PCT": 0.08,
     "TAKE_PROFIT_PCT": 99.0,
@@ -87,6 +87,36 @@ _UPSTREAM_DEFAULTS = {
     "VOL_LOOKBACK_HOURS": 48,
     "DYNAMIC_THRESHOLD_FLOOR": 0.006,
     "DYNAMIC_THRESHOLD_CEILING": 0.025,
+}
+_PARAM_KEYS = {
+    "symbols",
+    "min_votes",
+    "base_position_pct",
+    "cooldown_bars",
+    "decision_interval_minutes",
+    "decision_lag_minutes",
+    "max_hold_bars",
+    "atr_stop_mult",
+    "rsi_period",
+    "bb_percentile_threshold",
+    "momentum_long_hours",
+    "momentum_short_hours",
+    "vshort_threshold_mult",
+    "vol_lookback_hours",
+    "dynamic_threshold_window_hours",
+    "base_momentum_threshold",
+    "target_volatility",
+    "dynamic_threshold_floor",
+    "dynamic_threshold_ceiling",
+    "ema_fast_span",
+    "ema_slow_span",
+    "macd_fast_span",
+    "macd_slow_span",
+    "macd_signal_span",
+    "atr_period",
+    "bb_window_hours",
+    "bb_percentile_window_hours",
+    "bb_std_mult",
 }
 
 
@@ -171,6 +201,10 @@ class _DynamicThreshold:
     vol_ratio: float
 
 
+def validate_params(params: Mapping[str, object]) -> dict[str, object]:
+    return _params_mapping(_parse_params(params))
+
+
 def generate_decisions(
     bars: Sequence[Mapping[str, object]],
     params: Mapping[str, object],
@@ -178,7 +212,7 @@ def generate_decisions(
     if not bars:
         return []
 
-    parsed_params = _parse_params(params)
+    parsed_params = _Params(**validate_params(params))
     _require_fields(bars, _REQUIRED_FIELDS)
     rows_by_symbol = _rows_by_symbol(bars, parsed_params.symbols)
     required_history = _required_history_hours(parsed_params)
@@ -191,7 +225,6 @@ def generate_decisions(
         snapshots = _hourly_snapshots(rows, parsed_params.decision_interval_minutes)
         if len(snapshots) < required_history:
             continue
-        row_positions = {row.timestamp: position for position, row in enumerate(rows)}
         bar_minutes = _median_bar_minutes(rows)
         hold_signal_bars = max(
             1,
@@ -210,14 +243,6 @@ def generate_decisions(
             side = _entry_side(indicators, parsed_params.min_votes)
             if side is None:
                 continue
-            if not _has_fillable_hold_window(
-                row_positions,
-                row_count=len(rows),
-                as_of_time=snapshots[index].timestamp,
-                decision_lag_minutes=parsed_params.decision_lag_minutes,
-                max_hold_bars=parsed_params.max_hold_bars,
-            ):
-                continue
 
             effective_target_weight = parsed_params.base_position_pct / len(parsed_params.symbols)
             decision = _decision(
@@ -234,6 +259,8 @@ def generate_decisions(
 
 
 def _parse_params(params: Mapping[str, object]) -> _Params:
+    _reject_unknown_params(params, _PARAM_KEYS)
+    bb_window_hours = _positive_int(params.get("bb_window_hours", 10), "bb_window_hours")
     parsed = _Params(
         symbols=_symbols_param(params.get("symbols", _DEFAULT_SYMBOLS)),
         min_votes=_bounded_int(params.get("min_votes", 4), "min_votes", minimum=1, maximum=6),
@@ -255,7 +282,7 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
         momentum_short_hours=_positive_int(params.get("momentum_short_hours", 6), "momentum_short_hours"),
         vshort_threshold_mult=_positive_float(params.get("vshort_threshold_mult", 0.5), "vshort_threshold_mult"),
         vol_lookback_hours=_positive_int(
-            params.get("vol_lookback_hours", params.get("dynamic_threshold_window_hours", 48)),
+            _param_or_alias(params, "vol_lookback_hours", "dynamic_threshold_window_hours", 48),
             "vol_lookback_hours",
         ),
         base_momentum_threshold=_positive_float(
@@ -277,9 +304,9 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
         macd_slow_span=_positive_int(params.get("macd_slow_span", 26), "macd_slow_span"),
         macd_signal_span=_positive_int(params.get("macd_signal_span", 9), "macd_signal_span"),
         atr_period=_positive_int(params.get("atr_period", 24), "atr_period"),
-        bb_window_hours=_positive_int(params.get("bb_window_hours", 10), "bb_window_hours"),
+        bb_window_hours=bb_window_hours,
         bb_percentile_window_hours=_positive_int(
-            params.get("bb_percentile_window_hours", 2 * int(params.get("bb_window_hours", 10))),
+            params.get("bb_percentile_window_hours", 2 * bb_window_hours),
             "bb_percentile_window_hours",
         ),
         bb_std_mult=_positive_float(params.get("bb_std_mult", 1.0), "bb_std_mult"),
@@ -287,6 +314,38 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
     if parsed.dynamic_threshold_floor > parsed.dynamic_threshold_ceiling:
         raise ValueError("dynamic_threshold_floor must be less than or equal to dynamic_threshold_ceiling")
     return parsed
+
+
+def _params_mapping(params: _Params) -> dict[str, object]:
+    return {
+        "symbols": params.symbols,
+        "min_votes": params.min_votes,
+        "base_position_pct": params.base_position_pct,
+        "cooldown_bars": params.cooldown_bars,
+        "decision_interval_minutes": params.decision_interval_minutes,
+        "decision_lag_minutes": params.decision_lag_minutes,
+        "max_hold_bars": params.max_hold_bars,
+        "atr_stop_mult": params.atr_stop_mult,
+        "rsi_period": params.rsi_period,
+        "bb_percentile_threshold": params.bb_percentile_threshold,
+        "momentum_long_hours": params.momentum_long_hours,
+        "momentum_short_hours": params.momentum_short_hours,
+        "vshort_threshold_mult": params.vshort_threshold_mult,
+        "vol_lookback_hours": params.vol_lookback_hours,
+        "base_momentum_threshold": params.base_momentum_threshold,
+        "target_volatility": params.target_volatility,
+        "dynamic_threshold_floor": params.dynamic_threshold_floor,
+        "dynamic_threshold_ceiling": params.dynamic_threshold_ceiling,
+        "ema_fast_span": params.ema_fast_span,
+        "ema_slow_span": params.ema_slow_span,
+        "macd_fast_span": params.macd_fast_span,
+        "macd_slow_span": params.macd_slow_span,
+        "macd_signal_span": params.macd_signal_span,
+        "atr_period": params.atr_period,
+        "bb_window_hours": params.bb_window_hours,
+        "bb_percentile_window_hours": params.bb_percentile_window_hours,
+        "bb_std_mult": params.bb_std_mult,
+    }
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:
@@ -599,21 +658,6 @@ def _required_history_hours(params: _Params) -> int:
     )
 
 
-def _has_fillable_hold_window(
-    row_positions: Mapping[datetime, int],
-    *,
-    row_count: int,
-    as_of_time: datetime,
-    decision_lag_minutes: int,
-    max_hold_bars: int,
-) -> bool:
-    decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
-    position = row_positions.get(decision_time)
-    if position is None:
-        return False
-    return position + max_hold_bars + 1 < row_count
-
-
 def _momentum_bps(closes: Sequence[float], lookback_hours: int) -> float | None:
     if len(closes) <= lookback_hours:
         return None
@@ -803,42 +847,69 @@ def _symbols_param(value: object) -> tuple[str, ...]:
 
 
 def _bounded_int(value: object, name: str, *, minimum: int, maximum: int) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed < minimum or parsed > maximum:
         raise ValueError(f"{name} must be between {minimum} and {maximum}")
     return parsed
 
 
 def _positive_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
 
 
 def _non_negative_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed < 0:
         raise ValueError(f"{name} must be non-negative")
     return parsed
 
 
+def _integer(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(parsed) or not parsed.is_integer():
+        raise ValueError(f"{name} must be an integer")
+    return int(parsed)
+
+
 def _positive_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
 
 
 def _non_negative_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and non-negative")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and non-negative") from exc
     if not math.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
     return parsed
 
 
 def _percentile_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be between 0 and 100")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be between 0 and 100") from exc
     if not math.isfinite(parsed) or parsed < 0.0 or parsed > 100.0:
         raise ValueError(f"{name} must be between 0 and 100")
     return parsed
@@ -852,10 +923,29 @@ def _positive_price(value: object, name: str) -> float:
 def _optional_finite_float(value: object, name: str) -> float | None:
     if value is None:
         return None
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite when present")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite when present") from exc
     if not math.isfinite(parsed):
         raise ValueError(f"{name} must be finite when present")
     return parsed
+
+
+def _param_or_alias(params: Mapping[str, object], canonical: str, alias: str, default: object) -> object:
+    if canonical in params:
+        return params[canonical]
+    if alias in params:
+        return params[alias]
+    return default
+
+
+def _reject_unknown_params(params: Mapping[str, object], allowed: set[str]) -> None:
+    unknown = sorted(set(params).difference(allowed))
+    if unknown:
+        raise ValueError(f"unknown params: {', '.join(unknown)}")
 
 
 def _as_datetime(value: object) -> datetime:

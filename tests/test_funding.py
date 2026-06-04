@@ -287,6 +287,29 @@ def test_perp_ledger_full_weight_exposure_pays_funding():
     assert result.metrics["total_return"] == pytest.approx(-0.005)
 
 
+def test_perp_ledger_pins_price_pnl_plus_funding_cashflow():
+    result = _run_ledger(
+        rows=_ledger_rows(
+            closes=(100.0, 100.0, 110.0, 120.0),
+            events=((2, 2, 0.01),),
+        ),
+    )
+
+    assert result.status == "completed"
+    assert result.tables is not None
+    trade = result.tables.trades.iloc[0]
+    assert trade["signed_units"] == pytest.approx(1.0)
+    assert trade["entry_fill_price"] == pytest.approx(100.0)
+    assert trade["exit_fill_price"] == pytest.approx(120.0)
+    assert trade["realized_pnl"] == pytest.approx(20.0)
+    assert trade["funding_cashflow"] == pytest.approx(-1.1)
+    assert trade["net_pnl"] == pytest.approx(18.9)
+    assert result.metrics["ending_value"] == pytest.approx(118.9)
+    assert result.metrics["total_return"] == pytest.approx(0.189)
+    assert result.metrics["funding_cashflow_total"] == pytest.approx(-1.1)
+    assert result.metrics["funding_event_count"] == 1
+
+
 def test_perp_ledger_duplicate_matching_funding_rates_dedupe():
     rows = _ledger_rows(closes=(100.0, 100.0, 100.0, 100.0, 100.0), events=((2, 2, 0.01), (4, 2, 0.01)))
 

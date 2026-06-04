@@ -49,9 +49,68 @@ from quant_strategies.decisions import (
 )
 
 
-__all__ = ["generate_decisions"]
+__all__ = ["generate_decisions", "validate_params"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "close", "funding_timestamp", "funding_rate", "has_funding_event"}
+_EXIT_CONTROL_KEYS = ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps")
+_PARAM_KEYS = {
+    "funding_lookback_events",
+    "return_lookback_minutes",
+    "decision_interval_minutes",
+    "decision_lag_minutes",
+    "top_n",
+    "min_cross_section",
+    "min_abs_funding_bps",
+    "min_abs_return_bps",
+    "weight",
+    "max_hold_bars",
+    "session_start_hour",
+    "session_end_hour",
+    *_EXIT_CONTROL_KEYS,
+}
+
+
+def validate_params(params: Mapping[str, object]) -> dict[str, object]:
+    _reject_unknown_params(params, _PARAM_KEYS)
+    session_start_hour = _bounded_int(params.get("session_start_hour", 0), "session_start_hour", minimum=0, maximum=23)
+    session_end_hour = _bounded_int(params.get("session_end_hour", 24), "session_end_hour", minimum=1, maximum=24)
+    if session_start_hour >= session_end_hour:
+        raise ValueError("session_end_hour must be greater than session_start_hour")
+
+    parsed: dict[str, object] = {
+        "funding_lookback_events": _positive_int(
+            params.get("funding_lookback_events", 3),
+            "funding_lookback_events",
+        ),
+        "return_lookback_minutes": _positive_int(
+            params.get("return_lookback_minutes", 240),
+            "return_lookback_minutes",
+        ),
+        "decision_interval_minutes": _positive_int(
+            params.get("decision_interval_minutes", 480),
+            "decision_interval_minutes",
+        ),
+        "decision_lag_minutes": _non_negative_int(
+            params.get("decision_lag_minutes", 1),
+            "decision_lag_minutes",
+        ),
+        "top_n": _positive_int(params.get("top_n", 1), "top_n"),
+        "min_cross_section": _positive_int(params.get("min_cross_section", 4), "min_cross_section"),
+        "min_abs_funding_bps": _non_negative_float(
+            params.get("min_abs_funding_bps", 1.0),
+            "min_abs_funding_bps",
+        ),
+        "min_abs_return_bps": _non_negative_float(
+            params.get("min_abs_return_bps", 25.0),
+            "min_abs_return_bps",
+        ),
+        "weight": _positive_float(params.get("weight", 1.0), "weight"),
+        "max_hold_bars": _positive_int(params.get("max_hold_bars", 480), "max_hold_bars"),
+        "session_start_hour": session_start_hour,
+        "session_end_hour": session_end_hour,
+    }
+    parsed.update(_exit_controls(params))
+    return parsed
 
 
 def generate_decisions(
@@ -62,17 +121,18 @@ def generate_decisions(
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
 
-    funding_lookback_events = _positive_int(params.get("funding_lookback_events", 3), "funding_lookback_events")
-    return_lookback_minutes = _positive_int(params.get("return_lookback_minutes", 240), "return_lookback_minutes")
-    decision_interval_minutes = _positive_int(params.get("decision_interval_minutes", 480), "decision_interval_minutes")
-    decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
-    top_n = _positive_int(params.get("top_n", 1), "top_n")
-    min_cross_section = _positive_int(params.get("min_cross_section", 4), "min_cross_section")
-    min_abs_funding_bps = _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
-    min_abs_return_bps = _non_negative_float(params.get("min_abs_return_bps", 25.0), "min_abs_return_bps")
-    weight = float(params.get("weight", 1.0))
-    max_hold_bars = _positive_int(params.get("max_hold_bars", 480), "max_hold_bars")
-    exit_controls = _exit_controls(params)
+    parsed = validate_params(params)
+    funding_lookback_events = int(parsed["funding_lookback_events"])
+    return_lookback_minutes = int(parsed["return_lookback_minutes"])
+    decision_interval_minutes = int(parsed["decision_interval_minutes"])
+    decision_lag_minutes = int(parsed["decision_lag_minutes"])
+    top_n = int(parsed["top_n"])
+    min_cross_section = int(parsed["min_cross_section"])
+    min_abs_funding_bps = float(parsed["min_abs_funding_bps"])
+    min_abs_return_bps = float(parsed["min_abs_return_bps"])
+    weight = float(parsed["weight"])
+    max_hold_bars = int(parsed["max_hold_bars"])
+    exit_controls = {name: parsed[name] for name in _EXIT_CONTROL_KEYS if name in parsed}
 
     rows_by_symbol = _rows_by_symbol(bars)
     as_of_times = sorted(
@@ -80,7 +140,7 @@ def generate_decisions(
             row["timestamp"]
             for rows in rows_by_symbol.values()
             for row in rows
-            if _is_decision_time(row["timestamp"], decision_interval_minutes, params)
+            if _is_decision_time(row["timestamp"], decision_interval_minutes, parsed)
         }
     )
 
@@ -131,21 +191,57 @@ def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) ->
 
 
 def _positive_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
 
 
 def _non_negative_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed < 0:
         raise ValueError(f"{name} must be non-negative")
     return parsed
 
 
+def _bounded_int(value: object, name: str, *, minimum: int, maximum: int) -> int:
+    parsed = _integer(value, name)
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _integer(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(parsed) or not parsed.is_integer():
+        raise ValueError(f"{name} must be an integer")
+    return int(parsed)
+
+
+def _positive_float(value: object, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise ValueError(f"{name} must be finite and positive")
+    return parsed
+
+
 def _non_negative_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and non-negative")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and non-negative") from exc
     if not math.isfinite(parsed) or parsed < 0.0:
         raise ValueError(f"{name} must be finite and non-negative")
     return parsed
@@ -154,7 +250,12 @@ def _non_negative_float(value: object, name: str) -> float:
 def _optional_positive_float(value: object, name: str) -> float | None:
     if value is None:
         return None
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
@@ -162,11 +263,17 @@ def _optional_positive_float(value: object, name: str) -> float | None:
 
 def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
     controls: dict[str, object] = {}
-    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+    for name in _EXIT_CONTROL_KEYS:
         value = _optional_positive_float(params.get(name), name)
         if value is not None:
             controls[name] = value
     return controls
+
+
+def _reject_unknown_params(params: Mapping[str, object], allowed: set[str]) -> None:
+    unknown = sorted(set(params).difference(allowed))
+    if unknown:
+        raise ValueError(f"unknown params: {', '.join(unknown)}")
 
 
 def _rows_by_symbol(bars: Sequence[Mapping[str, object]]) -> dict[str, list[dict[str, Any]]]:

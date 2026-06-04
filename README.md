@@ -146,7 +146,10 @@ on obvious mismatches.
 Python callers use `quant_strategies.evaluation.run_evaluation` and receive
 `EvaluationRunResult`.
 
-Evaluation is not validation. It does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+Evaluation is not validation. It does not authorize promotion, paper trading, or live trading.
+Benchmark-relative metrics are evidence only: when `[benchmark]` is configured,
+evaluation reports passive benchmark and excess total return per scenario
+without ranking, promotion, paper-trading, or live-trading authority.
 
 ## Boundaries
 
@@ -166,7 +169,7 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 - **Research evaluation is separate from validation.** Historical portfolio,
   economic, and path evidence belongs in the stateless evaluation surface for
   frozen candidates, not in validation decisions or quick-run hot paths.
-  Benchmark-relative metrics are deferred.
+  Benchmark-relative metrics are evidence only and do not rank candidates.
 - **Research archives live outside this repo.** Search-loop archives, ranks, and
   handoff records do not live in the active foundation context. Regenerate or
   rerun evidence instead of relying on historical outputs.
@@ -176,6 +179,9 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 Use the `quant` conda environment for all Python commands:
 
 ```bash
+make check
+make check-vectorbtpro-smoke
+
 conda run -n quant python -m pip install -e .
 conda run -n quant quant-strategies --help
 conda run -n quant pytest
@@ -185,8 +191,10 @@ conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 ```
 
-Run the editable-install refresh, `--help` smoke, full test suite, and optional
-VectorBT Pro smoke before relying on the local environment for foundation runs.
+Run `make check` before relying on the local environment for foundation runs.
+It refreshes the editable install, checks the installed CLI, and runs the full
+test suite. Run `make check-vectorbtpro-smoke` when the real VectorBT Pro
+backend behavior matters.
 
 Path anchoring differs by surface. Quick-run configs resolve relative paths
 against the repository root. Validation and evaluation configs are

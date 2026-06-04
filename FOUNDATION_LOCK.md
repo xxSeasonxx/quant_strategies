@@ -27,12 +27,21 @@ validation support is limited to the explicit opt-in agreement oracle.
 `quant_strategies.evaluation.run_evaluation` and returns
 `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
 `pyarrow`.
+- **Strategy readiness:** a strategy may be quick-run-only. A strategy is not
+validation/evaluation-ready until it has `validate_params`, passes the relevant
+row-contract and causality checks, and does not depend on future rows during
+signal generation.
+- **Result success:** `completed` / `run_completed` means the workflow reached a
+structured terminal result, not necessarily success. Programmatic success
+requires the terminal flag to be true and `failure_stage is None`.
 - **Promotion boundary:** validation does not authorize paper trading, live
 trading, or promotion. Promotion remains outside this foundation.
-- **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
-- **Causality boundary:** complete deterministic, emitted, and strict
-suppression replay proof is the shared minimum for validation and evaluation
-evidence.
+- **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only and do not authorize ranking or promotion.
+- **Causality and audit boundary:** usable validation and evaluation evidence
+requires a passed row contract, decision-row / observation-dependency audit, and
+complete deterministic, emitted, and strict suppression replay proof. Evaluation
+must not be weaker than validation on decision lineage before portfolio metrics
+are trusted.
 - **Archive boundary:** ranked research handoff archives and search-loop records
 do not live in this repository. This repo keeps no pointer, symlink,
 compatibility path, or archive index for moved research records.
@@ -43,6 +52,34 @@ search memory, variant ranking, stopping rules, and iteration decisions.
 refresh, backfill, repair, and source joining.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
 quick-run artifacts are intentionally not full replay chains.
+
+## Current Run Readiness
+
+As of 2026-06-03, the public architecture is not a rewrite case. The identified
+P0/P1 run-readiness blockers have been fixed in the active codebase:
+
+- **Evaluation audit parity:** evaluation runs the same decision-row /
+observation-dependency audit as validation before portfolio metrics and
+artifacts are trusted.
+- **Future-row strategy logic:** the current active strategy fixes keep
+fillability and hold-window feasibility in execution/evaluation logic rather
+than strategy signal generation.
+- **Evaluation final-value semantics:** completed evaluation scenarios require
+`ending_value` to be the actual final portfolio value; a missing, NaN, or
+infinite final value fails the scenario.
+- **Current strategy readiness:** all four current `untested/` strategies expose
+`validate_params` and have targeted validator plus causality/data-audit tests.
+They remain under `untested/` until Season explicitly promotes or renames them.
+- **Evaluation evidence contract:** evaluation backend injection is typed by an
+explicit protocol, configs may opt into custom `[[scenarios]]`, and optional
+`[benchmark]` metrics add passive benchmark and excess return evidence only.
+- **Consumer contract:** `quant_autoresearch` should consume public
+`run_config`, `run_validation`, and `run_evaluation` APIs. Candidate ranking,
+comparison, search memory, stopping rules, and promotion remain outside this
+repo.
+
+Start running with targeted configs and use delta reviews for new issues. Do
+not run another broad blind foundation review unless Season asks for one.
 
 ## Accepted Debt
 
@@ -65,6 +102,8 @@ result fields.
 do not use it to mean the auto-research loop.
 - Keep the stateless research evaluation surface separate from validation and  
 quick-run hot paths.
+- Rerun affected artifacts after foundation contract changes instead of carrying
+compatibility shims for old generated outputs.
 
 ## Deferred Until Trigger
 
@@ -76,10 +115,10 @@ requirements tighten.
 - **VectorBT Pro agreement scope:** rebuild around trade-ledger or path-level
 comparison before treating agreement evidence as multi-trade validation
 confidence.
-- **Validation source output paths:** validation configs still anchor
-`output.results_dir` beside the config so candidate-local workspaces keep
-working. Revisit source-directory rejection only if validation config paths are
-redesigned.
+- **Validation/evaluation source output paths:** validation and evaluation
+configs still anchor `output.results_dir` beside the config so candidate-local
+workspaces keep working. Revisit source-directory rejection only if config path
+ownership is redesigned.
 
 ## Review Protocol
 

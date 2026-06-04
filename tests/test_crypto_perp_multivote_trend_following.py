@@ -6,7 +6,7 @@ import math
 import pytest
 
 from quant_strategies.validation.data_audit import audit_decision_rows
-from untested.crypto_perp_autoresearch_ensemble import (
+from untested.crypto_perp_multivote_trend_following import (
     _atr_bps,
     _bollinger_width_percentile,
     _dynamic_threshold_bps,
@@ -14,6 +14,7 @@ from untested.crypto_perp_autoresearch_ensemble import (
     _macd_histogram,
     _rsi,
     generate_decisions,
+    validate_params,
 )
 
 
@@ -146,6 +147,54 @@ def test_generate_decisions_returns_empty_for_empty_input():
     assert generate_decisions([], {}) == []
 
 
+def test_validate_params_returns_typed_defaults():
+    parsed = validate_params({})
+
+    assert parsed["symbols"] == ("BTC-PERP", "ETH-PERP", "SOL-PERP")
+    assert parsed["min_votes"] == 4
+    assert isinstance(parsed["min_votes"], int)
+    assert parsed["base_position_pct"] == pytest.approx(0.08)
+    assert isinstance(parsed["base_position_pct"], float)
+    assert parsed["vol_lookback_hours"] == 48
+
+
+def test_validate_params_normalizes_aliases_and_valid_overrides():
+    parsed = validate_params(
+        {
+            "symbols": ["BTC-PERP", "ETH-PERP"],
+            "min_votes": "5",
+            "base_position_pct": "0.17",
+            "decision_lag_minutes": "0",
+            "dynamic_threshold_window_hours": "24",
+            "bb_percentile_threshold": "80.0",
+        }
+    )
+
+    assert parsed["symbols"] == ("BTC-PERP", "ETH-PERP")
+    assert parsed["min_votes"] == 5
+    assert parsed["base_position_pct"] == pytest.approx(0.17)
+    assert parsed["decision_lag_minutes"] == 0
+    assert parsed["vol_lookback_hours"] == 24
+    assert "dynamic_threshold_window_hours" not in parsed
+    assert parsed["bb_percentile_threshold"] == pytest.approx(80.0)
+
+
+def test_validate_params_rejects_invalid_and_unknown_values():
+    with pytest.raises(ValueError, match="min_votes"):
+        validate_params({"min_votes": 7})
+    with pytest.raises(ValueError, match="symbols"):
+        validate_params({"symbols": []})
+    with pytest.raises(ValueError, match="unknown params: typo"):
+        validate_params({"typo": 1})
+
+
+def test_generate_decisions_preserves_behavior_with_validated_params():
+    rows = trend_rows(direction=1)
+    raw_params = params(base_position_pct="0.17", dynamic_threshold_window_hours="48")
+
+    assert generate_decisions(rows, validate_params(raw_params)) == generate_decisions(rows, raw_params)
+
+
 def test_generate_decisions_requires_ohlc_and_timezone_aware_timestamps():
     with pytest.raises(ValueError, match="missing required"):
         generate_decisions([{"symbol": "BTC-PERP", "timestamp": START}], params())
@@ -172,8 +221,10 @@ def test_generate_decisions_emits_bullish_four_of_six_vote_decision():
         if decision.metadata["momentum_12h_bps"] > decision.metadata["dynamic_threshold_bps"]
     )
     metadata = dict(first.metadata)
+    assert first.strategy_id == "crypto_perp_multivote_trend_following"
     assert first.instrument.symbol == "BTC-PERP"
     assert first.target.direction == "long"
+    assert metadata["signal_family"] == "crypto_perp_multivote_trend_following"
     assert metadata["long_votes"] >= 4
     assert metadata["short_votes"] < metadata["long_votes"]
     assert metadata["momentum_12h_bps"] > metadata["dynamic_threshold_bps"]
@@ -225,11 +276,22 @@ def test_generate_decisions_waits_for_sufficient_lookback_history():
     assert generate_decisions(trend_rows(hours=30), params()) == []
 
 
-def test_generate_decisions_skips_entries_without_future_hold_window():
+def test_generate_decisions_does_not_require_future_hold_window_rows():
     rows = trend_rows(direction=1, hours=70)
 
     assert generate_decisions(rows, params(max_hold_bars=1))
-    assert generate_decisions(rows, params(max_hold_bars=40)) == []
+    assert generate_decisions(rows, params(max_hold_bars=40))
+
+
+def test_generate_decisions_are_stable_when_future_rows_after_boundary_are_removed():
+    rows = trend_rows(direction=1, hours=90)
+    decisions = generate_decisions(rows, params(max_hold_bars=1, cooldown_bars=0))
+    boundary = decisions[0].as_of_time
+    truncated_rows = [row for row in rows if row["timestamp"] <= boundary]
+
+    truncated_decisions = generate_decisions(truncated_rows, params(max_hold_bars=1, cooldown_bars=0))
+
+    assert [decision for decision in decisions if decision.as_of_time <= boundary] == truncated_decisions
 
 
 def test_generate_decisions_builds_hourly_snapshots_from_minute_rows():

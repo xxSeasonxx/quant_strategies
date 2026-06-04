@@ -20,6 +20,15 @@ Current disposition anchor:
 ../../FOUNDATION_LOCK.md
 ```
 
+Historical review disposition:
+
+| Review | Current disposition |
+| --- | --- |
+| `2026-06-02-foundation-codex.md` | Historical broad review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `2026-06-02-foundation-codex-p3.md` | Historical P3 follow-up review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `review-claude.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+| `review-codex.md` | Historical root-level working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
+
 Future foundation reviews should be disposition-aware delta reviews by default:
 read the current disposition anchor first, then classify findings as `new`,
 `regression`, `fixed`, `accepted_debt`, `deferred_until_trigger`,

@@ -116,6 +116,35 @@ def test_generated_result_roots_are_ignored():
     assert set(result.stdout.splitlines()) == set(ignored_roots)
 
 
+def test_makefile_exposes_single_local_check_command():
+    text = (ROOT / "Makefile").read_text()
+
+    assert ".PHONY: check check-vectorbtpro-smoke check-all" in text
+    assert "check:" in text
+    assert "conda run -n quant python -m pip install -e ." in text
+    assert "conda run -n quant quant-strategies --help" in text
+    assert "conda run -n quant pytest -q" in text
+    assert "check-vectorbtpro-smoke:" in text
+    assert (
+        "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
+        "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
+    ) in text
+
+
+def test_review_archive_marks_historical_reviews_superseded():
+    text = (ROOT / "docs" / "reviews" / "README.md").read_text()
+
+    expected_rows = [
+        "| `2026-06-02-foundation-codex.md` | Historical broad review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `2026-06-02-foundation-codex-p3.md` | Historical P3 follow-up review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `review-claude.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+        "| `review-codex.md` | Historical root-level working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+    ]
+    for row in expected_rows:
+        assert row in text
+    assert "once its accepted findings are dispositioned" not in text
+
+
 def test_cli_entrypoint_is_neutral():
     payload = tomllib.loads((ROOT / "pyproject.toml").read_text())
 
@@ -205,3 +234,19 @@ def test_root_phase_plans_are_not_active_context():
             offenders.append(relative)
 
     assert offenders == []
+
+
+def test_active_docs_lock_quant_autoresearch_consumer_contract():
+    foundation = (ROOT / "docs" / "foundation-surfaces.md").read_text(errors="ignore")
+
+    required_snippets = [
+        "from quant_strategies.runner import run_config",
+        "from quant_strategies.validation import run_validation",
+        "from quant_strategies.evaluation import run_evaluation",
+        "result.outcome.completed and result.outcome.failure_stage is None",
+        "result.run_completed and result.failure_stage is None",
+        "validation labels are advisory evidence",
+        "ranking, comparison, search memory, stopping rules, and promotion decisions remain outside this repo",
+    ]
+    for snippet in required_snippets:
+        assert snippet in foundation

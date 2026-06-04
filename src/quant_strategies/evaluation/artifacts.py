@@ -801,10 +801,21 @@ def _scenario_coverage_ids(scenario_summary: Mapping[str, Any]) -> set[Any]:
     expected_ids = _coverage_id_set(scenario_coverage["expected_ids"]) if has_expected_ids else None
     completed_ids = _coverage_id_set(scenario_coverage["completed_ids"]) if has_completed_ids else None
     if has_expected_ids and has_completed_ids and expected_ids != completed_ids:
-        raise ValueError(
-            "scenario_coverage expected_ids and completed_ids must match for a completed evaluation manifest; "
-            f"expected={sorted(expected_ids)!r}; completed={sorted(completed_ids)!r}"
-        )
+        optional_ids = _coverage_id_set(scenario_coverage.get("optional_ids", ()))
+        missing_optional_ids = _coverage_id_set(scenario_coverage.get("missing_optional_ids", ()))
+        missing_required_ids = _coverage_id_set(scenario_coverage.get("missing_required_ids", ()))
+        if (
+            missing_required_ids
+            or not completed_ids <= expected_ids
+            or expected_ids - completed_ids != missing_optional_ids
+            or not missing_optional_ids <= optional_ids
+        ):
+            raise ValueError(
+                "scenario_coverage expected_ids and completed_ids must match for a completed evaluation manifest "
+                "unless only optional scenarios are missing; "
+                f"expected={sorted(expected_ids)!r}; completed={sorted(completed_ids)!r}"
+            )
+        return completed_ids
     if has_expected_ids:
         return expected_ids
     if has_completed_ids:

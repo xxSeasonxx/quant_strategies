@@ -9,7 +9,7 @@ from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
-from untested.krohn_mueller_whelan_fix_reversal import generate_decisions
+from untested.krohn_mueller_whelan_fix_reversal import generate_decisions, validate_params
 
 
 FIXES = {
@@ -86,6 +86,51 @@ def auditable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 
 def test_generate_decisions_returns_empty_for_empty_input():
     assert generate_decisions([], {}) == []
+
+
+def test_validate_params_returns_typed_defaults():
+    parsed = validate_params({})
+
+    assert parsed["decision_lead_minutes"] == 2
+    assert isinstance(parsed["decision_lead_minutes"], int)
+    assert parsed["observation_lag_minutes"] == 1
+    assert parsed["weight"] == pytest.approx(1.0)
+    assert isinstance(parsed["weight"], float)
+    assert parsed["max_hold_bars"] == 2
+
+
+def test_validate_params_normalizes_valid_overrides():
+    parsed = validate_params(
+        {
+            "decision_lead_minutes": "3",
+            "observation_lag_minutes": "2",
+            "weight": "0.5",
+            "max_hold_bars": "5",
+            "stop_loss_bps": "8.5",
+        }
+    )
+
+    assert parsed["decision_lead_minutes"] == 3
+    assert parsed["observation_lag_minutes"] == 2
+    assert parsed["weight"] == pytest.approx(0.5)
+    assert parsed["max_hold_bars"] == 5
+    assert parsed["stop_loss_bps"] == pytest.approx(8.5)
+
+
+def test_validate_params_rejects_invalid_and_unknown_values():
+    with pytest.raises(ValueError, match="decision_lead_minutes"):
+        validate_params({"decision_lead_minutes": 0})
+    with pytest.raises(ValueError, match="weight"):
+        validate_params({"weight": 0.0})
+    with pytest.raises(ValueError, match="unknown params: typo"):
+        validate_params({"typo": 1})
+
+
+def test_generate_decisions_preserves_behavior_with_validated_params():
+    rows = rows_for(["EURUSD"], signal_times(date(2024, 7, 1), "london"))
+    raw_params = {"weight": "0.5", "max_hold_bars": "2"}
+
+    assert payloads(rows, validate_params(raw_params)) == payloads(rows, raw_params)
 
 
 def test_generate_decisions_requires_symbol_timestamp_and_mid():
@@ -195,6 +240,18 @@ def test_generate_decisions_skips_missing_basket_symbols():
     signals = payloads(rows_for(["EURUSD"], signal_times(date(2024, 7, 1), "london")))
 
     assert [signal["symbol"] for signal in signals] == ["EURUSD"]
+
+
+def test_generate_decisions_emits_from_as_of_quote_without_decision_time_quote():
+    rows = rows_for(["EURUSD"], [as_of_time(date(2024, 7, 1), "london")])
+
+    decisions = generate_decisions(rows, {})
+
+    assert len(decisions) == 1
+    assert decisions[0].instrument.symbol == "EURUSD"
+    assert decisions[0].decision_time == decision_time(date(2024, 7, 1), "london")
+    assert decisions[0].as_of_time == as_of_time(date(2024, 7, 1), "london")
+    assert audit_decision_rows(auditable_rows(rows), decisions).passed is True
 
 
 def test_generate_decisions_emits_mid_observation_lineage():

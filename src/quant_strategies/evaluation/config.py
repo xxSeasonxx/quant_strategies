@@ -76,6 +76,35 @@ class EvaluationMetricsConfig(EvaluationConfigModel):
     annualization_periods_per_year: int = Field(gt=0)
 
 
+class BenchmarkConfig(EvaluationConfigModel):
+    symbol: str = Field(min_length=1)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        symbol = value.strip()
+        if not symbol:
+            raise ValueError("benchmark.symbol cannot be empty")
+        return symbol
+
+
+class EvaluationScenarioConfig(EvaluationConfigModel):
+    id: str = Field(min_length=1)
+    cost_scenario: str = Field(default="custom", min_length=1)
+    fill_scenario: str = Field(default="custom", min_length=1)
+    required: bool = True
+    cost_model: CostModelConfig | None = None
+    fill_model: FillModelConfig | None = None
+
+    @field_validator("id", "cost_scenario", "fill_scenario")
+    @classmethod
+    def normalize_label(cls, value: str, info: ValidationInfo) -> str:
+        label = value.strip()
+        if not label:
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return label
+
+
 class EvaluationOutputConfig(EvaluationConfigModel):
     results_dir: Path
 
@@ -96,6 +125,8 @@ class EvaluationConfig(EvaluationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     metrics: EvaluationMetricsConfig
+    benchmark: BenchmarkConfig | None = None
+    scenarios: tuple[EvaluationScenarioConfig, ...] = ()
     output: EvaluationOutputConfig
 
     def model_post_init(self, context: Any, /) -> None:
@@ -121,10 +152,15 @@ class EvaluationConfig(EvaluationConfigModel):
         return strategy_id
 
     @model_validator(mode="after")
-    def validate_window_ids(self) -> EvaluationConfig:
-        ids = tuple(window.id for window in self.windows)
-        if len(ids) != len(set(ids)):
+    def validate_unique_ids_and_benchmark(self) -> EvaluationConfig:
+        window_ids = tuple(window.id for window in self.windows)
+        if len(window_ids) != len(set(window_ids)):
             raise ValueError("window ids cannot contain duplicates")
+        scenario_ids = tuple(scenario.id for scenario in self.scenarios)
+        if len(scenario_ids) != len(set(scenario_ids)):
+            raise ValueError("scenario ids cannot contain duplicates")
+        if self.benchmark is not None and self.benchmark.symbol not in self.data.symbols:
+            raise ValueError("benchmark.symbol must be included in data.symbols")
         return self
 
     def to_execution_spec(self, window: EvaluationWindow) -> StrategyExecutionSpec:

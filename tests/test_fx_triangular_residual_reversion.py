@@ -9,7 +9,7 @@ from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import ObservationRef, StrategyDecision
 from quant_strategies.validation.data_audit import audit_decision_rows
-from untested.fx_triangular_residual_reversion import generate_decisions
+from untested.fx_triangular_residual_reversion import generate_decisions, validate_params
 
 
 START = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -104,6 +104,63 @@ def auditable_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 
 def test_generate_decisions_returns_empty_for_empty_input():
     assert generate_decisions([], {}) == []
+
+
+def test_validate_params_returns_typed_defaults():
+    parsed = validate_params({})
+
+    assert parsed["triangle_set"] == "outside_view_8"
+    assert parsed["zscore_window_bars"] == 240
+    assert isinstance(parsed["zscore_window_bars"], int)
+    assert parsed["attribution_bars"] == 5
+    assert parsed["crossing_only"] is True
+    assert parsed["weight"] == pytest.approx(1.0)
+    assert isinstance(parsed["weight"], float)
+
+
+def test_validate_params_normalizes_aliases_and_valid_overrides():
+    parsed = validate_params(
+        {
+            "triangle_set": "all_available",
+            "zscore_window_minutes": "3",
+            "min_zscore_observations": "2",
+            "entry_zscore": "2.0",
+            "min_abs_residual_bps": "1.25",
+            "attribution_minutes": "1",
+            "decision_lag_minutes": "0",
+            "crossing_only": False,
+            "weight": "0.5",
+            "max_hold_bars": "4",
+            "take_profit_bps": "10.5",
+        }
+    )
+
+    assert parsed["triangle_set"] == "all_available"
+    assert parsed["zscore_window_bars"] == 3
+    assert "zscore_window_minutes" not in parsed
+    assert parsed["attribution_bars"] == 1
+    assert "attribution_minutes" not in parsed
+    assert parsed["crossing_only"] is False
+    assert parsed["weight"] == pytest.approx(0.5)
+    assert parsed["take_profit_bps"] == pytest.approx(10.5)
+
+
+def test_validate_params_rejects_invalid_and_unknown_values():
+    with pytest.raises(ValueError, match="triangle_set"):
+        validate_params({"triangle_set": "typo"})
+    with pytest.raises(ValueError, match="crossing_only"):
+        validate_params({"crossing_only": "false"})
+    with pytest.raises(ValueError, match="zscore_window_bars"):
+        validate_params({"zscore_window_bars": 0})
+    with pytest.raises(ValueError, match="unknown params: typo"):
+        validate_params({"typo": 1})
+
+
+def test_generate_decisions_preserves_behavior_with_validated_params():
+    rows = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
+    raw_params = params(weight="0.5", max_hold_bars="4")
+
+    assert generate_payloads(rows, validate_params(raw_params)) == generate_payloads(rows, raw_params)
 
 
 def test_generate_decisions_rejects_duplicate_symbol_timestamp_closes():

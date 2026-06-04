@@ -47,15 +47,41 @@ from quant_strategies.decisions import (
 )
 
 
-__all__ = ["generate_decisions"]
+__all__ = ["generate_decisions", "validate_params"]
 
 _REQUIRED_FIELDS = {"symbol", "timestamp", "mid"}
+_EXIT_CONTROL_KEYS = ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps")
+_PARAM_KEYS = {
+    "decision_lead_minutes",
+    "observation_lag_minutes",
+    "weight",
+    "max_hold_bars",
+    *_EXIT_CONTROL_KEYS,
+}
 _DEFAULT_USD_BASKET = ("AUDUSD", "EURUSD", "GBPUSD", "NZDUSD", "USDCAD", "USDCHF", "USDJPY")
 _FIX_SCHEDULE = (
     ("tokyo", "Asia/Tokyo", time(9, 55)),
     ("frankfurt", "Europe/Berlin", time(14, 15)),
     ("london", "Europe/London", time(16, 0)),
 )
+
+
+def validate_params(params: Mapping[str, object]) -> dict[str, object]:
+    _reject_unknown_params(params, _PARAM_KEYS)
+    parsed: dict[str, object] = {
+        "decision_lead_minutes": _positive_int(
+            params.get("decision_lead_minutes", 2),
+            "decision_lead_minutes",
+        ),
+        "observation_lag_minutes": _positive_int(
+            params.get("observation_lag_minutes", 1),
+            "observation_lag_minutes",
+        ),
+        "weight": _positive_float(params.get("weight", 1.0), "weight"),
+        "max_hold_bars": _positive_int(params.get("max_hold_bars", 2), "max_hold_bars"),
+    }
+    parsed.update(_exit_controls(params))
+    return parsed
 
 
 def generate_decisions(
@@ -66,11 +92,12 @@ def generate_decisions(
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
 
-    decision_lead_minutes = _positive_int(params.get("decision_lead_minutes", 2), "decision_lead_minutes")
-    observation_lag_minutes = _positive_int(params.get("observation_lag_minutes", 1), "observation_lag_minutes")
-    weight = _positive_float(params.get("weight", 1.0), "weight")
-    max_hold_bars = _positive_int(params.get("max_hold_bars", 2), "max_hold_bars")
-    exit_controls = _exit_controls(params)
+    parsed = validate_params(params)
+    decision_lead_minutes = int(parsed["decision_lead_minutes"])
+    observation_lag_minutes = int(parsed["observation_lag_minutes"])
+    weight = float(parsed["weight"])
+    max_hold_bars = int(parsed["max_hold_bars"])
+    exit_controls = {name: parsed[name] for name in _EXIT_CONTROL_KEYS if name in parsed}
 
     mid_by_key, local_dates_by_fix, available_symbols = _mid_table(bars)
     basket_symbols = [symbol for symbol in _DEFAULT_USD_BASKET if symbol in available_symbols]
@@ -85,7 +112,7 @@ def generate_decisions(
             decision_time = fix_utc - timedelta(minutes=decision_lead_minutes)
             as_of_time = decision_time - timedelta(minutes=observation_lag_minutes)
             for symbol in basket_symbols:
-                if (symbol, as_of_time) not in mid_by_key or (symbol, decision_time) not in mid_by_key:
+                if (symbol, as_of_time) not in mid_by_key:
                     continue
                 seen_key = (symbol, fix_name, decision_time)
                 if seen_key in seen:
@@ -116,14 +143,31 @@ def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) ->
 
 
 def _positive_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _integer(value, name)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
 
 
+def _integer(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not math.isfinite(parsed) or not parsed.is_integer():
+        raise ValueError(f"{name} must be an integer")
+    return int(parsed)
+
+
 def _positive_float(value: object, name: str) -> float:
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
@@ -132,7 +176,12 @@ def _positive_float(value: object, name: str) -> float:
 def _optional_positive_float(value: object, name: str) -> float | None:
     if value is None:
         return None
-    parsed = float(value)
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be finite and positive")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite and positive") from exc
     if not math.isfinite(parsed) or parsed <= 0.0:
         raise ValueError(f"{name} must be finite and positive")
     return parsed
@@ -140,11 +189,17 @@ def _optional_positive_float(value: object, name: str) -> float | None:
 
 def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
     controls: dict[str, object] = {}
-    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
+    for name in _EXIT_CONTROL_KEYS:
         value = _optional_positive_float(params.get(name), name)
         if value is not None:
             controls[name] = value
     return controls
+
+
+def _reject_unknown_params(params: Mapping[str, object], allowed: set[str]) -> None:
+    unknown = sorted(set(params).difference(allowed))
+    if unknown:
+        raise ValueError(f"unknown params: {', '.join(unknown)}")
 
 
 def _mid_table(

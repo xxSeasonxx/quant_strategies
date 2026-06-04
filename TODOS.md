@@ -15,6 +15,9 @@ mechanical evidence validation -> audit retained-candidate evidence integrity
 research evaluation        -> stateless frozen-candidate portfolio/economic/path evidence
 ```
 
+Use `make check` for the standard local foundation check. Use
+`make check-vectorbtpro-smoke` only when the real VectorBT Pro backend matters.
+
 ## Status
 
 There are no open foundation-finalization PRs in this file. `FOUNDATION_LOCK.md`
@@ -32,9 +35,9 @@ for frozen-candidate portfolio/economic/path evidence, remains separate from
 validation, and does not authorize promotion, paper trading, or live trading.
 Detailed trace artifacts are Parquet through `pyarrow`.
 
-Remaining follow-up work is limited to benchmark-relative metrics,
-user-defined scenario matrices, and any residual backend limitations found
-during use.
+Benchmark-relative metrics and user-defined scenario matrices are implemented
+as evaluation evidence surfaces. Remaining follow-up work is limited to
+residual backend limitations found during use.
 
 ## Locked Direction
 
@@ -43,7 +46,8 @@ as a fresh P1 without a regression or documented trigger. In short:
 
 - quick run, validation run, and evaluation run are the implemented public
   surfaces;
-- Benchmark-relative metrics are deferred for evaluation;
+- benchmark-relative metrics and user-defined scenario matrices are implemented
+  as evidence-only evaluation features;
 - strategies are flat pure files;
 - validation and evaluation require `validate_params`;
 - engine metrics are linear signed per-trade results, not NAV;
@@ -67,10 +71,10 @@ as a fresh P1 without a regression or documented trigger. In short:
 - **VectorBT Pro agreement residual (low priority):** the optional agreement
   check is single-trade only. It should not be treated as multi-trade validation
   confidence unless rebuilt around trade-ledger or path-level comparison.
-- **Validation source output residual (low priority):** validation configs still
-  anchor `output.results_dir` beside the config so candidate-local workspaces
-  keep working. Revisit rejecting outputs under source directories only if
-  validation config paths are redesigned.
+- **Candidate-local output residual (low priority):** validation and evaluation
+  configs still anchor `output.results_dir` beside the config so
+  candidate-local workspaces keep working. Revisit rejecting outputs under
+  source directories only if config path ownership is redesigned.
 
 Strict suppression-lookahead replay is the default for quick runs, validation
 runs, and evaluation preflight; see `causality.check_hidden_lookahead` and the
@@ -81,6 +85,7 @@ runs, and evaluation preflight; see `causality.check_hidden_lookahead` and the
 Suggested checks:
 
 ```bash
+make check
 rg -n "FOUNDATION_LOCK|accepted_debt|deferred_until_trigger|broad blind|delta reviews|quick run|validation run" FOUNDATION_LOCK.md docs/reviews/README.md TODOS.md
 git diff --check
 ```

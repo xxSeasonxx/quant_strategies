@@ -11,9 +11,22 @@ import quant_strategies.evaluation.backend as backend_module
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
 from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.evaluation.backend import VectorBTProEvaluationBackend
+from quant_strategies.evaluation.backends import (
+    DataKindNamedEvaluationBackend,
+    EvaluationBackend,
+    PreparedEvaluationBackend,
+)
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.dependencies import EvaluationDependencies
 from quant_strategies.evaluation.scenarios import EvaluationScenario
+
+
+def test_vectorbtpro_backend_satisfies_evaluation_backend_protocols():
+    backend = VectorBTProEvaluationBackend()
+
+    assert isinstance(backend, EvaluationBackend)
+    assert isinstance(backend, PreparedEvaluationBackend)
+    assert isinstance(backend, DataKindNamedEvaluationBackend)
 
 
 def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
@@ -395,6 +408,83 @@ def test_vectorbtpro_evaluation_backend_fails_when_required_metric_is_nonfinite(
     assert result.status == "failed"
     assert result.metrics == {}
     assert expected_warning in result.warnings
+
+
+@pytest.mark.parametrize("portfolio_values", [[100.0, 101.0, math.nan], [100.0, 101.0, math.inf], []])
+def test_vectorbtpro_evaluation_backend_fails_when_final_portfolio_value_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+    portfolio_values: list[float],
+):
+    pd = pytest.importorskip("pandas")
+
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        @property
+        def records_readable(self):
+            return pd.DataFrame({"Trade Id": [1], "Column": ["BTC-PERP"]})
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def value(self):
+            return pd.Series(portfolio_values, dtype=float)
+
+        def returns(self):
+            return pd.Series([0.0, 0.01, 0.01])
+
+        def drawdowns(self):
+            return pd.Series([0.0, -0.01, -0.01])
+
+        def get_total_return(self):
+            return 0.01
+
+        def get_max_drawdown(self):
+            return -0.01
+
+    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio()))
+    fake_pyarrow = SimpleNamespace(__name__="pyarrow")
+    monkeypatch.setattr(
+        backend_module,
+        "require_evaluation_dependencies",
+        lambda: EvaluationDependencies(pandas=pd, pyarrow=fake_pyarrow, vectorbtpro=fake_vbt),
+    )
+
+    result = VectorBTProEvaluationBackend().run(
+        decisions=[decision()],
+        rows=rows(),
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+    )
+
+    assert result.status == "failed"
+    assert result.metrics == {}
+    assert "invalid_required_metric:ending_value" in result.warnings
+
+
+@pytest.mark.parametrize(
+    "portfolio_path",
+    [
+        {"portfolio_value": [100.0, 101.0, math.nan], "period_return": [0.0, 0.01, 0.01], "drawdown": [0.0, -0.01, -0.01]},
+        {"portfolio_value": [100.0, 101.0, math.inf], "period_return": [0.0, 0.01, 0.01], "drawdown": [0.0, -0.01, -0.01]},
+        {"portfolio_value": [], "period_return": [], "drawdown": []},
+        {"period_return": [0.0, 0.01], "drawdown": [0.0, -0.01]},
+    ],
+)
+def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(portfolio_path: dict[str, list[float]]):
+    pd = pytest.importorskip("pandas")
+    portfolio_path = pd.DataFrame(portfolio_path)
+    trades = pd.DataFrame({"net_pnl": [1.0]})
+
+    with pytest.raises(ValueError, match="invalid_required_metric:ending_value"):
+        backend_module._perp_ledger_metrics(
+            portfolio_path,
+            trades,
+            annualization_periods_per_year=252,
+            funding_cashflow_total=0.0,
+            funding_event_count=0,
+        )
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
