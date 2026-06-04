@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# Pydantic ontology classes intentionally expose validated fields, not methods.
+# pylint: disable=too-few-public-methods
+
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
