@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,7 +15,7 @@ from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError
-from quant_strategies.validation import run_validation
+from quant_strategies.validation._pipeline import _run_validation as run_validation
 from quant_strategies.validation.backends import BackendRunResult
 
 
@@ -165,6 +165,19 @@ def rows():
             "has_funding_event": False,
         },
     ]
+
+
+def _bar(symbol: str, timestamp: datetime, close: float) -> dict[str, Any]:
+    return {
+        "symbol": symbol,
+        "timestamp": timestamp,
+        "available_at": timestamp,
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "has_funding_event": False,
+    }
 
 
 def file_sha256(path: Path) -> str:
@@ -1550,6 +1563,144 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     assert base_result["decision_count"] == 1
     assert base_result["result"]["status"] == "failed"
     assert any("flat" in warning for warning in base_result["result"]["warnings"])
+
+
+def test_run_validation_fails_before_backend_on_leveraged_target_weight(
+    tmp_path: Path, monkeypatch
+):
+    candidate = write_candidate(tmp_path)
+    config_path = candidate / "validation.toml"
+    config_path.write_text(config_path.read_text().replace("weight = 1.0", "weight = 1.01"))
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "mechanical_fail"
+    assert result.decision.reasons == ("exposure_admissibility_failed",)
+    assert result.failure_stage == "exposure_admissibility"
+    assert backend.calls == 0
+    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert data_audit["windows"][0]["passed"] is False
+    assert any("leveraged_target_weight" in item for item in data_audit["windows"][0]["violations"])
+
+
+def test_run_validation_fails_before_backend_on_overlapping_gross_exposure(
+    tmp_path: Path, monkeypatch
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    decisions = []\n"
+        "    if len(rows) >= 1:\n"
+        "        decisions.append(StrategyDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "            decision_time=rows[0]['timestamp'],\n"
+        "            as_of_time=rows[0]['timestamp'],\n"
+        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.6),\n"
+        "            exit_policy=ExitPolicy(max_hold_bars=3),\n"
+        "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "        ))\n"
+        "    if len(rows) >= 2:\n"
+        "        decisions.append(StrategyDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "            decision_time=rows[1]['timestamp'],\n"
+        "            as_of_time=rows[1]['timestamp'],\n"
+        "            target=PositionTarget(direction='short', sizing_kind='target_weight', size=0.6),\n"
+        "            exit_policy=ExitPolicy(max_hold_bars=3),\n"
+        "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[1]['timestamp'], field='close', source='strategy_input'),),\n"
+        "        ))\n"
+        "    return decisions\n"
+    )
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows(8)))
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "mechanical_fail"
+    assert result.decision.reasons == ("exposure_admissibility_failed",)
+    assert result.failure_stage == "exposure_admissibility"
+    assert backend.calls == 0
+    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert any("portfolio_target_weight_exceeds_one" in item for item in data_audit["windows"][0]["violations"])
+
+
+def test_run_validation_checks_exposure_against_required_scenario_fill_models(
+    tmp_path: Path, monkeypatch
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml").read_text().replace(
+            'symbols = ["BTC-PERP"]',
+            'symbols = ["BTC-PERP", "ETH-PERP"]',
+        )
+    )
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    by_symbol = {}\n"
+        "    for row in rows:\n"
+        "        by_symbol.setdefault(row['symbol'], row)\n"
+        "    decisions = []\n"
+        "    if 'BTC-PERP' in by_symbol:\n"
+        "        row = by_symbol['BTC-PERP']\n"
+        "        decisions.append(StrategyDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "            decision_time=row['timestamp'],\n"
+        "            as_of_time=row['timestamp'],\n"
+        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.6),\n"
+        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
+        "        ))\n"
+        "    if 'ETH-PERP' in by_symbol:\n"
+        "        row = by_symbol['ETH-PERP']\n"
+        "        decisions.append(StrategyDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=InstrumentRef(kind='crypto_perp', symbol='ETH-PERP'),\n"
+        "            decision_time=row['timestamp'],\n"
+        "            as_of_time=row['timestamp'],\n"
+        "            target=PositionTarget(direction='short', sizing_kind='target_weight', size=0.6),\n"
+        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "            observations=(ObservationRef(symbol='ETH-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
+        "        ))\n"
+        "    return decisions\n"
+    )
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    loaded_rows = [
+        _bar("BTC-PERP", base + timedelta(minutes=0), 100.0),
+        _bar("BTC-PERP", base + timedelta(minutes=1), 101.0),
+        _bar("BTC-PERP", base + timedelta(minutes=10), 102.0),
+        _bar("BTC-PERP", base + timedelta(minutes=11), 103.0),
+        _bar("ETH-PERP", base + timedelta(minutes=9), 200.0),
+        _bar("ETH-PERP", base + timedelta(minutes=10), 201.0),
+        _bar("ETH-PERP", base + timedelta(minutes=10, seconds=30), 202.0),
+        _bar("ETH-PERP", base + timedelta(minutes=11, seconds=30), 203.0),
+    ]
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
+    )
+    backend = RecordingBackend()
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.decision.decision == "mechanical_fail"
+    assert result.decision.reasons == ("exposure_admissibility_failed",)
+    assert result.failure_stage == "exposure_admissibility"
+    assert backend.calls == 0
+    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert any(
+        "validation_2026_h1/fill_lag_plus_1:portfolio_target_weight_exceeds_one" in item
+        for item in data_audit["windows"][0]["violations"]
+    )
 
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):

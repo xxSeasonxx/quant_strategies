@@ -424,7 +424,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
     monkeypatch: pytest.MonkeyPatch,
 ):
     import quant_strategies.evaluation._pipeline as evaluation_runner
-    from quant_strategies.evaluation._pipeline import run_evaluation
+    from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 
     class CountingBackend(FakeEvaluationBackend):
         def __init__(self) -> None:

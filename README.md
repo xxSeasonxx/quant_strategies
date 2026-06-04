@@ -93,6 +93,10 @@ generate_decisions(rows, params) -> list[StrategyDecision]
   optional for the quick run (schema-less runs are flagged exploratory) but
   **required** for validation and evaluation, so candidate-level evidence never
   rests on params that were never schema-checked.
+- **Declared observations.** Validation and evaluation require decision
+  observations for candidate-level evidence. Evaluation defaults to at least one
+  observation and one observed symbol per decision; validation configs may also
+  require specific observation fields.
 - **Typed output.** The default output is `StrategyDecision` — a stable
   `decision_id`, instrument, `open` intent, decision/as-of times, target,
   `ExitPolicy`, and `ObservationRef` lineage for consumed rows.
@@ -179,6 +183,10 @@ without ranking, promotion, paper-trading, or live-trading authority.
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
+- **Default executable exposure is unlevered.** Target-weight evidence above
+  `1.0` and aggregate active gross target exposure above `1.0` are not normal
+  validation evidence. Strategies that need leverage require an explicit future
+  ontology/evidence contract.
 - **Funding basis differs by surface.** Engine funding is linear trade-activity
   funding folded into validation `net_return`; evaluation funding is NAV-ledger
   cashflow through `project_perp_ledger_v1`. Fillable crypto perp windows with

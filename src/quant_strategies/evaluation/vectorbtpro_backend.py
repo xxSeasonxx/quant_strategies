@@ -25,7 +25,7 @@ from quant_strategies.evaluation.dependencies import (
     require_evaluation_dependencies,
     require_pandas_dependency,
 )
-from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none
+from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none, required_drawdown_metric
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PortfolioMetricPayload,
@@ -205,8 +205,6 @@ def _unsupported_semantics(decisions: list[StrategyDecision], scenario: Evaluati
             unsupported.append("unsupported_direction")
         if item.target.size < 0:
             unsupported.append("negative_target_weight")
-        if item.target.size > 1.0:
-            unsupported.append("leveraged_target_weight")
         if (
             item.exit_policy.stop_loss_bps is not None
             or item.exit_policy.take_profit_bps is not None
@@ -369,7 +367,7 @@ def _portfolio_metrics(
     payload: dict[str, MetricValue] = {}
     payload["total_return"] = _required_float_metric("total_return", total_return)
     payload["ending_value"] = _required_final_metric("ending_value", values)
-    payload["max_drawdown"] = _required_float_metric("max_drawdown", max_drawdown)
+    payload["max_drawdown"] = required_drawdown_metric("max_drawdown", max_drawdown)
     payload["trade_count"] = _required_trade_count_metric(trade_count)
     _set_metric(payload, "win_rate", win_rate)
     _set_metric(payload, "profit_factor", profit_factor)

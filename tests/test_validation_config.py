@@ -401,7 +401,7 @@ def test_validation_config_converts_to_execution_spec_with_config_base_dir(tmp_p
     assert spec.data.end == date(2026, 6, 30)
 
 
-def test_load_validation_config_accepts_legacy_data_window_dates_but_uses_windows(tmp_path: Path):
+def test_load_validation_config_rejects_legacy_data_window_dates(tmp_path: Path):
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "validation.toml"
@@ -413,11 +413,8 @@ def test_load_validation_config_accepts_legacy_data_window_dates_but_uses_window
         )
     )
 
-    config = load_validation_config(config_path)
-    spec = config.to_execution_spec(config.windows[0])
-
-    assert spec.data.start == date(2026, 1, 1)
-    assert spec.data.end == date(2026, 6, 30)
+    with pytest.raises(ValidationConfigError, match="start|end|extra"):
+        load_validation_config(config_path)
 
 
 def test_validation_does_not_import_runner_config_for_execution():

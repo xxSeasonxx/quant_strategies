@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 
+from quant_strategies.core.decision_readiness import DecisionReadinessConfig
 from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
@@ -127,6 +128,7 @@ class EvaluationConfig(EvaluationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     metrics: EvaluationMetricsConfig
+    readiness: DecisionReadinessConfig = Field(default_factory=DecisionReadinessConfig)
     benchmark: BenchmarkConfig | None = None
     scenarios: tuple[EvaluationScenarioConfig, ...] = ()
     output: EvaluationOutputConfig

@@ -18,7 +18,7 @@ from quant_strategies.evaluation._portfolio_common import (
     target_positions_frame,
 )
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
-from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none
+from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none, required_drawdown_metric
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PortfolioMetricPayload,
@@ -334,9 +334,10 @@ def perp_ledger_metrics(
     returns = portfolio_path["period_return"] if "period_return" in portfolio_path else []
     drawdowns = portfolio_path["drawdown"] if "drawdown" in portfolio_path else []
     ending_value = required_final_metric("ending_value", values)
-    max_drawdown = min(series_values(drawdowns)) if series_values(drawdowns) else None
-    if finite_metric_or_none(max_drawdown) is None:
-        raise ValueError("invalid_required_metric:max_drawdown")
+    max_drawdown = required_drawdown_metric(
+        "max_drawdown",
+        min(series_values(drawdowns)) if series_values(drawdowns) else None,
+    )
 
     trade_pnls = [float(value) for value in series_values(trades["net_pnl"])] if "net_pnl" in trades else []
     wins = [value for value in trade_pnls if value > 0.0]
@@ -349,7 +350,7 @@ def perp_ledger_metrics(
     payload: dict[str, MetricValue] = {
         "total_return": total_return,
         "ending_value": ending_value,
-        "max_drawdown": float(max_drawdown),
+        "max_drawdown": max_drawdown,
         "trade_count": trade_count,
         "win_rate": None if trade_count == 0 else len(wins) / trade_count,
         "profit_factor": None if gross_loss == 0.0 else gross_profit / abs(gross_loss),

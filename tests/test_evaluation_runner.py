@@ -14,7 +14,7 @@ import quant_strategies.evaluation._pipeline as evaluation_runner
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
-from quant_strategies.evaluation._pipeline import run_evaluation
+from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 from quant_strategies.core.data_loader import LoadedData
 
 
@@ -1674,6 +1674,59 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
         "was available after decision_time" in item
         for item in payload["data_windows"][0]["data_audit"]["violations"]
     )
+
+
+def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class BackendShouldNotBeCalled(FakeBackend):
+        def __init__(self) -> None:
+            self.prepare_calls = 0
+            self.run_calls = 0
+
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+            self.prepare_calls += 1
+            raise AssertionError("prepare_inputs should not be called after readiness failure")
+
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+            self.run_calls += 1
+            raise AssertionError("run should not be called after readiness failure")
+
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[1]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    backend = BackendShouldNotBeCalled()
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "data_audit"
+    assert result.assessment_status == "evaluation_preflight_failed"
+    assert "requires at least 1" in result.message
+    assert backend.prepare_calls == 0
+    assert backend.run_calls == 0
+    payload = assert_failure_artifacts(
+        result,
+        failure_stage="data_audit",
+        assessment_status="evaluation_preflight_failed",
+        message_fragment="requires at least 1",
+    )
+    assert payload["data_windows"][0]["data_audit"]["passed"] is False
+    assert any("requires at least 1" in item for item in payload["data_windows"][0]["data_audit"]["violations"])
 
 
 def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(

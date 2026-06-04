@@ -31,6 +31,10 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 validation and evaluation. Strategies inspect only the provided `rows` and
 `params`; they do not load data, call engines, write artifacts, or run
 background loops.
+Validation and evaluation also require declared decision observations for
+candidate-level evidence. Evaluation defaults to at least one observation and
+one observed symbol per decision; validation configs can require additional
+observation fields.
 
 Rows are loaded through public `quant_data` APIs, normalized at the boundary,
 and passed to strategies as plain mapping rows. Package metadata bounds the
@@ -181,6 +185,8 @@ Purpose:
 scenarios;
 - require `validate_params`;
 - run strict row-contract, observation, and hidden-lookahead checks;
+- reject levered or aggregate-overexposed target-weight evidence before backend
+  scenarios;
 - emit an advisory validation decision from the validation policy.
 
 Primary config file: candidate-local `validation.toml`.
@@ -308,6 +314,8 @@ Important sections:
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[metrics]` with `annualization_periods_per_year` and optional
   `min_annualized_samples`;
+- optional `[readiness]` for decision observation requirements; defaults to at
+  least one observation and one observed symbol per decision;
 - optional `[benchmark]` with `symbol`, which must also be present in
   `data.symbols`;
 - optional `[[scenarios]]` entries with `id`, labels, `required`, and optional

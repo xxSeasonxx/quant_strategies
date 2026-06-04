@@ -168,7 +168,7 @@ def test_load_evaluation_config_accepts_min_annualized_samples_override(tmp_path
     assert config.metrics.min_annualized_samples == 4
 
 
-def test_load_evaluation_config_accepts_legacy_data_window_dates_but_uses_windows(tmp_path: Path):
+def test_load_evaluation_config_rejects_legacy_data_window_dates(tmp_path: Path):
     candidate = tmp_path / "candidate"
     write_strategy(candidate / "strategy.py")
     config_path = candidate / "evaluation.toml"
@@ -180,11 +180,8 @@ def test_load_evaluation_config_accepts_legacy_data_window_dates_but_uses_window
         )
     )
 
-    config = load_evaluation_config(config_path)
-    spec = config.to_execution_spec(config.windows[0])
-
-    assert spec.data.start == date(2026, 1, 1)
-    assert spec.data.end == date(2026, 6, 30)
+    with pytest.raises(EvaluationConfigError, match="start|end|extra"):
+        load_evaluation_config(config_path)
 
 
 def test_load_evaluation_config_rejects_min_annualized_samples_below_two(tmp_path: Path):

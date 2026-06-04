@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -26,17 +25,6 @@ class WindowedDataConfig(SharedConfigModel):
     dataset: str | None = None
     symbols: tuple[str, ...] = Field(min_length=1)
     strict: bool = True
-
-    @model_validator(mode="before")
-    @classmethod
-    def discard_legacy_window_dates(cls, value: Any) -> Any:
-        if cls is WindowedDataConfig and isinstance(value, Mapping):
-            return {
-                field_name: field_value
-                for field_name, field_value in value.items()
-                if field_name not in {"start", "end"}
-            }
-        return value
 
     @field_validator("symbols")
     @classmethod

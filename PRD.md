@@ -82,7 +82,8 @@ whether a strategy has durable alpha, statistical significance, regime
 robustness, benchmark-relative edge, capacity, or portfolio quality.
 Research evaluation provides stateless frozen-candidate portfolio, economic,
 and path evidence. No foundation job authorizes promotion, paper trading, or
-live trading. Benchmark-relative metrics are deferred.
+live trading. Benchmark-relative metrics, when configured, are advisory
+evaluation evidence only; they do not rank candidates or authorize promotion.
 
 ---
 
@@ -253,7 +254,9 @@ MUST NOT own candidate generation, search memory, ranking across variants,
 stopping rules, promotion, paper-trading authorization, or live-trading
 authorization.
 
-Research evaluation evidence does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are deferred.
+Research evaluation evidence does not authorize promotion, paper trading, or
+live trading. Benchmark-relative metrics, when configured, are advisory
+evidence only and do not rank candidates.
 
 A portfolio/NAV-specific backend is appropriate when portfolio/NAV semantics
 are the deliverable. That backend remains out of the quick-run hot path and does

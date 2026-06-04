@@ -40,6 +40,7 @@ from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEv
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
 from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.core.decision_readiness import check_decision_readiness
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
@@ -91,6 +92,19 @@ _ANNUALIZED_CADENCE_INSUFFICIENT_NULL_WARNING = (
 
 
 def run_evaluation(
+    config_path: str | Path,
+    *,
+    repo_root: Path | None = None,
+    event_sink: EvaluationEventSink | None = None,
+) -> EvaluationRunResult:
+    return _run_evaluation(
+        config_path,
+        repo_root=repo_root,
+        event_sink=event_sink,
+    )
+
+
+def _run_evaluation(
     config_path: str | Path,
     *,
     repo_root: Path | None = None,
@@ -322,6 +336,24 @@ def _run_data_audit(
             audit = audit_decision_rows(execution.normalized_rows, execution.decisions)
             data_window["data_audit"] = {"window_id": window.id, **audit.model_dump(mode="json")}
             if audit.passed:
+                readiness_violations = check_decision_readiness(
+                    execution.decisions,
+                    context.config.readiness,
+                    data_kind=context.config.data.kind,
+                    include_inferred_data_kind_fields=False,
+                )
+                if readiness_violations:
+                    data_window["data_audit"]["passed"] = False
+                    data_window["data_audit"]["violations"] = list(readiness_violations)
+                    message = "; ".join(readiness_violations)
+                    audit_event.fail(message)
+                    return _failure_result(
+                        context,
+                        state,
+                        "data_audit",
+                        "evaluation_preflight_failed",
+                        message,
+                    )
                 return None
             message = "; ".join(audit.violations) if audit.violations else "data_audit_failed"
             audit_event.fail(message)

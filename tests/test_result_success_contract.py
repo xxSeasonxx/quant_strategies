@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
-from quant_strategies.evaluation import EvaluationRunResult
+import quant_strategies.evaluation as evaluation_pkg
+from quant_strategies.evaluation import EvaluationRunResult, run_evaluation
 from quant_strategies.runner import RunOutcome, RunResult
-from quant_strategies.validation import ValidationRunResult
+from quant_strategies.validation import ValidationRunResult, run_validation
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
 
@@ -87,3 +89,9 @@ def test_evaluation_result_succeeded_is_derived_from_completed_run_without_failu
     assert successful.succeeded is True
     assert completed_with_failure_stage.succeeded is False
     assert incomplete.succeeded is False
+
+
+def test_public_validation_and_evaluation_apis_do_not_accept_backend_injection():
+    assert "backend" not in inspect.signature(run_validation).parameters
+    assert "backend" not in inspect.signature(run_evaluation).parameters
+    assert not hasattr(evaluation_pkg, "EvaluationBackend")

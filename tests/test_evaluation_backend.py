@@ -137,6 +137,36 @@ def test_portfolio_metrics_use_explicit_annualized_formulas():
     assert metrics["return_nonfinite_count"] == 0
 
 
+def test_portfolio_metrics_fail_when_max_drawdown_is_positive():
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        def win_rate(self):
+            return 1.0
+
+        def profit_factor(self):
+            return 2.0
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def value(self):
+            return [100.0, 101.0]
+
+        def returns(self):
+            return [0.0, 0.01]
+
+        def get_total_return(self):
+            return 0.01
+
+        def get_max_drawdown(self):
+            return 0.05
+
+    with pytest.raises(ValueError, match="invalid_required_metric:max_drawdown"):
+        backend_module._portfolio_metrics(FakePortfolio(), 252, min_annualized_samples=2)
+
+
 def test_portfolio_metrics_null_annualized_family_when_return_sample_is_too_short():
     class FakeTrades:
         def count(self):
@@ -538,6 +568,27 @@ def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(portfoli
     trades = pd.DataFrame({"net_pnl": [1.0]})
 
     with pytest.raises(ValueError, match="invalid_required_metric:ending_value"):
+        perp_module.perp_ledger_metrics(
+            portfolio_path,
+            trades,
+            annualization_periods_per_year=252,
+            funding_cashflow_total=0.0,
+            funding_event_count=0,
+        )
+
+
+def test_perp_ledger_metrics_fail_when_max_drawdown_is_positive():
+    pd = pytest.importorskip("pandas")
+    portfolio_path = pd.DataFrame(
+        {
+            "portfolio_value": [100.0, 101.0],
+            "period_return": [0.0, 0.01],
+            "drawdown": [0.01, 0.05],
+        }
+    )
+    trades = pd.DataFrame({"net_pnl": [1.0]})
+
+    with pytest.raises(ValueError, match="invalid_required_metric:max_drawdown"):
         perp_module.perp_ledger_metrics(
             portfolio_path,
             trades,

@@ -27,6 +27,8 @@ def base_unsupported_semantics(decision: StrategyDecision) -> tuple[str, ...]:
         unsupported.append("flat_target")
     if decision.target.sizing_kind != "target_weight":
         unsupported.append("non_target_weight_sizing")
+    if decision.target.sizing_kind == "target_weight" and decision.target.size > 1.0:
+        unsupported.append("leveraged_target_weight")
     return tuple(dict.fromkeys(unsupported))
 
 
@@ -71,6 +73,8 @@ def _unsupported_message(decision: StrategyDecision, semantic: str) -> str:
         return f"execution kernel cannot represent flat target for {symbol}"
     if semantic == "non_target_weight_sizing":
         return f"execution kernel requires target_weight sizing: {symbol}"
+    if semantic == "leveraged_target_weight":
+        return f"execution kernel cannot represent leveraged target_weight for {symbol}"
     return f"execution kernel cannot represent decision: {symbol}"
 
 

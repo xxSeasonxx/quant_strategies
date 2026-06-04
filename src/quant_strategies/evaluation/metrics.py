@@ -17,6 +17,13 @@ def finite_metric_or_none(value: Any) -> float | None:
     return metric
 
 
+def required_drawdown_metric(name: str, value: Any) -> float:
+    metric = finite_metric_or_none(value)
+    if metric is None or metric > 0.0:
+        raise ValueError(f"invalid_required_metric:{name}")
+    return metric
+
+
 def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     nav_base = "portfolio NAV path"
     returns_base = "full-grid periodic portfolio returns, including flat/no-position bars"

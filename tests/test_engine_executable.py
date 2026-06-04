@@ -89,6 +89,7 @@ def test_executable_decision_returns_engine_fields_and_jsonable_metadata():
             "multi_leg instrument",
         ),
         (decision(direction="flat", size=0.0), "flat_target", "flat target"),
+        (decision(size=1.01), "leveraged_target_weight", "leveraged target_weight"),
     ],
 )
 def test_base_executable_semantics_are_shared(source_decision, semantic: str, message: str):
