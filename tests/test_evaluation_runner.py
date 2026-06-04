@@ -20,6 +20,7 @@ from quant_strategies.core.data_loader import LoadedData
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
 
 
 def rows() -> list[dict[str, Any]]:
@@ -273,6 +274,12 @@ def completed_metrics() -> dict[str, int | float | str]:
         "total_return": 0.01,
         "ending_value": 101.0,
         "max_drawdown": -0.01,
+        "annualized_return": 0.10,
+        "volatility": 0.20,
+        "sharpe": 0.50,
+        "sortino": 0.75,
+        "calmar": 10.0,
+        "worst_period_return": -0.005,
         "trade_count": 1,
         "return_total_count_excluding_initial": 1,
         "return_sample_count": 1,
@@ -740,9 +747,40 @@ def test_run_evaluation_records_matching_annualization_cadence_without_warning(
     assert cadence["implied_periods_per_year"] == pytest.approx(365.2425)
     assert cadence["warning"] is None
     assert metrics_payload["evidence_quality_warnings"] == []
+    for item in metrics_payload["scenarios"]:
+        for name in ANNUALIZED_RISK_METRICS:
+            assert item["metrics"][name] is not None
+        assert item["metrics"]["worst_period_return"] == pytest.approx(-0.005)
+        assert "annualized_metrics_null_due_to_cadence_mismatch" not in item["warnings"]
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["annualization_cadence"] == cadence
     assert manifest["evaluation"]["evidence_quality_warnings"] == []
+
+
+def test_run_evaluation_warns_on_252_observed_periods_against_365_configured_annualization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path, annualization=365)
+    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    observed_spacing = timedelta(seconds=365.2425 * 24 * 60 * 60 / 252)
+    timestamps = [AS_OF + observed_spacing * index for index in range(4)]
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=CadenceFakeBackend(timestamps),
+    )
+
+    assert result.run_completed is True
+    assert len(result.evidence_quality_warnings) == 1
+    assert result.evidence_quality_warnings[0].startswith("annualization_cadence_mismatch:")
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    cadence = metrics_payload["annualization_cadence"]
+    assert cadence["status"] == "warning"
+    assert cadence["configured_periods_per_year"] == 365
+    assert cadence["implied_periods_per_year"] == pytest.approx(252.0)
+    assert cadence["mismatch_factor"] == pytest.approx(365 / 252)
 
 
 def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
@@ -771,6 +809,17 @@ def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
     assert cadence["mismatch_factor"] > 1000.0
     assert cadence["warning"] == result.evidence_quality_warnings[0]
     assert metrics_payload["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
+    for item in metrics_payload["scenarios"]:
+        metrics = item["metrics"]
+        for name in ANNUALIZED_RISK_METRICS:
+            assert metrics[name] is None
+        assert metrics["total_return"] == pytest.approx(0.01)
+        assert metrics["ending_value"] == pytest.approx(101.0)
+        assert metrics["max_drawdown"] == pytest.approx(-0.01)
+        assert metrics["return_sample_count"] == 1
+        assert metrics["return_total_count_excluding_initial"] == 1
+        assert metrics["worst_period_return"] == pytest.approx(-0.005)
+        assert "annualized_metrics_null_due_to_cadence_mismatch" in item["warnings"]
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["annualization_cadence"] == cadence
     assert manifest["evaluation"]["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
@@ -797,6 +846,12 @@ def test_run_evaluation_warns_when_one_completed_scenario_has_mismatched_cadence
     assert cadence["offending_scenario_ids"] == ["eval_2026_h1/zero_costs/base_fill"]
     assert cadence["observed_median_spacing_seconds"] == pytest.approx(60.0)
     assert cadence["warning"] == result.evidence_quality_warnings[0]
+    for item in metrics_payload["scenarios"]:
+        assert item["status"] == "completed"
+        for name in ANNUALIZED_RISK_METRICS:
+            assert item["metrics"][name] is None
+        assert item["metrics"]["total_return"] == pytest.approx(0.01)
+        assert "annualized_metrics_null_due_to_cadence_mismatch" in item["warnings"]
 
 
 def test_run_evaluation_uses_collision_proof_audit_paths_for_window_ids(

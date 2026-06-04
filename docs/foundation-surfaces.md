@@ -33,7 +33,8 @@ validation and evaluation. Strategies inspect only the provided `rows` and
 background loops.
 
 Rows are loaded through public `quant_data` APIs, normalized at the boundary,
-and passed to strategies as plain mapping rows.
+and passed to strategies as plain mapping rows. Package metadata bounds the
+supported upstream data contract as `quant-data>=0.1.0,<0.2.0`.
 
 Path anchoring:
 
@@ -56,8 +57,12 @@ conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_back
 ```
 
 Run `make check` when the local `quant` environment may have stale
-console-script metadata. Run `make check-vectorbtpro-smoke` before relying on
-real VectorBT Pro evaluation behavior.
+console-script metadata. It refreshes the editable install, checks the CLI,
+runs the full pytest suite, and runs the real VectorBT Pro evaluation smoke.
+The smoke is skipped by default only when the test is invoked without
+`RUN_VECTORBTPRO_SMOKE=1`; when enabled, missing `pandas`, `pyarrow`, or
+`vectorbtpro` fails the check. Run `make check-vectorbtpro-smoke` directly when
+only the real backend smoke matters.
 
 ## Status And Result Interpretation
 
@@ -67,7 +72,7 @@ details, not promotion language.
 
 | Surface | Python status fields | Success condition | Failure interpretation |
 | --- | --- | --- | --- |
-| Quick run | `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `outcome.completed` is true and `outcome.failure_stage is None` | `outcome.failure_stage` names the failed stage; `outcome.assessment_status` stays diagnostic-only |
+| Quick run | `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `outcome.completed` is true and `outcome.failure_stage is None` | `outcome.completed` is false, `outcome.failure_stage` names the failed stage, and `outcome.assessment_status` stays diagnostic-only |
 | Validation run | `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `run_completed` is true and `failure_stage is None`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
 | Evaluation run | `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `run_completed` is true and `failure_stage is None` | stateless frozen-candidate evidence only |
 
@@ -135,6 +140,8 @@ full-profile artifacts. Completed quick-run `summary.json` files include
 `economic_metrics`, a compact summary derived from the engine trade
 ledger. Diagnostic-profile runs additionally write `diagnostics.json` with
 `economic_slices`.
+Failed quick-run `summary.json` files set `run_completed` to `false` and
+`failure_stage` to the failed runner stage.
 
 Engine stop-loss, take-profit, and trailing thresholds are sampled threshold
 exits: they are evaluated on the configured bar fill price (`close` or `quote`)
@@ -252,7 +259,14 @@ contract does not match perp funding cashflows.
 Annualized metrics use full-grid portfolio returns from the `portfolio_path`
 trace, including flat/no-position bars. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
-an advisory `annualization_cadence` summary and warning on obvious mismatches.
+an advisory `annualization_cadence` summary and warning on mismatches.
+Annualized/risk metrics (`annualized_return`, `volatility`, `sharpe`,
+`sortino`, and `calmar`) are emitted only when `annualization_cadence.status`
+is `ok` and `return_sample_count` meets the minimum return-sample floor,
+`[metrics].min_annualized_samples` (default `20`). Cadence warnings or
+insufficient samples null that annualized/risk metrics family without nulling
+core economics such as `total_return`, `ending_value`, `max_drawdown`,
+`return_sample_count`, or `worst_period_return`.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading.
 Benchmark-relative metrics are evidence only: when optional `[benchmark]` is
@@ -269,7 +283,8 @@ Important sections:
 - top-level `strategy_path`, `strategy_id`;
 - `[[windows]]`;
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
-- `[metrics]` with `annualization_periods_per_year`;
+- `[metrics]` with `annualization_periods_per_year` and optional
+  `min_annualized_samples`;
 - optional `[benchmark]` with `symbol`, which must also be present in
   `data.symbols`;
 - optional `[[scenarios]]` entries with `id`, labels, `required`, and optional
@@ -321,6 +336,8 @@ or traces. Decision records are JSONL for direct audit.
 - It does not choose which strategy ideas are worth researching, how to mutate
 variants, how to rank candidates, or when an auto-research loop should stop.
 - It does not acquire, refresh, repair, or join data; `quant_data` owns that.
+  This repo pins the supported `quant-data` contract range instead of carrying
+  local data-materialization compatibility code.
 - It does not produce market proof, statistical proof, paper-trading permission,
 live-trading permission, or promotion authority.
 - It does not make generated artifacts true by construction; artifacts are

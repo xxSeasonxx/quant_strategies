@@ -30,6 +30,7 @@ def write_config(
     *,
     strategy_path: str = "strategy.py",
     annualization: int = 252,
+    min_annualized_samples: int | None = None,
     extra: str = "",
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -65,6 +66,7 @@ slippage_bps_per_side = 0.5
 
 [metrics]
 annualization_periods_per_year = {annualization}
+{f"min_annualized_samples = {min_annualized_samples}" if min_annualized_samples is not None else ""}
 
 [output]
 results_dir = "evaluation_results/demo"
@@ -87,6 +89,7 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
     assert config.windows[0].id == "eval_2026_h1"
     assert config.data.symbols == ("SPY", "QQQ")
     assert config.metrics.annualization_periods_per_year == 252
+    assert config.metrics.min_annualized_samples == 20
     assert config.to_execution_spec(config.windows[0]) == StrategyExecutionSpec(
         strategy_path=candidate / "strategy.py",
         strategy_id="demo",
@@ -116,6 +119,7 @@ def test_checked_in_simple_momentum_evaluation_example_loads():
     assert config.strategy_id == "simple_momentum"
     assert config.windows[0].id == "evaluation_2024_01"
     assert config.metrics.annualization_periods_per_year == 525949
+    assert config.metrics.min_annualized_samples == 20
 
 
 def test_resolve_evaluation_config_rejects_directory_path(tmp_path: Path):
@@ -142,6 +146,25 @@ def test_load_evaluation_config_requires_positive_annualization(tmp_path: Path):
     write_config(candidate / "evaluation.toml", annualization=0)
 
     with pytest.raises(EvaluationConfigError, match="annualization_periods_per_year"):
+        load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_load_evaluation_config_accepts_min_annualized_samples_override(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(candidate / "evaluation.toml", min_annualized_samples=4)
+
+    config = load_evaluation_config(candidate / "evaluation.toml")
+
+    assert config.metrics.min_annualized_samples == 4
+
+
+def test_load_evaluation_config_rejects_min_annualized_samples_below_two(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(candidate / "evaluation.toml", min_annualized_samples=1)
+
+    with pytest.raises(EvaluationConfigError, match="min_annualized_samples"):
         load_evaluation_config(candidate / "evaluation.toml")
 
 

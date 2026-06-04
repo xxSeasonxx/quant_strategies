@@ -64,6 +64,18 @@ def test_docs_describe_full_grid_returns_and_annualization_cadence_warnings():
         assert "flat/no-position bars" in text, path
         assert "annualization cadence" in text, path
         assert "annualization_cadence" in text, path
+        assert "min_annualized_samples" in text, path
+        assert "annualized/risk metrics" in text, path
+        assert "minimum return-sample floor" in text, path
+
+
+def test_lock_todos_and_review_track_p1_annualized_metric_guards():
+    for path in ["FOUNDATION_LOCK.md", "TODOS.md", "review-claude.md"]:
+        text = read(path)
+        assert "min_annualized_samples" in text, path
+        assert "annualized/risk metrics" in text, path
+        assert "annualization cadence" in text, path
+        assert "minimum return-sample floor" in text, path
 
 
 def test_prd_owns_product_intent_not_evaluate_command_schema():

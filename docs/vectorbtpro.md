@@ -107,7 +107,14 @@ The reason is semantic, not just implementation preference:
 - VectorBT Pro portfolio returns are NAV-path portfolio returns.
 - Evaluation annualized metrics use full-grid portfolio returns from
   `portfolio_path`, including flat/no-position bars, and completed runs emit an
-  `annualization_cadence` warning on obvious configured-cadence mismatches.
+  `annualization_cadence` warning on configured-cadence mismatches.
+- Annualized/risk metrics (`annualized_return`, `volatility`, `sharpe`,
+  `sortino`, and `calmar`) are emitted only when `annualization_cadence.status`
+  is `ok` and `return_sample_count` meets the minimum return-sample floor,
+  `[metrics].min_annualized_samples` (default `20`). Cadence warnings or
+  insufficient samples null that annualized/risk metrics family without nulling
+  core economics such as `total_return`, `ending_value`, `max_drawdown`,
+  `return_sample_count`, or `worst_period_return`.
 - Those objects only match in narrow cases.
 - Funding-aware evaluation semantics belong to the project perp ledger, not to
   VectorBT Pro.

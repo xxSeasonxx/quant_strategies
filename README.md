@@ -113,6 +113,8 @@ version. Completed quick-run summaries include engine-derived
 `RunResult`; status lives under `result.outcome`, while replayability,
 row-contract, causality, and warning fields live under `result.evidence`.
 The runner API does not keep flat compatibility aliases for older result fields.
+Runner-stage failures return `result.outcome.completed is False`, set
+`failure_stage`, and write `summary.json` with `run_completed: false`.
 
 **Validation run** — `quant-strategies validate candidate/validation.toml`
 
@@ -141,7 +143,13 @@ Annualized evaluation metrics use full-grid portfolio returns from
 `portfolio_path`, including flat/no-position bars. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
 an advisory annualization cadence summary, `annualization_cadence`, and warning
-on obvious mismatches.
+on mismatches. Annualized/risk metrics (`annualized_return`, `volatility`,
+`sharpe`, `sortino`, and `calmar`) are emitted only when
+`annualization_cadence.status` is `ok` and `return_sample_count` meets the
+minimum return-sample floor, `[metrics].min_annualized_samples` (default `20`).
+Cadence warnings or insufficient samples null that annualized/risk metrics
+family without nulling core economics such as `total_return`, `ending_value`,
+`max_drawdown`, `return_sample_count`, or `worst_period_return`.
 
 Python callers use `quant_strategies.evaluation.run_evaluation` and receive
 `EvaluationRunResult`.
@@ -155,7 +163,8 @@ without ranking, promotion, paper-trading, or live-trading authority.
 
 - **`quant-data` owns data.** Materialization, refresh, backfill, repair, and
   source joining belong upstream. This repo uses public `quant_data` loader APIs
-  only and does not discover upstream `.env` files.
+  only, bounds the supported dependency range as `quant-data>=0.1.0,<0.2.0`,
+  and does not discover upstream `.env` files.
 - **The engine reports activity sums, not NAV.** Trade-result metrics are linear
   per-trade sums, not portfolio/NAV-path returns. Validation uses the linear
   activity sum directly; it does not compound that metric as if it were a NAV path.
@@ -193,8 +202,9 @@ conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
 
 Run `make check` before relying on the local environment for foundation runs.
 It refreshes the editable install, checks the installed CLI, and runs the full
-test suite. Run `make check-vectorbtpro-smoke` when the real VectorBT Pro
-backend behavior matters.
+test suite plus the real VectorBT Pro evaluation smoke. The smoke fails loudly
+when `pandas`, `pyarrow`, or `vectorbtpro` is missing. Run
+`make check-vectorbtpro-smoke` directly when only the real backend smoke matters.
 
 Path anchoring differs by surface. Quick-run configs resolve relative paths
 against the repository root. Validation and evaluation configs are

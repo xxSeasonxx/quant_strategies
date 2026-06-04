@@ -118,17 +118,67 @@ def test_generated_result_roots_are_ignored():
 
 def test_makefile_exposes_single_local_check_command():
     text = (ROOT / "Makefile").read_text()
+    check_body = _makefile_target_body(text, "check")
 
     assert ".PHONY: check check-vectorbtpro-smoke check-all" in text
     assert "check:" in text
     assert "conda run -n quant python -m pip install -e ." in text
     assert "conda run -n quant quant-strategies --help" in text
     assert "conda run -n quant pytest -q" in text
+    assert check_body.index("conda run -n quant pytest -q") < check_body.index(
+        "$(MAKE) check-vectorbtpro-smoke"
+    )
     assert "check-vectorbtpro-smoke:" in text
     assert (
         "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
         "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
     ) in text
+    assert _makefile_target_header(text, "check-all") == "check-all: check"
+
+
+def _makefile_target_header(text: str, target: str) -> str:
+    for line in text.splitlines():
+        if line.startswith(f"{target}:"):
+            return line
+    raise AssertionError(f"target not found: {target}")
+
+
+def _makefile_target_body(text: str, target: str) -> str:
+    lines = text.splitlines()
+    body: list[str] = []
+    in_target = False
+    for line in lines:
+        if line.startswith(f"{target}:"):
+            in_target = True
+            continue
+        if in_target and line and not line.startswith(("\t", " ")):
+            break
+        if in_target:
+            body.append(line)
+    return "\n".join(body)
+
+
+def test_quant_data_dependency_is_version_bounded():
+    payload = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    dependencies = payload["project"]["dependencies"]
+    quant_data_specs = [
+        dependency
+        for dependency in dependencies
+        if dependency == "quant-data" or dependency.startswith("quant-data")
+    ]
+
+    assert quant_data_specs == ["quant-data>=0.1.0,<0.2.0"]
+
+
+def test_vectorbtpro_smoke_fails_loudly_when_enabled():
+    text = (ROOT / "tests" / "test_evaluation_backend.py").read_text()
+    smoke = text.split("def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():", 1)[1]
+    smoke = smoke.split("\ndef test_", 1)[0]
+
+    assert "pytest.importorskip" not in smoke
+    assert "import pandas" in smoke
+    assert "import pyarrow" in smoke
+    assert "import vectorbtpro" in smoke
 
 
 def test_review_archive_marks_historical_reviews_superseded():

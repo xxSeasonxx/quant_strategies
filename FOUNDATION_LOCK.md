@@ -31,12 +31,18 @@ validation support is limited to the explicit opt-in agreement oracle.
 validation/evaluation-ready until it has `validate_params`, passes the relevant
 row-contract and causality checks, and does not depend on future rows during
 signal generation.
-- **Result success:** `completed` / `run_completed` means the workflow reached a
-structured terminal result, not necessarily success. Programmatic success
-requires the terminal flag to be true and `failure_stage is None`.
+- **Result success:** programmatic success requires `completed` /
+`run_completed` to be true and `failure_stage is None`. Quick-run and
+evaluation failures set the terminal flag false when `failure_stage` is set.
 - **Promotion boundary:** validation does not authorize paper trading, live
 trading, or promotion. Promotion remains outside this foundation.
 - **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only and do not authorize ranking or promotion.
+- **Annualized metric trust boundary:** annualized/risk metrics are guarded by
+  annualization cadence (`annualization_cadence.status == "ok"`) and the
+  minimum return-sample floor `[metrics].min_annualized_samples` (default
+  `20`). Cadence warnings or insufficient samples null `annualized_return`,
+  `volatility`, `sharpe`, `sortino`, and `calmar` without nulling core
+  economics.
 - **Causality and audit boundary:** usable validation and evaluation evidence
 requires a passed row contract, decision-row / observation-dependency audit, and
 complete deterministic, emitted, and strict suppression replay proof. Evaluation
@@ -49,14 +55,15 @@ compatibility path, or archive index for moved research records.
 search memory, variant ranking, stopping rules, and iteration decisions.
 `quant_strategies` evaluates supplied strategies and configs.
 - **Data boundary:** `quant_data` owns data acquisition, materialization,
-refresh, backfill, repair, and source joining.
+refresh, backfill, repair, and source joining. Package metadata bounds the
+supported `quant-data` contract as `>=0.1.0,<0.2.0`.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
 quick-run artifacts are intentionally not full replay chains.
 
 ## Current Run Readiness
 
-As of 2026-06-03, the public architecture is not a rewrite case. The identified
-P0/P1 run-readiness blockers have been fixed in the active codebase:
+As of 2026-06-04, the public architecture is not a rewrite case. The identified
+P0/P1/P2 run-readiness blockers have been fixed in the active codebase:
 
 - **Evaluation audit parity:** evaluation runs the same decision-row /
 observation-dependency audit as validation before portfolio metrics and
@@ -73,6 +80,19 @@ They remain under `untested/` until Season explicitly promotes or renames them.
 - **Evaluation evidence contract:** evaluation backend injection is typed by an
 explicit protocol, configs may opt into custom `[[scenarios]]`, and optional
 `[benchmark]` metrics add passive benchmark and excess return evidence only.
+- **Annualized/risk metric guards:** completed evaluation artifacts keep the
+annualized/risk metrics family null unless cadence matches and
+`return_sample_count` meets the configured minimum return-sample floor,
+`[metrics].min_annualized_samples`.
+- **Default verification:** `make check` refreshes the editable install, checks
+the installed CLI, runs the full pytest suite, and runs the real VectorBT Pro
+evaluation smoke. The smoke fails loudly for missing `pandas`, `pyarrow`, or
+`vectorbtpro` when enabled.
+- **Quick-run failure semantics:** runner-stage failures return
+`RunOutcome.completed=False`, set `failure_stage`, and write `summary.json`
+with `run_completed=false`.
+- **Data dependency boundary:** `quant-data` is version-bounded as
+`>=0.1.0,<0.2.0` to guard the upstream data contract.
 - **Consumer contract:** `quant_autoresearch` should consume public
 `run_config`, `run_validation`, and `run_evaluation` APIs. Candidate ranking,
 comparison, search memory, stopping rules, and promotion remain outside this

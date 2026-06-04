@@ -657,7 +657,7 @@ def _failure_result(
         notes_path=notes_path,
         message=notes.strip(),
         outcome=RunOutcome(
-            completed=True,
+            completed=False,
             failure_stage=stage,
             assessment_status="runner_failed",
             promotion_eligible=False,

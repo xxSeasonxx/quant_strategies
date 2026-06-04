@@ -9,7 +9,7 @@ description = "Flat strategy library and explicit quant strategy runner."
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.10",
-    "quant-data",
+    "quant-data>=0.1.0,<0.2.0",
 ]
 
 [project.optional-dependencies]

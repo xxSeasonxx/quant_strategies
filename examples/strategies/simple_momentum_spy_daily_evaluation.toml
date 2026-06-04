@@ -29,6 +29,7 @@ slippage_bps_per_side = 0.0
 
 [metrics]
 annualization_periods_per_year = 525949
+min_annualized_samples = 20
 
 [output]
 results_dir = "evaluation_results/simple_momentum"

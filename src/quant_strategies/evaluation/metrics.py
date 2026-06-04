@@ -30,7 +30,11 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     benchmark_not_authority = (
         "benchmark-relative evidence only; not ranking, promotion, paper trading, or live trading authority"
     )
-    annualization = "explicit_config.annualization_periods_per_year"
+    annualization = (
+        "explicit_config.annualization_periods_per_year; requires "
+        "annualization_cadence.status == ok and return_sample_count >= "
+        "explicit_config.min_annualized_samples"
+    )
 
     return {
         "total_return": {
@@ -59,7 +63,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "no observed finite returns after the synthetic first return, any non-finite post-initial return is present, or total return <= -100%",
+            "null_when": "no observed finite returns after the synthetic first return, any non-finite post-initial return is present, return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or total return <= -100%",
         },
         "volatility": {
             "unit": "decimal_fraction_per_year",
@@ -69,7 +73,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "fewer than two observed returns after the synthetic first return",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or fewer than two observed returns after the synthetic first return",
         },
         "sharpe": {
             "unit": "ratio",
@@ -79,7 +83,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "volatility is unavailable or zero",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or volatility is unavailable or zero",
         },
         "sortino": {
             "unit": "ratio",
@@ -89,7 +93,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, or downside deviation is unavailable or zero; no downside returns is reported as null rather than infinity",
         },
         "calmar": {
             "unit": "ratio",
@@ -99,7 +103,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "annualization": annualization,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
+            "null_when": "return_sample_count is below [metrics].min_annualized_samples, annualization_cadence.status is warning, annualized return is unavailable, max drawdown is unavailable, or max drawdown is zero",
         },
         "max_drawdown": {
             "unit": "decimal_fraction",
@@ -141,7 +145,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "backend": backend,
             "cost_scope": cost_scope,
             "not_authority": not_authority,
-            "null_when": "no observed returns after the synthetic first return",
+            "null_when": "no observed returns after the synthetic first return or any non-finite post-initial return is present",
         },
         "return_total_count_excluding_initial": {
             "unit": "count",
@@ -154,7 +158,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
         "return_sample_count": {
             "unit": "count",
             "base": returns_base,
-            "aggregation": "finite post-initial return count used by annualized metrics",
+            "aggregation": "finite post-initial return count checked against [metrics].min_annualized_samples before annualized/risk metrics are emitted",
             "backend": backend,
             "not_authority": not_authority,
             "null_when": "never for completed scenarios",

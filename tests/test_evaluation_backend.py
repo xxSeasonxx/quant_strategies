@@ -21,6 +21,9 @@ from quant_strategies.evaluation.dependencies import EvaluationDependencies
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 
 
+ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
+
+
 def test_vectorbtpro_backend_satisfies_evaluation_backend_protocols():
     backend = VectorBTProEvaluationBackend()
 
@@ -103,7 +106,7 @@ def test_portfolio_metrics_use_explicit_annualized_formulas():
         annualization
     )
 
-    payload = backend_module._portfolio_metrics(FakePortfolio(), annualization)
+    payload = backend_module._portfolio_metrics(FakePortfolio(), annualization, min_annualized_samples=4)
     metrics = payload.metrics
 
     assert payload.warnings == ()
@@ -116,6 +119,47 @@ def test_portfolio_metrics_use_explicit_annualized_formulas():
     assert metrics["return_total_count_excluding_initial"] == 4
     assert metrics["return_sample_count"] == 4
     assert metrics["return_nonfinite_count"] == 0
+
+
+def test_portfolio_metrics_null_annualized_family_when_return_sample_is_too_short():
+    class FakeTrades:
+        def count(self):
+            return 1
+
+        def win_rate(self):
+            return 1.0
+
+        def profit_factor(self):
+            return math.inf
+
+    class FakePortfolio:
+        trades = FakeTrades()
+
+        def value(self):
+            return [100.0, 101.0, 100.5]
+
+        def returns(self):
+            return [0.0, 0.01, -0.004950495]
+
+        def get_total_return(self):
+            return 0.005
+
+        def get_max_drawdown(self):
+            return -0.004950495
+
+    payload = backend_module._portfolio_metrics(FakePortfolio(), 252, min_annualized_samples=4)
+    metrics = payload.metrics
+
+    for name in ANNUALIZED_RISK_METRICS:
+        assert metrics[name] is None
+    assert metrics["total_return"] == pytest.approx(0.005)
+    assert metrics["ending_value"] == pytest.approx(100.5)
+    assert metrics["max_drawdown"] == pytest.approx(-0.004950495)
+    assert metrics["return_sample_count"] == 2
+    assert metrics["return_total_count_excluding_initial"] == 2
+    assert metrics["return_nonfinite_count"] == 0
+    assert metrics["worst_period_return"] == pytest.approx(-0.004950495)
+    assert "annualized_metrics_insufficient_samples:2:min_required=4" in payload.warnings
 
 
 def test_portfolio_metrics_emit_none_for_unavailable_annualized_metrics_and_degenerate_trades():
@@ -485,6 +529,41 @@ def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(portfoli
             funding_cashflow_total=0.0,
             funding_event_count=0,
         )
+
+
+def test_perp_ledger_metrics_null_annualized_family_when_return_sample_is_too_short():
+    pd = pytest.importorskip("pandas")
+    portfolio_path = pd.DataFrame(
+        {
+            "portfolio_value": [100.0, 101.0, 100.5],
+            "period_return": [0.0, 0.01, -0.004950495],
+            "drawdown": [0.0, 0.0, -0.004950495],
+        }
+    )
+    trades = pd.DataFrame({"net_pnl": [0.5]})
+
+    payload = backend_module._perp_ledger_metrics(
+        portfolio_path,
+        trades,
+        annualization_periods_per_year=252,
+        min_annualized_samples=4,
+        funding_cashflow_total=0.0,
+        funding_event_count=0,
+    )
+    metrics = payload.metrics
+
+    for name in ANNUALIZED_RISK_METRICS:
+        assert metrics[name] is None
+    assert metrics["total_return"] == pytest.approx(0.005)
+    assert metrics["ending_value"] == pytest.approx(100.5)
+    assert metrics["max_drawdown"] == pytest.approx(-0.004950495)
+    assert metrics["return_sample_count"] == 2
+    assert metrics["return_total_count_excluding_initial"] == 2
+    assert metrics["return_nonfinite_count"] == 0
+    assert metrics["worst_period_return"] == pytest.approx(-0.004950495)
+    assert metrics["funding_cashflow_total"] == pytest.approx(0.0)
+    assert metrics["funding_event_count"] == 0
+    assert "annualized_metrics_insufficient_samples:2:min_required=4" in payload.warnings
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -927,9 +1006,9 @@ def test_prepared_decision_windows_reject_same_symbol_overlap_after_different_en
 def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():
     if os.environ.get("RUN_VECTORBTPRO_SMOKE") != "1":
         pytest.skip("set RUN_VECTORBTPRO_SMOKE=1 to run real VectorBT Pro smoke test")
-    pytest.importorskip("pandas")
-    pytest.importorskip("pyarrow")
-    pytest.importorskip("vectorbtpro")
+    import pandas  # noqa: F401
+    import pyarrow  # noqa: F401
+    import vectorbtpro  # noqa: F401
 
     result = VectorBTProEvaluationBackend().run(
         decisions=[decision(size=0.25)],

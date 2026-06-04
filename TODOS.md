@@ -15,14 +15,20 @@ mechanical evidence validation -> audit retained-candidate evidence integrity
 research evaluation        -> stateless frozen-candidate portfolio/economic/path evidence
 ```
 
-Use `make check` for the standard local foundation check. Use
-`make check-vectorbtpro-smoke` only when the real VectorBT Pro backend matters.
+Use `make check` for the standard local foundation check; it includes the real
+VectorBT Pro evaluation smoke. Use `make check-vectorbtpro-smoke` only when
+that smoke is the only needed slice.
 
 ## Status
 
 There are no open foundation-finalization PRs in this file. `FOUNDATION_LOCK.md`
 is the disposition anchor for locked contracts, accepted debt, deferred triggers,
 and review protocol.
+
+The P2 review follow-ups are fixed in the active codebase: `make check`
+exercises the real VectorBT Pro bars-path smoke, quick-run runner-stage
+failures report `completed=False` / `run_completed=false`, and `quant-data` is
+bounded as `>=0.1.0,<0.2.0`.
 
 ## Current Open Work
 
@@ -39,6 +45,12 @@ Benchmark-relative metrics and user-defined scenario matrices are implemented
 as evaluation evidence surfaces. Remaining follow-up work is limited to
 residual backend limitations found during use.
 
+The P1 annualized metric trust guards are implemented. Annualized/risk metrics
+are emitted only when `annualization_cadence.status` is `ok` and
+`return_sample_count` meets the minimum return-sample floor,
+`[metrics].min_annualized_samples`; cadence warnings or insufficient samples
+null the annualized/risk metrics family without nulling core economics.
+
 ## Locked Direction
 
 Use `FOUNDATION_LOCK.md` as the source of truth for what should not be reopened
@@ -48,6 +60,8 @@ as a fresh P1 without a regression or documented trigger. In short:
   surfaces;
 - benchmark-relative metrics and user-defined scenario matrices are implemented
   as evidence-only evaluation features;
+- annualized/risk metrics are guarded by annualization cadence and
+  `[metrics].min_annualized_samples`;
 - strategies are flat pure files;
 - validation and evaluation require `validate_params`;
 - engine metrics are linear signed per-trade results, not NAV;
@@ -55,6 +69,7 @@ as a fresh P1 without a regression or documented trigger. In short:
 - `quant_autoresearch` owns generation, search memory, variant ranking, stopping
   rules, and iteration decisions;
 - `quant_data` owns data acquisition and materialization;
+- `quant-data` is bounded as `>=0.1.0,<0.2.0`;
 - generated artifacts are evidence, not truth.
 
 ## Deferred Residuals

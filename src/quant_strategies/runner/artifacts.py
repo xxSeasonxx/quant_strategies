@@ -293,7 +293,7 @@ def summary_payload(
         "message": message,
         "artifacts": [],
         "engine": engine_payload,
-        "run_completed": True,
+        "run_completed": failure_stage is None,
         "assessment_status": assessment_status,
         # "unvalidated_passthrough" when the strategy defines no validate_params:
         # the quick-run still ran but its params were not schema-checked.

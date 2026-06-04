@@ -210,7 +210,11 @@ class VectorBTProEvaluationBackend:
         try:
             windows = _prepared_decision_windows(prepared, scenario)
             portfolio = _run_portfolio(vbt, pd, prepared.close, windows, scenario)
-            metric_payload = _portfolio_metrics(portfolio, metrics.annualization_periods_per_year)
+            metric_payload = _portfolio_metrics(
+                portfolio,
+                metrics.annualization_periods_per_year,
+                min_annualized_samples=metrics.min_annualized_samples,
+            )
             tables = _portfolio_tables(pd, portfolio, scenario.scenario_id, windows)
         except ValueError as exc:
             return PortfolioEvaluationResult(
@@ -648,6 +652,7 @@ def _run_perp_ledger(
         portfolio_path,
         trades,
         annualization_periods_per_year=metrics_config.annualization_periods_per_year,
+        min_annualized_samples=metrics_config.min_annualized_samples,
         funding_cashflow_total=sum(float(row["funding_cashflow"]) for row in funding_rows),
         funding_event_count=len(funding_rows),
     )
@@ -765,6 +770,7 @@ def _perp_ledger_metrics(
     annualization_periods_per_year: int,
     funding_cashflow_total: float,
     funding_event_count: int,
+    min_annualized_samples: int = 20,
 ) -> PortfolioMetricPayload:
     values = portfolio_path["portfolio_value"] if "portfolio_value" in portfolio_path else []
     returns = portfolio_path["period_return"] if "period_return" in portfolio_path else []
@@ -806,35 +812,46 @@ def _perp_ledger_metrics(
     payload["return_nonfinite_count"] = coverage.nonfinite_count
     if coverage.nonfinite_count:
         warnings.append(f"return_coverage_nonfinite:{coverage.nonfinite_count}")
+    if coverage.sample_count < min_annualized_samples:
+        warnings.append(
+            f"annualized_metrics_insufficient_samples:{coverage.sample_count}:"
+            f"min_required={min_annualized_samples}"
+        )
 
     if coverage.observed and coverage.nonfinite_count == 0:
         observed_returns = list(coverage.observed)
-        annualized_return = (
-            None
-            if total_return <= -1.0
-            else ((1.0 + total_return) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
-        )
-        mean_return = sum(observed_returns) / len(observed_returns)
-        volatility = (
-            None
-            if len(observed_returns) < 2
-            else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
-        )
-        downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
-        payload["annualized_return"] = annualized_return
-        payload["volatility"] = volatility
-        annualized_mean = mean_return * annualization_periods_per_year
-        payload["sharpe"] = None if not volatility else annualized_mean / volatility
-        payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
-        max_dd = finite_metric_or_none(payload["max_drawdown"])
-        payload["calmar"] = (
-            None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
-        )
         payload["worst_period_return"] = min(observed_returns)
+        if coverage.sample_count >= min_annualized_samples:
+            annualized_return = (
+                None
+                if total_return <= -1.0
+                else ((1.0 + total_return) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
+            )
+            mean_return = sum(observed_returns) / len(observed_returns)
+            volatility = (
+                None
+                if len(observed_returns) < 2
+                else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
+            )
+            downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
+            payload["annualized_return"] = annualized_return
+            payload["volatility"] = volatility
+            annualized_mean = mean_return * annualization_periods_per_year
+            payload["sharpe"] = None if not volatility else annualized_mean / volatility
+            payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
+            max_dd = finite_metric_or_none(payload["max_drawdown"])
+            payload["calmar"] = (
+                None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
+            )
     return PortfolioMetricPayload(metrics=payload, warnings=tuple(warnings))
 
 
-def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> PortfolioMetricPayload:
+def _portfolio_metrics(
+    portfolio: Any,
+    annualization_periods_per_year: int,
+    *,
+    min_annualized_samples: int = 20,
+) -> PortfolioMetricPayload:
     warnings: list[str] = []
     returns, return_warnings = _optional_accessor_value(portfolio, "returns", "returns")
     warnings.extend(return_warnings)
@@ -872,32 +889,38 @@ def _portfolio_metrics(portfolio: Any, annualization_periods_per_year: int) -> P
     payload["funding_model"] = "none"
     if coverage.nonfinite_count:
         warnings.append(f"return_coverage_nonfinite:{coverage.nonfinite_count}")
+    if coverage.sample_count < min_annualized_samples:
+        warnings.append(
+            f"annualized_metrics_insufficient_samples:{coverage.sample_count}:"
+            f"min_required={min_annualized_samples}"
+        )
 
     if coverage.observed and coverage.nonfinite_count == 0:
         observed_returns = list(coverage.observed)
-        total = finite_metric_or_none(payload["total_return"])
-        annualized_return = (
-            None
-            if total is None or total <= -1.0
-            else ((1.0 + total) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
-        )
-        mean_return = sum(observed_returns) / len(observed_returns)
-        volatility = (
-            None
-            if len(observed_returns) < 2
-            else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
-        )
-        downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
-        payload["annualized_return"] = annualized_return
-        payload["volatility"] = volatility
-        annualized_mean = mean_return * annualization_periods_per_year
-        payload["sharpe"] = None if not volatility else annualized_mean / volatility
-        payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
-        max_dd = finite_metric_or_none(payload["max_drawdown"])
-        payload["calmar"] = (
-            None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
-        )
         payload["worst_period_return"] = min(observed_returns)
+        if coverage.sample_count >= min_annualized_samples:
+            total = finite_metric_or_none(payload["total_return"])
+            annualized_return = (
+                None
+                if total is None or total <= -1.0
+                else ((1.0 + total) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
+            )
+            mean_return = sum(observed_returns) / len(observed_returns)
+            volatility = (
+                None
+                if len(observed_returns) < 2
+                else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
+            )
+            downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
+            payload["annualized_return"] = annualized_return
+            payload["volatility"] = volatility
+            annualized_mean = mean_return * annualization_periods_per_year
+            payload["sharpe"] = None if not volatility else annualized_mean / volatility
+            payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
+            max_dd = finite_metric_or_none(payload["max_drawdown"])
+            payload["calmar"] = (
+                None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
+            )
     return PortfolioMetricPayload(metrics=payload, warnings=tuple(warnings))
 
 

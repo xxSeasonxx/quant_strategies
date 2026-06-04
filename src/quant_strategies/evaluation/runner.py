@@ -88,7 +88,9 @@ _REQUIRED_COMPLETED_COUNT_METRICS = (
 )
 _REQUIRED_COMPLETED_FUNDING_MODELS = {"none", "project_perp_ledger_v1"}
 _SECONDS_PER_YEAR = 365.2425 * 24 * 60 * 60
-_ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 2.0
+_ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 1.1
+_ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
+_ANNUALIZED_CADENCE_NULL_WARNING = "annualized_metrics_null_due_to_cadence_mismatch"
 
 
 def run_evaluation(
@@ -160,11 +162,22 @@ def run_evaluation(
     if annualization_cadence["warning"] is not None:
         state.all_warnings.append(str(annualization_cadence["warning"]))
 
+    artifact_results = _completion_artifact_results(
+        state.backend_results,
+        annualization_cadence=annualization_cadence,
+    )
+    artifact_scenario_summary = _scenario_summary(
+        artifact_results,
+        state.expected_scenario_ids,
+        required_ids=state.required_scenario_ids,
+    )
+
     artifact_failure = _write_completion_artifacts(
         context,
         state,
-        scenario_summary,
+        artifact_scenario_summary,
         annualization_cadence=annualization_cadence,
+        backend_results=artifact_results,
     )
     if artifact_failure is not None:
         return artifact_failure
@@ -681,6 +694,7 @@ def _write_completion_artifacts(
     scenario_summary: dict[str, Any],
     *,
     annualization_cadence: Mapping[str, Any],
+    backend_results: Sequence[PortfolioEvaluationResult],
 ) -> EvaluationRunResult | None:
     metrics_payload = {
         "metric_semantics": evaluation_metric_semantics(),
@@ -695,7 +709,7 @@ def _write_completion_artifacts(
                 "warnings": list(item.warnings),
                 "unsupported_semantics": list(item.unsupported_semantics),
             }
-            for item in state.backend_results
+            for item in backend_results
         ],
     }
     try:
@@ -711,7 +725,7 @@ def _write_completion_artifacts(
             write_text_artifact(
                 context.result_dir,
                 "notes.md",
-                _notes(context.config.strategy_id, state.backend_results),
+                _notes(context.config.strategy_id, list(backend_results)),
             )
             write_evaluation_manifest(
                 context.result_dir,
@@ -736,6 +750,31 @@ def _write_completion_artifacts(
             f"artifact write failed: {exc}",
         )
     return None
+
+
+def _completion_artifact_results(
+    results: Sequence[PortfolioEvaluationResult],
+    *,
+    annualization_cadence: Mapping[str, Any],
+) -> list[PortfolioEvaluationResult]:
+    if annualization_cadence.get("status") != "warning":
+        return list(results)
+    return [_null_annualized_risk_metrics_due_to_cadence(result) for result in results]
+
+
+def _null_annualized_risk_metrics_due_to_cadence(
+    result: PortfolioEvaluationResult,
+) -> PortfolioEvaluationResult:
+    if result.status != "completed":
+        return result
+    metrics = dict(result.metrics)
+    for name in _ANNUALIZED_RISK_METRICS:
+        if name in metrics:
+            metrics[name] = None
+    warnings = result.warnings
+    if _ANNUALIZED_CADENCE_NULL_WARNING not in warnings:
+        warnings = (*warnings, _ANNUALIZED_CADENCE_NULL_WARNING)
+    return result.model_copy(update={"metrics": metrics, "warnings": warnings})
 
 
 def _annualization_cadence_summary(

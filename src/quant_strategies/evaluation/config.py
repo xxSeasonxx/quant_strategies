@@ -74,6 +74,7 @@ class EvaluationWindow(EvaluationConfigModel):
 
 class EvaluationMetricsConfig(EvaluationConfigModel):
     annualization_periods_per_year: int = Field(gt=0)
+    min_annualized_samples: int = Field(default=20, ge=2)
 
 
 class BenchmarkConfig(EvaluationConfigModel):
