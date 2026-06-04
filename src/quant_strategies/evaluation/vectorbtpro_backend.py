@@ -4,9 +4,7 @@ import math
 import numbers
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Any
 
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine.executable import base_unsupported_semantics
@@ -17,38 +15,18 @@ from quant_strategies.evaluation.dependencies import (
     require_pandas_dependency,
 )
 from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none
+from quant_strategies.evaluation.results import (
+    PortfolioEvaluationResult,
+    PortfolioMetricPayload,
+    PortfolioTraceTables,
+    PreparedPortfolioInputs,
+)
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 from quant_strategies.funding import funding_rates_match
 
 
-EvaluationBackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
 _INITIAL_EQUITY = 100.0
 _PROJECT_PERP_FUNDING_MODEL = "project_perp_ledger_v1"
-
-
-@dataclass(frozen=True)
-class PortfolioTraceTables:
-    portfolio_path: Any
-    trades: Any
-    target_positions: Any
-    target_exposure_summary: Any
-    funding_cashflows: Any = None
-
-
-@dataclass(frozen=True)
-class PortfolioMetricPayload:
-    metrics: dict[str, MetricValue]
-    warnings: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class PreparedPortfolioInputs:
-    close: Any
-    decisions: tuple[StrategyDecision, ...]
-    symbol_indexes: Mapping[str, Any]
-    decision_positions: tuple[int, ...]
-    source_rows: tuple[Mapping[str, Any], ...] = ()
-    data_kind: str = "bars"
 
 
 @dataclass(frozen=True)
@@ -72,18 +50,6 @@ class _PerpPosition:
     entry_notional: float
     entry_fee: float
     funding_cashflow: float = 0.0
-
-
-class PortfolioEvaluationResult(BaseModel):
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    scenario_id: str
-    backend: str
-    status: EvaluationBackendStatus
-    metrics: dict[str, MetricValue] = Field(default_factory=dict)
-    warnings: tuple[str, ...] = ()
-    unsupported_semantics: tuple[str, ...] = ()
-    tables: PortfolioTraceTables | None = None
 
 
 class VectorBTProEvaluationBackend:

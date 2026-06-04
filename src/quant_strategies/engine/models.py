@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
+from quant_strategies.core.config import CostModelConfig as CostModel
+from quant_strategies.core.config import FillModelConfig as FillModel
 from quant_strategies.decisions import StrategyDecision
 
 
@@ -77,27 +79,6 @@ class Bar(EngineModel):
         if self.has_funding_event and self.funding_rate is None:
             raise ValueError("funding event requires funding_rate")
         return self
-
-
-class FillModel(EngineModel):
-    price: Literal["open", "close", "quote"] = "close"
-    entry_lag_bars: int = Field(default=1, ge=0)
-    exit_lag_bars: int = Field(default=0, ge=0)
-
-
-class CostModel(EngineModel):
-    fee_bps_per_side: float = Field(default=0.0, ge=0)
-    slippage_bps_per_side: float = Field(default=0.0, ge=0)
-
-    @model_validator(mode="after")
-    def validate_costs(self) -> CostModel:
-        if not math.isfinite(self.fee_bps_per_side) or not math.isfinite(self.slippage_bps_per_side):
-            raise ValueError("cost values must be finite")
-        return self
-
-    @property
-    def round_trip_bps(self) -> float:
-        return 2.0 * (self.fee_bps_per_side + self.slippage_bps_per_side)
 
 
 class StrategySpec(EngineModel):

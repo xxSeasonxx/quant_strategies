@@ -18,10 +18,8 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
-    FutureRef,
     InstrumentLeg,
     MultiLegInstrumentRef,
-    OptionRef,
     PositionTarget as ExtendedPositionTarget,
     StrategyDecision as ExtendedStrategyDecision,
 )
@@ -106,11 +104,15 @@ def test_default_intent_rejects_extended_actions_and_book_side():
         DecisionIntent(action="open", book_side="buy")
 
 
-def test_extended_intent_accepts_actions_and_book_side():
-    intent = ExtendedDecisionIntent(action="close", book_side="sell")
+def test_extended_intent_keeps_open_intent_only():
+    intent = ExtendedDecisionIntent(action="open")
 
-    assert intent.action == "close"
-    assert intent.book_side == "sell"
+    assert intent.action == "open"
+    assert not hasattr(intent, "book_side")
+    with pytest.raises(ValidationError):
+        ExtendedDecisionIntent(action="close")
+    with pytest.raises(ValidationError):
+        ExtendedDecisionIntent(action="open", book_side="sell")
 
 
 def test_strategy_decision_generates_deterministic_decision_id():
@@ -269,24 +271,20 @@ def test_default_model_source_does_not_name_extended_vocabulary():
         assert name not in source
 
 
-def test_extended_strategy_decision_accepts_future_option_and_multi_leg_instruments():
-    future = FutureRef(
-        kind="future",
-        symbol="ESM26",
-        expiry=DECISION_TIME,
-        multiplier=50.0,
-        settlement="cash",
-    )
-    option = OptionRef(
-        kind="option",
-        symbol="SPY260116C00450000",
-        underlying_symbol="SPY",
-        option_type="call",
-        strike=450.0,
-        expiry=DECISION_TIME,
-        multiplier=100.0,
-        settlement="physical",
-    )
+def test_extended_ontology_exposes_only_multi_leg_near_term_subset():
+    import quant_strategies.decisions.extended_ontology as extended
+
+    assert not hasattr(extended, "FutureRef")
+    assert not hasattr(extended, "OptionRef")
+    assert not hasattr(extended, "BookSide")
+    assert not hasattr(extended, "OptionType")
+    assert not hasattr(extended, "Settlement")
+    assert extended.PositionTarget(direction="long", sizing_kind="target_weight", size=1.0)
+    with pytest.raises(ValidationError):
+        extended.PositionTarget(direction="long", sizing_kind="target_notional", size=1.0)
+
+
+def test_extended_strategy_decision_accepts_multi_leg_instruments():
     multi_leg = MultiLegInstrumentRef(
         kind="multi_leg",
         symbol="SPY_QQQ_PAIR",
@@ -296,29 +294,37 @@ def test_extended_strategy_decision_accepts_future_option_and_multi_leg_instrume
         ),
     )
 
-    for instrument in (future, option, multi_leg):
-        decision = ExtendedStrategyDecision(
-            strategy_id="demo",
-            instrument=instrument,
-            intent=ExtendedDecisionIntent(action="open"),
-            decision_time=DECISION_TIME,
-            as_of_time=AS_OF_TIME,
-            target=ExtendedPositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
-            exit_policy=ExitPolicy(max_hold_bars=5),
-        )
-        assert decision.instrument == instrument
+    decision = ExtendedStrategyDecision(
+        strategy_id="demo",
+        instrument=multi_leg,
+        intent=ExtendedDecisionIntent(action="open"),
+        decision_time=DECISION_TIME,
+        as_of_time=AS_OF_TIME,
+        target=ExtendedPositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
+        exit_policy=ExitPolicy(max_hold_bars=5),
+    )
+    assert decision.instrument == multi_leg
 
 
 def test_default_strategy_decision_rejects_extended_instruments():
     with pytest.raises(ValidationError):
         StrategyDecision(
             strategy_id="demo",
-            instrument=FutureRef(
-                kind="future",
-                symbol="ESM26",
-                expiry=DECISION_TIME,
-                multiplier=50.0,
-                settlement="cash",
+            instrument=MultiLegInstrumentRef(
+                kind="multi_leg",
+                symbol="SPY_QQQ_PAIR",
+                legs=(
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+                        direction="long",
+                        ratio=1.0,
+                    ),
+                    InstrumentLeg(
+                        instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"),
+                        direction="short",
+                        ratio=0.8,
+                    ),
+                ),
             ),
             decision_time=DECISION_TIME,
             as_of_time=AS_OF_TIME,
@@ -327,26 +333,7 @@ def test_default_strategy_decision_rejects_extended_instruments():
         )
 
 
-def test_instrument_models_reject_invalid_contract_fields():
-    with pytest.raises(ValidationError, match="expiry must be timezone-aware"):
-        FutureRef(
-            kind="future",
-            symbol="ESM26",
-            expiry=datetime(2026, 6, 19),
-            multiplier=50.0,
-            settlement="cash",
-        )
-    with pytest.raises(ValidationError):
-        OptionRef(
-            kind="option",
-            symbol="SPY_BAD",
-            underlying_symbol="SPY",
-            option_type="put",
-            strike=0.0,
-            expiry=DECISION_TIME,
-            multiplier=100.0,
-            settlement="cash",
-        )
+def test_multi_leg_model_rejects_invalid_contract_fields():
     with pytest.raises(ValidationError):
         MultiLegInstrumentRef(
             kind="multi_leg",
@@ -382,9 +369,9 @@ def test_position_target_rejects_extended_sizing_modes_by_default(sizing_kind: s
 
 @pytest.mark.parametrize(
     "sizing_kind",
-    ["target_weight", "target_notional", "target_contracts", "target_vol"],
+    ["target_weight"],
 )
-def test_extended_position_target_accepts_declared_sizing_modes(sizing_kind: str):
+def test_extended_position_target_accepts_target_weight_only(sizing_kind: str):
     target = ExtendedPositionTarget(direction="long", sizing_kind=sizing_kind, size=1.0)
 
     assert target.sizing_kind == sizing_kind

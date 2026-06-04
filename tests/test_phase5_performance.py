@@ -337,9 +337,9 @@ results_dir = "evaluation_results/demo"
 class FakeEvaluationBackend:
     name = "fake_evaluation"
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
         pd = pytest.importorskip("pandas")
-        from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
+        from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 
         frame = pd.DataFrame(
             {
@@ -425,8 +425,8 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    import quant_strategies.evaluation.runner as evaluation_runner
-    from quant_strategies.evaluation.runner import run_evaluation
+    import quant_strategies.evaluation._pipeline as evaluation_runner
+    from quant_strategies.evaluation._pipeline import run_evaluation
 
     class CountingBackend(FakeEvaluationBackend):
         def __init__(self) -> None:
@@ -434,11 +434,11 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             self.prepare_calls = 0
             self.row_ids: list[int] = []
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             return {"decisions": decisions, "rows": rows}
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.backend_calls += 1
             self.row_ids.append(id(rows))
             return super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
@@ -481,8 +481,8 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
 
 def test_strip_trace_tables_removes_dataframe_payload_from_summaries():
     pd = pytest.importorskip("pandas")
-    from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
-    from quant_strategies.evaluation.runner import _strip_trace_tables
+    from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
+    from quant_strategies.evaluation._pipeline import _strip_trace_tables
 
     tables = PortfolioTraceTables(
         portfolio_path=pd.DataFrame({"scenario_id": ["base"], "portfolio_value": [100.0]}),

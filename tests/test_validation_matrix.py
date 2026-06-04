@@ -111,7 +111,7 @@ def test_matrix_does_not_expand_parameter_scenarios():
 
 
 def test_validation_source_has_no_parameter_regeneration_branch():
-    source = Path("src/quant_strategies/validation/__init__.py").read_text()
+    source = Path("src/quant_strategies/validation/_pipeline.py").read_text()
 
     assert "parameter_decision_" not in source
     assert 'kind == "parameter"' not in source

@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.core.data_audit import audit_decision_rows
 from untested.crypto_perp_multivote_trend_following import (
     _atr_bps,
     _bollinger_width_percentile,

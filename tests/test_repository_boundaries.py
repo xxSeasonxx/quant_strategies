@@ -217,6 +217,11 @@ def test_shared_internals_are_not_runner_owned():
     assert offenders == []
 
 
+def test_data_audit_is_core_owned_not_validation_owned():
+    assert importlib.util.find_spec("quant_strategies.core.data_audit") is not None
+    assert importlib.util.find_spec("quant_strategies.validation.data_audit") is None
+
+
 def test_validation_and_evaluation_do_not_import_runner_internals():
     paths = [
         *list((ROOT / "src" / "quant_strategies" / "validation").rglob("*.py")),
@@ -224,6 +229,32 @@ def test_validation_and_evaluation_do_not_import_runner_internals():
     ]
 
     assert _forbidden_runner_imports(paths, forbidden_modules=None) == []
+
+
+def test_p3_simplification_uses_explicit_module_boundaries():
+    evaluation = ROOT / "src" / "quant_strategies" / "evaluation"
+    validation = ROOT / "src" / "quant_strategies" / "validation"
+
+    assert not (evaluation / "backend.py").exists()
+    assert not (evaluation / "runner.py").exists()
+    assert (evaluation / "vectorbtpro_backend.py").exists()
+    assert (evaluation / "results.py").exists()
+    assert (evaluation / "_pipeline.py").exists()
+    assert (validation / "results.py").exists()
+    assert (validation / "_pipeline.py").exists()
+
+
+def test_evaluation_pipeline_uses_protocols_not_reflective_dispatch():
+    pipeline = ROOT / "src" / "quant_strategies" / "evaluation" / "_pipeline.py"
+    if not pipeline.exists():
+        pipeline = ROOT / "src" / "quant_strategies" / "evaluation" / "runner.py"
+    text = pipeline.read_text()
+
+    assert "signature(" not in text
+    assert "Parameter" not in text
+    assert "hasattr(context.selected_backend" not in text
+    assert "PreparedEvaluationBackend" in text
+    assert "DataKindNamedEvaluationBackend" in text
 
 
 def _forbidden_runner_imports(

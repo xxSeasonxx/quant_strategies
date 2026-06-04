@@ -3,11 +3,21 @@
 Date: 2026-06-03
 Reviewer lens: senior quantitative researcher (engine/validation/evaluation math + audit boundaries)
 Method: independent re-derivation from source + four fresh-context lens subagents + targeted test execution.
-Disposition update: 2026-06-04 — the two P1 annualized/risk metric guards and
-all three P2 operability findings identified here are implemented in the active
-codebase. `make check` includes the real VectorBT Pro smoke, quick-run
-runner-stage failures report `completed=False` / `run_completed=false`, and
-`quant-data` is bounded as `>=0.1.0,<0.2.0`.
+Disposition update: 2026-06-04 — the two P1 annualized/risk metric guards, all
+three P2 operability findings, and the P3 simplification items identified here
+are implemented in the active codebase. `make check` includes the real VectorBT
+Pro smoke, quick-run runner-stage failures report `completed=False` /
+`run_completed=false`, and `quant-data` is bounded as `>=0.1.0,<0.2.0`. The P3
+work removed duplicate fill/cost model contracts, moved evaluation
+portfolio/run result contracts and the validation run result into neutral
+`results.py` modules, moved orchestration into `_pipeline.py`, renamed the
+concrete evaluation backend to `vectorbtpro_backend.py`, replaced reflective
+backend dispatch with declared Protocol checks, moved shared data-audit
+ownership into `core.data_audit`, and trimmed `extended_ontology` to the
+near-term multi-leg opt-in subset.
+Path references in the review evidence below preserve review-time locations;
+the disposition table records the current active-code locations where they
+changed.
 
 ## Independence Note
 
@@ -219,30 +229,25 @@ The public architecture is stronger than the file tree suggests. Dependency dire
 three functions + three result types + one CLI, and `StrategyExecutionSpec` + `execute_strategy_run`
 is a genuinely neutral spine both jobs adapt down into. **Preserve the spine.**
 
-Residual structural findings (maintainability, not correctness):
+Structural findings disposition (maintainability, not correctness):
 
-- **P3 — Triple "engine" naming + duplicate fill/cost models.** `engine/` (kernel) →
-  `core/engine_runner.py` (adapter) → `runner/` (wrapper), plus two near-identical model pairs:
-  `core/config.FillModelConfig.entry_lag_bars` is `ge=1` (config.py:49) while
-  `engine.models.FillModel.entry_lag_bars` is `ge=0`. The divergence is a **comprehension smell, not
-  a causality hole** — the public config clamps entry lag to ≥1, so same-bar entry is unreachable
-  from the public surface. Refactor naming when next touched; do not rewrite.
-- **P3 — Three backend stacks under near-identical names.** `evaluation/backend.py` (concrete) vs
-  `evaluation/backends.py` (Protocols) vs `validation/backends.py` (different contract + result
-  type). Pure naming/discoverability cost.
-- **P3 — Large facades entangle contract + orchestration.** `evaluation/backend.py` (~1226),
-  `evaluation/runner.py` (~1156), `validation/__init__.py` (~1007). Functions *are* decomposed (no
-  single god-function), but the public `__init__`/runner files carry result types + orchestration +
-  artifact writes + failure routing. Split into `__init__` (public + types) and an internal
-  `_pipeline.py` when you next touch them. Accepted debt, not a blocker.
-- **P3 — Reflective backend dispatch re-implements declared Protocols.** `evaluation/runner.py`
-  uses `hasattr`/`signature()` to decide whether to pass `data_kind`, while
-  `evaluation/backends.py` already declares `PreparedEvaluationBackend` /
-  `DataKindNamedEvaluationBackend`. Simplify to an `isinstance(backend, Protocol)` check (~16 lines
-  removed); also avoids a silently-dropped typo'd kwarg.
-- **P3 — Shared audit homed in a peer bounded context.** `evaluation/runner.py:38` imports
-  `audit_decision_rows` from `validation.data_audit`. The invariant is shared; its home should be
-  neutral (`core/` or `causality.py`). Mechanical move; low urgency.
+- **P3 — Duplicate fill/cost models:** addressed. `engine.FillModel` and
+  `engine.CostModel` now reuse the neutral `core.config` contracts; same-bar
+  entry remains rejected at the shared boundary.
+- **P3 — Evaluation backend naming:** addressed. The concrete VectorBT Pro /
+  project-ledger implementation lives in `evaluation/vectorbtpro_backend.py`,
+  result contracts live in `evaluation/results.py`, and backend Protocols stay
+  in `evaluation/backends.py`.
+- **P3 — Public facades carrying orchestration:** addressed for validation and
+  evaluation. Package `__init__.py` files are public facades, result types live
+  in `results.py`, and orchestration lives in `_pipeline.py`.
+- **P3 — Reflective backend dispatch:** addressed. Evaluation dispatch uses
+  `PreparedEvaluationBackend` / `DataKindNamedEvaluationBackend` Protocol checks
+  and always passes `data_kind` through the declared backend contract.
+- **P3 — Shared audit homed in a peer bounded context:** addressed.
+  Validation, evaluation, and strategy tests import `audit_decision_rows` from
+  neutral `core.data_audit`; the validation-owned module was removed rather
+  than kept as a compatibility layer.
 
 ## Engineering, Testability, And Operability Review
 
@@ -279,7 +284,7 @@ Low, do-not-overrate:
 
 | Concern | Verdict | Basis |
 | --- | --- | --- |
-| (1) Over-engineering? | **No** at the workflow level. Only speculative spots: `extended_ontology` (test-only; per your memory, **trim** to the near-term multi-asset subset, don't retire) and the reflective backend dispatch (simplify). | Three jobs, neutral spine, two justified evidence models. |
+| (1) Over-engineering? | **No** at the workflow level. The speculative `extended_ontology` breadth was trimmed to the near-term multi-leg subset, and reflective backend dispatch was simplified against the declared Protocols. | Three jobs, neutral spine, two justified evidence models. |
 | (2) Workflow simple? | **Yes — your instinct is right.** One pure `generate_decisions(rows, params)` file (+ optional `validate_params`), three commands, three result objects, one shared execution path. | `cli.py`, `core/execution.py`, `core/config.py`. |
 | (3) Layered on layered / poor design? | **Partial — naming/file-size, not logic.** Vertical layering is necessary and clean; the smells are triple "engine" naming + duplicate `FillModel`, three backend stacks under similar names, large facades, and reflective dispatch. None are "layers for their own sake." | onboarding + architecture lenses, confirmed by source. |
 | (4) Legacy / stale-artifact bias? | **No.** Zero shim/deprecated/alias markers in source; `validation/config.py` *rejects* a removed `backend` key with a migration error instead of shimming; fresh per-run dirs; `results/` git-ignored; no cross-run input reads. The design is not bent around old outputs. | grep + `causality`/`artifacts` read. |
@@ -309,9 +314,9 @@ Previously underbuilt: default bars-path verification in `make check`. That P2 g
 The two P1 annualized/risk metrics guards also have explicit cadence and minimum return-sample floor
 handling.
 
-Overbuilt / at risk: reflective backend dispatch (the Protocols already exist); `extended_ontology`
-breadth beyond near-term roadmap (trim). Do **not** add a ranking layer, scoring service, strategy
-registry, search-memory adapter, or stale-artifact compatibility shim — those violate the boundary.
+Overbuilt / at risk: deeper backend math extraction remains deferred until the backend is touched
+for a real change. Do **not** add a ranking layer, scoring service, strategy registry,
+search-memory adapter, or stale-artifact compatibility shim — those violate the boundary.
 
 ## Preserve / Refactor / Simplify / Add / Retire Action Map
 
@@ -321,12 +326,12 @@ registry, search-memory adapter, or stale-artifact compatibility shim — those 
 | P2 | Add | `make check` skipped real VBT bars-path math (FakeBackend + env-gated) | `Makefile`, `tests/test_evaluation_backend.py` | Fixed: `make check` invokes `check-vectorbtpro-smoke`, and enabled smoke imports fail loudly. |
 | P2 | Refactor | `summary.json` `run_completed:true` next to `status:"failed"` (artifact-level trap) | `runner/artifacts.py`, `runner/__init__.py` | Fixed: runner-stage failures return `completed=False` and summary `run_completed=false`. |
 | P2 | Add | `quant-data` unpinned — sole data source, silent semantic-drift risk | `pyproject.toml` | Fixed: dependency is bounded as `quant-data>=0.1.0,<0.2.0`. |
-| P3 | Refactor | Triple "engine" naming + duplicate FillModel (`ge=1` vs `ge=0`) | `engine/`, `core/engine_runner.py`, `core/config.py:49` | Rename/dedup when next touched. Not a causality hole. |
-| P3 | Simplify | Reflective backend dispatch re-implements declared Protocols | `evaluation/runner.py`, `evaluation/backends.py` | Dispatch on `isinstance(..., PreparedEvaluationBackend)`; pass `data_kind` unconditionally. |
-| P3 | Refactor | Large facades entangle contract + orchestration | `evaluation/runner.py`, `validation/__init__.py`, `evaluation/backend.py` | Split public types vs `_pipeline.py` when touched. |
-| P3 | Refactor | Shared `audit_decision_rows` homed in `validation/` | `evaluation/runner.py:38` | Move to `core/`/`causality.py`. |
-| P3 | Retire(trim) | `extended_ontology` is test-only/speculative | `decisions/extended_ontology.py` | Trim to near-term multi-asset subset (per memory); keep the opt-in seam. |
-| P3 | Preserve | `net_return` dual semantics under one key; `_is_true_flag` coercion; `not_evaluated` soft-stop; causality `available_at` fallback | as cited above | Document; tighten opportunistically. Contained today. |
+| P3 | Refactor | Triple "engine" naming + duplicate FillModel (`ge=1` vs `ge=0`) | `engine/`, `core/engine_runner.py`, `core/config.py:49` | Fixed: engine fill/cost models reuse the neutral `core.config` contracts. |
+| P3 | Simplify | Reflective backend dispatch re-implements declared Protocols | `evaluation/_pipeline.py`, `evaluation/backends.py` | Fixed: dispatch uses Protocol checks and always passes `data_kind`. |
+| P3 | Refactor | Large facades entangle contract + orchestration | `evaluation/_pipeline.py`, `validation/_pipeline.py`, `evaluation/vectorbtpro_backend.py` | Fixed for public facades/result contracts; deeper backend math extraction remains deferred until touched. |
+| P3 | Refactor | Shared `audit_decision_rows` homed in `validation/` | `core/data_audit.py`, `evaluation/_pipeline.py`, `validation/_pipeline.py` | Fixed: shared audit ownership moved to neutral `core.data_audit` with no validation compatibility shim. |
+| P3 | Retire(trim) | `extended_ontology` is test-only/speculative | `decisions/extended_ontology.py` | Fixed: opt-in surface now keeps only multi-leg instruments over existing base instruments and target-weight sizing. |
+| P3 | Preserve | `net_return` dual semantics under one key; `_is_true_flag` coercion; `not_evaluated` soft-stop; causality `available_at` fallback | as cited above | Preserved/documented; contained today and not worth wrapper fixes. |
 
 ## Prioritized Recommendations
 

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 import shutil
-from inspect import Parameter, signature
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,30 +26,25 @@ from quant_strategies.evaluation.artifacts import (
     write_text_artifact,
 )
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
-from quant_strategies.evaluation.backend import PortfolioEvaluationResult, VectorBTProEvaluationBackend
-from quant_strategies.evaluation.backends import EvaluationBackend
+from quant_strategies.evaluation.backends import (
+    DataKindNamedEvaluationBackend,
+    EvaluationBackend,
+    PreparedEvaluationBackend,
+)
 from quant_strategies.evaluation.config import load_evaluation_config, resolve_evaluation_config_path
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.errors import EvaluationConfigError
 from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
 from quant_strategies.evaluation.metrics import evaluation_metric_semantics
+from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEvaluationResult
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
-from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
+from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
     execute_strategy_run,
 )
-
-
-@dataclass(frozen=True)
-class EvaluationRunResult:
-    result_dir: Path | None
-    message: str
-    run_completed: bool = False
-    failure_stage: str | None = None
-    assessment_status: str = "evaluation_failed"
-    evidence_quality_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -484,13 +478,12 @@ def _prepare_portfolio_inputs(
             scenario_count=scenario_count,
         ):
             prepared = (
-                _call_backend_method(
-                    context.selected_backend.prepare_inputs,
+                context.selected_backend.prepare_inputs(
                     decisions=execution.decisions,
                     rows=projection_rows,
                     data_kind=context.config.data.kind,
                 )
-                if hasattr(context.selected_backend, "prepare_inputs")
+                if isinstance(context.selected_backend, PreparedEvaluationBackend)
                 else None
             )
     except EvaluationDependencyError as exc:
@@ -544,16 +537,13 @@ def _run_portfolio_scenario(
                 scenario=scenario,
                 metrics=context.config.metrics,
             )
-            if prepared is not None and hasattr(context.selected_backend, "run_prepared")
+            if prepared is not None and isinstance(context.selected_backend, PreparedEvaluationBackend)
             else context.selected_backend.run(
-                **_backend_kwargs(
-                    context.selected_backend.run,
-                    decisions=execution.decisions,
-                    rows=projection_rows,
-                    scenario=scenario,
-                    metrics=context.config.metrics,
-                    data_kind=context.config.data.kind,
-                )
+                decisions=execution.decisions,
+                rows=projection_rows,
+                scenario=scenario,
+                metrics=context.config.metrics,
+                data_kind=context.config.data.kind,
             )
         )
         if scenario_result.status == "completed":
@@ -901,29 +891,9 @@ def _median(values: Sequence[float]) -> float:
 
 
 def _backend_name(backend: Any, *, data_kind: str | None = None) -> str:
-    if data_kind is not None:
-        name_for_data_kind = getattr(backend, "name_for_data_kind", None)
-        if callable(name_for_data_kind):
-            return str(name_for_data_kind(data_kind))
+    if data_kind is not None and isinstance(backend, DataKindNamedEvaluationBackend):
+        return str(backend.name_for_data_kind(data_kind))
     return getattr(backend, "name", "unknown")
-
-
-def _call_backend_method(method: Any, **kwargs: Any) -> Any:
-    return method(**_backend_kwargs(method, **kwargs))
-
-
-def _backend_kwargs(method: Any, **kwargs: Any) -> dict[str, Any]:
-    if _accepts_keyword(method, "data_kind"):
-        return kwargs
-    return {key: value for key, value in kwargs.items() if key != "data_kind"}
-
-
-def _accepts_keyword(method: Any, name: str) -> bool:
-    try:
-        parameters = signature(method).parameters
-    except (TypeError, ValueError):
-        return False
-    return name in parameters or any(parameter.kind is Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
 def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:

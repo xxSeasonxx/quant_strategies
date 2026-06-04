@@ -9,12 +9,12 @@ from typing import Any
 import pandas as pd
 import pytest
 
-import quant_strategies.evaluation.backend as backend_module
-import quant_strategies.evaluation.runner as evaluation_runner
+import quant_strategies.evaluation.vectorbtpro_backend as backend_module
+import quant_strategies.evaluation._pipeline as evaluation_runner
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
-from quant_strategies.evaluation.backend import PortfolioEvaluationResult, PortfolioTraceTables
+from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
-from quant_strategies.evaluation.runner import run_evaluation
+from quant_strategies.evaluation._pipeline import run_evaluation
 from quant_strategies.core.data_loader import LoadedData
 
 
@@ -183,7 +183,7 @@ results_dir = "evaluation_results/demo"
 class FakeBackend:
     name = "fake_evaluation"
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
         frame = pd.DataFrame(
             {
                 "scenario_id": [scenario.scenario_id],
@@ -222,7 +222,7 @@ class CadenceFakeBackend(FakeBackend):
     def __init__(self, timestamps: Sequence[datetime]) -> None:
         self._timestamps = tuple(timestamps)
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
         frame = pd.DataFrame(
             {
                 "scenario_id": [scenario.scenario_id] * len(self._timestamps),
@@ -258,7 +258,7 @@ class CadenceFakeBackend(FakeBackend):
 
 
 class MixedCadenceFakeBackend(CadenceFakeBackend):
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
         spacing = timedelta(minutes=1) if scenario.scenario_id.endswith("/zero_costs/base_fill") else timedelta(days=1)
         timestamps = [AS_OF + spacing * index for index in range(4)]
         return CadenceFakeBackend(timestamps).run(
@@ -295,7 +295,7 @@ class PreparedFakeBackend(FakeBackend):
         self.prepare_calls: list[tuple[Sequence[Any], Sequence[dict[str, Any]]]] = []
         self.run_prepared_scenario_ids: list[str] = []
 
-    def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
         self.prepare_calls.append((decisions, rows))
         return {"decisions": decisions, "rows": rows}
 
@@ -529,7 +529,7 @@ def test_run_evaluation_keeps_optional_custom_scenario_failures_non_blocking(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class OptionalFailureBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             if scenario.scenario_id.endswith("/optional_stress"):
                 return PortfolioEvaluationResult(
                     scenario_id=scenario.scenario_id,
@@ -579,7 +579,7 @@ def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expect
     monkeypatch: pytest.MonkeyPatch,
 ):
     class SwappedScenarioBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             swapped_id = (
                 "eval_2026_h1/scenario_b"
@@ -965,7 +965,7 @@ def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: py
 
 def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     class UnsupportedBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1006,7 +1006,7 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
 
 def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     class UnavailableBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1040,7 +1040,7 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
             self.prepare_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise EvaluationDependencyError("vectorbtpro import failed")
 
@@ -1086,7 +1086,7 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
             self.prepare_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise exception
 
@@ -1166,7 +1166,7 @@ def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class DuplicateScenarioBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"scenario_id": "duplicate_scenario"})
 
@@ -1196,7 +1196,7 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class MissingTraceTablesBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1230,7 +1230,7 @@ def test_run_evaluation_fails_when_completed_backend_metrics_are_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class IncompleteMetricsBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"metrics": {"total_return": 0.01, "trade_count": 1}})
 
@@ -1259,7 +1259,7 @@ def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class MissingFundingMetricsBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             metrics_without_funding = {
                 key: value
@@ -1295,11 +1295,11 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after row contract failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.run_calls += 1
             raise AssertionError("run should not be called after row contract failure")
 
@@ -1342,11 +1342,11 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
 
@@ -1417,11 +1417,11 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
             self.prepare_calls = 0
             self.run_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
 
@@ -1487,11 +1487,11 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after causality preflight failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.run_calls += 1
             raise AssertionError("run should not be called after causality preflight failure")
 
@@ -1554,10 +1554,10 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class BackendShouldNotBeCalled(FakeBackend):
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
             raise AssertionError("prepare_inputs should not be called after empty row contract")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             raise AssertionError("run should not be called after empty row contract")
 
     candidate = write_candidate(tmp_path)
@@ -1588,7 +1588,7 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
         def __init__(self) -> None:
             self.calls = 0
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             self.calls += 1
             if self.calls == 6:
                 return PortfolioEvaluationResult(
@@ -1689,7 +1689,7 @@ def test_run_evaluation_reports_failure_artifact_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class FailingBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any):
+        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,

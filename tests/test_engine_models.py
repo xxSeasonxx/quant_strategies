@@ -6,8 +6,21 @@ import pytest
 from pydantic import ValidationError
 
 from quant_strategies.engine import Bar, CostModel, FillModel, Side, StrategySpec, Trade
+from quant_strategies.core.config import CostModelConfig, FillModelConfig
 
 from engine_helpers import decision_for
+
+
+def test_engine_fill_and_cost_models_are_shared_core_contracts():
+    assert FillModel is FillModelConfig
+    assert CostModel is CostModelConfig
+    assert FillModel.__module__ == "quant_strategies.core.config"
+    assert CostModel.__module__ == "quant_strategies.core.config"
+
+
+def test_fill_model_rejects_same_bar_entry_everywhere():
+    with pytest.raises(ValidationError, match="greater than or equal to 1"):
+        FillModel(entry_lag_bars=0)
 
 
 def test_bars_require_timezone_aware_timestamps():
@@ -43,6 +56,10 @@ def test_strategy_spec_accepts_strategy_decisions():
 def test_costs_must_be_finite():
     with pytest.raises(ValidationError, match="cost values must be finite"):
         CostModel(fee_bps_per_side=float("inf"))
+
+
+def test_cost_model_keeps_round_trip_bps_on_shared_contract():
+    assert CostModel(fee_bps_per_side=2.0, slippage_bps_per_side=3.0).round_trip_bps == 10.0
 
 
 def test_trade_accepts_decision_metadata():

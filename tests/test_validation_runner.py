@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-import quant_strategies.validation as validation
+import quant_strategies.validation._pipeline as validation
 from quant_strategies.causality import strict_replay_boundaries
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
@@ -910,7 +910,7 @@ def test_run_validation_records_backend_selection_failure_details(
     def fail_backend_selection(name: str):
         raise RuntimeError("backend registry down")
 
-    monkeypatch.setattr("quant_strategies.validation.get_backend", fail_backend_selection)
+    monkeypatch.setattr("quant_strategies.validation._pipeline.get_backend", fail_backend_selection)
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 

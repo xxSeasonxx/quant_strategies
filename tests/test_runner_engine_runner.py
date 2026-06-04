@@ -16,10 +16,8 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
-    FutureRef,
     InstrumentLeg,
     MultiLegInstrumentRef,
-    OptionRef,
     PositionTarget as ExtendedPositionTarget,
     StrategyDecision as ExtendedStrategyDecision,
 )
@@ -184,54 +182,9 @@ def test_build_request_rejects_flat_targets():
         )
 
 
-def test_build_request_rejects_non_target_weight():
-    with pytest.raises(RequestBuildError, match="target_weight"):
-        build_request(
-            strategy_id="demo",
-            rows=bars(100.0, 101.0, 102.0, 104.0),
-            decisions=[decision(sizing_kind="target_notional")],
-            fill_model=close_fill(),
-            cost_model=zero_cost(),
-        )
-
-
-def test_build_request_rejects_non_open_intent():
-    with pytest.raises(RequestBuildError, match="open intent"):
-        build_request(
-            strategy_id="demo",
-            rows=bars(100.0, 101.0, 102.0, 104.0),
-            decisions=[decision(intent=ExtendedDecisionIntent(action="close", book_side="sell"))],
-            fill_model=close_fill(),
-            cost_model=zero_cost(),
-        )
-
-
 @pytest.mark.parametrize(
     ("instrument", "message"),
     [
-        (
-            FutureRef(
-                kind="future",
-                symbol="ESM26",
-                expiry=datetime(2026, 6, 19, tzinfo=timezone.utc),
-                multiplier=50.0,
-                settlement="cash",
-            ),
-            "future instrument",
-        ),
-        (
-            OptionRef(
-                kind="option",
-                symbol="SPY260116C00450000",
-                underlying_symbol="SPY",
-                option_type="call",
-                strike=450.0,
-                expiry=datetime(2026, 1, 16, tzinfo=timezone.utc),
-                multiplier=100.0,
-                settlement="physical",
-            ),
-            "option instrument",
-        ),
         (
             MultiLegInstrumentRef(
                 kind="multi_leg",

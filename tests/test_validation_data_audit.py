@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
-from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.core.data_audit import audit_decision_rows
 
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)

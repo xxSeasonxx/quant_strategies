@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import quant_strategies.evaluation.backend as backend_module
+import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
 from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
-from quant_strategies.evaluation.backend import VectorBTProEvaluationBackend
+from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 from quant_strategies.evaluation.backends import (
     DataKindNamedEvaluationBackend,
     EvaluationBackend,

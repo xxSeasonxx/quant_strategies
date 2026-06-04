@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -53,6 +54,16 @@ class FillModelConfig(SharedConfigModel):
 class CostModelConfig(SharedConfigModel):
     fee_bps_per_side: float = Field(default=0.0, ge=0)
     slippage_bps_per_side: float = Field(default=0.0, ge=0)
+
+    @model_validator(mode="after")
+    def validate_costs(self) -> CostModelConfig:
+        if not math.isfinite(self.fee_bps_per_side) or not math.isfinite(self.slippage_bps_per_side):
+            raise ValueError("cost values must be finite")
+        return self
+
+    @property
+    def round_trip_bps(self) -> float:
+        return 2.0 * (self.fee_bps_per_side + self.slippage_bps_per_side)
 
 
 @dataclass(frozen=True)

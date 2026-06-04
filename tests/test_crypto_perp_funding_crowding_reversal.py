@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.validation.data_audit import audit_decision_rows
+from quant_strategies.core.data_audit import audit_decision_rows
 from untested.crypto_perp_funding_crowding_reversal import generate_decisions, validate_params
 
 

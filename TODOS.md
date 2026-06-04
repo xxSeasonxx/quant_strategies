@@ -30,6 +30,14 @@ exercises the real VectorBT Pro bars-path smoke, quick-run runner-stage
 failures report `completed=False` / `run_completed=false`, and `quant-data` is
 bounded as `>=0.1.0,<0.2.0`.
 
+The first P3 simplification slice is fixed in the active codebase: engine
+fill/cost models reuse the neutral `core.config` contracts, evaluation
+portfolio/run result contracts and the validation run result live in
+`results.py`, orchestration lives in `_pipeline.py`, the concrete evaluation
+backend is named
+`vectorbtpro_backend.py`, and evaluation backend dispatch uses declared
+Protocols instead of reflection.
+
 ## Current Open Work
 
 ### Evaluation follow-ups
@@ -71,6 +79,12 @@ as a fresh P1 without a regression or documented trigger. In short:
 - `quant_data` owns data acquisition and materialization;
 - `quant-data` is bounded as `>=0.1.0,<0.2.0`;
 - generated artifacts are evidence, not truth.
+
+## Contained P3 Residuals
+
+- Preserve the currently contained residuals unless they become active work:
+  `net_return` dual semantics, `_is_true_flag` coercion, `not_evaluated`
+  soft-stop, and causality's missing-`available_at` fallback.
 
 ## Deferred Residuals
 

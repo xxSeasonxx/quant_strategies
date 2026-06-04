@@ -9,7 +9,7 @@ from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef
 from quant_strategies.engine.bar_index import build_bar_index
 from quant_strategies.engine.evaluation import EvaluationError, _funding_return
 from quant_strategies.engine.models import Bar, Side
-from quant_strategies.evaluation.backend import VectorBTProEvaluationBackend
+from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 from quant_strategies.funding import funding_rates_match, funding_return_over_window

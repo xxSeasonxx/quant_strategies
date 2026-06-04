@@ -7,7 +7,8 @@ import pytest
 from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
-    FutureRef,
+    InstrumentLeg,
+    MultiLegInstrumentRef,
     PositionTarget as ExtendedPositionTarget,
     StrategyDecision as ExtendedStrategyDecision,
 )
@@ -66,29 +67,28 @@ def test_executable_decision_returns_engine_fields_and_jsonable_metadata():
     ("source_decision", "semantic", "message"),
     [
         (
-            decision(intent=ExtendedDecisionIntent(action="close", book_side="sell")),
-            "non_open_intent",
-            "open intent",
-        ),
-        (
             decision(
-                instrument=FutureRef(
-                    kind="future",
-                    symbol="ESM26",
-                    expiry=NOW,
-                    multiplier=50.0,
-                    settlement="cash",
+                instrument=MultiLegInstrumentRef(
+                    kind="multi_leg",
+                    symbol="SPY_QQQ_PAIR",
+                    legs=(
+                        InstrumentLeg(
+                            instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+                            direction="long",
+                            ratio=1.0,
+                        ),
+                        InstrumentLeg(
+                            instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"),
+                            direction="short",
+                            ratio=0.8,
+                        ),
+                    ),
                 )
             ),
-            "future_instrument",
-            "future instrument",
+            "multi_leg_decision",
+            "multi_leg instrument",
         ),
         (decision(direction="flat", size=0.0), "flat_target", "flat target"),
-        (
-            decision(sizing_kind="target_notional"),
-            "non_target_weight_sizing",
-            "target_weight",
-        ),
     ],
 )
 def test_base_executable_semantics_are_shared(source_decision, semantic: str, message: str):

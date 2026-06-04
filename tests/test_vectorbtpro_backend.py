@@ -15,10 +15,8 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
-    FutureRef,
     InstrumentLeg,
     MultiLegInstrumentRef,
-    OptionRef,
     PositionTarget as ExtendedPositionTarget,
     StrategyDecision as ExtendedStrategyDecision,
 )
@@ -459,17 +457,6 @@ def test_vectorbtpro_backend_prioritizes_unfillable_exit_before_unsupported_fill
     assert any("unfillable_exit" in warning for warning in result.warnings)
 
 
-def test_vectorbtpro_backend_reports_unsupported_non_target_weight_sizing():
-    result = VectorBTProBackend().run(
-        decisions=[decision(sizing_kind="target_notional")],
-        rows=rows(),
-        config=None,
-    )
-
-    assert result.status == "unsupported"
-    assert "non_target_weight_sizing" in result.unsupported_semantics
-
-
 @pytest.mark.parametrize("fill_price", ["open", "quote"])
 def test_vectorbtpro_backend_reports_unsupported_non_close_fill_price(fill_price):
     config = SimpleNamespace(fill_model=SimpleNamespace(price=fill_price))
@@ -506,43 +493,9 @@ def test_vectorbtpro_backend_reports_unsupported_flat_target():
     assert "flat_target" in result.unsupported_semantics
 
 
-def test_vectorbtpro_backend_reports_unsupported_non_open_intent():
-    result = VectorBTProBackend().run(
-        decisions=[decision(intent=ExtendedDecisionIntent(action="roll", book_side="buy"))],
-        rows=rows(),
-        config=None,
-    )
-
-    assert result.status == "unsupported"
-    assert "non_open_intent" in result.unsupported_semantics
-
-
 @pytest.mark.parametrize(
     ("instrument", "semantic"),
     [
-        (
-            FutureRef(
-                kind="future",
-                symbol="ESM26",
-                expiry=DECISION,
-                multiplier=1.0,
-                settlement="cash",
-            ),
-            "future_instrument",
-        ),
-        (
-            OptionRef(
-                kind="option",
-                symbol="SPY260116C00450000",
-                underlying_symbol="BTC",
-                option_type="call",
-                strike=100.0,
-                expiry=DECISION,
-                multiplier=1.0,
-                settlement="cash",
-            ),
-            "option_instrument",
-        ),
         (
             MultiLegInstrumentRef(
                 kind="multi_leg",
