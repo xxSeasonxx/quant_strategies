@@ -147,10 +147,8 @@ def write_config(
     quick_checks: bool = True,
     artifact_profile: str | None = "full",
     diagnostic_sample_trades: int | None = None,
-    row_contract: str | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
-    row_contract_line = f'row_contract = "{row_contract}"\n' if row_contract else ""
     artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
     diagnostic_sample_trades_line = (
         f"diagnostic_sample_trades = {diagnostic_sample_trades}\n"
@@ -163,13 +161,12 @@ def write_config(
         f'''
 strategy_path = "strategies/demo.py"
 strategy_id = "demo"
-{row_contract_line}
+
 [data]
 kind = "{kind}"
 {dataset_line}symbols = ["{symbol}"]
 start = "2024-01-01"
 end = "2024-01-05"
-strict = true
 
 [params]
 
@@ -352,8 +349,8 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
         "fraction": 1.0,
     }
     assert summary["row_contract"]["status"] == "passed"
-    # Default quick-run uses the lenient "search" contract: available_at is
-    # present in the data (availability "complete") but is not a *required* field.
+    # available_at is an unconditional required field; the data carries it
+    # (availability "complete"), so the contract passes.
     assert summary["row_contract"]["required_fields"] == [
         "symbol",
         "timestamp",
@@ -361,6 +358,7 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
         "high",
         "low",
         "close",
+        "available_at",
     ]
     assert summary["row_contract"]["quant_data_feedback"] == []
     assert summary["causality_verified"] is True
@@ -967,10 +965,13 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
     assert normalized_rows_calls == 1
 
 
-def test_run_config_marks_partial_available_at_coverage(
+def test_run_config_fails_row_contract_on_partial_available_at(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # available_at is unconditionally required: a row missing it fails the row
+    # contract, so the quick run fails at the engine row-contract gate. There is no
+    # search-mode "partial coverage tolerated" path.
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
     partial_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
@@ -988,20 +989,18 @@ def test_run_config_marks_partial_available_at_coverage(
     assert coverage["present"] == 3
     assert coverage["total"] == 4
     assert coverage["fraction"] == pytest.approx(3 / 4)
-    assert summary["causality_verified"] is False
-    assert summary["evidence_quality_warnings"] == [
-        "available_at_partial",
-        "runner_causality_not_verified",
+    assert summary["row_contract"]["status"] == "failed"
+    assert summary["row_contract"]["missing_required_fields"] == {"available_at": 1}
+    assert summary["row_contract"]["quant_data_feedback"] == [
+        "row_missing_available_at:available_at:1"
     ]
-    assert data_manifest["data_availability_status"] == "partial"
-    assert data_manifest["availability_coverage"]["field"] == "available_at"
-    assert data_manifest["availability_coverage"]["present"] == 3
-    assert data_manifest["availability_coverage"]["total"] == 4
-    assert data_manifest["availability_coverage"]["fraction"] == pytest.approx(3 / 4)
-    assert data_manifest["causality_verified"] is False
-    assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert result.outcome.assessment_status == "quick_check_unverified"
-    assert summary["assessment_status"] == "quick_check_unverified"
+    assert data_manifest["row_contract"] == summary["row_contract"]
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "request_build"
+    assert result.outcome.assessment_status == "runner_failed"
+    assert summary["stage"] == "request_build"
+    assert "row_contract_failed: row_missing_available_at:available_at:1" in summary["message"]
+    assert not (result.result_dir / "engine_request.json").exists()
 
 
 def test_run_config_rejects_invalid_available_at_for_causality_claim(
@@ -1108,14 +1107,45 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     )
 
 
-def test_row_contract_strictness_is_independent_of_artifact_profile(
+def test_row_contract_status_is_independent_of_artifact_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # F6: artifact_profile is pure verbosity and must NOT change pass/fail. The
-    # SAME data (missing available_at) is tolerated under the default "search"
-    # contract regardless of profile, and fails only when row_contract="validation".
+    # F6: artifact_profile is pure verbosity and must NOT change the row-contract
+    # verdict. The same data yields an identical row contract under every profile.
     write_strategy(tmp_path)
+
+    def defective_rows():
+        contract_rows = rows(100.0, 101.0, 102.0)
+        contract_rows[1].pop("high")  # a row-contract defect, independent of profile
+        return contract_rows
+
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=defective_rows()),
+    )
+
+    def row_contract(config_path: Path) -> dict:
+        result = run_config(config_path, repo_root=tmp_path)
+        return json.loads((result.result_dir / "summary.json").read_text())["row_contract"]
+
+    full = row_contract(write_config(tmp_path, artifact_profile="full"))
+    summary = row_contract(
+        write_config(tmp_path, relative_path="run_summary.toml", artifact_profile="summary")
+    )
+    assert full["status"] == "failed"
+    assert full == summary
+
+
+def test_quick_run_fails_row_contract_when_available_at_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # available_at is unconditionally required now: a quick run surfaces a missing
+    # available_at as a failed row contract — there is no search-mode tolerance.
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -1124,25 +1154,13 @@ def test_row_contract_strictness_is_independent_of_artifact_profile(
         ),
     )
 
-    def row_contract_status(config_path: Path) -> dict:
-        result = run_config(config_path, repo_root=tmp_path)
-        return json.loads((result.result_dir / "summary.json").read_text())["row_contract"]
+    result = run_config(config_path, repo_root=tmp_path)
 
-    # Verbose ("full") and terse ("summary") profiles agree under the search row contract.
-    full_status = row_contract_status(write_config(tmp_path, artifact_profile="full"))
-    summary_status = row_contract_status(
-        write_config(tmp_path, relative_path="run_summary.toml", artifact_profile="summary")
-    )
-    assert full_status["status"] == "passed"
-    assert summary_status["status"] == "passed"
-    assert full_status["mode"] == summary_status["mode"] == "search"
-
-    # Opting into the validation contract makes the identical data fail.
-    validation_status = row_contract_status(
-        write_config(tmp_path, relative_path="run_validation.toml", row_contract="validation")
-    )
-    assert validation_status["status"] == "failed"
-    assert validation_status["mode"] == "validation"
+    assert result.result_dir is not None
+    row_contract = json.loads((result.result_dir / "summary.json").read_text())["row_contract"]
+    assert row_contract["status"] == "failed"
+    assert row_contract["missing_required_fields"] == {"available_at": 3}
+    assert "row_missing_available_at:available_at:3" in row_contract["quant_data_feedback"]
 
 
 def test_runner_catches_peek_to_suppress_with_strict_replay(
@@ -1431,7 +1449,6 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
         "symbols": ["SPY"],
         "start": "2024-01-01",
         "end": "2024-01-05",
-        "strict": True,
     }
     assert data_manifest["artifact_profile"] == "full"
     assert data_manifest["replayable_from_artifacts"] is True
@@ -1488,7 +1505,7 @@ def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
         for field in ("open", "high", "low", "close"):
             loaded_row[field] = str(loaded_row[field])
     config = config_module.load_config(config_path, repo_root=tmp_path)
-    expected_normalized = NormalizedRows.from_rows(config, loaded_rows, mode="search")
+    expected_normalized = NormalizedRows.from_rows(config, loaded_rows)
     monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
 
     result = run_config(config_path, repo_root=tmp_path)

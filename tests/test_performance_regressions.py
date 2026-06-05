@@ -102,7 +102,6 @@ dataset = "synthetic"
 symbols = ["SYM000", "SYM001", "SYM002", "SYM003", "SYM004"]
 start = "2024-01-01"
 end = "2024-01-05"
-strict = true
 
 [params]
 
@@ -135,6 +134,7 @@ def runner_rows(symbol_count: int = 5, bars_per_symbol: int = 400) -> list[dict[
                 {
                     "symbol": symbol,
                     "timestamp": timestamp,
+                    "available_at": timestamp,
                     "open": close,
                     "high": close,
                     "low": close,
@@ -308,7 +308,6 @@ end = "2026-06-30"
 kind = "bars"
 dataset = "demo_bars"
 symbols = ["BTC-PERP"]
-strict = true
 
 [params]
 weight = 0.25

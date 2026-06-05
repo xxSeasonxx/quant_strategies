@@ -154,7 +154,6 @@ strategy_id = "demo"
 [data]
 kind = "{data_kind}"
 {dataset_line}symbols = ["BTC-PERP"]
-strict = true
 
 [params]
 weight = 0.25
@@ -423,7 +422,6 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert data_manifest["windows"][0]["row_count"] == 4
     assert len(data_manifest["windows"][0]["normalized_rows_sha256"]) == 64
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
-    assert data_manifest["windows"][0]["row_contract"]["mode"] == "validation"
     assert data_manifest["windows"][0]["decision_count"] == 1
     assert data_manifest["windows"][0]["input_rows_artifact"]["path"] == input_rows_path.relative_to(
         result.result_dir

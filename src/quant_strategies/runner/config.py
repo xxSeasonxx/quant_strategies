@@ -18,10 +18,6 @@ from quant_strategies.core.errors import ConfigError
 
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
-# Row-contract strictness is an EXPLICIT run policy, independent of artifact
-# verbosity (`artifact_profile`). The quick-run defaults to the lenient "search"
-# contract; set "validation" to make missing/invalid `available_at` fail the run.
-RowContractStrictness = Literal["search", "validation"]
 
 _GENERATED_OUTPUT_ROOT = "results"
 
@@ -87,7 +83,6 @@ class RunConfig(RunnerConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     output: OutputConfig
-    row_contract: RowContractStrictness = "search"
 
     @field_validator("strategy_path")
     @classmethod

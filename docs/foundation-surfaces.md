@@ -36,12 +36,17 @@ candidate-level evidence. Evaluation defaults to at least one observation and
 one observed symbol per decision; validation configs can require additional
 observation fields.
 
-Rows are loaded through public `quant_data` APIs, normalized at the boundary,
-and passed to strategies as plain mapping rows. Package metadata bounds the
-supported upstream data contract as `quant-data>=0.1.0,<0.2.0`. `quant_data`
-owns stable row ordering for supplied rows; `quant_strategies` preserves
+Rows are loaded through public `quant_data` APIs — the strategy contract loaders
+for bars/universe and the derived-join loaders for FX/crypto, all strict —
+normalized at the boundary, and passed to strategies as plain mapping rows.
+Package metadata bounds the supported upstream data contract as
+`quant-data>=0.1.0,<0.2.0`. `quant_data` owns deterministic row ordering and the
+causal `available_at` stamp for supplied rows; `quant_strategies` preserves the
 supplied row order for strategy input, hashing, and execution and does not sort
-rows locally before hashing or execution.
+rows locally before hashing or execution. `available_at` is an unconditional
+hard requirement on every row; causal replay gates valid rows strictly on
+`available_at <= decision_time`, and a missing/invalid `available_at` fails the
+row contract rather than the lookahead guard.
 
 All three surfaces use one shared decision/spec kernel plus separate
 price-evidence paths: quick run and validation use the engine trade-activity
@@ -139,7 +144,7 @@ Primary config file: `experiment.toml`.
 
 Important sections:
 
-- top-level `strategy_path`, `strategy_id`, optional `row_contract`;
+- top-level `strategy_path`, `strategy_id`;
 - `[data]` loaded through `quant_data`;
 - `[params]`, `[fill_model]`, `[cost_model]`;
 - `[output]` with repo-local generated `results_dir` under `results/`, artifact

@@ -9,7 +9,7 @@ from quant_strategies.causality import (
     causality_completeness_violations,
     check_hidden_lookahead,
 )
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.provenance import file_sha256, text_sha256
 from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
@@ -63,7 +63,6 @@ class _ValidationContext:
     result_dir: Path
     backend_name: str
     selected_backend: ValidationBackend
-    row_contract_mode: RowContractMode
     event_emitter: ValidationStageEmitter
 
 
@@ -173,9 +172,8 @@ def _run_validation(
             event_emitter=events,
         )
 
-    # Validation always uses the validation row contract; strict replay is always
-    # on (Phase 1) and mechanical_thresholds governs only the mechanical gates.
-    row_contract_mode = RowContractMode.VALIDATION
+    # Strict replay is always on (Phase 1); mechanical_thresholds governs only the
+    # mechanical gates.
     context = _ValidationContext(
         repo_root=root,
         path_base=path_base,
@@ -184,7 +182,6 @@ def _run_validation(
         result_dir=result_dir,
         backend_name=backend_name,
         selected_backend=selected_backend,
-        row_contract_mode=row_contract_mode,
         event_emitter=events,
     )
     for window in config.windows:
@@ -235,12 +232,10 @@ def _run_validation_window(
             "window_execution",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            row_contract_mode=context.row_contract_mode.value,
         ):
             execution = execute_strategy_run(
                 execution_spec,
                 repo_root=context.path_base,
-                row_contract_mode=context.row_contract_mode,
             )
     except StrategyExecutionError as exc:
         return _handle_window_execution_error(context, state, window, execution_spec, exc)
@@ -378,7 +373,6 @@ def _audit_window_execution(
             "data_audit",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            row_contract_mode=context.row_contract_mode.value,
             decision_count=len(decisions),
         ) as audit_event:
             audit = audit_decision_rows(strategy_rows, decisions)
@@ -854,7 +848,6 @@ def _data_provenance(
             "symbols": list(execution_spec.data.symbols),
             "start": execution_spec.data.start.isoformat(),
             "end": execution_spec.data.end.isoformat(),
-            "strict": execution_spec.data.strict,
         },
         "row_count": row_count,
         "rows_path": None if rows is None else rows_path,

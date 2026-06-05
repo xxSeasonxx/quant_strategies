@@ -94,7 +94,6 @@ strategy_id = "demo"
 kind = "bars"
 dataset = "unit-test-bars"
 symbols = ["BTC-PERP"]
-strict = true
 
 [params]
 weight = 1.0
@@ -622,7 +621,6 @@ def test_strict_replay_boundaries_dedupe_shared_row_information_sets():
             fill_model=SimpleNamespace(price="close"),
         ),
         [*rows(), *eth_rows],
-        mode="validation",
     )
 
     boundaries = strict_replay_boundaries(normalized, [])

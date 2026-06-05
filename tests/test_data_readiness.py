@@ -122,7 +122,6 @@ def test_normalized_rows_path_uses_shared_timestamp_normalization(monkeypatch: p
                 close="100.5",
             )
         ],
-        mode="search",
     )
     monkeypatch.setattr(
         data_readiness,

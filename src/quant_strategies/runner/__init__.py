@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, runner_evidence_semantics
 from quant_strategies.observation_dependencies import (
@@ -116,7 +116,6 @@ def run_config(
             execution = execute_strategy_run(
                 config.to_execution_spec(),
                 repo_root=effective_repo_root,
-                row_contract_mode=_runner_row_contract_mode(config),
             )
     except StrategyExecutionError as exc:
         return _execution_failure_result(
@@ -254,12 +253,6 @@ def _execution_failure_result(
         evidence_quality=exc.evidence_quality,
         event_emitter=event_emitter,
     )
-
-
-def _runner_row_contract_mode(config: config_module.RunConfig) -> RowContractMode:
-    # Strictness comes from the explicit `row_contract` policy, NOT from the
-    # `artifact_profile` verbosity knob (a verbosity change must never flip pass/fail).
-    return RowContractMode(config.row_contract)
 
 
 def _write_strategy_input_rows_if_full(

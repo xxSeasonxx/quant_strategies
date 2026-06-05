@@ -10,7 +10,7 @@ from typing import Any
 
 from quant_strategies.core.evidence_quality import compact_evidence_quality, compact_row_contract
 from quant_strategies.core.serialization import json_safe_value
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
     causality_evidence_fields,
@@ -153,7 +153,6 @@ def write_data_manifest(
             "symbols": list(config.data.symbols),
             "start": config.data.start.isoformat(),
             "end": config.data.end.isoformat(),
-            "strict": config.data.strict,
         },
         "rows": {
             "total": len(normalized),
@@ -230,7 +229,7 @@ def _normalized_rows(
         return normalized_rows
     if isinstance(rows, NormalizedRows):
         return rows
-    return NormalizedRows.from_rows(config, rows, mode=RowContractMode.SEARCH)
+    return NormalizedRows.from_rows(config, rows)
 
 
 def _artifact_hashes(result_dir: Path) -> dict[str, dict[str, str]]:

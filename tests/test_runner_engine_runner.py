@@ -129,7 +129,7 @@ def test_build_request_accepts_normalized_rows_without_timestamp_parsing(monkeyp
         raw_row["timestamp"] = raw_row["timestamp"].isoformat().replace("+00:00", "Z")
         for field in ("open", "high", "low", "close"):
             raw_row[field] = str(raw_row[field])
-    normalized = NormalizedRows.from_rows(config(), raw_rows, mode="search")
+    normalized = NormalizedRows.from_rows(config(), raw_rows)
     import quant_strategies.core.engine_runner as runner_engine_runner
 
     monkeypatch.setattr(

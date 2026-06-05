@@ -71,7 +71,6 @@ dataset = "equity_1min"
 symbols = ["SPY"]
 start = "2024-01-01"
 end = "2024-01-05"
-strict = true
 
 [params]
 weight = 1.0

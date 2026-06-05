@@ -214,12 +214,10 @@ def _run_evaluation_window(
             "window_execution",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            row_contract_mode="validation",
         ) as window_event:
             execution = execute_strategy_run(
                 execution_spec,
                 repo_root=context.config.base_dir,
-                row_contract_mode="validation",
                 require_passed_row_contract=True,
             )
             row_contract = execution.normalized_rows.row_contract_summary()
@@ -330,7 +328,6 @@ def _run_data_audit(
             "data_audit",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            row_contract_mode="validation",
             decision_count=len(execution.decisions),
         ) as audit_event:
             audit = audit_decision_rows(execution.normalized_rows, execution.decisions)

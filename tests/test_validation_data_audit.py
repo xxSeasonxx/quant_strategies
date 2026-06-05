@@ -63,6 +63,36 @@ def test_audit_fails_when_available_after_decision_time():
     )
 
 
+def test_audit_normalized_rows_flags_missing_available_at():
+    # Validation audits NormalizedRows (not raw dicts); a row missing available_at must
+    # fail the audit via the row-contract violations path. This is how the unconditional
+    # available_at requirement is enforced on the validation surface.
+    from types import SimpleNamespace
+
+    from quant_strategies.data_contract import NormalizedRows
+
+    config = SimpleNamespace(
+        data=SimpleNamespace(kind="bars"),
+        fill_model=SimpleNamespace(price="close"),
+    )
+    rows = [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": AS_OF,
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+        }
+    ]
+    normalized = NormalizedRows.from_rows(config, rows)
+
+    audit = audit_decision_rows(normalized, [decision()])
+
+    assert audit.passed is False
+    assert any("row_missing_available_at" in violation for violation in audit.violations)
+
+
 def test_audit_parses_iso_timestamp_and_available_at_for_late_violation():
     rows = [
         {

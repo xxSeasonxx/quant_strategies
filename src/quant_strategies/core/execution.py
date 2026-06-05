@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     DecisionStrategyLoadError,
     load_decision_strategy,
@@ -75,10 +75,8 @@ def execute_strategy_run(
     config: StrategyExecutionSpec,
     *,
     repo_root: Path,
-    row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
     require_passed_row_contract: bool = False,
 ) -> StrategyExecutionResult:
-    contract_mode = RowContractMode(row_contract_mode)
     try:
         generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
     except SystemExit as exc:
@@ -104,24 +102,16 @@ def execute_strategy_run(
         ) from exc
 
     try:
-        loaded = load_data(config, row_contract_mode=contract_mode)
+        loaded = load_data(config)
     except RunnerError as exc:
         raise StrategyExecutionError("data_load", str(exc)) from exc
 
-    if loaded.normalized_rows is not None and loaded.normalized_rows.mode is contract_mode:
+    if loaded.normalized_rows is not None:
         normalized_rows = loaded.normalized_rows
     elif isinstance(loaded.rows, NormalizedRows):
-        normalized_rows = (
-            loaded.rows
-            if loaded.rows.mode is contract_mode
-            else NormalizedRows.from_rows(config, loaded.rows, mode=contract_mode)
-        )
+        normalized_rows = loaded.rows
     else:
-        normalized_rows = NormalizedRows.from_rows(
-            config,
-            loaded.rows,
-            mode=contract_mode,
-        )
+        normalized_rows = NormalizedRows.from_rows(config, loaded.rows)
     rows = normalized_rows.projection_rows()
     row_hash = normalized_rows.normalized_rows_sha256
     evidence = compact_evidence_quality(normalized_rows.evidence_quality())

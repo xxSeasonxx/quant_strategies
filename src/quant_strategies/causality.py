@@ -447,9 +447,10 @@ def _row_available_for_boundary(row: _VisibleRow, boundary: ReplayBoundary) -> b
     if row.available_at is not None:
         return row.available_at <= boundary.decision_time
 
-    # Availability parse failures are evidence-quality problems. Replay falls
-    # back to timestamp-only visibility so bad provenance does not masquerade as
-    # a hidden-lookahead strategy failure.
+    # `available_at` is a mandatory row-contract field: a row reaching replay without
+    # a usable one has already failed the contract, and the run fails at the
+    # row-contract gate with a clear data-quality message. Treat such a row as
+    # visible here so a provenance defect is never misreported as hidden lookahead.
     return True
 
 

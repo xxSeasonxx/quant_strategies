@@ -75,7 +75,6 @@ end = "2026-06-30"
 [data]
 kind = "crypto_perp_funding"
 symbols = ["BTC-PERP"]
-strict = true
 
 [params]
 weight = 1.0
@@ -408,8 +407,8 @@ def test_load_validation_config_rejects_legacy_data_window_dates(tmp_path: Path)
     write_config(config_path)
     config_path.write_text(
         config_path.read_text().replace(
-            "strict = true\n\n[params]",
-            'strict = true\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
+            'symbols = ["BTC-PERP"]\n\n[params]',
+            'symbols = ["BTC-PERP"]\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
         )
     )
 

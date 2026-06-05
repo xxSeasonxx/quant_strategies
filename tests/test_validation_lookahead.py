@@ -213,7 +213,6 @@ def test_hidden_lookahead_uses_normalized_rows_without_reparsing(monkeypatch):
             ohlc_row(AS_OF, 100.0, available_at=AS_OF),
             ohlc_row(FUTURE, 999.0, available_at=FUTURE),
         ],
-        mode="validation",
     )
     baseline = as_of_strategy(normalized.projection_rows(), {})
     monkeypatch.setattr(

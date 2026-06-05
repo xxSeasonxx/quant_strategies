@@ -63,10 +63,15 @@ search memory, variant ranking, stopping rules, and iteration decisions.
 `quant_strategies` evaluates supplied strategies and configs.
 - **Data boundary:** `quant_data` owns data acquisition, materialization,
 refresh, backfill, repair, and source joining. Package metadata bounds the
-supported `quant-data` contract as `>=0.1.0,<0.2.0`. `quant_data` owns stable
-row ordering for supplied rows; `quant_strategies` preserves supplied row order
-for strategy input, hashing, and execution and does not sort rows locally before
-hashing or execution.
+supported `quant-data` contract as `>=0.1.0,<0.2.0`. `quant_data` owns
+deterministic row ordering and the causal `available_at` stamp for supplied
+rows; `quant_strategies` consumes the strategy contract loaders (always strict),
+preserves the supplied row order for strategy input, hashing, and execution, and
+does not sort rows locally before hashing or execution. `available_at` is an
+unconditional hard requirement on every row in quick run, validation, and
+evaluation; causal replay gates valid rows strictly on `available_at <= decision_time`,
+and a missing/invalid `available_at` fails the row contract rather than the
+lookahead guard.
 - **Funding basis:** Engine funding is linear trade-activity funding folded into
 validation `net_return`; evaluation funding is NAV-ledger cashflow through the
 project perp ledger. Fillable crypto perp windows with no funding events in

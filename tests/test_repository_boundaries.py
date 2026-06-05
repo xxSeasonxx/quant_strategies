@@ -124,7 +124,7 @@ def test_makefile_exposes_single_local_check_command():
     text = (ROOT / "Makefile").read_text()
     check_body = _makefile_target_body(text, "check")
 
-    assert ".PHONY: check check-vectorbtpro-smoke check-all" in text
+    assert ".PHONY: check check-vectorbtpro-smoke check-quant-data-contract check-all" in text
     assert "check:" in text
     assert "conda run -n quant python -m pip install -e ." in text
     assert "conda run -n quant quant-strategies --help" in text
@@ -136,6 +136,11 @@ def test_makefile_exposes_single_local_check_command():
     assert (
         "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
         "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
+    ) in text
+    assert "check-quant-data-contract:" in text
+    assert (
+        "conda run -n quant env RUN_QUANT_DATA_CONTRACT_SMOKE=1 pytest "
+        "tests/test_quant_data_contract_smoke.py"
     ) in text
     assert _makefile_target_header(text, "check-all") == "check-all: check"
 
@@ -172,6 +177,16 @@ def test_quant_data_dependency_is_version_bounded():
     ]
 
     assert quant_data_specs == ["quant-data>=0.1.0,<0.2.0"]
+
+
+def test_data_loader_bars_use_contract_loaders_not_raw_layer():
+    # Bars/universe must load via the strategy contract layer (causal available_at +
+    # deterministic order), never the raw exploratory loader which carries neither.
+    source = (ROOT / "src" / "quant_strategies" / "core" / "data_loader.py").read_text()
+    assert "load_strategy_bars" in source
+    assert "load_strategy_universe_bars" in source
+    assert "load_bars" not in source
+    assert "load_universe_bars" not in source
 
 
 def test_vectorbtpro_smoke_fails_loudly_when_enabled():

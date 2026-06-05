@@ -7,18 +7,12 @@ from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.evidence_semantics import causality_evidence_fields
-
-
-class RowContractMode(StrEnum):
-    SEARCH = "search"
-    VALIDATION = "validation"
 
 
 RowContractReason = Literal[
@@ -127,7 +121,7 @@ class _IssueAccumulator:
             return
         if issue.reason in {"row_missing_required_field", "row_missing_quote_field"}:
             self._missing_required_fields[issue.field] += 1
-        if issue.reason == "row_missing_available_at" and issue.severity == "error":
+        if issue.reason == "row_missing_available_at":
             self._missing_required_fields[issue.field] += 1
         if issue.reason == "row_invalid_funding_fields":
             self._funding_event_missing_fields[issue.field] += 1
@@ -156,7 +150,6 @@ class _IssueAccumulator:
 
 @dataclass(frozen=True)
 class NormalizedRows(Sequence[Mapping[str, Any]]):
-    mode: RowContractMode
     data_kind: str
     required_fields: tuple[str, ...]
     issues: tuple[RowContractIssue, ...]
@@ -190,13 +183,10 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         cls,
         config: Any,
         rows: Iterable[Mapping[str, Any]],
-        *,
-        mode: RowContractMode | str = RowContractMode.SEARCH,
     ) -> NormalizedRows:
-        contract_mode = _coerce_mode(mode)
         data_kind = _data_kind(config)
         fill_price = _fill_price(config)
-        required_fields = required_row_fields(config, mode=contract_mode)
+        required_fields = required_row_fields(config)
         normalized_rows: list[dict[str, Any]] = []
         issues = _IssueAccumulator(sample_size=_ISSUE_SAMPLE_SIZE)
         valid_available_at = 0
@@ -253,15 +243,12 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
 
             available_at = normalized.get("available_at")
             if _is_missing(normalized, "available_at"):
-                severity: RowContractSeverity = (
-                    "warning" if contract_mode is RowContractMode.SEARCH else "error"
-                )
                 issues.append(
                     _issue(
                         "row_missing_available_at",
                         "available_at",
                         normalized,
-                        severity=severity,
+                        severity="error",
                         message="row is missing available_at",
                     )
                 )
@@ -327,7 +314,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             availability_coverage["invalid"] = invalid_available_at
 
         return cls(
-            mode=contract_mode,
             data_kind=data_kind,
             required_fields=required_fields,
             issues=issues.sample(),
@@ -412,7 +398,6 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             status = "passed"
         return {
             "data_kind": self.data_kind,
-            "mode": self.mode.value,
             "status": status,
             "required_fields": list(self.required_fields),
             "missing_required_fields": dict(self._missing_required_field_items),
@@ -466,26 +451,15 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         return list(self._quant_data_feedback_items)
 
 
-def required_row_fields(
-    config: Any,
-    *,
-    mode: RowContractMode | str | None = None,
-) -> tuple[str, ...]:
+def required_row_fields(config: Any) -> tuple[str, ...]:
     data_kind = _data_kind(config)
     fields = list(_BASE_REQUIRED_FIELDS)
     if data_kind == "crypto_perp_funding":
         fields.append("has_funding_event")
     if data_kind == "forex_with_quotes" and _fill_price(config) == "quote":
         fields.extend(_QUOTE_FIELDS)
-    if mode is not None and _coerce_mode(mode) is not RowContractMode.SEARCH:
-        fields.append("available_at")
+    fields.append("available_at")
     return tuple(fields)
-
-
-def _coerce_mode(mode: RowContractMode | str) -> RowContractMode:
-    if isinstance(mode, RowContractMode):
-        return mode
-    return RowContractMode(mode)
 
 
 def _data_kind(config: Any) -> str:
@@ -881,7 +855,6 @@ def _normalized_rows_sha256_from_storage(
 __all__ = [
     "NormalizedRows",
     "RowContractIssue",
-    "RowContractMode",
     "RowContractReason",
     "RowContractSeverity",
     "required_row_fields",

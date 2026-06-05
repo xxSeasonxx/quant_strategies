@@ -51,7 +51,6 @@ kind = "{data_kind}"
 {dataset_line}symbols = ["SPY"]
 start = "2024-01-01"
 end = "2024-01-05"
-strict = true
 
 [params]
 weight = 1.0
@@ -293,6 +292,22 @@ def test_removed_same_bar_close_fill_flag_is_rejected_as_unknown(tmp_path: Path)
             write_config(tmp_path, fill_model_extra=f"{removed_flag} = true\n"),
             repo_root=tmp_path,
         )
+
+
+def test_removed_data_strict_toggle_is_rejected_as_unknown(tmp_path: Path):
+    # Loads are always strict now; a leftover `strict` key in [data] must fail loudly
+    # (extra="forbid"), not be silently ignored.
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            'symbols = ["SPY"]\n',
+            'symbols = ["SPY"]\nstrict = true\n',
+        )
+    )
+
+    with pytest.raises(ConfigError, match="strict"):
+        load_config(config_path, repo_root=tmp_path)
 
 
 def test_future_bar_close_fill_remains_accepted(tmp_path: Path):

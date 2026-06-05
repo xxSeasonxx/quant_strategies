@@ -4,10 +4,13 @@ This note states what `quant_strategies` expects from upstream `quant_data`.
 It is an interface contract for this repository, not a setup guide for
 `quant_data` internals.
 
-This is the target boundary contract. As of this writing, row-order ownership is
-still an open local follow-up in `quant_strategies`: upstream should provide
-stable ordering, and this repo should preserve it once the local row-order
-implementation is reconciled.
+Upstream owns the strategy contract: deterministic row ordering and the causal
+`available_at` stamp are produced by `quant_data`, not reconstructed here.
+`quant_strategies` consumes that contract and preserves the supplied row order;
+it does not sort, de-duplicate, join, or repair rows locally. The upstream-owned
+contract is documented in the `quant-data` consumer guide
+(`docs/consumer/README.md`, `usage-guide.md`, `reference.md`); this note is the
+downstream-consumer view of the same boundary.
 
 ## Responsibility Split
 
@@ -17,16 +20,17 @@ implementation is reconciled.
 - vendor/source truth, adjustment policy, survivorship policy, and data-quality
   repair;
 - public loader behavior and supported loader arguments;
-- stable row ordering for supplied rows;
+- deterministic row ordering for supplied rows;
+- the causal `available_at` stamp on every row, derived from a single upstream
+  availability policy;
 - source-specific details such as funding timestamps, quote fields, corporate
   actions, missing-data semantics, and dataset coverage.
 
 `quant_strategies` owns research evidence:
 
 - calling only public `quant_data` loader APIs;
-- preserving supplied row order for strategy input, normalized hashes, execution
-  inputs, and audit artifacts as the target contract after the open local
-  row-order follow-up is addressed;
+- preserving the supplied row order for strategy input, normalized hashes,
+  execution inputs, and audit artifacts;
 - row-contract validation and structured feedback to upstream;
 - strategy execution, causality checks, decision validation, fills, costs,
   evaluation, and artifacts;
@@ -50,10 +54,24 @@ The most helpful upstream setup is deterministic and explicit:
 - duplicate `(symbol, timestamp)` rows are absent unless the loader contract
   explicitly defines how they are resolved.
 
-`quant_strategies` can validate and report row-contract violations. Its target
-boundary is not to sort, de-duplicate, infer, join, or repair rows at the data
-boundary; local code still has an open row-order follow-up before that target is
-fully true.
+`quant_strategies` selects the loader by data kind and always loads strictly:
+
+- `bars`, single symbol → `quant_data.contract_loaders.load_strategy_bars`;
+- `bars`, multiple symbols → `quant_data.contract_loaders.load_strategy_universe_bars`,
+  which returns one frame ordered `(timestamp, symbol)` and raises when a
+  requested symbol is missing;
+- `crypto_perp_funding` → `quant_data.loader.load_crypto_perp_bars_with_funding`
+  (precomputed bars+funding join, already carrying `available_at`);
+- `forex_with_quotes` → `quant_data.loader.load_fx_bars_with_quotes`
+  (precomputed bars+quotes join, already carrying `available_at`).
+
+All four are called with strict loading: the window is validated upstream, an
+empty result raises, and duplicate keys are rejected. There is no `data.strict`
+toggle and no relaxed load path.
+
+`quant_strategies` validates and reports row-contract violations, but it does
+not sort, de-duplicate, infer, join, or repair rows at the data boundary. It
+preserves the order each loader returns.
 Execution internals may build per-symbol time indexes for fills; that is not a
 replacement for the upstream row-order contract.
 
@@ -68,6 +86,14 @@ Bar data should include:
 - `high`
 - `low`
 - `close`
+
+`available_at` is an unconditional hard requirement on every row in every run
+surface (quick run, validation, and evaluation). A missing or invalid
+`available_at` is an error, never a tolerated warning, and the run fails at the
+row-contract gate. Causal replay gates valid rows strictly on
+`available_at <= decision_time`; because a missing or invalid `available_at` fails
+the row contract first, a provenance defect surfaces as a data-quality failure,
+never as a hidden-lookahead verdict.
 
 FX quote workflows should also include:
 

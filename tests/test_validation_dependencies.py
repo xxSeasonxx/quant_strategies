@@ -170,7 +170,6 @@ def test_observation_index_uses_normalized_rows_without_reparsing(monkeypatch: p
                 "low": 100.0,
             }
         ],
-        mode="validation",
     )
     observations = (
         ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),

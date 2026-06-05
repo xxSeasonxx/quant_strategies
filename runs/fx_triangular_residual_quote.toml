@@ -21,7 +21,6 @@ symbols = [
 ]
 start = "2024-01-08"
 end = "2024-01-08"
-strict = true
 
 [params]
 triangle_set = "outside_view_8"

@@ -24,7 +24,6 @@ class WindowedDataConfig(SharedConfigModel):
     kind: DataKind
     dataset: str | None = None
     symbols: tuple[str, ...] = Field(min_length=1)
-    strict: bool = True
 
     @field_validator("symbols")
     @classmethod

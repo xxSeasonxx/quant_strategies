@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
+import importlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from quant_strategies.core.serialization import json_safe_value
-from quant_strategies.data_contract import NormalizedRows, RowContractMode
-from quant_strategies.datetime_utils import parse_aware_datetime
+from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.core.errors import DataLoadError
 
@@ -15,33 +13,44 @@ _UNSET = object()
 
 
 class _LazyLoaderProxy:
-    _loader_attributes = (
-        "load_bars",
-        "load_universe_bars",
-        "load_crypto_perp_bars_with_funding",
-        "load_fx_bars_with_quotes",
-    )
+    """Overridable, lazily-imported handle to one `quant_data` loader module.
 
-    def __init__(self) -> None:
-        object.__setattr__(self, "_overrides", set())
-        for name in self._loader_attributes:
-            object.__setattr__(self, name, _UNSET)
+    Importing this module must not import `quant_data` (purity invariant); the
+    backing module is imported only on first real use. Tests override individual
+    functions with ``setattr`` on the proxy; an unset name falls through to the
+    real upstream function.
+    """
 
-    def __setattr__(self, name: str, value: object) -> None:
-        object.__setattr__(self, name, value)
-        if name in self._loader_attributes:
-            overrides = self._overrides
-            if value is _UNSET:
-                overrides.discard(name)
-            else:
-                overrides.add(name)
+    def __init__(self, module_name: str, attributes: tuple[str, ...]) -> None:
+        self._module_name = module_name
+        self._module: Any | None = None
+        for name in attributes:
+            setattr(self, name, _UNSET)
 
-    def has_overrides(self) -> bool:
-        return bool(self._overrides)
+    def resolve(self, name: str) -> Any:
+        value = getattr(self, name, _UNSET)
+        if value is not _UNSET:
+            return value
+        return getattr(self._import_module(), name)
+
+    def _import_module(self) -> Any:
+        if self._module is None:
+            self._module = importlib.import_module(self._module_name)
+        return self._module
 
 
 get_engine: Any | None = None
-loader: Any = _LazyLoaderProxy()
+# Bars/universe come from the strategy contract layer (causal `available_at`,
+# deterministic order, strict window validation); the precomputed bars+funding /
+# bars+quotes joins still live in the raw loader module and already carry `available_at`.
+contract_loaders = _LazyLoaderProxy(
+    "quant_data.contract_loaders",
+    ("load_strategy_bars", "load_strategy_universe_bars"),
+)
+loader = _LazyLoaderProxy(
+    "quant_data.loader",
+    ("load_crypto_perp_bars_with_funding", "load_fx_bars_with_quotes"),
+)
 _default_engine_factory: Any | None = None
 _default_engine_value: object = _UNSET
 
@@ -56,7 +65,6 @@ def load_data(
     config: StrategyExecutionSpec,
     *,
     engine: object | None = None,
-    row_contract_mode: RowContractMode | str = RowContractMode.SEARCH,
 ) -> LoadedData:
     db_engine = engine if engine is not None else _default_engine()
     try:
@@ -67,70 +75,44 @@ def load_data(
         raise DataLoadError(f"data load failed: {exc}") from exc
     if not rows:
         raise DataLoadError("data load returned no rows")
-    rows.sort(key=_row_sort_key)
-    normalized_rows = NormalizedRows.from_rows(config, rows, mode=row_contract_mode)
+    normalized_rows = NormalizedRows.from_rows(config, rows)
     return LoadedData(rows=normalized_rows.projection_rows(), normalized_rows=normalized_rows)
-
-
-def _row_sort_key(row: Mapping[str, Any]) -> tuple[str, tuple[int, Any]]:
-    raw_timestamp = row.get("timestamp")
-    parsed_timestamp, _ = parse_aware_datetime(raw_timestamp)
-    if parsed_timestamp is not None:
-        timestamp_key = (0, parsed_timestamp)
-    elif raw_timestamp is None:
-        timestamp_key = (2, "")
-    else:
-        timestamp_key = (1, _json_sort_value(raw_timestamp))
-    return (str(row.get("symbol", "")), timestamp_key)
-
-
-def _json_sort_value(value: Any) -> str:
-    return json.dumps(
-        json_safe_value(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
 
 
 def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, Any]]:
     data = config.data
-    quant_data_loader = _loader()
     if data.kind == "bars":
         if data.dataset is None:
             raise DataLoadError("data.dataset is required for bars")
         if len(data.symbols) == 1:
-            frame = _loader_attribute(quant_data_loader, "load_bars")(
+            frame = contract_loaders.resolve("load_strategy_bars")(
                 engine,
                 data.symbols[0],
                 data.dataset,
                 data.start,
                 data.end,
-                research=True,
-                strict=data.strict,
+                strict=True,
             )
             return _rows_from_frame(frame)
-        universe = _loader_attribute(quant_data_loader, "load_universe_bars")(
+        frame = contract_loaders.resolve("load_strategy_universe_bars")(
             engine,
             list(data.symbols),
             data.dataset,
             data.start,
             data.end,
-            research=True,
-            strict=data.strict,
+            strict=True,
         )
-        return _rows_from_universe(universe)
+        return _rows_from_frame(frame)
 
     if data.kind == "crypto_perp_funding":
         rows: list[dict[str, Any]] = []
         for symbol in data.symbols:
-            frame = _loader_attribute(quant_data_loader, "load_crypto_perp_bars_with_funding")(
+            frame = loader.resolve("load_crypto_perp_bars_with_funding")(
                 engine,
                 symbol,
                 data.start,
                 data.end,
-                research=True,
-                strict=data.strict,
+                strict=True,
             )
             rows.extend(_rows_from_frame(frame))
         return rows
@@ -139,28 +121,18 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
         rows = []
         require_quotes = config.fill_model.price == "quote"
         for symbol in data.symbols:
-            frame = _loader_attribute(quant_data_loader, "load_fx_bars_with_quotes")(
+            frame = loader.resolve("load_fx_bars_with_quotes")(
                 engine,
                 symbol,
                 data.start,
                 data.end,
-                research=True,
-                strict=data.strict,
+                strict=True,
                 require_quotes=require_quotes,
             )
             rows.extend(_rows_from_frame(frame))
         return rows
 
     raise DataLoadError(f"unsupported data kind: {data.kind}")
-
-
-def _rows_from_universe(universe: object) -> list[dict[str, Any]]:
-    if not isinstance(universe, dict):
-        raise DataLoadError("load_universe_bars must return a dict of frames")
-    rows: list[dict[str, Any]] = []
-    for frame in universe.values():
-        rows.extend(_rows_from_frame(frame))
-    return rows
 
 
 def _rows_from_frame(frame: object) -> list[dict[str, Any]]:
@@ -188,26 +160,6 @@ def _default_engine() -> object:
         _default_engine_value = factory()
         _default_engine_factory = factory
     return _default_engine_value
-
-
-def _loader() -> Any:
-    global loader
-    if isinstance(loader, _LazyLoaderProxy) and not loader.has_overrides():
-        loader = _import_quant_data_loader()
-    return loader
-
-
-def _loader_attribute(quant_data_loader: Any, name: str) -> Any:
-    value = getattr(quant_data_loader, name, _UNSET)
-    if value is _UNSET and isinstance(quant_data_loader, _LazyLoaderProxy):
-        return getattr(_import_quant_data_loader(), name)
-    return value
-
-
-def _import_quant_data_loader() -> Any:
-    from quant_data import loader as quant_data_loader
-
-    return quant_data_loader
 
 
 def _get_engine() -> Any:

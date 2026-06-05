@@ -56,7 +56,6 @@ end = "2026-06-30"
 kind = "bars"
 dataset = "equity_1min"
 symbols = ["SPY", "QQQ"]
-strict = true
 
 [params]
 weight = 0.5
@@ -106,7 +105,6 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
             kind="bars",
             dataset="equity_1min",
             symbols=("SPY", "QQQ"),
-            strict=True,
             start=config.windows[0].start,
             end=config.windows[0].end,
         ),
@@ -175,8 +173,8 @@ def test_load_evaluation_config_rejects_legacy_data_window_dates(tmp_path: Path)
     write_config(config_path)
     config_path.write_text(
         config_path.read_text().replace(
-            "strict = true\n\n[params]",
-            'strict = true\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
+            'symbols = ["SPY", "QQQ"]\n\n[params]',
+            'symbols = ["SPY", "QQQ"]\nstart = "2025-01-01"\nend = "2025-12-31"\n\n[params]',
         )
     )
 
