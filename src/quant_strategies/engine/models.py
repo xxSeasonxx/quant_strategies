@@ -11,7 +11,6 @@ from quant_strategies.core.config import CostModelConfig as CostModel
 from quant_strategies.core.config import FillModelConfig as FillModel
 from quant_strategies.decisions import StrategyDecision
 
-
 EVIDENCE_SCHEMA_VERSION = "quant_strategies.engine.evidence/v4"
 
 

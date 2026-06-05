@@ -1,25 +1,24 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.core import execution
-from quant_strategies.runner.config import load_config
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError, StrategyLoadError
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     execute_strategy_run,
 )
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.runner.config import load_config
 
-
-TIMESTAMP = datetime(2024, 1, 1, tzinfo=timezone.utc)
+TIMESTAMP = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def rows() -> list[dict[str, Any]]:
@@ -108,7 +107,9 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
         "    )]\n",
     )
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
@@ -133,7 +134,9 @@ def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(
         return [decision()]
 
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: generate_decisions)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=normalized))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=normalized)
+    )
 
     result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
@@ -255,7 +258,9 @@ def test_execute_strategy_run_invalid_decision_output_carries_loaded_context(
     loaded_rows = rows()
     write_strategy(tmp_path, "def generate_decisions(rows, params): return ['not a decision']\n")
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     with pytest.raises(StrategyExecutionError) as error:
         execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
@@ -280,11 +285,12 @@ def test_execute_strategy_run_maps_generation_exception_with_loaded_context(
     loaded_rows = rows()
     write_strategy(
         tmp_path,
-        "def generate_decisions(rows, params):\n"
-        "    raise RuntimeError('boom')\n",
+        "def generate_decisions(rows, params):\n    raise RuntimeError('boom')\n",
     )
     config = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     with pytest.raises(StrategyExecutionError) as error:
         execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
@@ -313,7 +319,9 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
     write_strategy(tmp_path, "def generate_decisions(rows, params): return []\n")
     config = write_config(tmp_path)
     monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: flat_decision_strategy)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
 
@@ -338,7 +346,9 @@ _SCHEMALESS_STRATEGY = (
 )
 
 
-def test_execute_strategy_run_flags_schemaless_passthrough(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_execute_strategy_run_flags_schemaless_passthrough(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     # No validate_params + runner default (require_param_validator=False): the run
     # completes but the params are flagged as unvalidated passthrough.
     write_strategy(tmp_path, _SCHEMALESS_STRATEGY)

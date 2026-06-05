@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import math
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
 import quant_strategies.evaluation._portfolio_common as common_module
-import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 import quant_strategies.evaluation.project_perp_ledger as perp_module
+import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
-from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
-from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
+from quant_strategies.decisions import (
+    DecisionIntent,
+    ExitPolicy,
+    InstrumentRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.evaluation.backends import (
     DataKindNamedEvaluationBackend,
     EvaluationBackend,
@@ -21,13 +26,15 @@ from quant_strategies.evaluation.backends import (
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.dependencies import EvaluationDependencies
 from quant_strategies.evaluation.scenarios import EvaluationScenario
-
+from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 
 ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
 
 
 def test_vectorbtpro_backend_remains_public_compatibility_adapter():
-    from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend as imported
+    from quant_strategies.evaluation.vectorbtpro_backend import (
+        VectorBTProEvaluationBackend as imported,
+    )
 
     assert imported is VectorBTProEvaluationBackend
 
@@ -48,7 +55,9 @@ def test_evaluation_metric_semantics_label_nav_metrics_as_portfolio_evidence():
     assert MetricValue == float | int | str | bool | None
     assert semantics["total_return"]["base"] == "portfolio NAV path"
     assert "project_perp_ledger_v1" in str(semantics["total_return"]["backend"])
-    assert "includes funding cashflows for crypto_perp_funding" in str(semantics["total_return"]["cost_scope"])
+    assert "includes funding cashflows for crypto_perp_funding" in str(
+        semantics["total_return"]["cost_scope"]
+    )
     assert semantics["funding_cashflow_total"]["base"] == "funding_cashflows trace table"
     assert semantics["funding_event_count"]["unit"] == "count"
     assert semantics["funding_model"]["null_when"].startswith("never")
@@ -65,7 +74,9 @@ def test_evaluation_backend_split_keeps_project_perp_ledger_in_dedicated_module(
 
     assert common_module.prepared_decision_windows
     assert perp_module.run_perp_ledger
-    assert backend.name_for_data_kind("crypto_perp_funding") == perp_module.PROJECT_PERP_FUNDING_MODEL
+    assert (
+        backend.name_for_data_kind("crypto_perp_funding") == perp_module.PROJECT_PERP_FUNDING_MODEL
+    )
 
 
 def test_finite_metric_or_none_rejects_nan_inf_and_booleans():
@@ -116,13 +127,17 @@ def test_portfolio_metrics_use_explicit_annualized_formulas():
     annualization = 12
     mean_return = sum(observed_returns) / len(observed_returns)
     annualized_return = ((1.0 + 0.08) ** (annualization / len(observed_returns))) - 1.0
-    sample_variance = sum((value - mean_return) ** 2 for value in observed_returns) / (len(observed_returns) - 1)
-    volatility = math.sqrt(sample_variance) * math.sqrt(annualization)
-    downside_deviation = math.sqrt(((-0.01) ** 2 + (-0.02) ** 2) / len(observed_returns)) * math.sqrt(
-        annualization
+    sample_variance = sum((value - mean_return) ** 2 for value in observed_returns) / (
+        len(observed_returns) - 1
     )
+    volatility = math.sqrt(sample_variance) * math.sqrt(annualization)
+    downside_deviation = math.sqrt(
+        ((-0.01) ** 2 + (-0.02) ** 2) / len(observed_returns)
+    ) * math.sqrt(annualization)
 
-    payload = backend_module._portfolio_metrics(FakePortfolio(), annualization, min_annualized_samples=4)
+    payload = backend_module._portfolio_metrics(
+        FakePortfolio(), annualization, min_annualized_samples=4
+    )
     metrics = payload.metrics
 
     assert payload.warnings == ()
@@ -246,7 +261,9 @@ def test_portfolio_metrics_emit_none_for_unavailable_annualized_metrics_and_dege
             return 0.0
 
     no_trade_metrics = backend_module._portfolio_metrics(FakePortfolio(NoTradeStats()), 252).metrics
-    no_loss_metrics = backend_module._portfolio_metrics(FakePortfolio(NoLossTradeStats()), 252).metrics
+    no_loss_metrics = backend_module._portfolio_metrics(
+        FakePortfolio(NoLossTradeStats()), 252
+    ).metrics
 
     for name in ("annualized_return", "volatility", "sharpe", "sortino", "calmar"):
         assert no_trade_metrics[name] is None
@@ -419,7 +436,9 @@ def test_vectorbtpro_evaluation_backend_fails_when_required_metric_accessor_rais
         def get_max_drawdown(self):
             return -0.01
 
-    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio()))
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio())
+    )
     fake_pyarrow = SimpleNamespace(__name__="pyarrow")
     monkeypatch.setattr(
         backend_module,
@@ -480,7 +499,9 @@ def test_vectorbtpro_evaluation_backend_fails_when_required_metric_is_nonfinite(
         def get_max_drawdown(self):
             return math.nan if metric_method == "get_max_drawdown" else -0.01
 
-    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio()))
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio())
+    )
     fake_pyarrow = SimpleNamespace(__name__="pyarrow")
     monkeypatch.setattr(
         backend_module,
@@ -500,7 +521,9 @@ def test_vectorbtpro_evaluation_backend_fails_when_required_metric_is_nonfinite(
     assert expected_warning in result.warnings
 
 
-@pytest.mark.parametrize("portfolio_values", [[100.0, 101.0, math.nan], [100.0, 101.0, math.inf], []])
+@pytest.mark.parametrize(
+    "portfolio_values", [[100.0, 101.0, math.nan], [100.0, 101.0, math.inf], []]
+)
 def test_vectorbtpro_evaluation_backend_fails_when_final_portfolio_value_is_invalid(
     monkeypatch: pytest.MonkeyPatch,
     portfolio_values: list[float],
@@ -533,7 +556,9 @@ def test_vectorbtpro_evaluation_backend_fails_when_final_portfolio_value_is_inva
         def get_max_drawdown(self):
             return -0.01
 
-    fake_vbt = SimpleNamespace(Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio()))
+    fake_vbt = SimpleNamespace(
+        Portfolio=SimpleNamespace(from_signals=lambda close, **kwargs: FakePortfolio())
+    )
     fake_pyarrow = SimpleNamespace(__name__="pyarrow")
     monkeypatch.setattr(
         backend_module,
@@ -556,13 +581,23 @@ def test_vectorbtpro_evaluation_backend_fails_when_final_portfolio_value_is_inva
 @pytest.mark.parametrize(
     "portfolio_path",
     [
-        {"portfolio_value": [100.0, 101.0, math.nan], "period_return": [0.0, 0.01, 0.01], "drawdown": [0.0, -0.01, -0.01]},
-        {"portfolio_value": [100.0, 101.0, math.inf], "period_return": [0.0, 0.01, 0.01], "drawdown": [0.0, -0.01, -0.01]},
+        {
+            "portfolio_value": [100.0, 101.0, math.nan],
+            "period_return": [0.0, 0.01, 0.01],
+            "drawdown": [0.0, -0.01, -0.01],
+        },
+        {
+            "portfolio_value": [100.0, 101.0, math.inf],
+            "period_return": [0.0, 0.01, 0.01],
+            "drawdown": [0.0, -0.01, -0.01],
+        },
         {"portfolio_value": [], "period_return": [], "drawdown": []},
         {"period_return": [0.0, 0.01], "drawdown": [0.0, -0.01]},
     ],
 )
-def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(portfolio_path: dict[str, list[float]]):
+def test_perp_ledger_metrics_fail_when_final_portfolio_value_is_invalid(
+    portfolio_path: dict[str, list[float]],
+):
     pd = pytest.importorskip("pandas")
     portfolio_path = pd.DataFrame(portfolio_path)
     trades = pd.DataFrame({"net_pnl": [1.0]})
@@ -633,16 +668,24 @@ def test_perp_ledger_metrics_null_annualized_family_when_return_sample_is_too_sh
     assert "annualized_metrics_insufficient_samples:2:min_required=4" in payload.warnings
 
 
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
 def rows():
     return [
         {"symbol": "BTC-PERP", "timestamp": AS_OF, "close": 100.0},
         {"symbol": "BTC-PERP", "timestamp": DECISION, "close": 101.0},
-        {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": 102.0},
-        {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "close": 103.0},
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "close": 102.0,
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "close": 103.0,
+        },
     ]
 
 
@@ -760,14 +803,24 @@ def test_prepare_inputs_accepts_no_decisions_as_no_trade_evidence(monkeypatch: p
     assert list(prepared.close.columns) == ["BTC-PERP"]
 
 
-def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(monkeypatch: pytest.MonkeyPatch):
+def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(
+    monkeypatch: pytest.MonkeyPatch,
+):
     pd = pytest.importorskip("pandas")
     captured = install_fake_vbt(monkeypatch)
     extra_rows = rows() + [
         {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 200.0},
         {"symbol": "ETH-PERP", "timestamp": DECISION, "close": 201.0},
-        {"symbol": "ETH-PERP", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": 202.0},
-        {"symbol": "ETH-PERP", "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "close": 203.0},
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "close": 202.0,
+        },
+        {
+            "symbol": "ETH-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "close": 203.0,
+        },
     ]
     base_scenario = scenario()
     stress_scenario = base_scenario.model_copy(
@@ -793,13 +846,18 @@ def test_run_prepared_reuses_filtered_inputs_for_multiple_scenarios(monkeypatch:
 
     assert [result.status for result in results] == ["completed", "completed"]
     assert all(result.tables is not None for result in results)
-    assert all(not result.tables.portfolio_path.empty for result in results if result.tables is not None)
+    assert all(
+        not result.tables.portfolio_path.empty for result in results if result.tables is not None
+    )
     assert all(not result.tables.trades.empty for result in results if result.tables is not None)
     assert list(prepared.close.columns) == ["BTC-PERP"]
     assert "ETH-PERP" not in prepared.close.columns
     assert len(captured["calls"]) == 2
     assert [call["close_columns"] for call in captured["calls"]] == [["BTC-PERP"], ["BTC-PERP"]]
-    assert [id(call["close"]) for call in captured["calls"]] == [id(original_close), id(original_close)]
+    assert [id(call["close"]) for call in captured["calls"]] == [
+        id(original_close),
+        id(original_close),
+    ]
     assert captured["calls"][0]["kwargs"]["fees"] == pytest.approx(0.0001)
     assert captured["calls"][0]["kwargs"]["slippage"] == pytest.approx(0.0002)
     assert captured["calls"][1]["kwargs"]["fees"] == pytest.approx(0.0007)
@@ -814,8 +872,8 @@ def test_run_prepared_reuses_multi_symbol_close_in_decision_order(monkeypatch: p
     timestamps = [
         AS_OF,
         DECISION,
-        datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-        datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+        datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
     ]
     multi_symbol_rows = [
         {"symbol": symbol, "timestamp": timestamp, "close": close}
@@ -857,7 +915,10 @@ def test_run_prepared_reuses_multi_symbol_close_in_decision_order(monkeypatch: p
     assert "IWM" not in prepared.close.columns
     assert len(captured["calls"]) == 2
     assert [call["close_columns"] for call in captured["calls"]] == [["SPY", "QQQ"], ["SPY", "QQQ"]]
-    assert [id(call["close"]) for call in captured["calls"]] == [id(original_close), id(original_close)]
+    assert [id(call["close"]) for call in captured["calls"]] == [
+        id(original_close),
+        id(original_close),
+    ]
     assert prepared.close is original_close
     pd.testing.assert_frame_equal(prepared.close, original_snapshot)
 
@@ -895,7 +956,9 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert result.tables.target_positions.loc[0, "target_weight"] == pytest.approx(1.0)
     assert result.tables.target_positions.loc[1, "target_weight"] == pytest.approx(0.0)
     assert result.tables.target_exposure_summary.loc[0, "decision_count"] == 1
-    assert result.tables.target_exposure_summary.loc[0, "target_round_trip_turnover"] == pytest.approx(2.0)
+    assert result.tables.target_exposure_summary.loc[
+        0, "target_round_trip_turnover"
+    ] == pytest.approx(2.0)
     assert set(captured["close_columns"]) == {"BTC-PERP"}
     assert captured["kwargs"]["cash_sharing"] is True
     assert captured["kwargs"]["group_by"] is True
@@ -903,7 +966,7 @@ def test_vectorbtpro_evaluation_backend_returns_metrics_and_tables(monkeypatch: 
     assert captured["kwargs"]["init_cash"] == pytest.approx(100.0)
     assert captured["kwargs"]["fees"] == pytest.approx(0.0001)
     assert captured["kwargs"]["slippage"] == pytest.approx(0.0002)
-    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
     assert captured["kwargs"]["size"].loc[entry_time, "BTC-PERP"] == pytest.approx(1.0)
 
 
@@ -961,7 +1024,9 @@ def test_vectorbtpro_evaluation_backend_accepts_property_paths_and_drawdowns_obj
 
     assert result.status == "completed"
     assert result.tables is not None
-    assert list(result.tables.portfolio_path["scenario_id"].unique()) == ["w/realistic_costs/base_fill"]
+    assert list(result.tables.portfolio_path["scenario_id"].unique()) == [
+        "w/realistic_costs/base_fill"
+    ]
     assert "portfolio_value" in result.tables.portfolio_path.columns
     assert "period_return" in result.tables.portfolio_path.columns
     assert "drawdown" in result.tables.portfolio_path.columns
@@ -1055,9 +1120,9 @@ def test_max_gross_target_weight_allows_same_timestamp_cross_asset_rollover(
     timestamps = [
         AS_OF,
         DECISION,
-        datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-        datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
-        datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+        datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+        datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
     ]
     rollover_rows = [
         {"symbol": symbol, "timestamp": timestamp, "close": close}
@@ -1067,7 +1132,7 @@ def test_max_gross_target_weight_allows_same_timestamp_cross_asset_rollover(
         }.items()
         for timestamp, close in zip(timestamps, closes, strict=True)
     ]
-    later_decision_time = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    later_decision_time = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
     rollover = [
         decision(symbol="BTC-PERP", size=1.0),
         decision(symbol="ETH-PERP", size=1.0).model_copy(
@@ -1085,13 +1150,19 @@ def test_max_gross_target_weight_allows_same_timestamp_cross_asset_rollover(
     assert result.status == "completed"
 
 
-def test_prepared_decision_windows_reject_same_symbol_overlap_after_different_entries(monkeypatch: pytest.MonkeyPatch):
+def test_prepared_decision_windows_reject_same_symbol_overlap_after_different_entries(
+    monkeypatch: pytest.MonkeyPatch,
+):
     install_fake_vbt(monkeypatch)
     overlap_rows = rows() + [
-        {"symbol": "BTC-PERP", "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc), "close": 104.0},
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+            "close": 104.0,
+        },
     ]
     later_decision = decision(size=0.4).model_copy(
-        update={"decision_time": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)}
+        update={"decision_time": datetime(2026, 1, 1, 0, 2, tzinfo=UTC)}
     )
     prepared = VectorBTProEvaluationBackend().prepare_inputs(
         decisions=[decision(size=0.4), later_decision],

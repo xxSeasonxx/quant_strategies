@@ -11,7 +11,6 @@ from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.decisions import StrategyDecision, validate_decision_output
 
-
 ReplayMode = Literal["emitted", "strict"]
 
 
@@ -463,4 +462,6 @@ def _decision_matches_boundary(decision: StrategyDecision, boundary: ReplayBound
 
 
 def _is_aware_datetime(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )

@@ -4,11 +4,11 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PreparedPortfolioInputs,
 )
-from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 
 

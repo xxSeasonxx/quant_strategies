@@ -8,15 +8,35 @@ from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine.executable import base_unsupported_semantics
 from quant_strategies.evaluation._portfolio_common import (
     cost_bps_fraction as _cost_bps_fraction,
+)
+from quant_strategies.evaluation._portfolio_common import (
     downside_deviation as _downside_deviation,
+)
+from quant_strategies.evaluation._portfolio_common import (
     funding_cashflows_frame as _funding_cashflows_frame,
+)
+from quant_strategies.evaluation._portfolio_common import (
     index_position as _index_position,
+)
+from quant_strategies.evaluation._portfolio_common import (
     prepared_decision_windows as _prepared_decision_windows,
+)
+from quant_strategies.evaluation._portfolio_common import (
     required_final_metric as _required_final_metric,
+)
+from quant_strategies.evaluation._portfolio_common import (
     return_coverage as _return_coverage,
+)
+from quant_strategies.evaluation._portfolio_common import (
     sample_stdev as _sample_stdev,
+)
+from quant_strategies.evaluation._portfolio_common import (
     series_values as _series_values,
+)
+from quant_strategies.evaluation._portfolio_common import (
     target_exposure_summary_frame as _target_exposure_summary_frame,
+)
+from quant_strategies.evaluation._portfolio_common import (
     target_positions_frame as _target_positions_frame,
 )
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
@@ -25,16 +45,22 @@ from quant_strategies.evaluation.dependencies import (
     require_evaluation_dependencies,
     require_pandas_dependency,
 )
-from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none, required_drawdown_metric
+from quant_strategies.evaluation.metrics import (
+    MetricValue,
+    finite_metric_or_none,
+    required_drawdown_metric,
+)
+from quant_strategies.evaluation.project_perp_ledger import (
+    PROJECT_PERP_FUNDING_MODEL as _PROJECT_PERP_FUNDING_MODEL,
+)
+from quant_strategies.evaluation.project_perp_ledger import (
+    run_perp_ledger as _run_perp_ledger,
+)
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PortfolioMetricPayload,
     PortfolioTraceTables,
     PreparedPortfolioInputs,
-)
-from quant_strategies.evaluation.project_perp_ledger import (
-    PROJECT_PERP_FUNDING_MODEL as _PROJECT_PERP_FUNDING_MODEL,
-    run_perp_ledger as _run_perp_ledger,
 )
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 
@@ -195,7 +221,9 @@ class VectorBTProEvaluationBackend:
         )
 
 
-def _unsupported_semantics(decisions: list[StrategyDecision], scenario: EvaluationScenario) -> tuple[str, ...]:
+def _unsupported_semantics(
+    decisions: list[StrategyDecision], scenario: EvaluationScenario
+) -> tuple[str, ...]:
     unsupported: list[str] = []
     for item in decisions:
         unsupported.extend(base_unsupported_semantics(item))
@@ -216,7 +244,9 @@ def _unsupported_semantics(decisions: list[StrategyDecision], scenario: Evaluati
     return tuple(dict.fromkeys(unsupported))
 
 
-def _close_frame(pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[str] | None = None) -> Any:
+def _close_frame(
+    pd: Any, rows: Sequence[Mapping[str, Any]], symbols: Sequence[str] | None = None
+) -> Any:
     selected_symbols = None if symbols is None else set(symbols)
     symbol_order = tuple(dict.fromkeys(symbols or ()))
     if selected_symbols is not None and not selected_symbols:
@@ -361,7 +391,9 @@ def _portfolio_metrics(
     trade_count = _required_accessor_value(trades, "count", "trade_count")
     win_rate, win_rate_warnings = _optional_accessor_value(trades, "win_rate", "win_rate")
     warnings.extend(win_rate_warnings)
-    profit_factor, profit_factor_warnings = _optional_accessor_value(trades, "profit_factor", "profit_factor")
+    profit_factor, profit_factor_warnings = _optional_accessor_value(
+        trades, "profit_factor", "profit_factor"
+    )
     warnings.extend(profit_factor_warnings)
 
     payload: dict[str, MetricValue] = {}
@@ -401,7 +433,8 @@ def _portfolio_metrics(
             annualized_return = (
                 None
                 if total is None or total <= -1.0
-                else ((1.0 + total) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
+                else ((1.0 + total) ** (annualization_periods_per_year / coverage.sample_count))
+                - 1.0
             )
             mean_return = sum(observed_returns) / len(observed_returns)
             volatility = (
@@ -409,26 +442,38 @@ def _portfolio_metrics(
                 if len(observed_returns) < 2
                 else _sample_stdev(observed_returns) * math.sqrt(annualization_periods_per_year)
             )
-            downside_deviation = _downside_deviation(observed_returns, annualization_periods_per_year)
+            downside_deviation = _downside_deviation(
+                observed_returns, annualization_periods_per_year
+            )
             payload["annualized_return"] = annualized_return
             payload["volatility"] = volatility
             annualized_mean = mean_return * annualization_periods_per_year
             payload["sharpe"] = None if not volatility else annualized_mean / volatility
-            payload["sortino"] = None if not downside_deviation else annualized_mean / downside_deviation
+            payload["sortino"] = (
+                None if not downside_deviation else annualized_mean / downside_deviation
+            )
             max_dd = finite_metric_or_none(payload["max_drawdown"])
             payload["calmar"] = (
-                None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
+                None
+                if annualized_return is None or max_dd in (None, 0.0)
+                else annualized_return / abs(max_dd)
             )
     return PortfolioMetricPayload(metrics=payload, warnings=tuple(warnings))
 
 
-def _portfolio_tables(pd: Any, portfolio: Any, scenario_id: str, windows: list[dict[str, Any]]) -> PortfolioTraceTables:
+def _portfolio_tables(
+    pd: Any, portfolio: Any, scenario_id: str, windows: list[dict[str, Any]]
+) -> PortfolioTraceTables:
     path = _frame_from_series(pd, _attribute_value_or_none(portfolio, "value"), "portfolio_value")
-    returns = _frame_from_series(pd, _attribute_value_or_none(portfolio, "returns"), "period_return")
+    returns = _frame_from_series(
+        pd, _attribute_value_or_none(portfolio, "returns"), "period_return"
+    )
     drawdown = _frame_from_series(pd, _drawdown_series_or_none(portfolio), "drawdown")
     portfolio_path = path.join(returns, how="outer").join(drawdown, how="outer").reset_index()
     portfolio_path.insert(0, "scenario_id", scenario_id)
-    trades = _records_frame(pd, getattr(getattr(portfolio, "trades", None), "records_readable", None), scenario_id)
+    trades = _records_frame(
+        pd, getattr(getattr(portfolio, "trades", None), "records_readable", None), scenario_id
+    )
     target_positions = _target_positions_frame(pd, windows, scenario_id)
     target_exposure_summary = _target_exposure_summary_frame(pd, windows, scenario_id)
     return PortfolioTraceTables(
@@ -464,7 +509,9 @@ def _required_accessor_value(owner: Any, name: str, metric_name: str) -> Any:
         raise ValueError(f"metric_extraction_failed:{metric_name}:{exc}") from exc
 
 
-def _optional_accessor_value(owner: Any, name: str, metric_name: str) -> tuple[Any | None, tuple[str, ...]]:
+def _optional_accessor_value(
+    owner: Any, name: str, metric_name: str
+) -> tuple[Any | None, tuple[str, ...]]:
     if owner is None:
         return None, (f"metric_extraction_unavailable:{metric_name}:owner_unavailable",)
     try:

@@ -14,7 +14,6 @@ from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.evidence_semantics import causality_evidence_fields
 
-
 RowContractReason = Literal[
     "row_missing_required_field",
     "row_invalid_timestamp",
@@ -376,10 +375,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
 
     @property
     def ranges_by_symbol(self) -> dict[str, dict[str, Any]]:
-        return {
-            symbol: dict(items)
-            for symbol, items in self._range_items
-        }
+        return {symbol: dict(items) for symbol, items in self._range_items}
 
     @property
     def availability_coverage(self) -> dict[str, Any]:
@@ -433,9 +429,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     def _timestamp_status(self) -> str:
         total = len(self)
         aware_timestamps = sum(
-            1
-            for row in self.projection_rows()
-            if _is_aware_datetime(row.get("timestamp"))
+            1 for row in self.projection_rows() if _is_aware_datetime(row.get("timestamp"))
         )
         if total == 0:
             return "empty"
@@ -535,7 +529,9 @@ def _normalize_timestamp_field(
                 reason=issue_reason,
                 field=field_name,
                 symbol=symbol,
-                timestamp=row.get(field_name) if field_name == "timestamp" else row.get("timestamp"),
+                timestamp=row.get(field_name)
+                if field_name == "timestamp"
+                else row.get("timestamp"),
                 severity="error",
                 message=f"{field_name} must be a timezone-aware datetime",
             )
@@ -747,7 +743,9 @@ def _finite_float(value: Any) -> float | None:
 
 
 def _is_aware_datetime(value: Any) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )
 
 
 def _duplicate_timestamp_key(
@@ -768,8 +766,7 @@ def _hashable_json_safe_value(value: Any) -> Any:
     safe_value = json_safe_value(value)
     if isinstance(safe_value, Mapping):
         return tuple(
-            (str(key), _hashable_json_safe_value(item))
-            for key, item in sorted(safe_value.items())
+            (str(key), _hashable_json_safe_value(item)) for key, item in sorted(safe_value.items())
         )
     if isinstance(safe_value, list | tuple):
         return tuple(_hashable_json_safe_value(item) for item in safe_value)
@@ -786,7 +783,9 @@ def _availability_status(*, total: int, valid: int, invalid: int) -> str:
     return "missing"
 
 
-def _range_items(rows: Sequence[Mapping[str, Any]]) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
+def _range_items(
+    rows: Sequence[Mapping[str, Any]],
+) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
     ranges: dict[str, dict[str, Any]] = {}
     for row in rows:
         symbol = str(row.get("symbol") or "")
@@ -832,7 +831,9 @@ def _freeze_storage_value(value: Any) -> Any:
     return value
 
 
-def _mapping_items(mapping: Mapping[str, Mapping[str, Any]]) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
+def _mapping_items(
+    mapping: Mapping[str, Mapping[str, Any]],
+) -> tuple[tuple[str, tuple[tuple[str, Any], ...]], ...]:
     return tuple((key, tuple(value.items())) for key, value in mapping.items())
 
 

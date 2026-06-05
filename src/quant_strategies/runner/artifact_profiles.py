@@ -9,9 +9,11 @@ from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value, normalized_rows_sha256
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, trade_result_metric_semantics
+from quant_strategies.evidence_semantics import (
+    replayable_from_artifacts_for_profile,
+    trade_result_metric_semantics,
+)
 from quant_strategies.runner.config import RunConfig
-
 
 SUMMARY_SAMPLE_SIZE = 5
 

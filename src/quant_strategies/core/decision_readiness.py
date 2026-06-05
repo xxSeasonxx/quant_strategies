@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from quant_strategies.decisions import StrategyDecision
 
-
 _INFERRED_REQUIRED_FIELDS_BY_DATA_KIND = {
     "crypto_perp_funding": (
         "close",

@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
 from quant_strategies.evaluation.config import EvaluationScenarioConfig, EvaluationWindow
 
-
 CostScenario = str
 FillScenario = str
 

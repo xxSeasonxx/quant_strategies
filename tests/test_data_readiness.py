@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from quant_strategies.core.errors import DataReadinessError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.runner import data_readiness
-from quant_strategies.core.errors import DataReadinessError
 
-
-DECISION_TIME = datetime(2024, 1, 1, tzinfo=timezone.utc)
+DECISION_TIME = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def config() -> SimpleNamespace:
@@ -63,7 +62,10 @@ def test_decision_as_of_time_checks_completed_row_against_later_decision_time():
     data_readiness.assert_decision_rows_ready(
         [
             row(timestamp=DECISION_TIME, available_at=DECISION_TIME + timedelta(minutes=1)),
-            row(timestamp=DECISION_TIME + timedelta(minutes=1), available_at=DECISION_TIME + timedelta(minutes=2)),
+            row(
+                timestamp=DECISION_TIME + timedelta(minutes=1),
+                available_at=DECISION_TIME + timedelta(minutes=2),
+            ),
         ],
         [
             decision(
@@ -126,7 +128,9 @@ def test_normalized_rows_path_uses_shared_timestamp_normalization(monkeypatch: p
     monkeypatch.setattr(
         data_readiness,
         "parse_aware_datetime",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not parse normalized rows")
+        ),
     )
 
     data_readiness.assert_decision_rows_ready(normalized, [decision()])

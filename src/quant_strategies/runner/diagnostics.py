@@ -12,7 +12,6 @@ from quant_strategies.evidence_semantics import replayable_from_artifacts_for_pr
 from quant_strategies.runner.config import RunConfig
 from quant_strategies.runner.economic_metrics import diagnostic_slices
 
-
 SAMPLE_TRADE_FIELDS = (
     "decision_id",
     "symbol",
@@ -103,7 +102,8 @@ def _holding_period(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     seconds = [
         elapsed
         for trade in trades
-        if (elapsed := _elapsed_seconds(trade.get("entry_time"), trade.get("exit_time"))) is not None
+        if (elapsed := _elapsed_seconds(trade.get("entry_time"), trade.get("exit_time")))
+        is not None
     ]
     if not seconds:
         return {
@@ -116,11 +116,7 @@ def _holding_period(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
 
     ordered = sorted(seconds)
     mid = len(ordered) // 2
-    median = (
-        ordered[mid]
-        if len(ordered) % 2
-        else (ordered[mid - 1] + ordered[mid]) / 2.0
-    )
+    median = ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2.0
     return {
         "count": len(seconds),
         "min_seconds": min(seconds),
@@ -176,7 +172,9 @@ def _cost_funding_breakdown(trade_result: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _sample_trades(trades: Sequence[Mapping[str, Any]], cap: int) -> dict[str, list[dict[str, Any]]]:
+def _sample_trades(
+    trades: Sequence[Mapping[str, Any]], cap: int
+) -> dict[str, list[dict[str, Any]]]:
     winners = sorted(trades, key=lambda item: _float_value(item.get("net_return")), reverse=True)
     losers = sorted(trades, key=lambda item: _float_value(item.get("net_return")))
     return {

@@ -44,10 +44,10 @@ work, or depend on unmodeled flat exits/signal flips for most return, reject
 this port before any promotion decision.
 """
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import math
 from typing import Any
 
 from quant_strategies.decisions import (
@@ -57,7 +57,6 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-
 
 __all__ = ["generate_decisions", "validate_params"]
 
@@ -228,7 +227,9 @@ def generate_decisions(
         bar_minutes = _median_bar_minutes(rows)
         hold_signal_bars = max(
             1,
-            math.ceil(parsed_params.max_hold_bars * bar_minutes / parsed_params.decision_interval_minutes),
+            math.ceil(
+                parsed_params.max_hold_bars * bar_minutes / parsed_params.decision_interval_minutes
+            ),
         )
         next_allowed_index = 0
 
@@ -255,7 +256,9 @@ def generate_decisions(
             decisions.append(decision)
             next_allowed_index = index + max(hold_signal_bars, parsed_params.cooldown_bars) + 1
 
-    return sorted(decisions, key=lambda decision: (decision.decision_time, decision.instrument.symbol))
+    return sorted(
+        decisions, key=lambda decision: (decision.decision_time, decision.instrument.symbol)
+    )
 
 
 def _parse_params(params: Mapping[str, object]) -> _Params:
@@ -264,13 +267,17 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
     parsed = _Params(
         symbols=_symbols_param(params.get("symbols", _DEFAULT_SYMBOLS)),
         min_votes=_bounded_int(params.get("min_votes", 4), "min_votes", minimum=1, maximum=6),
-        base_position_pct=_positive_float(params.get("base_position_pct", 0.08), "base_position_pct"),
+        base_position_pct=_positive_float(
+            params.get("base_position_pct", 0.08), "base_position_pct"
+        ),
         cooldown_bars=_non_negative_int(params.get("cooldown_bars", 2), "cooldown_bars"),
         decision_interval_minutes=_positive_int(
             params.get("decision_interval_minutes", 60),
             "decision_interval_minutes",
         ),
-        decision_lag_minutes=_non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes"),
+        decision_lag_minutes=_non_negative_int(
+            params.get("decision_lag_minutes", 1), "decision_lag_minutes"
+        ),
         max_hold_bars=_positive_int(params.get("max_hold_bars", 720), "max_hold_bars"),
         atr_stop_mult=_positive_float(params.get("atr_stop_mult", 5.5), "atr_stop_mult"),
         rsi_period=_positive_int(params.get("rsi_period", 8), "rsi_period"),
@@ -278,9 +285,15 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
             params.get("bb_percentile_threshold", 85.0),
             "bb_percentile_threshold",
         ),
-        momentum_long_hours=_positive_int(params.get("momentum_long_hours", 12), "momentum_long_hours"),
-        momentum_short_hours=_positive_int(params.get("momentum_short_hours", 6), "momentum_short_hours"),
-        vshort_threshold_mult=_positive_float(params.get("vshort_threshold_mult", 0.5), "vshort_threshold_mult"),
+        momentum_long_hours=_positive_int(
+            params.get("momentum_long_hours", 12), "momentum_long_hours"
+        ),
+        momentum_short_hours=_positive_int(
+            params.get("momentum_short_hours", 6), "momentum_short_hours"
+        ),
+        vshort_threshold_mult=_positive_float(
+            params.get("vshort_threshold_mult", 0.5), "vshort_threshold_mult"
+        ),
         vol_lookback_hours=_positive_int(
             _param_or_alias(params, "vol_lookback_hours", "dynamic_threshold_window_hours", 48),
             "vol_lookback_hours",
@@ -289,7 +302,9 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
             params.get("base_momentum_threshold", 0.012),
             "base_momentum_threshold",
         ),
-        target_volatility=_positive_float(params.get("target_volatility", 0.015), "target_volatility"),
+        target_volatility=_positive_float(
+            params.get("target_volatility", 0.015), "target_volatility"
+        ),
         dynamic_threshold_floor=_positive_float(
             params.get("dynamic_threshold_floor", 0.006),
             "dynamic_threshold_floor",
@@ -312,7 +327,9 @@ def _parse_params(params: Mapping[str, object]) -> _Params:
         bb_std_mult=_positive_float(params.get("bb_std_mult", 1.0), "bb_std_mult"),
     )
     if parsed.dynamic_threshold_floor > parsed.dynamic_threshold_ceiling:
-        raise ValueError("dynamic_threshold_floor must be less than or equal to dynamic_threshold_ceiling")
+        raise ValueError(
+            "dynamic_threshold_floor must be less than or equal to dynamic_threshold_ceiling"
+        )
     return parsed
 
 
@@ -408,12 +425,31 @@ def _hourly_snapshots(rows: list[_InputRow], interval_minutes: int) -> list[_Hou
         high_row = max(window, key=lambda item: item.high)
         low_row = min(window, key=lambda item: item.low)
         close_row = window[-1]
-        funding_row = next((item for item in reversed(window) if item.funding_rate is not None), None)
+        funding_row = next(
+            (item for item in reversed(window) if item.funding_rate is not None), None
+        )
         observations = (
-            ObservationRef(symbol=row.symbol, timestamp=open_row.timestamp, field="open", source="strategy_input"),
-            ObservationRef(symbol=row.symbol, timestamp=high_row.timestamp, field="high", source="strategy_input"),
-            ObservationRef(symbol=row.symbol, timestamp=low_row.timestamp, field="low", source="strategy_input"),
-            ObservationRef(symbol=row.symbol, timestamp=close_row.timestamp, field="close", source="strategy_input"),
+            ObservationRef(
+                symbol=row.symbol,
+                timestamp=open_row.timestamp,
+                field="open",
+                source="strategy_input",
+            ),
+            ObservationRef(
+                symbol=row.symbol,
+                timestamp=high_row.timestamp,
+                field="high",
+                source="strategy_input",
+            ),
+            ObservationRef(
+                symbol=row.symbol, timestamp=low_row.timestamp, field="low", source="strategy_input"
+            ),
+            ObservationRef(
+                symbol=row.symbol,
+                timestamp=close_row.timestamp,
+                field="close",
+                source="strategy_input",
+            ),
         )
         if funding_row is not None:
             observations = (
@@ -774,7 +810,10 @@ def _dynamic_threshold(
 ) -> _DynamicThreshold | None:
     if len(closes) <= vol_lookback_hours:
         return None
-    returns = [math.log(closes[index] / closes[index - 1]) for index in range(len(closes) - vol_lookback_hours, len(closes))]
+    returns = [
+        math.log(closes[index] / closes[index - 1])
+        for index in range(len(closes) - vol_lookback_hours, len(closes))
+    ]
     mean = sum(returns) / len(returns)
     variance = sum((value - mean) ** 2 for value in returns) / len(returns)
     realized_vol = math.sqrt(variance)
@@ -934,7 +973,9 @@ def _optional_finite_float(value: object, name: str) -> float | None:
     return parsed
 
 
-def _param_or_alias(params: Mapping[str, object], canonical: str, alias: str, default: object) -> object:
+def _param_or_alias(
+    params: Mapping[str, object], canonical: str, alias: str, default: object
+) -> object:
     if canonical in params:
         return params[canonical]
     if alias in params:

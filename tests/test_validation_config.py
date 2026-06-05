@@ -6,12 +6,20 @@ from pathlib import Path
 import pytest
 
 from quant_strategies.core.config import StrategyExecutionSpec
-from quant_strategies.validation.config import load_validation_config, resolve_validation_config_path
+from quant_strategies.validation.config import (
+    load_validation_config,
+    resolve_validation_config_path,
+)
 from quant_strategies.validation.errors import ValidationConfigError
 
 
 def test_shared_config_primitives_are_neutral_not_runner_owned():
-    from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig, WindowedDataConfig
+    from quant_strategies.core.config import (
+        CostModelConfig,
+        DataConfig,
+        FillModelConfig,
+        WindowedDataConfig,
+    )
     from quant_strategies.runner import config as runner_config
     from quant_strategies.validation.config import ScenarioRunConfig, ValidationConfig
 
@@ -445,7 +453,9 @@ def test_load_validation_config_rejects_strategy_path_outside_config_directory(t
     outside.write_text("def generate_decisions(rows, params):\n    return []\n")
     write_config(candidate / "validation.toml", strategy_path="../outside.py")
 
-    with pytest.raises(ValidationConfigError, match="strategy_path must resolve inside config directory"):
+    with pytest.raises(
+        ValidationConfigError, match="strategy_path must resolve inside config directory"
+    ):
         load_validation_config(candidate / "validation.toml")
 
 
@@ -457,7 +467,9 @@ def test_load_validation_config_rejects_absolute_strategy_path_outside_config_di
     outside.write_text("def generate_decisions(rows, params):\n    return []\n")
     write_config(candidate / "validation.toml", strategy_path=str(outside))
 
-    with pytest.raises(ValidationConfigError, match="strategy_path must resolve inside config directory"):
+    with pytest.raises(
+        ValidationConfigError, match="strategy_path must resolve inside config directory"
+    ):
         load_validation_config(candidate / "validation.toml")
 
 
@@ -475,7 +487,9 @@ def test_load_validation_config_rejects_absolute_results_dir_outside_config_dire
         )
     )
 
-    with pytest.raises(ValidationConfigError, match="output.results_dir must resolve inside config directory"):
+    with pytest.raises(
+        ValidationConfigError, match="output.results_dir must resolve inside config directory"
+    ):
         load_validation_config(config_path)
 
 
@@ -484,9 +498,10 @@ def test_example_validation_config_keeps_candidate_local_results_dir():
 
     config = load_validation_config(config_path)
 
-    assert config.output.results_dir == (
-        config_path.parent / "validation_results" / "simple_momentum"
-    ).resolve()
+    assert (
+        config.output.results_dir
+        == (config_path.parent / "validation_results" / "simple_momentum").resolve()
+    )
 
 
 def test_load_validation_config_rejects_missing_windows(tmp_path: Path):
@@ -529,11 +544,11 @@ def test_load_validation_config_rejects_duplicate_window_ids(tmp_path: Path):
         config_path.read_text().replace(
             'end = "2026-06-30"\n\n[data]',
             'end = "2026-06-30"\n\n'
-            '[[windows]]\n'
+            "[[windows]]\n"
             'id = "validation_2026_h1"\n'
             'start = "2026-07-01"\n'
             'end = "2026-12-31"\n\n'
-            '[data]',
+            "[data]",
         )
     )
 
@@ -548,17 +563,19 @@ def test_load_validation_config_rejects_sanitized_window_artifact_collisions(
     config_path = candidate / "validation.toml"
     write_config(config_path)
     config_path.write_text(
-        config_path.read_text().replace(
+        config_path.read_text()
+        .replace(
             'id = "validation_2026_h1"',
             'id = "a b"',
-        ).replace(
+        )
+        .replace(
             'end = "2026-06-30"\n\n[data]',
             'end = "2026-06-30"\n\n'
-            '[[windows]]\n'
+            "[[windows]]\n"
             'id = "a:b"\n'
             'start = "2026-07-01"\n'
             'end = "2026-12-31"\n\n'
-            '[data]',
+            "[data]",
         )
     )
 
@@ -573,17 +590,19 @@ def test_load_validation_config_rejects_casefold_window_artifact_collisions(
     config_path = candidate / "validation.toml"
     write_config(config_path)
     config_path.write_text(
-        config_path.read_text().replace(
+        config_path.read_text()
+        .replace(
             'id = "validation_2026_h1"',
             'id = "A"',
-        ).replace(
+        )
+        .replace(
             'end = "2026-06-30"\n\n[data]',
             'end = "2026-06-30"\n\n'
-            '[[windows]]\n'
+            "[[windows]]\n"
             'id = "a"\n'
             'start = "2026-07-01"\n'
             'end = "2026-12-31"\n\n'
-            '[data]',
+            "[data]",
         )
     )
 
@@ -598,17 +617,19 @@ def test_load_validation_config_rejects_window_artifact_file_directory_conflicts
     config_path = candidate / "validation.toml"
     write_config(config_path)
     config_path.write_text(
-        config_path.read_text().replace(
+        config_path.read_text()
+        .replace(
             'id = "validation_2026_h1"',
             'id = "a"',
-        ).replace(
+        )
+        .replace(
             'end = "2026-06-30"\n\n[data]',
             'end = "2026-06-30"\n\n'
-            '[[windows]]\n'
+            "[[windows]]\n"
             'id = "a.jsonl/b"\n'
             'start = "2026-07-01"\n'
             'end = "2026-12-31"\n\n'
-            '[data]',
+            "[data]",
         )
     )
 

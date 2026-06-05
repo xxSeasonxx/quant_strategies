@@ -16,7 +16,6 @@ from quant_strategies.core.config import (
 )
 from quant_strategies.core.errors import ConfigError
 
-
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
 
 _GENERATED_OUTPUT_ROOT = "results"

@@ -33,9 +33,9 @@ fixing proxy before adding filters or tuning windows.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from datetime import date, datetime, time, timedelta, timezone
 import math
+from collections.abc import Mapping, Sequence
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from quant_strategies.decisions import (
@@ -45,7 +45,6 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-
 
 __all__ = ["generate_decisions", "validate_params"]
 
@@ -108,7 +107,7 @@ def generate_decisions(
         zone = ZoneInfo(zone_name)
         for local_date in sorted(local_dates_by_fix[fix_name]):
             fix_local = datetime.combine(local_date, local_fix_time, tzinfo=zone)
-            fix_utc = fix_local.astimezone(timezone.utc)
+            fix_utc = fix_local.astimezone(UTC)
             decision_time = fix_utc - timedelta(minutes=decision_lead_minutes)
             as_of_time = decision_time - timedelta(minutes=observation_lag_minutes)
             for symbol in basket_symbols:
@@ -132,7 +131,9 @@ def generate_decisions(
                     )
                 )
 
-    return sorted(decisions, key=lambda decision: (decision.decision_time, decision.instrument.symbol))
+    return sorted(
+        decisions, key=lambda decision: (decision.decision_time, decision.instrument.symbol)
+    )
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:
@@ -229,7 +230,7 @@ def _utc_datetime(value: object) -> datetime:
         raise TypeError(f"expected datetime timestamp, got {type(value).__name__}")
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("timestamp must be timezone-aware")
-    return value.astimezone(timezone.utc)
+    return value.astimezone(UTC)
 
 
 def _positive_finite_float(value: object) -> float:
@@ -256,7 +257,9 @@ def _decision(
         instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
         decision_time=decision_time,
         as_of_time=as_of_time,
-        target=PositionTarget(direction=_sell_usd_direction(symbol), sizing_kind="target_weight", size=weight),
+        target=PositionTarget(
+            direction=_sell_usd_direction(symbol), sizing_kind="target_weight", size=weight
+        ),
         exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
         observations=(
             ObservationRef(

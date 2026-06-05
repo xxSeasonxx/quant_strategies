@@ -5,9 +5,8 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import ClassVar, TextIO
-
 
 StageEvent = dict[str, object]
 StageEventSink = Callable[[StageEvent], None]
@@ -70,7 +69,7 @@ class StageEmitter:
                 "event": self.event_type,
                 "stage": stage,
                 "status": status,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 **fields,
             }
         )

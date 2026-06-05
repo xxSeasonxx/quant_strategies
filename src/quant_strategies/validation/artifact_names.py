@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-
 _VALIDATION_SCENARIO_KINDS = (
     "base",
     "realistic_costs",
@@ -41,9 +40,13 @@ def validation_artifact_path_collisions(window_ids: Sequence[str]) -> tuple[str,
     for index, (left_id, left_path, left_parts) in enumerate(entries):
         for right_id, right_path, right_parts in entries[index + 1 :]:
             if _is_prefix(left_parts, right_parts):
-                collisions.append(f"{left_id!r}:{left_path!r} is a parent of {right_id!r}:{right_path!r}")
+                collisions.append(
+                    f"{left_id!r}:{left_path!r} is a parent of {right_id!r}:{right_path!r}"
+                )
             elif _is_prefix(right_parts, left_parts):
-                collisions.append(f"{right_id!r}:{right_path!r} is a parent of {left_id!r}:{left_path!r}")
+                collisions.append(
+                    f"{right_id!r}:{right_path!r} is a parent of {left_id!r}:{left_path!r}"
+                )
 
     return tuple(dict.fromkeys(collisions))
 

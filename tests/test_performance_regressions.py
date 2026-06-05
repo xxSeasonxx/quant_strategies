@@ -3,20 +3,20 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.causality import check_hidden_lookahead
-from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
-from quant_strategies.core import execution
-from quant_strategies.runner import run_config
-from quant_strategies.core.data_loader import LoadedData
 from engine_helpers import decision_for
+from quant_strategies.causality import check_hidden_lookahead
+from quant_strategies.core import execution
+from quant_strategies.core.data_loader import LoadedData
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
+from quant_strategies.runner import run_config
 
 
 def large_engine_request(
@@ -25,7 +25,7 @@ def large_engine_request(
     bars_per_symbol: int = 2_000,
     decisions_per_symbol: int = 100,
 ) -> EvaluationRequest:
-    start = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
     bars: list[Bar] = []
     decisions: list[StrategyDecision] = []
     for symbol_index in range(symbol_count):
@@ -92,7 +92,7 @@ def runner_config(tmp_path: Path) -> Path:
     strategy.write_text(strategy_source())
     config_path = tmp_path / "run.toml"
     config_path.write_text(
-        '''
+        """
 strategy_path = "strategies/summary_profile.py"
 strategy_id = "summary_profile"
 
@@ -117,13 +117,13 @@ slippage_bps_per_side = 0.0
 [output]
 results_dir = "results"
 artifact_profile = "summary"
-'''.lstrip()
+""".lstrip()
     )
     return config_path
 
 
 def runner_rows(symbol_count: int = 5, bars_per_symbol: int = 400) -> list[dict[str, object]]:
-    start = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
     rows: list[dict[str, object]] = []
     for symbol_index in range(symbol_count):
         symbol = f"SYM{symbol_index:03d}"
@@ -148,7 +148,9 @@ def artifact_bytes(result_dir: Path) -> int:
     return sum(path.stat().st_size for path in result_dir.rglob("*") if path.is_file())
 
 
-def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, ...]) -> list[dict[str, Any]]:
+def minimal_trace_table_artifacts(
+    result_dir: Path, *, scenario_ids: tuple[str, ...]
+) -> list[dict[str, Any]]:
     pd = pytest.importorskip("pandas")
     from quant_strategies.evaluation.artifacts import write_parquet_artifact
 
@@ -159,7 +161,7 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
-                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc)] * len(scenario_ids),
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=UTC)] * len(scenario_ids),
                     "portfolio_value": [100.0] * len(scenario_ids),
                     "period_return": [0.0] * len(scenario_ids),
                     "drawdown": [0.0] * len(scenario_ids),
@@ -171,7 +173,9 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
         write_parquet_artifact(
             result_dir,
             "tables/trades.parquet",
-            pd.DataFrame({"scenario_id": list(scenario_ids), "trade_id": list(range(len(scenario_ids)))}),
+            pd.DataFrame(
+                {"scenario_id": list(scenario_ids), "trade_id": list(range(len(scenario_ids)))}
+            ),
             artifact_kind="trades",
             scenario_ids=scenario_ids,
         ),
@@ -181,11 +185,11 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
-                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc)] * len(scenario_ids),
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=UTC)] * len(scenario_ids),
                     "asset": ["BTC-PERP"] * len(scenario_ids),
                     "target_weight": [0.25] * len(scenario_ids),
                     "event": ["entry"] * len(scenario_ids),
-                    "decision_time": [datetime(2026, 1, 1, tzinfo=timezone.utc)] * len(scenario_ids),
+                    "decision_time": [datetime(2026, 1, 1, tzinfo=UTC)] * len(scenario_ids),
                     "direction": ["long"] * len(scenario_ids),
                 }
             ),
@@ -226,8 +230,8 @@ def minimal_trace_table_artifacts(result_dir: Path, *, scenario_ids: tuple[str, 
 
 
 def evaluation_rows() -> list[dict[str, Any]]:
-    as_of = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-    decision = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+    as_of = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    decision = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
     return [
         {
             "symbol": "BTC-PERP",
@@ -251,8 +255,8 @@ def evaluation_rows() -> list[dict[str, Any]]:
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "open": 102.0,
             "high": 102.0,
             "low": 102.0,
@@ -261,8 +265,8 @@ def evaluation_rows() -> list[dict[str, Any]]:
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "open": 103.0,
             "high": 103.0,
             "low": 103.0,
@@ -295,7 +299,7 @@ def write_evaluation_candidate(tmp_path: Path) -> Path:
         "    )]\n"
     )
     (candidate / "evaluation.toml").write_text(
-        '''
+        """
 strategy_path = "strategy.py"
 strategy_id = "demo"
 
@@ -326,7 +330,7 @@ annualization_periods_per_year = 365
 
 [output]
 results_dir = "evaluation_results/demo"
-'''.lstrip()
+""".lstrip()
     )
     return candidate
 
@@ -334,9 +338,20 @@ results_dir = "evaluation_results/demo"
 class FakeEvaluationBackend:
     name = "fake_evaluation"
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
         pd = pytest.importorskip("pandas")
-        from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
+        from quant_strategies.evaluation.results import (
+            PortfolioEvaluationResult,
+            PortfolioTraceTables,
+        )
 
         frame = pd.DataFrame(
             {
@@ -359,7 +374,11 @@ class FakeEvaluationBackend:
                 }
             ),
             target_exposure_summary=pd.DataFrame(
-                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "asset": ["BTC-PERP"],
+                    "decision_count": [1],
+                }
             ),
             funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
@@ -403,7 +422,9 @@ def test_summary_profile_artifacts_stay_under_byte_budget(
     monkeypatch: pytest.MonkeyPatch,
 ):
     config_path = runner_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=runner_rows()))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=runner_rows())
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -431,11 +452,25 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             self.prepare_calls = 0
             self.row_ids: list[int] = []
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             return {"decisions": decisions, "rows": rows}
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.backend_calls += 1
             self.row_ids.append(id(rows))
             return super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
@@ -478,14 +513,18 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
 
 def test_strip_trace_tables_removes_dataframe_payload_from_summaries():
     pd = pytest.importorskip("pandas")
-    from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
     from quant_strategies.evaluation._pipeline import _strip_trace_tables
+    from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 
     tables = PortfolioTraceTables(
         portfolio_path=pd.DataFrame({"scenario_id": ["base"], "portfolio_value": [100.0]}),
         trades=pd.DataFrame({"scenario_id": ["base"], "trade_id": [1]}),
-        target_positions=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "target_weight": [0.25]}),
-        target_exposure_summary=pd.DataFrame({"scenario_id": ["base"], "asset": ["BTC-PERP"], "decision_count": [1]}),
+        target_positions=pd.DataFrame(
+            {"scenario_id": ["base"], "asset": ["BTC-PERP"], "target_weight": [0.25]}
+        ),
+        target_exposure_summary=pd.DataFrame(
+            {"scenario_id": ["base"], "asset": ["BTC-PERP"], "decision_count": [1]}
+        ),
         funding_cashflows=pd.DataFrame({"scenario_id": []}),
     )
     result = PortfolioEvaluationResult(
@@ -522,13 +561,17 @@ def test_evaluation_manifest_uses_table_hashes_without_rehashing_parquet(
     def fail_on_parquet_hash(path: Path | str) -> str:
         materialized = Path(path)
         if materialized.suffix == ".parquet":
-            raise AssertionError(f"Parquet trace table was rehashed during manifest write: {materialized}")
+            raise AssertionError(
+                f"Parquet trace table was rehashed during manifest write: {materialized}"
+            )
         return original_artifact_file_sha256(materialized)
 
     def fail_on_parquet_provenance_hash(path: Path | str) -> str:
         materialized = Path(path)
         if materialized.suffix == ".parquet":
-            raise AssertionError(f"Parquet trace table was rehashed in artifact inventory: {materialized}")
+            raise AssertionError(
+                f"Parquet trace table was rehashed in artifact inventory: {materialized}"
+            )
         return original_provenance_file_sha256(materialized)
 
     monkeypatch.setattr(evaluation_artifacts, "file_sha256", fail_on_parquet_hash)
@@ -559,14 +602,18 @@ def test_evaluation_manifest_uses_table_hashes_without_rehashing_parquet(
     public_table_artifacts = [dict(item) for item in table_artifacts]
 
     assert manifest["tables"] == public_table_artifacts
-    assert manifest["trace_artifacts"]["total_byte_size"] == sum(item["byte_size"] for item in public_table_artifacts)
-    assert not any(path.startswith("tables/") and path.endswith(".parquet") for path in manifest["artifacts"])
+    assert manifest["trace_artifacts"]["total_byte_size"] == sum(
+        item["byte_size"] for item in public_table_artifacts
+    )
+    assert not any(
+        path.startswith("tables/") and path.endswith(".parquet") for path in manifest["artifacts"]
+    )
 
 
 def test_hidden_lookahead_grouped_replay_completes_under_runtime_budget():
     row_count = 50_000
     decision_count = 5_000
-    start_time = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    start_time = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
     as_of_time = start_time + timedelta(minutes=9)
     rows = [
         {

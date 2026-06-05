@@ -3,20 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
-from quant_strategies.data_contract import NormalizedRows
+import quant_strategies.core.execution as execution
 import quant_strategies.runner.artifacts as artifacts
 from quant_strategies.core import engine_runner
-import quant_strategies.core.execution as execution
-from quant_strategies.runner import RunOutcome, RunResult, config as config_module, run_config
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
-
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.runner import RunOutcome, RunResult, run_config
+from quant_strategies.runner import config as config_module
 
 SUMMARY_KEYS = {
     "strategy_id",
@@ -66,7 +66,7 @@ def rows(
     include_available_at: bool = True,
     readiness_lag: timedelta = timedelta(0),
 ) -> list[dict[str, object]]:
-    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 1, tzinfo=UTC)
     result: list[dict[str, object]] = []
     for index, close in enumerate(closes):
         timestamp = start + timedelta(days=index)
@@ -149,7 +149,9 @@ def write_config(
     diagnostic_sample_trades: int | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
-    artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    artifact_profile_line = (
+        f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    )
     diagnostic_sample_trades_line = (
         f"diagnostic_sample_trades = {diagnostic_sample_trades}\n"
         if diagnostic_sample_trades is not None
@@ -189,7 +191,7 @@ quick_checks = {str(quick_checks).lower()}
 
 def read_summary(result_dir: Path) -> dict[str, object]:
     summary = json.loads((result_dir / "summary.json").read_text())
-    assert SUMMARY_KEYS <= set(summary)
+    assert set(summary) >= SUMMARY_KEYS
     assert all((result_dir / name).exists() for name in summary["artifacts"])
     if summary["stage"] == "completed":
         assert summary["failure_stage"] is None
@@ -262,7 +264,10 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         assert semantics["unit"] == "decimal_fraction"
         assert semantics["base"] == "signed target-weighted trade activity; not portfolio NAV"
         assert semantics["backend"] == "execution_kernel"
-        assert semantics["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+        assert (
+            semantics["comparability"]
+            == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+        )
         assert semantics["tolerance"] is None
         assert semantics["asymmetry"]
 
@@ -303,7 +308,11 @@ def assert_no_mode_fields(value: object) -> None:
 def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -412,7 +421,9 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
     assert "evidence.json" not in names
 
     summary = read_summary(result.result_dir)
-    assert_assessment(result, summary, assessment_status="quick_check_passed", artifact_profile="summary")
+    assert_assessment(
+        result, summary, assessment_status="quick_check_passed", artifact_profile="summary"
+    )
     assert summary["engine"]["passed"] is True
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
@@ -542,14 +553,22 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert "engine_request.json" not in run_manifest["artifacts"]
 
 
-def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_summary_profile_does_not_build_full_evidence_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
     monkeypatch.setattr(
         engine_runner,
         "evidence_json",
-        lambda packet: (_ for _ in ()).throw(AssertionError("summary mode should not serialize evidence")),
+        lambda packet: (_ for _ in ()).throw(
+            AssertionError("summary mode should not serialize evidence")
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -559,10 +578,16 @@ def test_summary_profile_does_not_build_full_evidence_json(tmp_path: Path, monke
     assert not (result.result_dir / "evidence.json").exists()
 
 
-def test_diagnostics_completion_is_not_validation_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_diagnostics_completion_is_not_validation_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, quick_checks=False)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -594,7 +619,11 @@ def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, quick_checks=False)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -652,7 +681,11 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "    )]\n"
     )
     config_path = write_config(tmp_path, quick_checks=False)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -675,10 +708,16 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     assert trade["decision_metadata"]["funding_pressure_bps"] == 3.25
 
 
-def test_quick_check_failure_keeps_completed_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_quick_check_failure_keeps_completed_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, quick_checks=True)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 90.0, 89.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -705,7 +744,11 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
     config_path = write_config(tmp_path, quick_checks=True)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -823,7 +866,9 @@ def test_run_cli_exit_code_prefers_derived_succeeded_contract():
     assert cli._run_exit_code(result) == 1
 
 
-def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_strategy_import_failure_prevents_data_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("VALUE = 1\n")
@@ -840,7 +885,9 @@ def test_strategy_import_failure_prevents_data_load(tmp_path: Path, monkeypatch:
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "strategy_import"
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
     assert (result.result_dir / "run_manifest.json").exists()
 
 
@@ -856,7 +903,9 @@ def test_strategy_path_directory_failure_writes_summary(tmp_path: Path):
     assert not (result.result_dir / "strategy_snapshot.py").exists()
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "strategy_import"
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
     assert (result.result_dir / "run_manifest.json").exists()
 
 
@@ -875,7 +924,9 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(1.10, 1.11, 1.12, 1.13, quotes=True, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(1.10, 1.11, 1.12, 1.13, quotes=True, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -913,7 +964,9 @@ def test_run_config_marks_complete_available_at_coverage(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -947,7 +1000,9 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
     normalized_rows_calls = 0
     original_from_rows = NormalizedRows.from_rows
@@ -976,7 +1031,9 @@ def test_run_config_fails_row_contract_on_partial_available_at(
     config_path = write_config(tmp_path, artifact_profile="summary")
     partial_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     partial_rows[1].pop("available_at")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=partial_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=partial_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1011,7 +1068,9 @@ def test_run_config_rejects_invalid_available_at_for_causality_claim(
     config_path = write_config(tmp_path)
     invalid_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     invalid_rows[1]["available_at"] = "not-a-datetime"
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=invalid_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=invalid_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1102,8 +1161,7 @@ def test_runner_catches_hidden_lookahead_before_request_build(
         for event in events
     )
     assert not any(
-        event["stage"] == "causality_check" and event["status"] == "completed"
-        for event in events
+        event["stage"] == "causality_check" and event["status"] == "completed" for event in events
     )
 
 
@@ -1247,7 +1305,9 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
     events: list[dict[str, object]] = []
 
@@ -1281,7 +1341,9 @@ def test_run_config_records_row_contract_feedback(
     contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
     contract_rows[1].pop("high")
     contract_rows[2]["timestamp"] = contract_rows[1]["timestamp"]
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1315,7 +1377,9 @@ def test_run_config_records_engine_invalid_row_contract_before_engine_request(
     config_path = write_config(tmp_path)
     contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
     contract_rows[1]["close"] = 0.0
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1348,7 +1412,9 @@ def test_run_config_requires_crypto_funding_event_indicator(
     for row in contract_rows:
         row["symbol"] = "BTC-PERP"
         row.pop("has_funding_event")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1357,9 +1423,7 @@ def test_run_config_requires_crypto_funding_event_indicator(
     row_contract = summary["row_contract"]
     assert row_contract["status"] == "failed"
     assert row_contract["missing_required_fields"] == {"has_funding_event": 4}
-    assert row_contract["quant_data_feedback"] == [
-        "row_missing_required_field:has_funding_event:4"
-    ]
+    assert row_contract["quant_data_feedback"] == ["row_missing_required_field:has_funding_event:4"]
 
 
 def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
@@ -1379,7 +1443,9 @@ def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
     contract_rows[0]["has_funding_event"] = "yes"
     contract_rows[0]["funding_timestamp"] = contract_rows[0]["timestamp"]
     contract_rows[0]["funding_rate"] = Decimal("0.0001")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1392,13 +1458,13 @@ def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
     row_contract = summary["row_contract"]
     assert summary["stage"] == "request_build"
     assert summary["assessment_status"] != "quick_check_passed"
-    assert "row_contract_failed: row_invalid_funding_fields:has_funding_event:1" in summary["message"]
+    assert (
+        "row_contract_failed: row_invalid_funding_fields:has_funding_event:1" in summary["message"]
+    )
     assert row_contract["status"] == "failed"
     assert row_contract["issue_reasons"] == {"row_invalid_funding_fields": 1}
     assert row_contract["funding_event_missing_fields"] == {"has_funding_event": 1}
-    assert row_contract["quant_data_feedback"] == [
-        "row_invalid_funding_fields:has_funding_event:1"
-    ]
+    assert row_contract["quant_data_feedback"] == ["row_invalid_funding_fields:has_funding_event:1"]
     assert data_manifest["row_contract"] == row_contract
     assert not (result.result_dir / "engine_request.json").exists()
 
@@ -1407,7 +1473,9 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1475,7 +1543,9 @@ def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
     loaded_rows[0]["research_nan"] = float("nan")
     loaded_rows[0]["research_decimal"] = Decimal("1.25")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1506,7 +1576,9 @@ def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
             loaded_row[field] = str(loaded_row[field])
     config = config_module.load_config(config_path, repo_root=tmp_path)
     expected_normalized = NormalizedRows.from_rows(config, loaded_rows)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1547,12 +1619,18 @@ def test_full_profile_strategy_input_rows_hash_mismatch_fails_artifact_write(
         run_config(config_path, repo_root=tmp_path)
 
 
-def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_decision_generation_failure_writes_run_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    raise RuntimeError('boom')\n")
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1562,26 +1640,29 @@ def test_decision_generation_failure_writes_run_manifest(tmp_path: Path, monkeyp
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     jsonl_path = result.result_dir / "strategy_input_rows.jsonl"
     assert jsonl_path.exists()
-    assert hashlib.sha256(jsonl_path.read_bytes()).hexdigest() == data_manifest[
-        "normalized_rows_sha256"
-    ]
+    assert (
+        hashlib.sha256(jsonl_path.read_bytes()).hexdigest()
+        == data_manifest["normalized_rows_sha256"]
+    )
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "trade_result" not in summary["engine"]
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "def generate_decisions(rows, params):\n"
-        "    rows[0]['close'] = 999.0\n"
-        "    return []\n"
+        "def generate_decisions(rows, params):\n    rows[0]['close'] = 999.0\n    return []\n"
     )
     config_path = write_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1591,19 +1672,23 @@ def test_runner_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch: pytest
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "strategy execution failed" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "def generate_decisions(rows, params):\n"
-        "    params['weight'] = 2.0\n"
-        "    return []\n"
+        "def generate_decisions(rows, params):\n    params['weight'] = 2.0\n    return []\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1612,10 +1697,14 @@ def test_runner_blocks_strategy_param_mutation(tmp_path: Path, monkeypatch: pyte
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "strategy execution failed" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
-def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_runner_validates_params_before_data_loading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
@@ -1643,7 +1732,9 @@ def test_runner_validates_params_before_data_loading(tmp_path: Path, monkeypatch
     assert summary["stage"] == "param_validation"
     assert summary["message"] == "param validation failed: unknown params"
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_runner_rejects_non_mapping_validate_params_return(
@@ -1659,7 +1750,11 @@ def test_runner_rejects_non_mapping_validate_params_return(
         "    return []\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1669,7 +1764,9 @@ def test_runner_rejects_non_mapping_validate_params_return(
     assert summary["stage"] == "param_validation"
     assert summary["message"] == "param validation failed: validate_params must return a mapping"
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_runner_structures_validate_params_system_exit(tmp_path: Path):
@@ -1692,7 +1789,9 @@ def test_runner_structures_validate_params_system_exit(tmp_path: Path):
     assert summary["stage"] == "param_validation"
     assert summary["message"] == "param validation exited: params exited"
     assert not (result.result_dir / "strategy_input_rows.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_runner_structures_strategy_execution_system_exit(
@@ -1702,11 +1801,14 @@ def test_runner_structures_strategy_execution_system_exit(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "def generate_decisions(rows, params):\n"
-        "    raise SystemExit('strategy exited')\n"
+        "def generate_decisions(rows, params):\n    raise SystemExit('strategy exited')\n"
     )
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1742,8 +1844,12 @@ def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=readiness_lag)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows))
+    loaded_rows = rows(
+        100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=readiness_lag
+    )
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1762,7 +1868,11 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(minutes=1))),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(
+                100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(minutes=1)
+            )
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1819,7 +1929,9 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1829,7 +1941,9 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "decision_generation"
     assert "decision_time" in summary["message"]
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_invalid_decision_output_fails_before_writing_decision_records(
@@ -1843,7 +1957,9 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1857,7 +1973,9 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
     assert not (result.result_dir / "decision_records.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts(
@@ -1882,7 +2000,9 @@ def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1897,7 +2017,9 @@ def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts
     assert (result.result_dir / "data_manifest.json").exists()
     assert (result.result_dir / "decision_records.jsonl").exists()
     assert not (result.result_dir / "signals.csv").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
@@ -1922,7 +2044,9 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1933,7 +2057,9 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
     assert summary["stage"] == "decision_generation"
     assert "decision_strategy_id_mismatch[0]: expected demo, got other" in summary["message"]
     assert not (result.result_dir / "decision_records.jsonl").exists()
-    assert_assessment(result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"]))
+    assert_assessment(
+        result, summary, assessment_status="runner_failed", failure_stage=str(summary["stage"])
+    )
 
 
 def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -1945,10 +2071,16 @@ def test_run_manifest_marks_dirty_git_worktree(tmp_path: Path, monkeypatch: pyte
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True
+    )
     (tmp_path / "README.md").write_text("dirty\n")
     (tmp_path / "scratch.txt").write_text("untracked\n")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -1993,9 +2125,15 @@ def test_run_manifest_ignores_untracked_detritus_for_repository_identity(
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True)
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    subprocess.run(["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "baseline"], cwd=tmp_path, check=True, capture_output=True
+    )
     (tmp_path / "scratch.txt").write_text("untracked\n")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -2015,7 +2153,9 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, kind="crypto_perp_funding", symbol="BTC-PERP", dataset=None)
+    config_path = write_config(
+        tmp_path, kind="crypto_perp_funding", symbol="BTC-PERP", dataset=None
+    )
     funding_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     for row in funding_rows:
         row["symbol"] = "BTC-PERP"
@@ -2040,17 +2180,23 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     assert summary["funding_model"] == "linear_additive_adjustment"
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
     assert run_manifest["evidence"]["funding_model"] == "linear_additive_adjustment"
-    funding = run_manifest["evidence"]["metric_semantics"]["trade_result.sum_signed_trade_activity_funding"]
+    funding = run_manifest["evidence"]["metric_semantics"][
+        "trade_result.sum_signed_trade_activity_funding"
+    ]
     assert funding["return_path_model"] == "linear_additive_adjustment"
     notes = (result.result_dir / "notes.md").read_text()
     assert "return_scope: price-and-funding" in notes
     assert "supplied funding events are included" in notes
 
 
-def test_request_build_failure_preserves_prior_stage_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_request_build_failure_preserves_prior_stage_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0)))
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0))
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 
@@ -2074,13 +2220,17 @@ def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
     monkeypatch.setattr(
         engine_runner,
         "evaluate_request",
-        lambda request, *, mode, include_evidence=True, include_diagnostics=False: (_ for _ in ()).throw(
-            EvaluationRunError("engine unavailable")
-        ),
+        lambda request, *, mode, include_evidence=True, include_diagnostics=False: (
+            _ for _ in ()
+        ).throw(EvaluationRunError("engine unavailable")),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -2099,7 +2249,11 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     repo_root.mkdir()
     write_strategy(repo_root)
     config_path = write_config(repo_root, relative_path="runs/demo.toml")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
     monkeypatch.chdir(tmp_path)
 
     result = run_config("runs/demo.toml", repo_root=repo_root)
@@ -2112,7 +2266,11 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
 def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
     events: list[dict[str, object]] = []
 
     result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
@@ -2121,11 +2279,7 @@ def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: p
     assert events
     assert all(event["event"] == "runner_stage" for event in events)
     assert all(isinstance(event["timestamp"], str) for event in events)
-    completed_stages = {
-        str(event["stage"])
-        for event in events
-        if event["status"] == "completed"
-    }
+    completed_stages = {str(event["stage"]) for event in events if event["status"] == "completed"}
     assert {
         "config_load",
         "artifact_initialization",
@@ -2153,7 +2307,11 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     repo_root.mkdir()
     write_strategy(repo_root)
     write_config(repo_root, relative_path="runs/demo.toml")
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(["run", "--repo-root", str(repo_root), "runs/demo.toml"])
@@ -2173,7 +2331,11 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     exit_code = cli.main(["run", "--events-jsonl", str(config_path)])
     captured = capsys.readouterr()
@@ -2186,8 +2348,7 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     assert events
     assert all(event["event"] == "runner_stage" for event in events)
     assert any(
-        event["stage"] == "engine_evaluation" and event["status"] == "completed"
-        for event in events
+        event["stage"] == "engine_evaluation" and event["status"] == "completed" for event in events
     )
 
 
@@ -2201,7 +2362,11 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     exit_code = cli.main(["run", str(config_path)])
     output = capsys.readouterr().out.strip()
@@ -2210,7 +2375,9 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
     assert Path(output).exists()
 
 
-def test_cli_reports_failure_with_notes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+def test_cli_reports_failure_with_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
     import quant_strategies.cli as cli
 
     notes = tmp_path / "results" / "run" / "notes.md"
@@ -2297,8 +2464,12 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
     assert first.result_dir is not None
     assert second.result_dir is not None
     assert first.result_dir != second.result_dir
-    assert {path.name for path in first.result_dir.iterdir() if path.is_file()} == expected_artifacts
-    assert {path.name for path in second.result_dir.iterdir() if path.is_file()} == expected_artifacts
+    assert {
+        path.name for path in first.result_dir.iterdir() if path.is_file()
+    } == expected_artifacts
+    assert {
+        path.name for path in second.result_dir.iterdir() if path.is_file()
+    } == expected_artifacts
     assert {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in first.result_dir.iterdir()
@@ -2339,7 +2510,11 @@ def test_run_config_completion_write_failure_returns_structured_result(
 
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     def raise_oserror(*_args, **_kwargs):
         raise OSError("disk full")
@@ -2377,7 +2552,11 @@ def test_run_config_flags_unvalidated_passthrough_on_quick_run(
     # but is visibly flagged as exploratory (params not schema-checked).
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
-    monkeypatch.setattr(execution, "load_data", lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)))
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
 
     result = run_config(config_path, repo_root=tmp_path)
 

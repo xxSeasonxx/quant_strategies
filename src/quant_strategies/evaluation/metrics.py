@@ -28,15 +28,15 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     nav_base = "portfolio NAV path"
     returns_base = "full-grid periodic portfolio returns, including flat/no-position bars"
     trades_base = "portfolio trade records"
-    backend = "vectorbtpro for non-funding evaluations; project_perp_ledger_v1 for crypto_perp_funding"
+    backend = (
+        "vectorbtpro for non-funding evaluations; project_perp_ledger_v1 for crypto_perp_funding"
+    )
     cost_scope = (
         "net of configured fees/slippage; includes funding cashflows for crypto_perp_funding; "
         "excludes borrow, financing, and market impact"
     )
     not_authority = "not validation, promotion, paper trading, or live trading authority"
-    benchmark_not_authority = (
-        "benchmark-relative evidence only; not ranking, promotion, paper trading, or live trading authority"
-    )
+    benchmark_not_authority = "benchmark-relative evidence only; not ranking, promotion, paper trading, or live trading authority"
     annualization = (
         "explicit_config.annualization_periods_per_year; requires "
         "annualization_cadence.status == ok and return_sample_count >= "

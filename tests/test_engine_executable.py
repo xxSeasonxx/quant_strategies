@@ -1,22 +1,33 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    DecisionIntent,
+    ExitPolicy,
+    InstrumentRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
+)
+from quant_strategies.decisions.extended_ontology import (
     InstrumentLeg,
     MultiLegInstrumentRef,
+)
+from quant_strategies.decisions.extended_ontology import (
     PositionTarget as ExtendedPositionTarget,
+)
+from quant_strategies.decisions.extended_ontology import (
     StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.engine.executable import base_unsupported_semantics, executable_decision
 from quant_strategies.engine.models import Side
 
-
-NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def decision(

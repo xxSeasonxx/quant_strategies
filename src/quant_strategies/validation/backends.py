@@ -181,8 +181,8 @@ class ScenarioBackendRunResult:
     # Raw agreement is set only when the opt-in oracle actually ran. The explicit
     # status is always present so uncorroborated evidence cannot be mistaken for
     # agreement evidence.
-    agreement: "AgreementResult | None" = None
-    agreement_oracle_status: "AgreementOracleStatus" = "disabled"
+    agreement: AgreementResult | None = None
+    agreement_oracle_status: AgreementOracleStatus = "disabled"
     agreement_oracle_note: str = ""
 
 

@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from quant_strategies.core.engine_runner import build_request
+from quant_strategies.core.errors import EvaluationRunError, RequestBuildError
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine import screen
 from quant_strategies.engine.evaluation import EvaluationError
-from quant_strategies.core.engine_runner import build_request
-from quant_strategies.core.errors import EvaluationRunError, RequestBuildError
 from quant_strategies.validation.backends import BackendRunResult
 from quant_strategies.validation.config import ScenarioRunConfig
 

@@ -4,11 +4,10 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
 
-from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.core.errors import DataReadinessError
-
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.datetime_utils import parse_aware_datetime
+from quant_strategies.decisions import StrategyDecision
 
 AVAILABILITY_FIELD = "available_at"
 DECISION_AS_OF_FIELD = "as_of_time"
@@ -45,7 +44,9 @@ def assert_decision_rows_ready(
                 f"{symbol}: {as_of_time.isoformat()}"
             )
         for row in matching_rows:
-            _assert_row_ready(row, symbol=symbol, as_of_time=as_of_time, decision_time=decision_time)
+            _assert_row_ready(
+                row, symbol=symbol, as_of_time=as_of_time, decision_time=decision_time
+            )
 
 
 def _assert_normalized_decision_rows_ready(
@@ -114,7 +115,9 @@ def _assert_normalized_row_ready(
 
 
 def _is_aware_datetime(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )
 
 
 def _matching_datetime(value: object, field_name: str) -> datetime | None:

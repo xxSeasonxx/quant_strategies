@@ -5,7 +5,7 @@ import json
 import re
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -126,8 +126,10 @@ class _TrustedTableMetadata(dict[str, Any]):
         raise AttributeError(f"{type(self).__name__} attributes are immutable")
 
 
-def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: datetime | None = None) -> Path:
-    timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+def create_evaluation_result_dir(
+    results_root: Path, strategy_id: str, *, now: datetime | None = None
+) -> Path:
+    timestamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     base_name = f"{timestamp}-{_safe_name(strategy_id)}"
     results_root.mkdir(parents=True, exist_ok=True)
 
@@ -143,7 +145,9 @@ def create_evaluation_result_dir(results_root: Path, strategy_id: str, *, now: d
         return result_dir
 
 
-def initialize_evaluation_artifacts(config_path: Path, strategy_path: Path, result_dir: Path) -> None:
+def initialize_evaluation_artifacts(
+    config_path: Path, strategy_path: Path, result_dir: Path
+) -> None:
     shutil.copyfile(config_path, result_dir / "evaluation_config.toml")
     if strategy_path.is_file():
         shutil.copyfile(strategy_path, result_dir / "strategy_snapshot.py")
@@ -152,7 +156,9 @@ def initialize_evaluation_artifacts(config_path: Path, strategy_path: Path, resu
 def write_json_artifact(result_dir: Path, name: str, payload: Any) -> Path:
     path = _artifact_path(result_dir, name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(json_safe_value(payload), indent=2, sort_keys=True, allow_nan=False) + "\n")
+    path.write_text(
+        json.dumps(json_safe_value(payload), indent=2, sort_keys=True, allow_nan=False) + "\n"
+    )
     return path
 
 
@@ -310,7 +316,9 @@ def write_evaluation_manifest(
     annualization_cadence: Mapping[str, Any] | None = None,
     evidence_quality_warnings: Sequence[str] = (),
 ) -> Path:
-    _validate_trace_table_artifacts(table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary)
+    _validate_trace_table_artifacts(
+        table_artifacts, result_dir=result_dir, scenario_summary=scenario_summary
+    )
     manifest_table_artifacts = [dict(item) for item in table_artifacts]
     audit_artifacts = _validated_audit_artifacts_from_windows(data_windows, result_dir=result_dir)
     input_rows_embedded = bool(data_windows)
@@ -320,7 +328,14 @@ def write_evaluation_manifest(
         "environment.json",
         environment_identity(
             repo_root,
-            package_names=("quant-strategies", "quant-data", "pydantic", "pandas", "pyarrow", "vectorbtpro"),
+            package_names=(
+                "quant-strategies",
+                "quant-data",
+                "pydantic",
+                "pandas",
+                "pyarrow",
+                "vectorbtpro",
+            ),
             exclude_paths=(result_dir,),
         ),
     )
@@ -334,7 +349,7 @@ def write_evaluation_manifest(
                 "name": backend_name,
                 "version": None,
             },
-            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "generated_at_utc": datetime.now(UTC).isoformat(),
             "config_path": _relative_path(config_path, path_base),
             "config_sha256": file_sha256(config_path),
             "assessment_status": "evaluation_complete",
@@ -407,9 +422,13 @@ def _validated_audit_artifacts_from_windows(
         input_rows_artifact = window.get("input_rows_artifact")
         decision_records_artifact = window.get("decision_records_artifact")
         if not isinstance(input_rows_artifact, Mapping):
-            raise ValueError(f"data window {window_id!r} is missing input_rows audit artifact metadata")
+            raise ValueError(
+                f"data window {window_id!r} is missing input_rows audit artifact metadata"
+            )
         if not isinstance(decision_records_artifact, Mapping):
-            raise ValueError(f"data window {window_id!r} is missing decision_records audit artifact metadata")
+            raise ValueError(
+                f"data window {window_id!r} is missing decision_records audit artifact metadata"
+            )
 
         _validate_input_rows_audit_artifact(
             input_rows_artifact,
@@ -459,14 +478,18 @@ def _validate_input_rows_audit_artifact(
         raise ValueError("input_rows audit artifact scenario_ids must be empty")
     if item["path"] != expected_path:
         raise ValueError("input_rows audit artifact path does not match data window")
-    artifact_path = _validated_audit_path(result_dir, item["path"], suffix=".parquet", label="input_rows")
+    artifact_path = _validated_audit_path(
+        result_dir, item["path"], suffix=".parquet", label="input_rows"
+    )
     for hash_key in ("file_sha256", "schema_sha256"):
         if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
             raise ValueError(f"input_rows audit artifact {hash_key} must be 64 hex characters")
     if file_sha256(artifact_path) != item["file_sha256"]:
         raise ValueError("input_rows audit artifact file_sha256 does not match file")
     if item["normalized_rows_sha256"] != expected_normalized_rows_sha256:
-        raise ValueError("input_rows audit artifact normalized_rows_sha256 does not match data window")
+        raise ValueError(
+            "input_rows audit artifact normalized_rows_sha256 does not match data window"
+        )
 
     _validate_non_negative_int(item, "row_count", kind="input_rows audit artifact")
     if item["row_count"] != expected_row_count:
@@ -483,7 +506,9 @@ def _validate_input_rows_audit_artifact(
     )
     for key in _TRACE_TABLE_METADATA_COMPARE_FIELDS:
         if item[key] != actual_metadata[key]:
-            raise ValueError(f"input_rows audit artifact metadata does not match Parquet file for {key}")
+            raise ValueError(
+                f"input_rows audit artifact metadata does not match Parquet file for {key}"
+            )
 
 
 def _validate_decision_records_audit_artifact(
@@ -494,7 +519,9 @@ def _validate_decision_records_audit_artifact(
     expected_row_count: int,
 ) -> None:
     missing_keys = _REQUIRED_DECISION_RECORD_METADATA - set(item)
-    none_keys = {key for key in _REQUIRED_DECISION_RECORD_METADATA if key in item and item[key] is None}
+    none_keys = {
+        key for key in _REQUIRED_DECISION_RECORD_METADATA if key in item and item[key] is None
+    }
     if missing_keys:
         missing = ", ".join(sorted(missing_keys))
         raise ValueError(f"decision_records audit artifact is missing required metadata: {missing}")
@@ -507,14 +534,18 @@ def _validate_decision_records_audit_artifact(
         raise ValueError("decision_records audit artifact format must be jsonl")
     if item["path"] != expected_path:
         raise ValueError("decision_records audit artifact path does not match data window")
-    artifact_path = _validated_audit_path(result_dir, item["path"], suffix=".jsonl", label="decision_records")
+    artifact_path = _validated_audit_path(
+        result_dir, item["path"], suffix=".jsonl", label="decision_records"
+    )
     if not isinstance(item["sha256"], str) or not _SHA256_PATTERN.fullmatch(item["sha256"]):
         raise ValueError("decision_records audit artifact sha256 must be 64 hex characters")
     if file_sha256(artifact_path) != item["sha256"]:
         raise ValueError("decision_records audit artifact sha256 does not match file")
     _validate_non_negative_int(item, "row_count", kind="decision_records audit artifact")
     if item["row_count"] != expected_row_count:
-        raise ValueError("decision_records audit artifact row_count does not match data window decision_count")
+        raise ValueError(
+            "decision_records audit artifact row_count does not match data window decision_count"
+        )
     _validate_non_negative_int(item, "byte_size", kind="decision_records audit artifact")
     if item["byte_size"] != artifact_path.stat().st_size:
         raise ValueError("decision_records audit artifact byte_size does not match file")
@@ -568,7 +599,9 @@ def _record_unique_audit_path(path: str, seen_paths: set[str]) -> None:
 
 def _canonical_jsonl_lines(items: Sequence[Any]) -> str:
     lines = [
-        json.dumps(_canonical_record_value(item), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        json.dumps(
+            _canonical_record_value(item), sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
         for item in items
     ]
     return "\n".join(lines) + ("\n" if lines else "")
@@ -591,6 +624,7 @@ def _artifact_path(result_dir: Path, name: str) -> Path:
     except ValueError as exc:
         raise ValueError("Artifact name must stay inside result_dir") from exc
     return path
+
 
 def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) -> Any:
     column_types = _TRACE_COLUMN_TYPES.get(artifact_kind)
@@ -622,7 +656,9 @@ def _materialize_known_trace_columns(pa: Any, table: Any, artifact_kind: str) ->
 
 def _with_scenario_ids_metadata(table: Any, scenario_ids: tuple[str, ...]) -> Any:
     metadata = dict(table.schema.metadata or {})
-    metadata[_SCENARIO_IDS_METADATA_KEY] = json.dumps(list(scenario_ids), allow_nan=False).encode("utf-8")
+    metadata[_SCENARIO_IDS_METADATA_KEY] = json.dumps(list(scenario_ids), allow_nan=False).encode(
+        "utf-8"
+    )
     return table.replace_schema_metadata(metadata)
 
 
@@ -631,16 +667,22 @@ def _scenario_ids_from_footer(schema: Any, *, artifact_kind: str) -> list[str]:
     raw_value = metadata.get(_SCENARIO_IDS_METADATA_KEY)
     if raw_value is None:
         if artifact_kind in _TRACE_COLUMN_TYPES:
-            raise ValueError(f"{artifact_kind} trace table is missing scenario_ids Parquet metadata")
+            raise ValueError(
+                f"{artifact_kind} trace table is missing scenario_ids Parquet metadata"
+            )
         return []
 
     try:
         value = json.loads(raw_value.decode("utf-8"))
     except (AttributeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{artifact_kind} trace table has invalid scenario_ids Parquet metadata") from exc
+        raise ValueError(
+            f"{artifact_kind} trace table has invalid scenario_ids Parquet metadata"
+        ) from exc
 
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise ValueError(f"{artifact_kind} trace table scenario_ids Parquet metadata must be a list of strings")
+        raise ValueError(
+            f"{artifact_kind} trace table scenario_ids Parquet metadata must be a list of strings"
+        )
     return value
 
 
@@ -667,13 +709,19 @@ def _validate_trace_table_artifacts(
         if not isinstance(item, Mapping):
             raise ValueError(f"trace table metadata at index {index} must be a mapping")
         missing_keys = _REQUIRED_TRACE_TABLE_METADATA - set(item)
-        none_keys = {key for key in _REQUIRED_TRACE_TABLE_METADATA if key in item and item[key] is None}
+        none_keys = {
+            key for key in _REQUIRED_TRACE_TABLE_METADATA if key in item and item[key] is None
+        }
         if missing_keys:
             missing = ", ".join(sorted(missing_keys))
-            raise ValueError(f"trace table metadata at index {index} is missing required metadata: {missing}")
+            raise ValueError(
+                f"trace table metadata at index {index} is missing required metadata: {missing}"
+            )
         if none_keys:
             missing = ", ".join(sorted(none_keys))
-            raise ValueError(f"trace table metadata at index {index} is missing required metadata: {missing}")
+            raise ValueError(
+                f"trace table metadata at index {index} is missing required metadata: {missing}"
+            )
 
         artifact_kind = item["artifact_kind"]
         if not isinstance(artifact_kind, str) or not artifact_kind:
@@ -682,7 +730,11 @@ def _validate_trace_table_artifacts(
 
     required_kinds = set(_REQUIRED_TRACE_TABLES)
     actual_kinds = set(kinds)
-    if len(table_artifacts) != len(_REQUIRED_TRACE_TABLES) or actual_kinds != required_kinds or len(kinds) != len(actual_kinds):
+    if (
+        len(table_artifacts) != len(_REQUIRED_TRACE_TABLES)
+        or actual_kinds != required_kinds
+        or len(kinds) != len(actual_kinds)
+    ):
         missing = ", ".join(sorted(required_kinds - actual_kinds)) or "none"
         extra = ", ".join(sorted(str(kind) for kind in actual_kinds - required_kinds)) or "none"
         raise ValueError(
@@ -694,13 +746,17 @@ def _validate_trace_table_artifacts(
     expected_scenario_ids: set[Any] | None = None
     for kind, required_path in _REQUIRED_TRACE_TABLES.items():
         item = by_kind[kind]
-        _validate_trace_table_metadata_item(item, kind=kind, required_path=required_path, result_dir=result_dir)
+        _validate_trace_table_metadata_item(
+            item, kind=kind, required_path=required_path, result_dir=result_dir
+        )
 
         scenario_ids = set(item["scenario_ids"])
         if expected_scenario_ids is None:
             expected_scenario_ids = scenario_ids
         elif scenario_ids != expected_scenario_ids:
-            raise ValueError("trace table scenario_ids must be consistent across required trace tables")
+            raise ValueError(
+                "trace table scenario_ids must be consistent across required trace tables"
+            )
 
     coverage_scenario_ids = _scenario_coverage_ids(scenario_summary)
     if expected_scenario_ids is not None and expected_scenario_ids != coverage_scenario_ids:
@@ -736,10 +792,14 @@ def _validate_trace_table_metadata_item(
     for hash_key in ("file_sha256", "schema_sha256"):
         if not isinstance(item[hash_key], str) or not _SHA256_PATTERN.fullmatch(item[hash_key]):
             raise ValueError(f"{kind} trace table metadata {hash_key} must be 64 hex characters")
-    trusted_file_hash = item.trusted_file_sha256 if isinstance(item, _TrustedTableMetadata) else None
+    trusted_file_hash = (
+        item.trusted_file_sha256 if isinstance(item, _TrustedTableMetadata) else None
+    )
     if trusted_file_hash is not None:
         if trusted_file_hash != item["file_sha256"]:
-            raise ValueError(f"{kind} trace table metadata file_sha256 does not match trusted writer hash")
+            raise ValueError(
+                f"{kind} trace table metadata file_sha256 does not match trusted writer hash"
+            )
     elif file_sha256(artifact_path) != item["file_sha256"]:
         raise ValueError(f"{kind} trace table metadata file_sha256 does not match Parquet file")
 
@@ -767,7 +827,9 @@ def _validate_trace_table_metadata_item(
             include_file_hash=False,
         )
     except Exception as exc:
-        raise ValueError(f"{kind} trace table metadata could not be verified from Parquet file") from exc
+        raise ValueError(
+            f"{kind} trace table metadata could not be verified from Parquet file"
+        ) from exc
 
     for key in _TRACE_TABLE_METADATA_COMPARE_FIELDS:
         expected_value = actual_metadata[key]
@@ -799,7 +861,9 @@ def _scenario_coverage_ids(scenario_summary: Mapping[str, Any]) -> set[Any]:
     has_expected_ids = "expected_ids" in scenario_coverage
     has_completed_ids = "completed_ids" in scenario_coverage
     expected_ids = _coverage_id_set(scenario_coverage["expected_ids"]) if has_expected_ids else None
-    completed_ids = _coverage_id_set(scenario_coverage["completed_ids"]) if has_completed_ids else None
+    completed_ids = (
+        _coverage_id_set(scenario_coverage["completed_ids"]) if has_completed_ids else None
+    )
     if has_expected_ids and has_completed_ids and expected_ids != completed_ids:
         optional_ids = _coverage_id_set(scenario_coverage.get("optional_ids", ()))
         missing_optional_ids = _coverage_id_set(scenario_coverage.get("missing_optional_ids", ()))

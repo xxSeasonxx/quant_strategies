@@ -67,8 +67,7 @@ def test_strategy_bars_contract_shape() -> None:
     frame = load_strategy_bars(engine, symbol, EQUITY_DATASET, start, end, strict=True)
 
     assert frame.height > 0, (
-        f"load_strategy_bars returned no rows for {symbol} on {EQUITY_DATASET} "
-        f"in [{start}, {end}]"
+        f"load_strategy_bars returned no rows for {symbol} on {EQUITY_DATASET} in [{start}, {end}]"
     )
 
     required = {
@@ -111,9 +110,7 @@ def test_universe_bars_ordering_and_uniqueness() -> None:
     start, end = _smoke_window()
 
     engine = get_engine()
-    frame = load_strategy_universe_bars(
-        engine, symbols, EQUITY_DATASET, start, end, strict=True
-    )
+    frame = load_strategy_universe_bars(engine, symbols, EQUITY_DATASET, start, end, strict=True)
 
     assert frame.height > 0, (
         f"load_strategy_universe_bars returned no rows for {symbols} on "

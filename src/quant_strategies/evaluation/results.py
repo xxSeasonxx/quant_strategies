@@ -10,7 +10,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evaluation.metrics import MetricValue
 
-
 EvaluationBackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ from quant_strategies.evaluation.config import (
     load_evaluation_config,
     resolve_evaluation_config_path,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -122,7 +120,10 @@ def test_checked_in_simple_momentum_evaluation_example_loads():
 
     assert config.base_dir == config_path.parent
     assert config.strategy_path == ROOT / "examples" / "strategies" / "simple_momentum.py"
-    assert config.output.results_dir == ROOT / "examples" / "strategies" / "evaluation_results" / "simple_momentum"
+    assert (
+        config.output.results_dir
+        == ROOT / "examples" / "strategies" / "evaluation_results" / "simple_momentum"
+    )
     assert config.strategy_id == "simple_momentum"
     assert config.windows[0].id == "evaluation_2024_01"
     assert config.metrics.annualization_periods_per_year == 525949
@@ -143,7 +144,9 @@ def test_load_evaluation_config_rejects_paths_outside_candidate_dir(tmp_path: Pa
     write_strategy(outside)
     write_config(candidate / "evaluation.toml", strategy_path="../outside.py")
 
-    with pytest.raises(EvaluationConfigError, match="strategy_path must resolve inside config directory"):
+    with pytest.raises(
+        EvaluationConfigError, match="strategy_path must resolve inside config directory"
+    ):
         load_evaluation_config(candidate / "evaluation.toml")
 
 
@@ -197,13 +200,13 @@ def test_load_evaluation_config_rejects_empty_or_duplicate_window_ids(tmp_path: 
     write_config(candidate / "evaluation.toml")
     payload = (candidate / "evaluation.toml").read_text()
     payload = payload.replace('id = "eval_2026_h1"', 'id = "dup"')
-    payload += '''
+    payload += """
 
 [[windows]]
 id = "dup"
 start = "2026-07-01"
 end = "2026-12-31"
-'''
+"""
     (candidate / "evaluation.toml").write_text(payload)
 
     with pytest.raises(EvaluationConfigError, match="window ids cannot contain duplicates"):
@@ -215,7 +218,7 @@ def test_load_evaluation_config_accepts_custom_scenarios_and_benchmark(tmp_path:
     write_strategy(candidate / "strategy.py")
     write_config(
         candidate / "evaluation.toml",
-        extra='''
+        extra="""
 
 [benchmark]
 symbol = "SPY"
@@ -240,7 +243,7 @@ id = "stress_fill"
 cost_scenario = "custom_costs"
 fill_scenario = "custom_fill"
 required = false
-''',
+""",
     )
 
     config = load_evaluation_config(candidate / "evaluation.toml")
@@ -267,7 +270,7 @@ def test_load_evaluation_config_rejects_all_optional_custom_scenarios(tmp_path: 
     write_strategy(candidate / "strategy.py")
     write_config(
         candidate / "evaluation.toml",
-        extra='''
+        extra="""
 
 [[scenarios]]
 id = "optional_a"
@@ -276,7 +279,7 @@ required = false
 [[scenarios]]
 id = "optional_b"
 required = false
-''',
+""",
     )
 
     with pytest.raises(EvaluationConfigError, match="at least one required scenario"):
@@ -288,14 +291,14 @@ def test_load_evaluation_config_rejects_duplicate_custom_scenario_ids(tmp_path: 
     write_strategy(candidate / "strategy.py")
     write_config(
         candidate / "evaluation.toml",
-        extra='''
+        extra="""
 
 [[scenarios]]
 id = "dup"
 
 [[scenarios]]
 id = "dup"
-''',
+""",
     )
 
     with pytest.raises(EvaluationConfigError, match="scenario ids cannot contain duplicates"):
@@ -307,14 +310,16 @@ def test_load_evaluation_config_rejects_benchmark_symbol_outside_data_symbols(tm
     write_strategy(candidate / "strategy.py")
     write_config(
         candidate / "evaluation.toml",
-        extra='''
+        extra="""
 
 [benchmark]
 symbol = "IWM"
-''',
+""",
     )
 
-    with pytest.raises(EvaluationConfigError, match="benchmark.symbol must be included in data.symbols"):
+    with pytest.raises(
+        EvaluationConfigError, match="benchmark.symbol must be included in data.symbols"
+    ):
         load_evaluation_config(candidate / "evaluation.toml")
 
 
@@ -323,7 +328,7 @@ def test_load_evaluation_config_rejects_invalid_custom_scenario_model(tmp_path: 
     write_strategy(candidate / "strategy.py")
     write_config(
         candidate / "evaluation.toml",
-        extra='''
+        extra="""
 
 [[scenarios]]
 id = "bad_cost"
@@ -331,7 +336,7 @@ id = "bad_cost"
 [scenarios.cost_model]
 fee_bps_per_side = -0.01
 slippage_bps_per_side = 0.0
-''',
+""",
     )
 
     with pytest.raises(EvaluationConfigError, match="fee_bps_per_side"):

@@ -127,7 +127,9 @@ class VectorBTProBackend:
         except Exception as exc:
             return _failed(self.name, f"metric_extraction_failed:{exc}")
         if metrics["trade_count"] != len(windows):
-            return _failed(self.name, f"unexpected_trade_count:{metrics['trade_count']}:{len(windows)}")
+            return _failed(
+                self.name, f"unexpected_trade_count:{metrics['trade_count']}:{len(windows)}"
+            )
         # Funding is owned by the engine verdict kernel; vbt is a price-path
         # cross-check only and deliberately reports no funding metrics.
         metrics = {
@@ -186,7 +188,9 @@ def _validate_portfolio_target_weights(windows: list[dict[str, Any]]) -> float:
     return max_gross
 
 
-def _validate_decision_windows(pd: Any, close: Any, decisions: list[StrategyDecision], config: Any) -> list[dict[str, Any]]:
+def _validate_decision_windows(
+    pd: Any, close: Any, decisions: list[StrategyDecision], config: Any
+) -> list[dict[str, Any]]:
     entry_lag = _entry_lag(config)
     exit_lag = _exit_lag(config)
     entry_signals: set[tuple[str, Any]] = set()
@@ -344,7 +348,7 @@ def _portfolio_metrics(portfolio: Any) -> dict[str, float | int]:
 def _optional_portfolio_metrics(portfolio: Any) -> dict[str, float]:
     metrics: dict[str, float] = {}
     try:
-        trades = getattr(portfolio, "trades")
+        trades = portfolio.trades
     except Exception:
         trades = None
     optional_metrics = (

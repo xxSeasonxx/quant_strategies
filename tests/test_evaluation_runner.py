@@ -2,24 +2,23 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
-import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 import quant_strategies.evaluation._pipeline as evaluation_runner
-from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
-from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
-from quant_strategies.evaluation.dependencies import EvaluationDependencyError
-from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
+import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 from quant_strategies.core.data_loader import LoadedData
+from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
+from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
+from quant_strategies.evaluation.dependencies import EvaluationDependencyError
+from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
 
 
@@ -47,8 +46,8 @@ def rows() -> list[dict[str, Any]]:
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "open": 102.0,
             "high": 102.0,
             "low": 102.0,
@@ -57,8 +56,8 @@ def rows() -> list[dict[str, Any]]:
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "open": 103.0,
             "high": 103.0,
             "low": 103.0,
@@ -85,8 +84,8 @@ def rows_with_benchmark() -> list[dict[str, Any]]:
     benchmark_closes = {
         AS_OF: 200.0,
         DECISION: 205.0,
-        datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc): 210.0,
-        datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc): 220.0,
+        datetime(2026, 1, 1, 0, 2, tzinfo=UTC): 210.0,
+        datetime(2026, 1, 1, 0, 3, tzinfo=UTC): 220.0,
     }
     benchmark_rows = [
         {
@@ -114,7 +113,9 @@ def write_candidate(
 ) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
-    validator = "def validate_params(params):\n    return dict(params)\n" if with_param_validator else ""
+    validator = (
+        "def validate_params(params):\n    return dict(params)\n" if with_param_validator else ""
+    )
     dataset_line = 'dataset = "demo_bars"\n' if data_kind == "bars" else ""
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, "
@@ -180,7 +181,15 @@ results_dir = "evaluation_results/demo"
 class FakeBackend:
     name = "fake_evaluation"
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
         frame = pd.DataFrame(
             {
                 "scenario_id": [scenario.scenario_id],
@@ -202,7 +211,11 @@ class FakeBackend:
                 }
             ),
             target_exposure_summary=pd.DataFrame(
-                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "asset": ["BTC-PERP"],
+                    "decision_count": [1],
+                }
             ),
             funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
@@ -219,12 +232,22 @@ class CadenceFakeBackend(FakeBackend):
     def __init__(self, timestamps: Sequence[datetime]) -> None:
         self._timestamps = tuple(timestamps)
 
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
         frame = pd.DataFrame(
             {
                 "scenario_id": [scenario.scenario_id] * len(self._timestamps),
                 "timestamp": list(self._timestamps),
-                "portfolio_value": [100.0 + index for index, _timestamp in enumerate(self._timestamps)],
+                "portfolio_value": [
+                    100.0 + index for index, _timestamp in enumerate(self._timestamps)
+                ],
                 "period_return": [0.0, *([0.01] * (len(self._timestamps) - 1))],
                 "drawdown": [0.0] * len(self._timestamps),
             }
@@ -241,7 +264,11 @@ class CadenceFakeBackend(FakeBackend):
                 }
             ),
             target_exposure_summary=pd.DataFrame(
-                {"scenario_id": [scenario.scenario_id], "asset": ["BTC-PERP"], "decision_count": [1]}
+                {
+                    "scenario_id": [scenario.scenario_id],
+                    "asset": ["BTC-PERP"],
+                    "decision_count": [1],
+                }
             ),
             funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
@@ -255,8 +282,20 @@ class CadenceFakeBackend(FakeBackend):
 
 
 class MixedCadenceFakeBackend(CadenceFakeBackend):
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
-        spacing = timedelta(minutes=1) if scenario.scenario_id.endswith("/zero_costs/base_fill") else timedelta(days=1)
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
+        spacing = (
+            timedelta(minutes=1)
+            if scenario.scenario_id.endswith("/zero_costs/base_fill")
+            else timedelta(days=1)
+        )
         timestamps = [AS_OF + spacing * index for index in range(4)]
         return CadenceFakeBackend(timestamps).run(
             decisions=decisions,
@@ -267,9 +306,19 @@ class MixedCadenceFakeBackend(CadenceFakeBackend):
 
 
 class MixedSparseCadenceFakeBackend(FakeBackend):
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
         if scenario.scenario_id.endswith("/sparse"):
-            return FakeBackend.run(self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+            return FakeBackend.run(
+                self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics
+            )
         timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
         return CadenceFakeBackend(timestamps).run(
             decisions=decisions,
@@ -280,9 +329,19 @@ class MixedSparseCadenceFakeBackend(FakeBackend):
 
 
 class MixedMismatchAndSparseCadenceFakeBackend(FakeBackend):
-    def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+    def run(
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        scenario: Any,
+        metrics: Any,
+        data_kind: str = "bars",
+    ):
         if scenario.scenario_id.endswith("/sparse"):
-            return FakeBackend.run(self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
+            return FakeBackend.run(
+                self, decisions=decisions, rows=rows, scenario=scenario, metrics=metrics
+            )
         timestamps = [AS_OF + timedelta(minutes=index) for index in range(4)]
         return CadenceFakeBackend(timestamps).run(
             decisions=decisions,
@@ -318,7 +377,9 @@ class PreparedFakeBackend(FakeBackend):
         self.prepare_calls: list[tuple[Sequence[Any], Sequence[dict[str, Any]]]] = []
         self.run_prepared_scenario_ids: list[str] = []
 
-    def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+    def prepare_inputs(
+        self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars"
+    ) -> dict[str, Any]:
         self.prepare_calls.append((decisions, rows))
         return {"decisions": decisions, "rows": rows}
 
@@ -350,7 +411,10 @@ def assert_failure_artifacts(
     assert payload["strategy_id"] == "demo"
     assert payload["failure_stage"] == failure_stage
     assert payload["assessment_status"] == assessment_status
-    assert payload["not_authority"] == "not validation, promotion, paper trading, or live trading authority"
+    assert (
+        payload["not_authority"]
+        == "not validation, promotion, paper trading, or live trading authority"
+    )
     assert "generated_at_utc" in payload
     assert "scenario_coverage" in payload["scenario_summary"]
     assert "data_windows" in payload
@@ -423,17 +487,20 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert len(data_manifest["windows"][0]["normalized_rows_sha256"]) == 64
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
     assert data_manifest["windows"][0]["decision_count"] == 1
-    assert data_manifest["windows"][0]["input_rows_artifact"]["path"] == input_rows_path.relative_to(
-        result.result_dir
-    ).as_posix()
+    assert (
+        data_manifest["windows"][0]["input_rows_artifact"]["path"]
+        == input_rows_path.relative_to(result.result_dir).as_posix()
+    )
     assert data_manifest["windows"][0]["input_rows_artifact"]["row_count"] == 4
     assert len(data_manifest["windows"][0]["input_rows_artifact"]["file_sha256"]) == 64
-    assert data_manifest["windows"][0]["input_rows_artifact"]["normalized_rows_sha256"] == (
-        data_manifest["windows"][0]["normalized_rows_sha256"]
+    assert (
+        data_manifest["windows"][0]["input_rows_artifact"]["normalized_rows_sha256"]
+        == (data_manifest["windows"][0]["normalized_rows_sha256"])
     )
-    assert data_manifest["windows"][0]["decision_records_artifact"]["path"] == decision_records_path.relative_to(
-        result.result_dir
-    ).as_posix()
+    assert (
+        data_manifest["windows"][0]["decision_records_artifact"]["path"]
+        == decision_records_path.relative_to(result.result_dir).as_posix()
+    )
     assert data_manifest["windows"][0]["decision_records_artifact"]["row_count"] == 1
     assert len(data_manifest["windows"][0]["decision_records_artifact"]["sha256"]) == 64
     input_rows = pd.read_parquet(input_rows_path)
@@ -447,8 +514,13 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert decision_payload["instrument"]["symbol"] == "BTC-PERP"
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["evaluation"]["evidence_class"] == "research_evaluation"
-    assert manifest["evaluation"]["not_authority"] == "not validation, promotion, paper trading, or live trading authority"
-    assert manifest["audit_artifacts"]["input_rows"] == [data_manifest["windows"][0]["input_rows_artifact"]]
+    assert (
+        manifest["evaluation"]["not_authority"]
+        == "not validation, promotion, paper trading, or live trading authority"
+    )
+    assert manifest["audit_artifacts"]["input_rows"] == [
+        data_manifest["windows"][0]["input_rows_artifact"]
+    ]
     assert manifest["audit_artifacts"]["decision_records"] == [
         data_manifest["windows"][0]["decision_records_artifact"]
     ]
@@ -473,7 +545,10 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert all(len(item["scenario_ids"]) == 6 for item in manifest["tables"])
     assert manifest["scenario_coverage"]["expected_count"] == 6
     assert manifest["scenario_coverage"]["completed_count"] == 6
-    assert manifest["scenario_coverage"]["expected_ids"] == manifest["scenario_coverage"]["completed_ids"]
+    assert (
+        manifest["scenario_coverage"]["expected_ids"]
+        == manifest["scenario_coverage"]["completed_ids"]
+    )
     assert manifest["scenario_coverage"]["missing_ids"] == []
     assert manifest["scenario_coverage"]["unexpected_ids"] == []
     assert {event["event"] for event in events} == {"evaluation_stage"}
@@ -508,7 +583,7 @@ def test_run_evaluation_uses_configured_custom_scenarios(
     config_path = candidate / "evaluation.toml"
     config_path.write_text(
         config_path.read_text()
-        + '''
+        + """
 
 [[scenarios]]
 id = "realistic_base"
@@ -528,10 +603,13 @@ slippage_bps_per_side = 5.0
 price = "close"
 entry_lag_bars = 2
 exit_lag_bars = 0
-'''
+"""
     )
     backend = PreparedFakeBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -551,7 +629,15 @@ def test_run_evaluation_keeps_optional_custom_scenario_failures_non_blocking(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class OptionalFailureBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             if scenario.scenario_id.endswith("/optional_stress"):
                 return PortfolioEvaluationResult(
                     scenario_id=scenario.scenario_id,
@@ -565,7 +651,7 @@ def test_run_evaluation_keeps_optional_custom_scenario_failures_non_blocking(
     config_path = candidate / "evaluation.toml"
     config_path.write_text(
         config_path.read_text()
-        + '''
+        + """
 
 [[scenarios]]
 id = "required_base"
@@ -574,18 +660,29 @@ required = true
 [[scenarios]]
 id = "optional_stress"
 required = false
-'''
+"""
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=OptionalFailureBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=OptionalFailureBackend()
+    )
 
     assert result.run_completed is True
     assert result.failure_stage is None
-    assert any("optional_scenario_failed:eval_2026_h1/optional_stress" in item for item in result.evidence_quality_warnings)
+    assert any(
+        "optional_scenario_failed:eval_2026_h1/optional_stress" in item
+        for item in result.evidence_quality_warnings
+    )
     summary = json.loads((result.result_dir / "scenario_summary.json").read_text())
     coverage = summary["scenario_coverage"]
-    assert coverage["expected_ids"] == ["eval_2026_h1/required_base", "eval_2026_h1/optional_stress"]
+    assert coverage["expected_ids"] == [
+        "eval_2026_h1/required_base",
+        "eval_2026_h1/optional_stress",
+    ]
     assert coverage["completed_ids"] == ["eval_2026_h1/required_base"]
     assert coverage["missing_ids"] == []
     assert coverage["missing_required_ids"] == []
@@ -593,7 +690,9 @@ required = false
     assert summary["status_counts"] == {"completed": 1, "failed": 1}
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["scenario_coverage"]["completed_ids"] == ["eval_2026_h1/required_base"]
-    assert all(item["scenario_ids"] == ["eval_2026_h1/required_base"] for item in manifest["tables"])
+    assert all(
+        item["scenario_ids"] == ["eval_2026_h1/required_base"] for item in manifest["tables"]
+    )
 
 
 def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expected_set(
@@ -601,7 +700,15 @@ def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expect
     monkeypatch: pytest.MonkeyPatch,
 ):
     class SwappedScenarioBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             swapped_id = (
                 "eval_2026_h1/scenario_b"
@@ -614,18 +721,23 @@ def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expect
     config_path = candidate / "evaluation.toml"
     config_path.write_text(
         config_path.read_text()
-        + '''
+        + """
 
 [[scenarios]]
 id = "scenario_a"
 
 [[scenarios]]
 id = "scenario_b"
-'''
+"""
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=SwappedScenarioBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=SwappedScenarioBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -641,18 +753,20 @@ def test_run_evaluation_attaches_benchmark_metrics_to_each_scenario(
     config_path = candidate / "evaluation.toml"
     config_path.write_text(
         config_path.read_text().replace('symbols = ["BTC-PERP"]', 'symbols = ["BTC-PERP", "SPY"]')
-        + '''
+        + """
 
 [benchmark]
 symbol = "SPY"
-'''
+"""
     )
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=rows_with_benchmark()),
     )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is True
     metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
@@ -672,7 +786,11 @@ def test_benchmark_metrics_ignore_trailing_nonfinite_close_after_valid_endpoint_
     benchmark_rows = [
         {"symbol": "SPY", "timestamp": AS_OF, "close": 200.0},
         {"symbol": "SPY", "timestamp": DECISION, "close": 220.0},
-        {"symbol": "SPY", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": float("nan")},
+        {
+            "symbol": "SPY",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "close": float("nan"),
+        },
     ]
 
     assert benchmark_metrics_for_rows(benchmark_rows, symbol="SPY") == {
@@ -685,9 +803,21 @@ def test_benchmark_metrics_use_first_and_final_finite_positive_closes():
     benchmark_rows = [
         {"symbol": "SPY", "timestamp": AS_OF, "close": float("nan")},
         {"symbol": "SPY", "timestamp": DECISION, "close": 200.0},
-        {"symbol": "SPY", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": float("inf")},
-        {"symbol": "SPY", "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "close": 220.0},
-        {"symbol": "SPY", "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc), "close": float("nan")},
+        {
+            "symbol": "SPY",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "close": float("inf"),
+        },
+        {
+            "symbol": "SPY",
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "close": 220.0,
+        },
+        {
+            "symbol": "SPY",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+            "close": float("nan"),
+        },
     ]
 
     assert benchmark_metrics_for_rows(benchmark_rows, symbol="SPY") == {
@@ -700,7 +830,11 @@ def test_benchmark_metrics_require_at_least_two_finite_positive_closes():
     invalid_rows = [
         {"symbol": "SPY", "timestamp": AS_OF, "close": float("nan")},
         {"symbol": "SPY", "timestamp": DECISION, "close": 0.0},
-        {"symbol": "SPY", "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "close": 200.0},
+        {
+            "symbol": "SPY",
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "close": 200.0,
+        },
     ]
 
     with pytest.raises(ValueError, match="insufficient_finite_benchmark_closes:SPY"):
@@ -715,18 +849,23 @@ def test_run_evaluation_reports_benchmark_metric_failure_stage(
     config_path = candidate / "evaluation.toml"
     config_path.write_text(
         config_path.read_text().replace('symbols = ["BTC-PERP"]', 'symbols = ["BTC-PERP", "SPY"]')
-        + '''
+        + """
 
 [benchmark]
 symbol = "SPY"
-'''
+"""
     )
     events: list[dict[str, object]] = []
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     monkeypatch.setattr(
         evaluation_runner,
         "benchmark_metrics_for_rows",
-        lambda rows, *, symbol: (_ for _ in ()).throw(ValueError("missing_finite_benchmark_close:SPY")),
+        lambda rows, *, symbol: (_ for _ in ()).throw(
+            ValueError("missing_finite_benchmark_close:SPY")
+        ),
     )
 
     result = run_evaluation(
@@ -749,7 +888,10 @@ def test_run_evaluation_records_matching_annualization_cadence_without_warning(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, annualization=365)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
 
     result = run_evaluation(
@@ -761,7 +903,10 @@ def test_run_evaluation_records_matching_annualization_cadence_without_warning(
     assert result.run_completed is True
     assert result.evidence_quality_warnings == ()
     metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
-    assert "full-grid periodic portfolio returns" in metrics_payload["metric_semantics"]["annualized_return"]["base"]
+    assert (
+        "full-grid periodic portfolio returns"
+        in metrics_payload["metric_semantics"]["annualized_return"]["base"]
+    )
     cadence = metrics_payload["annualization_cadence"]
     assert cadence["status"] == "ok"
     assert cadence["configured_periods_per_year"] == 365
@@ -784,7 +929,10 @@ def test_run_evaluation_warns_on_252_observed_periods_against_365_configured_ann
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, annualization=365)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     observed_spacing = timedelta(seconds=365.2425 * 24 * 60 * 60 / 252)
     timestamps = [AS_OF + observed_spacing * index for index in range(4)]
 
@@ -810,7 +958,10 @@ def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, annualization=365)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     timestamps = [AS_OF + timedelta(minutes=index) for index in range(4)]
 
     result = run_evaluation(
@@ -844,7 +995,9 @@ def test_run_evaluation_warns_on_obvious_annualization_cadence_mismatch(
         assert "annualized_metrics_null_due_to_cadence_mismatch" in item["warnings"]
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["annualization_cadence"] == cadence
-    assert manifest["evaluation"]["evidence_quality_warnings"] == list(result.evidence_quality_warnings)
+    assert manifest["evaluation"]["evidence_quality_warnings"] == list(
+        result.evidence_quality_warnings
+    )
 
 
 def test_run_evaluation_nulls_annualized_metrics_when_cadence_is_insufficient(
@@ -852,7 +1005,10 @@ def test_run_evaluation_nulls_annualized_metrics_when_cadence_is_insufficient(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, annualization=365)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -901,16 +1057,19 @@ def test_run_evaluation_marks_cadence_insufficient_when_any_completed_scenario_h
     candidate = write_candidate(tmp_path, annualization=365)
     (candidate / "evaluation.toml").write_text(
         (candidate / "evaluation.toml").read_text()
-        + '''
+        + """
 
 [[scenarios]]
 id = "dense"
 
 [[scenarios]]
 id = "sparse"
-'''
+"""
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -945,16 +1104,19 @@ def test_run_evaluation_keeps_offending_cadence_ids_when_other_scenarios_are_ins
     candidate = write_candidate(tmp_path, annualization=365)
     (candidate / "evaluation.toml").write_text(
         (candidate / "evaluation.toml").read_text()
-        + '''
+        + """
 
 [[scenarios]]
 id = "fast"
 
 [[scenarios]]
 id = "sparse"
-'''
+"""
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -979,7 +1141,10 @@ def test_run_evaluation_warns_when_one_completed_scenario_has_mismatched_cadence
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, annualization=365)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -1008,16 +1173,23 @@ def test_run_evaluation_uses_collision_proof_audit_paths_for_window_ids(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path, window_ids=("eval/2026", "eval 2026"))
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=PreparedFakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=PreparedFakeBackend()
+    )
 
     assert result.run_completed is True
     assert result.result_dir is not None
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     row_paths = [window["input_rows_artifact"]["path"] for window in data_manifest["windows"]]
-    decision_paths = [window["decision_records_artifact"]["path"] for window in data_manifest["windows"]]
+    decision_paths = [
+        window["decision_records_artifact"]["path"] for window in data_manifest["windows"]
+    ]
     assert len(row_paths) == 2
     assert len(decision_paths) == 2
     assert len(set(row_paths)) == 2
@@ -1025,7 +1197,9 @@ def test_run_evaluation_uses_collision_proof_audit_paths_for_window_ids(
     for path in [*row_paths, *decision_paths]:
         assert (result.result_dir / path).exists()
     assert [item["path"] for item in manifest["audit_artifacts"]["input_rows"]] == row_paths
-    assert [item["path"] for item in manifest["audit_artifacts"]["decision_records"]] == decision_paths
+    assert [
+        item["path"] for item in manifest["audit_artifacts"]["decision_records"]
+    ] == decision_paths
     assert manifest["replayability"]["replayable_from_artifacts"] is True
 
 
@@ -1035,7 +1209,10 @@ def test_run_evaluation_resolves_relative_config_path_from_cwd_when_repo_root_om
 ):
     write_candidate(tmp_path)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation("candidate/evaluation.toml", backend=FakeBackend())
 
@@ -1060,13 +1237,13 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
     funding_rows = funding_rows + [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "open": 104.0,
             "high": 104.0,
             "low": 104.0,
             "close": 104.0,
-            "funding_timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "funding_timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "funding_rate": 0.0003,
             "has_funding_event": True,
         }
@@ -1111,8 +1288,8 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
     no_event_rows = rows() + [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "open": 104.0,
             "high": 104.0,
             "low": 104.0,
@@ -1144,9 +1321,14 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
 
 def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     candidate = write_candidate(tmp_path, with_param_validator=False)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "param_validation"
@@ -1160,9 +1342,19 @@ def test_run_evaluation_requires_validate_params(tmp_path: Path, monkeypatch: py
     )
 
 
-def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_evaluation_fails_on_backend_unsupported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     class UnsupportedBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1172,7 +1364,10 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
 
     candidate = write_candidate(tmp_path)
     events: list[dict[str, object]] = []
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -1201,9 +1396,19 @@ def test_run_evaluation_fails_on_backend_unsupported(tmp_path: Path, monkeypatch
     )
 
 
-def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_run_evaluation_maps_backend_unavailable_to_public_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     class UnavailableBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1212,9 +1417,14 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(tmp_path: Path
             )
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=UnavailableBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=UnavailableBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1237,7 +1447,13 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
             self.prepare_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise EvaluationDependencyError("vectorbtpro import failed")
 
@@ -1247,7 +1463,10 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
 
     candidate = write_candidate(tmp_path)
     backend = UnavailablePreparedBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -1283,7 +1502,13 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
             self.prepare_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise exception
 
@@ -1293,7 +1518,10 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
 
     candidate = write_candidate(tmp_path)
     backend = FailingPrepareBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -1334,12 +1562,17 @@ def test_run_evaluation_maps_run_prepared_failure_statuses(
                 backend=self.name,
                 status=backend_status,
                 warnings=(message_fragment,) if backend_status != "unsupported" else (),
-                unsupported_semantics=(message_fragment,) if backend_status == "unsupported" else (),
+                unsupported_semantics=(message_fragment,)
+                if backend_status == "unsupported"
+                else (),
             )
 
     candidate = write_candidate(tmp_path)
     backend = FailingPreparedBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -1363,14 +1596,27 @@ def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class DuplicateScenarioBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"scenario_id": "duplicate_scenario"})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=DuplicateScenarioBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=DuplicateScenarioBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1393,7 +1639,15 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class MissingTraceTablesBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1403,9 +1657,14 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
             )
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingTraceTablesBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingTraceTablesBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1427,14 +1686,27 @@ def test_run_evaluation_fails_when_completed_backend_metrics_are_incomplete(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class IncompleteMetricsBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"metrics": {"total_return": 0.01, "trade_count": 1}})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=IncompleteMetricsBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=IncompleteMetricsBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1456,7 +1728,15 @@ def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class MissingFundingMetricsBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             metrics_without_funding = {
                 key: value
@@ -1466,9 +1746,14 @@ def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
             return result.model_copy(update={"metrics": metrics_without_funding})
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingFundingMetricsBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=MissingFundingMetricsBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1492,11 +1777,25 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after row contract failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.run_calls += 1
             raise AssertionError("run should not be called after row contract failure")
 
@@ -1506,7 +1805,9 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
 
     candidate = write_candidate(tmp_path)
     backend = BackendShouldNotBeCalled()
-    invalid_rows = [{key: value for key, value in row.items() if key != "available_at"} for row in rows()]
+    invalid_rows = [
+        {key: value for key, value in row.items() if key != "available_at"} for row in rows()
+    ]
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=invalid_rows),
@@ -1539,11 +1840,25 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
 
@@ -1571,7 +1886,10 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
     )
     backend = BackendShouldNotBeCalled()
     events: list[dict[str, object]] = []
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -1598,7 +1916,9 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
     assert data_window["row_count"] == 4
     assert data_window["decision_count"] == 1
     assert data_window["data_audit"]["passed"] is False
-    assert any("missing as_of row for BTC-PERP" in item for item in data_window["data_audit"]["violations"])
+    assert any(
+        "missing as_of row for BTC-PERP" in item for item in data_window["data_audit"]["violations"]
+    )
     failed_events = [event for event in events if event["status"] == "failed"]
     assert any(event["stage"] == "data_audit" for event in failed_events)
     assert not any(event["stage"] == "causality_check" for event in events)
@@ -1614,11 +1934,25 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
             self.prepare_calls = 0
             self.run_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
 
@@ -1683,11 +2017,25 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
             self.prepare_calls = 0
             self.run_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after readiness failure")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.run_calls += 1
             raise AssertionError("run should not be called after readiness failure")
 
@@ -1707,7 +2055,10 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
         "    )]\n"
     )
     backend = BackendShouldNotBeCalled()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
 
@@ -1724,7 +2075,10 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
         message_fragment="requires at least 1",
     )
     assert payload["data_windows"][0]["data_audit"]["passed"] is False
-    assert any("requires at least 1" in item for item in payload["data_windows"][0]["data_audit"]["violations"])
+    assert any(
+        "requires at least 1" in item
+        for item in payload["data_windows"][0]["data_audit"]["violations"]
+    )
 
 
 def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
@@ -1737,17 +2091,35 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
             self.run_calls = 0
             self.run_prepared_calls = 0
 
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             self.prepare_calls += 1
-            raise AssertionError("prepare_inputs should not be called after causality preflight failure")
+            raise AssertionError(
+                "prepare_inputs should not be called after causality preflight failure"
+            )
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.run_calls += 1
             raise AssertionError("run should not be called after causality preflight failure")
 
         def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
             self.run_prepared_calls += 1
-            raise AssertionError("run_prepared should not be called after causality preflight failure")
+            raise AssertionError(
+                "run_prepared should not be called after causality preflight failure"
+            )
 
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
@@ -1804,10 +2176,24 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class BackendShouldNotBeCalled(FakeBackend):
-        def prepare_inputs(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars") -> dict[str, Any]:
+        def prepare_inputs(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            data_kind: str = "bars",
+        ) -> dict[str, Any]:
             raise AssertionError("prepare_inputs should not be called after empty row contract")
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             raise AssertionError("run should not be called after empty row contract")
 
     candidate = write_candidate(tmp_path)
@@ -1816,7 +2202,9 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
         lambda config, **_kwargs: LoadedData(rows=[]),
     )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=BackendShouldNotBeCalled())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=BackendShouldNotBeCalled()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "data_load"
@@ -1838,7 +2226,15 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
         def __init__(self) -> None:
             self.calls = 0
 
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             self.calls += 1
             if self.calls == 6:
                 return PortfolioEvaluationResult(
@@ -1850,9 +2246,14 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
             return super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
 
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=LateFailureBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=LateFailureBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
@@ -1874,7 +2275,10 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     real_write = evaluation_runner.write_parquet_artifact
     calls = 0
@@ -1888,7 +2292,9 @@ def test_run_evaluation_removes_staged_tables_when_final_parquet_write_fails(
 
     monkeypatch.setattr(evaluation_runner, "write_parquet_artifact", failing_write)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -1910,14 +2316,19 @@ def test_run_evaluation_failure_artifacts_include_window_when_audit_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def failing_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
         raise OSError("audit rows failed")
 
     monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", failing_input_rows)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -1939,7 +2350,15 @@ def test_run_evaluation_reports_failure_artifact_write_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
     class FailingBackend(FakeBackend):
-        def run(self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], scenario: Any, metrics: Any, data_kind: str = "bars"):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+        ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
@@ -1949,7 +2368,10 @@ def test_run_evaluation_reports_failure_artifact_write_failure(
 
     candidate = write_candidate(tmp_path)
     events: list[dict[str, object]] = []
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def failing_failure_json(*args: Any, **kwargs: Any) -> None:
         raise OSError("failure artifact disk full")
@@ -1987,7 +2409,10 @@ def test_run_evaluation_rejects_mismatched_audit_artifact_hash(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     real_write = evaluation_runner.write_decision_records_artifact
 
     def bad_decision_records(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -1997,7 +2422,9 @@ def test_run_evaluation_rejects_mismatched_audit_artifact_hash(
 
     monkeypatch.setattr(evaluation_runner, "write_decision_records_artifact", bad_decision_records)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -2017,7 +2444,10 @@ def test_run_evaluation_rejects_audit_artifact_bound_to_wrong_window(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     real_write = evaluation_runner.write_input_rows_artifact
 
     def wrong_window_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -2025,7 +2455,9 @@ def test_run_evaluation_rejects_audit_artifact_bound_to_wrong_window(
 
     monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", wrong_window_input_rows)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -2043,7 +2475,10 @@ def test_run_evaluation_rejects_audit_row_count_not_bound_to_data_window(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     real_write = evaluation_runner.write_input_rows_artifact
 
     def truncated_input_rows(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -2051,7 +2486,9 @@ def test_run_evaluation_rejects_audit_row_count_not_bound_to_data_window(
 
     monkeypatch.setattr(evaluation_runner, "write_input_rows_artifact", truncated_input_rows)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -2069,15 +2506,22 @@ def test_run_evaluation_rejects_audit_decision_count_not_bound_to_data_window(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     real_write = evaluation_runner.write_decision_records_artifact
 
     def empty_decision_records(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return real_write(*args, **{**kwargs, "decisions": []})
 
-    monkeypatch.setattr(evaluation_runner, "write_decision_records_artifact", empty_decision_records)
+    monkeypatch.setattr(
+        evaluation_runner, "write_decision_records_artifact", empty_decision_records
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"
@@ -2095,9 +2539,14 @@ def test_run_evaluation_uses_staged_write_table_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is True
     assert result.failure_stage is None
@@ -2118,14 +2567,19 @@ def test_run_evaluation_removes_published_tables_when_manifest_write_fails(
     monkeypatch: pytest.MonkeyPatch,
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def failing_manifest(*args: Any, **kwargs: Any) -> None:
         raise OSError("manifest failed")
 
     monkeypatch.setattr(evaluation_runner, "write_evaluation_manifest", failing_manifest)
 
-    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.run_completed is False
     assert result.failure_stage == "artifact_write"

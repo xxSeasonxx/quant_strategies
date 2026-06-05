@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
 import quant_strategies.observation_dependencies as observation_dependencies
+from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     ExitPolicy,
@@ -14,12 +15,10 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-from quant_strategies.core.data_audit import audit_decision_rows
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
-FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
+FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
 
 
 def decision(
@@ -37,7 +36,9 @@ def decision(
     )
 
 
-def row(symbol: str, timestamp: datetime = AS_OF, available_at: object = AS_OF) -> dict[str, object]:
+def row(
+    symbol: str, timestamp: datetime = AS_OF, available_at: object = AS_OF
+) -> dict[str, object]:
     return {
         "symbol": symbol,
         "timestamp": timestamp,
@@ -171,13 +172,13 @@ def test_observation_index_uses_normalized_rows_without_reparsing(monkeypatch: p
             }
         ],
     )
-    observations = (
-        ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),
-    )
+    observations = (ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),)
     monkeypatch.setattr(
         observation_dependencies,
         "parse_aware_datetime",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not parse normalized rows")
+        ),
     )
 
     row_index, timestamp_violations = observation_dependencies.observation_row_index(normalized)

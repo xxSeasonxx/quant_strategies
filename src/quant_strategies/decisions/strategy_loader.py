@@ -15,8 +15,7 @@ class StrategyGenerator(Protocol):
         self,
         rows: Sequence[Mapping[str, object]],
         params: Mapping[str, object],
-    ) -> Sequence[StrategyDecision]:
-        ...
+    ) -> Sequence[StrategyDecision]: ...
 
 
 DecisionStrategyCallable = StrategyGenerator
@@ -53,11 +52,11 @@ def load_decision_strategy(
     if enforce_purity:
         violations = strategy_purity_violations(strategy_path)
         if violations:
-            raise DecisionStrategyLoadError(
-                f"strategy purity violations: {'; '.join(violations)}"
-            )
+            raise DecisionStrategyLoadError(f"strategy purity violations: {'; '.join(violations)}")
 
-    module_name = f"_quant_decision_strategy_{hashlib.sha1(str(strategy_path).encode()).hexdigest()}"
+    module_name = (
+        f"_quant_decision_strategy_{hashlib.sha1(str(strategy_path).encode()).hexdigest()}"
+    )
     spec = importlib.util.spec_from_file_location(module_name, strategy_path)
     if spec is None or spec.loader is None:
         raise DecisionStrategyLoadError(f"could not import strategy file: {strategy_path}")
@@ -81,5 +80,5 @@ def load_decision_strategy(
             raise DecisionStrategyLoadError(
                 "strategy validate_params must be callable when defined"
             )
-        setattr(generate_decisions, "validate_params", validate_params)
+        generate_decisions.validate_params = validate_params
     return generate_decisions

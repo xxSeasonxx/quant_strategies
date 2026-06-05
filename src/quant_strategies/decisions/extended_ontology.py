@@ -2,24 +2,26 @@ from __future__ import annotations
 
 # Pydantic ontology classes intentionally expose validated fields, not methods.
 # pylint: disable=too-few-public-methods
-
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 
 from quant_strategies.decisions.models import (
     DecisionIntent as BaseDecisionIntent,
+)
+from quant_strategies.decisions.models import (
     DecisionModel,
     Direction,
-    ExitPolicy,
     InstrumentRef,
-    ObservationRef,
-    PositionTarget as BasePositionTarget,
-    StrategyDecision as BaseStrategyDecision,
     _finite_positive,
     _stripped_non_empty,
 )
-
+from quant_strategies.decisions.models import (
+    PositionTarget as BasePositionTarget,
+)
+from quant_strategies.decisions.models import (
+    StrategyDecision as BaseStrategyDecision,
+)
 
 LegDirection = Literal["long", "short"]
 DecisionAction = Literal["open"]
@@ -71,8 +73,8 @@ class StrategyDecision(BaseStrategyDecision):
 
 __all__ = [
     "DecisionAction",
-    "DecisionIntent",
     "DecisionInstrument",
+    "DecisionIntent",
     "InstrumentLeg",
     "LegDirection",
     "MultiLegInstrumentRef",

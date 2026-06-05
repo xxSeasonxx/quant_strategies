@@ -5,9 +5,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.core.errors import DataLoadError
+from quant_strategies.data_contract import NormalizedRows
 
 _UNSET = object()
 

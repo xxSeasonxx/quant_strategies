@@ -4,7 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 EvidenceClass = Literal["quick_run_diagnostic", "validation_advisory"]
 StrategyContract = Literal["decision"]
 RunnerReturnModel = Literal["trade_result.sum_signed_trade_activity_net"]

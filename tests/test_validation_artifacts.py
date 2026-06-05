@@ -30,7 +30,9 @@ def test_create_validation_result_dir_uses_strategy_id(tmp_path: Path):
     assert result_dir.exists()
 
 
-def test_create_validation_result_dir_adds_suffix_on_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_create_validation_result_dir_adds_suffix_on_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     class FixedDatetime(datetime):
         @classmethod
         def now(cls, tz=UTC):  # type: ignore[override]

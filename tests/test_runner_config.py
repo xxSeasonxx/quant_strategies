@@ -5,10 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from quant_strategies.core.errors import ConfigError
 from quant_strategies.decisions import load_decision_strategy
 from quant_strategies.runner.config import load_config
-from quant_strategies.core.errors import ConfigError
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,11 +33,11 @@ def write_config(
     output_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
-    artifact_profile_line = f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    artifact_profile_line = (
+        f'artifact_profile = "{artifact_profile}"\n' if artifact_profile is not None else ""
+    )
     quick_checks_line = (
-        f"quick_checks = {str(quick_checks).lower()}\n"
-        if quick_checks is not None
-        else ""
+        f"quick_checks = {str(quick_checks).lower()}\n" if quick_checks is not None else ""
     )
     config_path = repo_root / "run.toml"
     config_path.write_text(
@@ -161,7 +160,9 @@ def test_legacy_output_mode_is_rejected(tmp_path: Path):
 @pytest.mark.parametrize("artifact_profile", ["diagnostic", "summary", "full"])
 def test_supported_artifact_profiles_are_accepted(tmp_path: Path, artifact_profile: str):
     write_strategy(tmp_path)
-    config = load_config(write_config(tmp_path, artifact_profile=artifact_profile), repo_root=tmp_path)
+    config = load_config(
+        write_config(tmp_path, artifact_profile=artifact_profile), repo_root=tmp_path
+    )
 
     assert config.output.artifact_profile == artifact_profile
 

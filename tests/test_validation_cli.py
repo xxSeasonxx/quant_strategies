@@ -12,7 +12,9 @@ from quant_strategies.validation.errors import ValidationError
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
 
-@pytest.mark.parametrize("decision", ["mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"])
+@pytest.mark.parametrize(
+    "decision", ["mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"]
+)
 def test_validate_cli_returns_zero_for_completed_advisory_decisions(
     decision: str,
     monkeypatch,
@@ -48,7 +50,9 @@ def test_validate_cli_returns_two_for_mechanical_fail(monkeypatch, tmp_path: Pat
         "quant_strategies.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("nonpositive_net_return",)),
+            decision=ValidationPolicyDecision(
+                decision="mechanical_fail", reasons=("nonpositive_net_return",)
+            ),
             message="validation decision: mechanical_fail",
             run_completed=True,
             failure_stage=None,
@@ -66,7 +70,9 @@ def test_validate_cli_returns_three_for_data_audit_failure(monkeypatch, tmp_path
         "quant_strategies.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("data_audit_failed",)),
+            decision=ValidationPolicyDecision(
+                decision="mechanical_fail", reasons=("data_audit_failed",)
+            ),
             message="validation decision: mechanical_fail",
             run_completed=True,
             failure_stage="data_audit",
@@ -84,7 +90,9 @@ def test_validate_cli_returns_three_for_data_load_failure(monkeypatch, tmp_path:
         "quant_strategies.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=tmp_path / "validation_results" / "run",
-            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("data_load_failed",)),
+            decision=ValidationPolicyDecision(
+                decision="mechanical_fail", reasons=("data_load_failed",)
+            ),
             message="validation decision: mechanical_fail",
             run_completed=True,
             failure_stage="data_load",
@@ -117,7 +125,9 @@ def test_validate_cli_omits_artifacts_when_config_load_returns_no_result_dir(
         "quant_strategies.cli.run_validation",
         lambda path, repo_root=None: ValidationRunResult(
             result_dir=None,
-            decision=ValidationPolicyDecision(decision="mechanical_fail", reasons=("validation_config_failed",)),
+            decision=ValidationPolicyDecision(
+                decision="mechanical_fail", reasons=("validation_config_failed",)
+            ),
             message="bad validation config",
             run_completed=False,
             failure_stage="config_load",
@@ -154,7 +164,9 @@ def test_validate_cli_events_jsonl_wires_validation_event_sink(
 ):
     calls: list[tuple[Path, Path | None, bool]] = []
 
-    def fake_run_validation(path: Path, repo_root: Path | None = None, event_sink=None) -> ValidationRunResult:
+    def fake_run_validation(
+        path: Path, repo_root: Path | None = None, event_sink=None
+    ) -> ValidationRunResult:
         calls.append((path, repo_root, event_sink is not None))
         assert event_sink is not None
         event_sink(

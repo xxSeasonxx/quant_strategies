@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from quant_strategies.evaluation import EvaluationRunResult
 from quant_strategies import cli
+from quant_strategies.evaluation import EvaluationRunResult
 
 
 def test_evaluate_cli_prints_result_artifact_path_on_success(monkeypatch, tmp_path: Path, capsys):
@@ -35,7 +35,9 @@ def test_evaluate_cli_events_jsonl_wires_evaluation_event_sink(monkeypatch, tmp_
     calls: list[tuple[Path, Path | None, bool]] = []
     result_dir = tmp_path / "evaluation_results" / "run"
 
-    def fake_run_evaluation(path: Path, repo_root: Path | None = None, event_sink=None) -> EvaluationRunResult:
+    def fake_run_evaluation(
+        path: Path, repo_root: Path | None = None, event_sink=None
+    ) -> EvaluationRunResult:
         calls.append((path, repo_root, event_sink is not None))
         assert event_sink is not None
         event_sink(

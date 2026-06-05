@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
 def decision(symbol: str = "BTC-PERP") -> StrategyDecision:
@@ -50,7 +49,7 @@ def test_audit_fails_when_available_after_decision_time():
         {
             "symbol": "BTC-PERP",
             "timestamp": AS_OF,
-            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 100.0,
         }
     ]

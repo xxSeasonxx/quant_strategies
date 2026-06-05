@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import quant_strategies.engine as engine
+from engine_helpers import bars_for, decision_for
 from quant_strategies.engine import (
     Bar,
     EvaluationRequest,
@@ -16,17 +17,16 @@ from quant_strategies.engine import (
     screen,
 )
 
-from engine_helpers import bars_for, decision_for
-
-
-DECISION = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+DECISION = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
 
 
 def profitable_request() -> EvaluationRequest:
     return EvaluationRequest(
         spec=StrategySpec(
             strategy_id="deterministic_check",
-            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(
+                decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),
+            ),
         ),
         bars=bars_for("BTC", [100.0, 100.0, 110.0]),
         fill_model=FillModel(price="close", entry_lag_bars=1),
@@ -87,7 +87,9 @@ def test_gate_screen_fails_closed_when_required_bars_are_missing():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_inputs",
-            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(
+                decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),
+            ),
         ),
         bars=(),
     )
@@ -114,7 +116,7 @@ def quote_bars() -> tuple[Bar, ...]:
         ),
         Bar(
             symbol="EURUSD",
-            timestamp=datetime(2024, 1, 1, 9, 31, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 9, 31, tzinfo=UTC),
             open=100.0,
             high=100.1,
             low=99.9,
@@ -125,7 +127,7 @@ def quote_bars() -> tuple[Bar, ...]:
         ),
         Bar(
             symbol="EURUSD",
-            timestamp=datetime(2024, 1, 1, 9, 32, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 1, 9, 32, tzinfo=UTC),
             open=110.0,
             high=110.1,
             low=109.9,
@@ -141,7 +143,11 @@ def quote_request() -> EvaluationRequest:
     return EvaluationRequest(
         spec=StrategySpec(
             strategy_id="quote_evidence",
-            decisions=(decision_for(symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(
+                decision_for(
+                    symbol="EURUSD", decision_time=DECISION, side=Side.LONG, max_hold_bars=1
+                ),
+            ),
         ),
         bars=quote_bars(),
         fill_model=FillModel(price="quote", entry_lag_bars=1),
@@ -152,7 +158,9 @@ def test_gate_screen_reports_missing_quote_fills_as_invalid_inputs():
     request = EvaluationRequest(
         spec=StrategySpec(
             strategy_id="missing_quote_inputs",
-            decisions=(decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),),
+            decisions=(
+                decision_for(symbol="BTC", decision_time=DECISION, side=Side.LONG, max_hold_bars=1),
+            ),
         ),
         bars=bars_for("BTC", [100.0, 101.0, 102.0]),
         fill_model=FillModel(price="quote", entry_lag_bars=1),

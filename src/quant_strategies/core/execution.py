@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any, Literal
 
 from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
+from quant_strategies.core.config import StrategyExecutionSpec
+from quant_strategies.core.data_loader import load_data
+from quant_strategies.core.errors import RunnerError, StrategyLoadError
+from quant_strategies.core.evidence_quality import compact_evidence_quality
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     DecisionStrategyLoadError,
@@ -14,11 +18,6 @@ from quant_strategies.decisions import (
     validate_strategy_params,
 )
 from quant_strategies.decisions.models import StrategyDecision
-from quant_strategies.core.config import StrategyExecutionSpec
-from quant_strategies.core.data_loader import load_data
-from quant_strategies.core.evidence_quality import compact_evidence_quality
-from quant_strategies.core.errors import RunnerError, StrategyLoadError
-
 
 ExecutionStage = Literal[
     "strategy_import",
@@ -80,7 +79,9 @@ def execute_strategy_run(
     try:
         generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
     except SystemExit as exc:
-        raise StrategyExecutionError("strategy_import", f"strategy import exited: {_system_exit_message(exc)}") from exc
+        raise StrategyExecutionError(
+            "strategy_import", f"strategy import exited: {_system_exit_message(exc)}"
+        ) from exc
     except RunnerError as exc:
         raise StrategyExecutionError("strategy_import", str(exc)) from exc
 

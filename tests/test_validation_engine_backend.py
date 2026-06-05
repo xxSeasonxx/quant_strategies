@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -15,15 +15,15 @@ from quant_strategies.decisions import (
 from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.engine_backend import EngineBackend
 
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
 def bar(minute: int, close: float) -> dict:
     # Engine requires OHLC; flat bars (o=h=l=c) are valid and keep close-fills exact.
     return {
         "symbol": "BTC-PERP",
-        "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+        "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=UTC),
         "open": close,
         "high": close,
         "low": close,
@@ -39,7 +39,7 @@ def funding_rows():
     base = rows()
     base[-1] = {
         **base[-1],
-        "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+        "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
         "funding_rate": 0.0003,
         "has_funding_event": True,
     }
@@ -97,7 +97,9 @@ def test_engine_backend_extras_are_internally_consistent():
     )
     m = result.metrics
     # net == gross + funding - cost.
-    assert m["net_return"] == pytest.approx(m["gross_return"] + m["funding_return"] - m["cost_return"])
+    assert m["net_return"] == pytest.approx(
+        m["gross_return"] + m["funding_return"] - m["cost_return"]
+    )
     # round-trip cost = 2*(fee+slippage)/1e4 * weight.
     assert m["cost_return"] == pytest.approx(2.0 * (5.0 + 2.0) / 10_000.0 * 1.0)
 
@@ -123,7 +125,7 @@ def test_engine_backend_funding_can_flip_gated_net_negative():
     big_funding = rows()
     big_funding[-1] = {
         **big_funding[-1],
-        "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+        "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
         "funding_rate": 0.05,  # large positive funding rate; a long pays it
         "has_funding_event": True,
     }

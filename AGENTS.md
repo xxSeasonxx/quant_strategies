@@ -45,6 +45,9 @@ cleaner fix.
 - Prefer clean, simple, maintainable code over accumulating patchy or redundant
 code. Delete or replace bad local code when that is safer than building around
 it.
+- Use repo-owned Make targets for formatting and lint cleanup (for example,
+`make fix` or the nearest available format/lint target); do not rely on LLM
+agents to hand-format code.
 - Always report changed-line counts before completion: files changed,
 insertions, deletions, and net change. Separate source, tests, docs, and
 generated/artifact movement when that distinction matters.

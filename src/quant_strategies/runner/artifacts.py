@@ -4,10 +4,11 @@ import json
 import re
 import shutil
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.core.engine_runner import EngineRun
 from quant_strategies.core.evidence_quality import compact_evidence_quality, compact_row_contract
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows
@@ -24,14 +25,12 @@ from quant_strategies.provenance import (
     source_identity,
 )
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.core.engine_runner import EngineRun
-
 
 RUNNER_EVIDENCE_SCHEMA_VERSION = "quant_strategies.runner.evidence/v1"
 
 
 def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path:
-    timestamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%dT%H%M%SZ")
+    timestamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT%H%M%SZ")
     base_name = f"{timestamp}-{_safe_name(config.strategy_id)}"
     config.output.results_dir.mkdir(parents=True, exist_ok=True)
     result_dir = config.output.results_dir / base_name
@@ -141,12 +140,12 @@ def write_data_manifest(
     evidence_quality_payload: dict[str, Any] | None = None,
 ) -> None:
     normalized = _normalized_rows(config, rows, normalized_rows=normalized_rows)
-    quality = compact_evidence_quality(
-        evidence_quality_payload or normalized.evidence_quality()
-    )
+    quality = compact_evidence_quality(evidence_quality_payload or normalized.evidence_quality())
     payload = {
         "artifact_profile": config.output.artifact_profile,
-        "replayable_from_artifacts": replayable_from_artifacts_for_profile(config.output.artifact_profile),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile(
+            config.output.artifact_profile
+        ),
         "data": {
             "kind": config.data.kind,
             "dataset": config.data.dataset,
@@ -201,7 +200,7 @@ def write_jsonl(path: Path, rows: Sequence[Mapping[str, Any]]) -> str:
     with path.open("wb") as handle:
         for row in rows:
             line = _canonical_json_line(row)
-            payload = f"{line}\n".encode("utf-8")
+            payload = f"{line}\n".encode()
             handle.write(payload)
             digest.update(payload)
     return digest.hexdigest()
@@ -285,7 +284,9 @@ def summary_payload(
         "strategy_id": config.strategy_id,
         "quick_checks": config.output.quick_checks,
         "artifact_profile": config.output.artifact_profile,
-        "replayable_from_artifacts": replayable_from_artifacts_for_profile(config.output.artifact_profile),
+        "replayable_from_artifacts": replayable_from_artifacts_for_profile(
+            config.output.artifact_profile
+        ),
         "status": status,
         "stage": stage,
         "failure_stage": failure_stage,
@@ -327,12 +328,17 @@ def compact_engine_summary(
         screening_result = engine_run.validate_summary.get("screening_result")
         source = screening_result if isinstance(screening_result, dict) else None
 
-    summary: dict[str, object] = {"passed": engine_run.passed, "trade_count": _trade_count(engine_run)}
+    summary: dict[str, object] = {
+        "passed": engine_run.passed,
+        "trade_count": _trade_count(engine_run),
+    }
     trade_result = source.get("trade_result") if isinstance(source, dict) else None
     if isinstance(trade_result, dict):
         summary["trade_result"] = {
             "sum_signed_trade_activity_gross": trade_result.get("sum_signed_trade_activity_gross"),
-            "sum_signed_trade_activity_funding": trade_result.get("sum_signed_trade_activity_funding"),
+            "sum_signed_trade_activity_funding": trade_result.get(
+                "sum_signed_trade_activity_funding"
+            ),
             "sum_signed_trade_activity_cost": trade_result.get("sum_signed_trade_activity_cost"),
             "sum_signed_trade_activity_net": trade_result.get("sum_signed_trade_activity_net"),
         }
@@ -350,7 +356,11 @@ def compact_engine_summary(
         gates = engine_run.validate_summary.get("gates")
         if isinstance(gates, list):
             summary["gates"] = [
-                {"name": gate.get("name"), "passed": gate.get("passed"), "detail": gate.get("detail")}
+                {
+                    "name": gate.get("name"),
+                    "passed": gate.get("passed"),
+                    "detail": gate.get("detail"),
+                }
                 for gate in gates
                 if isinstance(gate, dict)
             ]

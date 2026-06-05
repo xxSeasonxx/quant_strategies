@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-
 ROW_CONTRACT_ISSUE_SAMPLE_SIZE = 25
 
 

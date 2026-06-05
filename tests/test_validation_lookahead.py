@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -15,11 +15,10 @@ from quant_strategies.decisions import (
     StrategyDecision,
 )
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
-FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
-LATE_DECISION = datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
+FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
+LATE_DECISION = datetime(2026, 1, 1, 0, 3, tzinfo=UTC)
 
 
 def row(
@@ -164,10 +163,7 @@ def test_hidden_lookahead_check_reports_replay_exceptions():
 
 
 def test_hidden_lookahead_parses_row_visibility_once_per_check(monkeypatch):
-    source_rows = [
-        row(AS_OF, 100.0 + index, available_at=AS_OF)
-        for index in range(12)
-    ]
+    source_rows = [row(AS_OF, 100.0 + index, available_at=AS_OF) for index in range(12)]
 
     def multi_decision_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
         return [
@@ -218,7 +214,9 @@ def test_hidden_lookahead_uses_normalized_rows_without_reparsing(monkeypatch):
     monkeypatch.setattr(
         causality,
         "parse_aware_datetime",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not parse normalized rows")
+        ),
     )
 
     result = check_hidden_lookahead(
@@ -545,10 +543,7 @@ def test_strict_hidden_lookahead_replays_unique_boundaries_once():
 
 
 def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
-    source_rows = [
-        row(AS_OF, 100.0 + index, available_at=AS_OF)
-        for index in range(4)
-    ]
+    source_rows = [row(AS_OF, 100.0 + index, available_at=AS_OF) for index in range(4)]
     replay_row_ids: list[int] = []
 
     def recording_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):

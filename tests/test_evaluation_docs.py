@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -87,12 +86,18 @@ def test_docs_describe_full_grid_returns_and_annualization_cadence_warnings():
 
 def test_docs_lock_row_order_policy_and_shared_kernel_boundaries():
     docs = compact(
-        "\n".join(read(path) for path in ["README.md", "FOUNDATION_LOCK.md", "docs/foundation-surfaces.md"])
+        "\n".join(
+            read(path)
+            for path in ["README.md", "FOUNDATION_LOCK.md", "docs/foundation-surfaces.md"]
+        )
     ).replace("`", "")
 
     assert "one shared decision/spec kernel plus separate price-evidence paths" in docs
     assert "quant_data owns stable row ordering for supplied rows" in docs
-    assert "quant_strategies preserves supplied row order for strategy input, hashing, and execution" in docs
+    assert (
+        "quant_strategies preserves supplied row order for strategy input, hashing, and execution"
+        in docs
+    )
     assert "does not sort rows locally before hashing or execution" in docs
 
 
@@ -111,7 +116,10 @@ def test_docs_lock_sortino_funding_and_no_lookahead_semantics():
 
     assert "Sortino uses downside semivariance over the full return sample" in docs
     assert "returns `None`, not infinity, when undefined" in docs
-    assert "Engine funding is linear trade-activity funding folded into validation `net_return`" in docs
+    assert (
+        "Engine funding is linear trade-activity funding folded into validation `net_return`"
+        in docs
+    )
     assert "evaluation funding is NAV-ledger cashflow" in docs
     assert "no funding events in the open interval accrue zero funding" in docs
     assert "flagged funding rows still fail when malformed, conflicting, or mark-misaligned" in docs

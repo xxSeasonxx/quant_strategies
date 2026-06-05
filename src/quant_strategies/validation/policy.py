@@ -6,10 +6,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from quant_strategies.evidence_semantics import validation_evidence_semantics
-from quant_strategies.validation.backends import BackendMetrics, BackendRunResult, ScenarioBackendRunResult
+from quant_strategies.validation.backends import (
+    BackendMetrics,
+    BackendRunResult,
+    ScenarioBackendRunResult,
+)
 
-
-ValidationDecision = Literal["mechanical_fail", "mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"]
+ValidationDecision = Literal[
+    "mechanical_fail", "mechanical_complete", "mechanical_caution", "mechanical_threshold_pass"
+]
 
 
 class ValidationPolicyDecision(BaseModel):
@@ -385,9 +390,7 @@ def _mechanical_thresholds_decision(
     window_count = len(windows)
     realistic_total_trades = sum(metrics.trade_count for metrics in realistic_metrics)
     zero_trade_windows = [
-        item.window_id
-        for item in realistic
-        if complete_metrics[item.scenario_id].trade_count == 0
+        item.window_id for item in realistic if complete_metrics[item.scenario_id].trade_count == 0
     ]
     realistic_net_activity = sum(metrics.net_return for metrics in realistic_metrics)
     positive_realistic_evidence = realistic_net_activity > 0.0

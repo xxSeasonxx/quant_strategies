@@ -1,24 +1,27 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field as _field
+from dataclasses import dataclass
+from dataclasses import field as _field
 from pathlib import Path
-from typing import TYPE_CHECKING as _TYPE_CHECKING, Any
+from typing import TYPE_CHECKING as _TYPE_CHECKING
+from typing import Any
 
 from quant_strategies.causality import (
     causality_completeness_violations,
     check_hidden_lookahead,
 )
-from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.provenance import file_sha256, text_sha256
-from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
 from quant_strategies.core.config import default_repo_root
+from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     execute_strategy_run,
 )
 from quant_strategies.core.exposure import exposure_admissibility_violations
+from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.provenance import file_sha256, text_sha256
 from quant_strategies.validation.artifact_names import safe_scenario_artifact_path
 from quant_strategies.validation.artifacts import (
     backend_runs_payload,
@@ -34,10 +37,11 @@ from quant_strategies.validation.backends import (
     ValidationBackend,
     get_backend,
 )
-from quant_strategies.validation.config import ScenarioRunConfig
-from quant_strategies.validation.config import load_validation_config
-from quant_strategies.validation.config import resolve_validation_config_path
-from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.validation.config import (
+    ScenarioRunConfig,
+    load_validation_config,
+    resolve_validation_config_path,
+)
 from quant_strategies.validation.errors import ValidationConfigError
 from quant_strategies.validation.events import ValidationEventSink, ValidationStageEmitter
 from quant_strategies.validation.manifest import write_validation_manifest
@@ -520,7 +524,9 @@ def _run_window_scenarios(
     )
     state.required_scenario_ids.extend(scenario.id for scenario in scenarios if scenario.required)
     for scenario in scenarios:
-        scenario_result = _run_scenario_backend(context, window, execution_spec, execution, scenario)
+        scenario_result = _run_scenario_backend(
+            context, window, execution_spec, execution, scenario
+        )
         state.backend_results.append(scenario_result)
         _record_agreement_failure(state, scenario_result)
 
@@ -743,7 +749,7 @@ def _mechanical_fail_decision(
         decision="mechanical_fail",
         reasons=reason_tuple,
         failed_gates=reason_tuple,
-        gate_details={reason: "failed" for reason in reason_tuple},
+        gate_details=dict.fromkeys(reason_tuple, "failed"),
         overfit_controls=overfit_controls_from_search_pressure(search_pressure),
     )
 
@@ -862,9 +868,7 @@ def _data_provenance(
             )
         ),
         "row_contract": (
-            None
-            if normalized_rows is None
-            else normalized_rows.row_contract_summary()
+            None if normalized_rows is None else normalized_rows.row_contract_summary()
         ),
     }
     if message is not None:

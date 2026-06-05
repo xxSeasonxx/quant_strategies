@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,8 +26,8 @@ def test_write_parquet_artifact_records_schema_hash_and_row_count(tmp_path: Path
         {
             "scenario_id": ["w/base", "w/base"],
             "timestamp": [
-                datetime(2026, 1, 1, tzinfo=timezone.utc),
-                datetime(2026, 1, 2, tzinfo=timezone.utc),
+                datetime(2026, 1, 1, tzinfo=UTC),
+                datetime(2026, 1, 2, tzinfo=UTC),
             ],
             "portfolio_value": [100.0, 101.0],
         }
@@ -455,7 +455,9 @@ def test_write_evaluation_manifest_rejects_missing_required_trace_table_metadata
         )
 
 
-def test_write_evaluation_manifest_rejects_trace_table_scenario_ids_missing_expected_coverage(tmp_path: Path):
+def test_write_evaluation_manifest_rejects_trace_table_scenario_ids_missing_expected_coverage(
+    tmp_path: Path,
+):
     result_dir = tmp_path / "results"
     result_dir.mkdir()
     config_path = tmp_path / "evaluation_config.toml"
@@ -531,7 +533,7 @@ def test_write_text_artifact_writes_plain_markdown(tmp_path: Path):
 
 def test_create_evaluation_result_dir_uses_strategy_id_and_suffix(tmp_path: Path):
     root = tmp_path / "evaluation_results"
-    now = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
 
     first = create_evaluation_result_dir(root, "demo strategy", now=now)
     second = create_evaluation_result_dir(root, "demo strategy", now=now)
@@ -540,7 +542,9 @@ def test_create_evaluation_result_dir_uses_strategy_id_and_suffix(tmp_path: Path
     assert second.name == "2026-01-01T120000Z-demo_strategy-2"
 
 
-def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, ...]) -> list[dict[str, object]]:
+def _write_required_trace_tables(
+    result_dir: Path, *, scenario_ids: tuple[str, ...]
+) -> list[dict[str, object]]:
     return [
         write_parquet_artifact(
             result_dir,
@@ -548,7 +552,7 @@ def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, .
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
-                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=UTC) for _ in scenario_ids],
                     "portfolio_value": [100.0 for _ in scenario_ids],
                     "period_return": [0.0 for _ in scenario_ids],
                     "drawdown": [0.0 for _ in scenario_ids],
@@ -570,11 +574,11 @@ def _write_required_trace_tables(result_dir: Path, *, scenario_ids: tuple[str, .
             pd.DataFrame(
                 {
                     "scenario_id": list(scenario_ids),
-                    "timestamp": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
+                    "timestamp": [datetime(2026, 1, 1, tzinfo=UTC) for _ in scenario_ids],
                     "asset": ["SPY" for _ in scenario_ids],
                     "target_weight": [1.0 for _ in scenario_ids],
                     "event": ["entry" for _ in scenario_ids],
-                    "decision_time": [datetime(2026, 1, 1, tzinfo=timezone.utc) for _ in scenario_ids],
+                    "decision_time": [datetime(2026, 1, 1, tzinfo=UTC) for _ in scenario_ids],
                     "direction": ["long" for _ in scenario_ids],
                 }
             ),

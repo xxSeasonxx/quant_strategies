@@ -35,7 +35,9 @@ def build_bar_index(
         funding_events: list[Bar] = []
         for index, bar in enumerate(ordered):
             if bar.timestamp in positions:
-                raise error_factory(f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}")
+                raise error_factory(
+                    f"duplicate bar timestamp for {symbol}: {bar.timestamp.isoformat()}"
+                )
             positions[bar.timestamp] = index
             if bar.has_funding_event:
                 funding_events.append(bar)

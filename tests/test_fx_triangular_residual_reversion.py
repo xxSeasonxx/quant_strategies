@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import math
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.core.engine_runner import build_request, evaluate_request
-from quant_strategies.decisions import ObservationRef, StrategyDecision
-from quant_strategies.core.data_audit import audit_decision_rows
 from untested.fx_triangular_residual_reversion import generate_decisions, validate_params
 
+from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.core.engine_runner import build_request, evaluate_request
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 
-START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+START = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def direct_residual_rows(residuals: list[float]) -> list[dict[str, object]]:
@@ -94,7 +93,9 @@ def decision_payload(decision: StrategyDecision) -> dict[str, object]:
     return payload
 
 
-def generate_payloads(bars: list[dict[str, object]], params: dict[str, object]) -> list[dict[str, object]]:
+def generate_payloads(
+    bars: list[dict[str, object]], params: dict[str, object]
+) -> list[dict[str, object]]:
     return [decision_payload(decision) for decision in generate_decisions(bars, params)]
 
 
@@ -160,7 +161,9 @@ def test_generate_decisions_preserves_behavior_with_validated_params():
     rows = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
     raw_params = params(weight="0.5", max_hold_bars="4")
 
-    assert generate_payloads(rows, validate_params(raw_params)) == generate_payloads(rows, raw_params)
+    assert generate_payloads(rows, validate_params(raw_params)) == generate_payloads(
+        rows, raw_params
+    )
 
 
 def test_generate_decisions_rejects_duplicate_symbol_timestamp_closes():
@@ -194,8 +197,7 @@ def test_generate_decisions_emits_complete_close_observation_lineage():
     rows = direct_residual_rows([0.0, 0.001, 0.002, 0.0])
     decisions = generate_decisions(rows, params())
     observed = {
-        (item.symbol, item.timestamp, item.field, item.source)
-        for item in decisions[0].observations
+        (item.symbol, item.timestamp, item.field, item.source) for item in decisions[0].observations
     }
     expected_times = [START + timedelta(minutes=index) for index in range(3)]
     expected = {
@@ -227,7 +229,9 @@ def test_fx_lineage_audit_fails_for_missing_or_late_observed_rows():
     assert missing_audit.passed is False
     assert any("missing observation row" in violation for violation in missing_audit.violations)
     assert late_audit.passed is False
-    assert any("was available after decision_time" in violation for violation in late_audit.violations)
+    assert any(
+        "was available after decision_time" in violation for violation in late_audit.violations
+    )
 
 
 def test_generate_decisions_maps_synthetic_leg_reversion_side():
@@ -307,16 +311,23 @@ def test_generate_decisions_suppresses_repeated_same_zone_entries():
 
 
 def test_generate_decisions_requires_enough_residual_history():
-    assert generate_decisions(direct_residual_rows([0.005, 0.0]), params(min_zscore_observations=3)) == []
+    assert (
+        generate_decisions(direct_residual_rows([0.005, 0.0]), params(min_zscore_observations=3))
+        == []
+    )
 
 
 def test_generate_decisions_rejects_unknown_triangle_set():
     with pytest.raises(ValueError, match="triangle_set"):
-        generate_decisions(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(triangle_set="typo"))
+        generate_decisions(
+            direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(triangle_set="typo")
+        )
 
 
 def test_generate_decisions_returns_empty_below_threshold():
-    signals = generate_decisions(direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(entry_zscore=100.0))
+    signals = generate_decisions(
+        direct_residual_rows([0.0, 0.001, 0.002, 0.0]), params(entry_zscore=100.0)
+    )
 
     assert signals == []
 

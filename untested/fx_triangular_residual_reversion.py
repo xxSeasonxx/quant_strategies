@@ -34,9 +34,9 @@ before spread and slippage, reject this one-minute residual proxy before tuning.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-import math
 from statistics import fmean, pstdev
 from typing import Any
 
@@ -47,7 +47,6 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-
 
 __all__ = ["generate_decisions", "validate_params"]
 
@@ -171,9 +170,7 @@ def generate_decisions(
             continue
         representative = max(entries, key=lambda entry: abs(float(entry["strength"])))
         observations = _unique_observations(
-            observation
-            for entry in entries
-            for observation in entry["observations"]
+            observation for entry in entries for observation in entry["observations"]
         )
         decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
         decisions.append(
@@ -192,7 +189,9 @@ def generate_decisions(
                 metadata={
                     "residual_zscore": representative["residual_zscore"],
                     "residual_bps": representative["residual_bps"],
-                    "attribution_score": sum(float(entry["attribution_score"]) for entry in entries),
+                    "attribution_score": sum(
+                        float(entry["attribution_score"]) for entry in entries
+                    ),
                     "signal_family": "fx_triangular_residual_reversion",
                 },
             )
@@ -286,7 +285,9 @@ def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
     return controls
 
 
-def _param_or_alias(params: Mapping[str, object], canonical: str, alias: str, default: object) -> object:
+def _param_or_alias(
+    params: Mapping[str, object], canonical: str, alias: str, default: object
+) -> object:
     if canonical in params:
         return params[canonical]
     if alias in params:
@@ -398,7 +399,12 @@ def _triangle_observations(
     point_indexes = set(range(history_start, current_index + 1))
     point_indexes.add(attribution_index)
     return tuple(
-        ObservationRef(symbol=symbol, timestamp=points[index]["timestamp"], field="close", source="strategy_input")
+        ObservationRef(
+            symbol=symbol,
+            timestamp=points[index]["timestamp"],
+            field="close",
+            source="strategy_input",
+        )
         for index in sorted(point_indexes)
         for symbol in symbols
     )

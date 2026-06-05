@@ -6,7 +6,6 @@ from pathlib import Path
 
 from quant_strategies.decisions import strategy_purity_violations
 
-
 REQUIRED_HEADINGS = (
     "Source / provenance:",
     "Market rationale:",
@@ -22,11 +21,7 @@ PROVENANCE_ANCHOR_PATTERN = re.compile(
 
 
 def strategy_files() -> list[Path]:
-    return sorted(
-        path
-        for path in Path("untested").glob("*.py")
-        if path.name != "__init__.py"
-    )
+    return sorted(path for path in Path("untested").glob("*.py") if path.name != "__init__.py")
 
 
 def example_strategy_files() -> list[Path]:
@@ -39,9 +34,7 @@ def all_strategy_files_for_contract() -> list[Path]:
 
 def strategy_python_files() -> list[Path]:
     return sorted(
-        path
-        for path in Path("untested").rglob("*.py")
-        if "__pycache__" not in path.parts
+        path for path in Path("untested").rglob("*.py") if "__pycache__" not in path.parts
     )
 
 

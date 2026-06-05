@@ -12,7 +12,6 @@ from quant_strategies.validation import run_validation
 from quant_strategies.validation.errors import ValidationError
 from quant_strategies.validation.events import jsonl_event_sink as validation_jsonl_event_sink
 
-
 _DATA_FAILURE_STAGES = {
     "data_load",
     "data_readiness",
@@ -27,18 +26,34 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run", help="run one strategy config")
-    run_parser.add_argument("--repo-root", type=Path, default=None, help="repository root for relative config paths")
-    run_parser.add_argument("--events-jsonl", action="store_true", help="write structured runner stage events to stderr")
+    run_parser.add_argument(
+        "--repo-root", type=Path, default=None, help="repository root for relative config paths"
+    )
+    run_parser.add_argument(
+        "--events-jsonl", action="store_true", help="write structured runner stage events to stderr"
+    )
     run_parser.add_argument("config", type=Path)
 
     validate_parser = subparsers.add_parser("validate", help="validate one validation TOML config")
-    validate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative validation config path")
-    validate_parser.add_argument("--events-jsonl", action="store_true", help="write structured validation stage events to stderr")
+    validate_parser.add_argument(
+        "--repo-root", type=Path, default=None, help="anchor for a relative validation config path"
+    )
+    validate_parser.add_argument(
+        "--events-jsonl",
+        action="store_true",
+        help="write structured validation stage events to stderr",
+    )
     validate_parser.add_argument("config", type=Path)
 
     evaluate_parser = subparsers.add_parser("evaluate", help="evaluate one evaluation TOML config")
-    evaluate_parser.add_argument("--repo-root", type=Path, default=None, help="anchor for a relative evaluation config path")
-    evaluate_parser.add_argument("--events-jsonl", action="store_true", help="write structured evaluation stage events to stderr")
+    evaluate_parser.add_argument(
+        "--repo-root", type=Path, default=None, help="anchor for a relative evaluation config path"
+    )
+    evaluate_parser.add_argument(
+        "--events-jsonl",
+        action="store_true",
+        help="write structured evaluation stage events to stderr",
+    )
     evaluate_parser.add_argument("config", type=Path)
 
     args = parser.parse_args(argv)
@@ -133,7 +148,9 @@ def _validation_exit_code(result: object) -> int:
     failure_stage = getattr(result, "failure_stage", None)
     if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if not getattr(result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None):
+    if not getattr(
+        result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None
+    ):
         return 1
     decision = getattr(getattr(result, "decision", None), "decision", None)
     if decision == "mechanical_fail":
@@ -145,6 +162,8 @@ def _evaluation_exit_code(result: object) -> int:
     failure_stage = getattr(result, "failure_stage", None)
     if failure_stage in _DATA_FAILURE_STAGES:
         return 3
-    if not getattr(result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None):
+    if not getattr(
+        result, "succeeded", getattr(result, "run_completed", False) and failure_stage is None
+    ):
         return 1
     return 0

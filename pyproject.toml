@@ -22,6 +22,10 @@ evaluation = [
     "pyarrow>=16",
     "vectorbtpro",
 ]
+dev = [
+    "mypy",
+    "ruff",
+]
 
 [project.scripts]
 quant-strategies = "quant_strategies.cli:main"
@@ -33,3 +37,49 @@ where = ["src"]
 addopts = "-ra"
 pythonpath = [".", "src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "C4",
+    "SIM",
+    "RUF",
+]
+ignore = [
+    "E501",   # Ruff format does not rewrite long strings/messages.
+    "B905",   # Existing zip usage needs case-by-case strictness decisions.
+    "C416",   # Style-only simplification; avoid churn during gate adoption.
+    "RUF005", # Style-only collection unpacking suggestions.
+    "RUF007", # Prefer explicit pairwise migrations in behavior changes.
+    "RUF015", # Style-only first-element access suggestions.
+    "RUF043", # Existing pytest match patterns need deliberate regex review.
+    "SIM101", # Style-only simplification; avoid churn during gate adoption.
+    "SIM103", # Style-only simplification; avoid churn during gate adoption.
+    "SIM105", # Style-only simplification; avoid churn during gate adoption.
+    "SIM108", # Style-only simplification; avoid churn during gate adoption.
+    "SIM401", # Style-only simplification; avoid churn during gate adoption.
+    "UP042",  # StrEnum migration is a public enum compatibility decision.
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+warn_unused_configs = true
+warn_return_any = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = true

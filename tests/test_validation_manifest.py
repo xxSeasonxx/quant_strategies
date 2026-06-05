@@ -73,12 +73,13 @@ def test_validation_manifest_replayable_when_all_required_completed_scenarios_ha
 
     assert manifest["validation"]["verdict_replayable"] is True
     assert all(
-        item["replayable_from_trade_ledger"] is True
-        for item in manifest["backend"]["scenarios"]
+        item["replayable_from_trade_ledger"] is True for item in manifest["backend"]["scenarios"]
     )
     for item in manifest["backend"]["scenarios"]:
         ledger_path = tmp_path / "validation_results" / item["trade_ledger_path"]
-        assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(ledger_path)
+        assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(
+            ledger_path
+        )
 
 
 def test_validation_manifest_does_not_overclaim_mixed_replayability(tmp_path: Path):

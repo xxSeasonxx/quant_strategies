@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
+from quant_strategies.core.config import CostModelConfig, FillModelConfig
+from quant_strategies.core.errors import EvaluationRunError, RequestBuildError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.engine import (
@@ -21,10 +23,6 @@ from quant_strategies.engine import (
 )
 from quant_strategies.engine.bar_index import IndexedBars, attach_bar_index, build_bar_index
 from quant_strategies.engine.executable import executable_decision
-
-from quant_strategies.core.config import CostModelConfig, FillModelConfig
-from quant_strategies.core.errors import EvaluationRunError, RequestBuildError
-
 
 EngineMode = Literal["screen", "gate"]
 
@@ -48,8 +46,7 @@ def build_request(
 ) -> EvaluationRequest:
     source_rows, normalized_timestamps = _engine_rows(rows)
     engine_bars = tuple(
-        _bar_from_row(row, normalized_timestamp=normalized_timestamps)
-        for row in source_rows
+        _bar_from_row(row, normalized_timestamp=normalized_timestamps) for row in source_rows
     )
     request = EvaluationRequest(
         spec=StrategySpec(strategy_id=strategy_id, decisions=tuple(decisions)),
@@ -77,7 +74,11 @@ def evaluate_request(
     try:
         if mode == "screen":
             screen_result = screen(request)
-            packet = build_evidence_packet(request, screening_result=screen_result) if include_evidence else None
+            packet = (
+                build_evidence_packet(request, screening_result=screen_result)
+                if include_evidence
+                else None
+            )
             return EngineRun(
                 mode="screen",
                 screen_summary=_screen_summary(screen_result, include_trades=include_trades),
@@ -112,7 +113,10 @@ def evaluate_request(
 
 
 def request_json(request: EvaluationRequest) -> str:
-    return json.dumps(request.model_dump(mode="json", exclude_none=True), indent=2, sort_keys=True) + "\n"
+    return (
+        json.dumps(request.model_dump(mode="json", exclude_none=True), indent=2, sort_keys=True)
+        + "\n"
+    )
 
 
 def _screen_summary(result, *, include_trades: bool) -> dict[str, Any]:
@@ -124,8 +128,14 @@ def _screen_summary(result, *, include_trades: bool) -> dict[str, Any]:
 
 
 def _validation_summary(report, *, include_trades: bool) -> dict[str, Any]:
-    payload = report.model_dump(mode="json", exclude={"screening_result": {"trades"}} if not include_trades else None)
-    if not include_trades and report.screening_result is not None and isinstance(payload.get("screening_result"), dict):
+    payload = report.model_dump(
+        mode="json", exclude={"screening_result": {"trades"}} if not include_trades else None
+    )
+    if (
+        not include_trades
+        and report.screening_result is not None
+        and isinstance(payload.get("screening_result"), dict)
+    ):
         payload["screening_result"]["trade_count"] = report.screening_result.trade_count
     return payload
 
@@ -165,7 +175,9 @@ def _bar_from_row(row: Mapping[str, Any], *, normalized_timestamp: bool = False)
         return Bar(**payload)
     except KeyError as exc:
         field = str(exc.args[0])
-        raise RequestBuildError(f"missing required bar field '{field}' for {row.get('symbol', '<unknown>')}") from exc
+        raise RequestBuildError(
+            f"missing required bar field '{field}' for {row.get('symbol', '<unknown>')}"
+        ) from exc
     except RequestBuildError:
         raise
     except Exception as exc:
@@ -221,7 +233,9 @@ def _decision_index(indexed: IndexedBars, decision: StrategyDecision) -> int:
     position = indexed.positions_by_symbol.get(symbol, {}).get(decision.decision_time)
     if position is not None:
         return position
-    raise RequestBuildError(f"decision_time does not match a bar timestamp: {decision.decision_time.isoformat()}")
+    raise RequestBuildError(
+        f"decision_time does not match a bar timestamp: {decision.decision_time.isoformat()}"
+    )
 
 
 def _decision_symbol(decision: StrategyDecision) -> str:

@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[1]
 LOOP_MEMORY_MARKERS = (
     "ranking_method_version",
@@ -123,15 +122,27 @@ def test_generated_result_roots_are_ignored():
 def test_makefile_exposes_single_local_check_command():
     text = (ROOT / "Makefile").read_text()
     check_body = _makefile_target_body(text, "check")
+    test_body = _makefile_target_body(text, "test")
 
-    assert ".PHONY: check check-vectorbtpro-smoke check-quant-data-contract check-all" in text
-    assert "check:" in text
+    assert (
+        ".PHONY: format fix lint typecheck test check check-vectorbtpro-smoke "
+        "check-quant-data-contract check-all"
+    ) in text
+    assert _makefile_target_header(text, "check") == "check: lint test"
+    assert "format:" in text
+    assert "fix:" in text
+    assert "lint:" in text
+    assert "typecheck:" in text
+    assert "test:" in text
+    assert "conda run -n quant ruff format ." in text
+    assert "conda run -n quant ruff check . --fix" in text
+    assert "conda run -n quant ruff format --check ." in text
+    assert "conda run -n quant ruff check ." in text
+    assert "conda run -n quant mypy src tests" in text
     assert "conda run -n quant python -m pip install -e ." in text
     assert "conda run -n quant quant-strategies --help" in text
-    assert "conda run -n quant pytest -q" in text
-    assert check_body.index("conda run -n quant pytest -q") < check_body.index(
-        "$(MAKE) check-vectorbtpro-smoke"
-    )
+    assert "conda run -n quant pytest -q" in test_body
+    assert "$(MAKE) check-vectorbtpro-smoke" in check_body
     assert "check-vectorbtpro-smoke:" in text
     assert (
         "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
@@ -142,7 +153,9 @@ def test_makefile_exposes_single_local_check_command():
         "conda run -n quant env RUN_QUANT_DATA_CONTRACT_SMOKE=1 pytest "
         "tests/test_quant_data_contract_smoke.py"
     ) in text
-    assert _makefile_target_header(text, "check-all") == "check-all: check"
+    assert _makefile_target_header(text, "check-all") == (
+        "check-all: check typecheck check-quant-data-contract"
+    )
 
 
 def _makefile_target_header(text: str, target: str) -> str:
@@ -226,7 +239,9 @@ def test_review_archive_index_points_to_current_disposition_anchor():
 
 def test_review_archive_marks_historical_reviews_superseded_when_opted_in():
     if os.environ.get("RUN_REVIEW_ARCHIVE_CHECK") != "1":
-        pytest.skip("set RUN_REVIEW_ARCHIVE_CHECK=1 to run exact archive disposition maintenance checks")
+        pytest.skip(
+            "set RUN_REVIEW_ARCHIVE_CHECK=1 to run exact archive disposition maintenance checks"
+        )
 
     text = (ROOT / "docs" / "reviews" / "README.md").read_text()
 
@@ -246,9 +261,7 @@ def test_review_archive_marks_historical_reviews_superseded_when_opted_in():
 def test_review_archive_artifacts_are_dated():
     dated_review_name = re.compile(r"^\d{4}-\d{2}-\d{2}-.+\.md$")
     review_files = [
-        path.name
-        for path in (ROOT / "docs" / "reviews").glob("*.md")
-        if path.name != "README.md"
+        path.name for path in (ROOT / "docs" / "reviews").glob("*.md") if path.name != "README.md"
     ]
 
     assert review_files
@@ -340,7 +353,9 @@ def _forbidden_runner_imports(
                 if module == forbidden_prefix:
                     for alias in node.names:
                         if not forbidden_names or alias.name in forbidden_names:
-                            offenders.append(f"{path.relative_to(ROOT)}: from {module} import {alias.name}")
+                            offenders.append(
+                                f"{path.relative_to(ROOT)}: from {module} import {alias.name}"
+                            )
     return sorted(offenders)
 
 
@@ -378,7 +393,9 @@ def test_root_phase_plans_are_not_active_context():
 
 
 def test_active_docs_lock_quant_autoresearch_consumer_contract():
-    foundation = " ".join((ROOT / "docs" / "foundation-surfaces.md").read_text(errors="ignore").split())
+    foundation = " ".join(
+        (ROOT / "docs" / "foundation-surfaces.md").read_text(errors="ignore").split()
+    )
 
     required_snippets = [
         "from quant_strategies.runner import run_config",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -12,19 +12,20 @@ import pytest
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 
-
 LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
 
 
 def test_runner_artifacts_do_not_expose_legacy_row_summary_owner():
+    import quant_strategies.core.execution as runner_execution
     import quant_strategies.runner as runner_package
     import quant_strategies.runner.artifacts as artifacts
-    import quant_strategies.core.execution as runner_execution
 
     for module in (artifacts, runner_execution, runner_package):
         assert not hasattr(module, "RowSummary")
     assert "row_summary" not in inspect.signature(artifacts.write_data_manifest).parameters
-    assert "row_summary" not in inspect.signature(runner_execution.StrategyExecutionError).parameters
+    assert (
+        "row_summary" not in inspect.signature(runner_execution.StrategyExecutionError).parameters
+    )
 
 
 def test_replayable_from_artifacts_for_profile_maps_profiles():
@@ -101,8 +102,7 @@ def test_row_contract_issue_compaction_samples_each_failure_class():
     compacted = artifacts.compact_evidence_quality(evidence)
     row_contract = compacted["row_contract"]
     sampled_keys = {
-        (issue["severity"], issue["reason"], issue["field"])
-        for issue in row_contract["issues"]
+        (issue["severity"], issue["reason"], issue["field"]) for issue in row_contract["issues"]
     }
 
     assert row_contract["issue_count"] == 30
@@ -250,13 +250,15 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
     assert net["unit"] == "decimal_fraction"
     assert net["base"] == "signed target-weighted trade activity; not portfolio NAV"
     assert net["backend"] == "execution_kernel"
-    assert net["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+    assert (
+        net["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+    )
     assert net["tolerance"] is None
     assert "not comparable to NAV-path total return" in net["asymmetry"]
 
 
 def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     rows = [
         {"symbol": "SPY", "timestamp": timestamp, "close": 100.0, "nested": {"b": 2, "a": 1}},
         {"nested": {"a": 1, "b": 2}, "close": 101.0, "timestamp": timestamp, "symbol": "SPY"},
@@ -270,7 +272,7 @@ def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
 
 
 def test_write_jsonl_uses_same_canonical_rows_as_normalized_hash(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     rows = [
         {"symbol": "SPY", "timestamp": timestamp, "close": 100.0, "nested": {"b": 2, "a": 1}},
         {"nested": {"a": 1, "b": 2}, "close": 101.0, "timestamp": timestamp, "symbol": "SPY"},
@@ -285,7 +287,7 @@ def test_write_jsonl_uses_same_canonical_rows_as_normalized_hash(tmp_path: Path)
 
 
 def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     run_config = config(tmp_path)
     rows = [
         row("SPY", timestamp, 100.0),
@@ -336,7 +338,7 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
 
 
 def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     payload = summary_profile_payload(
         config=config(tmp_path),
         rows=[row("SPY", timestamp, 100.0)],
@@ -349,11 +351,17 @@ def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
 
 
 def test_summary_profile_payload_normalizes_common_non_json_row_values(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
 
     payload = summary_profile_payload(
         config=config(tmp_path),
-        rows=[{**row("SPY", timestamp, 100.0), "research_nan": float("nan"), "research_decimal": Decimal("1.25")}],
+        rows=[
+            {
+                **row("SPY", timestamp, 100.0),
+                "research_nan": float("nan"),
+                "research_decimal": Decimal("1.25"),
+            }
+        ],
         decisions=[decision("SPY", timestamp)],
         engine={"passed": True, "trade_count": 1},
     )
@@ -365,7 +373,7 @@ def test_summary_profile_payload_normalizes_common_non_json_row_values(tmp_path:
 
 
 def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     run_config = config(tmp_path)
     result_dir = tmp_path / "results" / "run"
     result_dir.mkdir(parents=True)
@@ -392,12 +400,14 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
     assert parsed["replayable_from_artifacts"] is False
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in parsed
     assert parsed["rows"]["row_count"] == 1
-    assert parsed["rows"]["normalized_rows_sha256"] == normalized_rows_sha256([row("SPY", timestamp, 100.0)])
+    assert parsed["rows"]["normalized_rows_sha256"] == normalized_rows_sha256(
+        [row("SPY", timestamp, 100.0)]
+    )
     assert_trade_result_metric_semantics(parsed)
 
 
 def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     run_config = config(
         tmp_path,
         artifact_profile="diagnostic",

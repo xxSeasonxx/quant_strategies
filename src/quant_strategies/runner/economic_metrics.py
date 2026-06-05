@@ -77,9 +77,7 @@ def trades_from_engine_summary(engine: Mapping[str, Any]) -> list[dict[str, Any]
         else:
             raise ValueError("engine trade_count must be an integer when provided")
         if expected_trade_count != len(copied_trades):
-            raise ValueError(
-                "engine diagnostic_trades length does not match trade_count"
-            )
+            raise ValueError("engine diagnostic_trades length does not match trade_count")
     return copied_trades
 
 

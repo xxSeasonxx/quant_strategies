@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -11,16 +11,21 @@ import pytest
 
 import quant_strategies.validation._pipeline as validation
 from quant_strategies.causality import strict_replay_boundaries
-from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.decisions import (
+    ExitPolicy,
+    InstrumentRef,
+    ObservationRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.validation._pipeline import _run_validation as run_validation
 from quant_strategies.validation.backends import BackendRunResult
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
 class FakeBackend:
@@ -127,7 +132,11 @@ def decision(strategy_id: str = "demo") -> StrategyDecision:
         as_of_time=AS_OF,
         target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
         exit_policy=ExitPolicy(max_hold_bars=1),
-        observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close", source="strategy_input"),),
+        observations=(
+            ObservationRef(
+                symbol="BTC-PERP", timestamp=AS_OF, field="close", source="strategy_input"
+            ),
+        ),
     )
 
 
@@ -155,8 +164,8 @@ def rows():
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "open": 102.0,
             "high": 102.0,
             "low": 102.0,
@@ -210,14 +219,14 @@ def expected_row_records() -> list[dict[str, Any]]:
             "timestamp": DECISION.isoformat(),
         },
         {
-            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc).isoformat(),
+            "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC).isoformat(),
             "close": 102.0,
             "has_funding_event": False,
             "high": 102.0,
             "low": 102.0,
             "open": 102.0,
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc).isoformat(),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC).isoformat(),
         },
     ]
 
@@ -283,16 +292,16 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         "decision_count": 1,
         "decision_records_path": base_decision_path,
         "decision_records_sha256": file_sha256(base_decision_file),
-            "trade_ledger_path": None,
-            "trade_ledger_sha256": None,
-            "agreement_oracle": {
-                "enabled": False,
-                "ran": False,
-                "status": "disabled",
-                "note": "agreement_oracle_disabled",
-            },
-            "result": {
-                "backend": "fake",
+        "trade_ledger_path": None,
+        "trade_ledger_sha256": None,
+        "agreement_oracle": {
+            "enabled": False,
+            "ran": False,
+            "status": "disabled",
+            "note": "agreement_oracle_disabled",
+        },
+        "result": {
+            "backend": "fake",
             "status": "completed",
             "metrics": {"net_return": 0.02, "trade_count": 20},
             "warnings": [],
@@ -316,7 +325,9 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
     assert (result.result_dir / "decision_schema.json").exists()
     legacy_sensitivity_artifact = "robustness" + "_matrix.json"
     assert not (result.result_dir / legacy_sensitivity_artifact).exists()
-    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    cost_fill_sensitivity = json.loads(
+        (result.result_dir / "cost_fill_sensitivity.json").read_text()
+    )
     assert cost_fill_sensitivity["decision"]["decision"] == "mechanical_caution"
     assert "min_windows" in cost_fill_sensitivity["decision"]["failed_gates"]
     assert len(cost_fill_sensitivity["scenarios"]) == 4
@@ -363,9 +374,7 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         result.result_dir / "backend_runs" / "summary.json"
     )
     assert manifest["artifacts"][row_path]["sha256"] == file_sha256(row_file)
-    assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(
-        base_decision_file
-    )
+    assert manifest["artifacts"][base_decision_path]["sha256"] == file_sha256(base_decision_file)
     assert (result.result_dir / "environment.json").exists()
     assert "python" not in manifest
     assert "packages" not in manifest
@@ -502,8 +511,7 @@ def test_validation_strict_replay_detects_suppression_even_with_mechanical_thres
     # the default validation path (previously this path ran emitted-only replay).
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml").read_text()
-        + "\n[mechanical_thresholds]\nenabled = false\n"
+        (candidate / "validation.toml").read_text() + "\n[mechanical_thresholds]\nenabled = false\n"
     )
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
@@ -561,16 +569,14 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     )
     events: list[dict[str, object]] = []
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, event_sink=events.append)
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, event_sink=events.append
+    )
 
     assert result.decision.decision == "mechanical_fail"
-    assert any(
-        event["stage"] == "data_audit" and event["status"] == "failed"
-        for event in events
-    )
+    assert any(event["stage"] == "data_audit" and event["status"] == "failed" for event in events)
     assert not any(
-        event["stage"] == "data_audit" and event["status"] == "completed"
-        for event in events
+        event["stage"] == "data_audit" and event["status"] == "completed" for event in events
     )
 
     suppressed = write_candidate(tmp_path / "suppressed")
@@ -594,16 +600,16 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
     )
     events.clear()
 
-    result = run_validation(suppressed / "validation.toml", repo_root=tmp_path / "suppressed", event_sink=events.append)
+    result = run_validation(
+        suppressed / "validation.toml", repo_root=tmp_path / "suppressed", event_sink=events.append
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert any(
-        event["stage"] == "causality_check" and event["status"] == "failed"
-        for event in events
+        event["stage"] == "causality_check" and event["status"] == "failed" for event in events
     )
     assert not any(
-        event["stage"] == "causality_check" and event["status"] == "completed"
-        for event in events
+        event["stage"] == "causality_check" and event["status"] == "completed" for event in events
     )
 
 
@@ -626,18 +632,17 @@ def test_strict_replay_boundaries_dedupe_shared_row_information_sets():
     boundaries = strict_replay_boundaries(normalized, [])
 
     assert [
-        (boundary.as_of_time, boundary.decision_time, boundary.symbols)
-        for boundary in boundaries
+        (boundary.as_of_time, boundary.decision_time, boundary.symbols) for boundary in boundaries
     ] == [
         (AS_OF, DECISION, frozenset({"BTC-PERP", "ETH-PERP"})),
         (
             DECISION,
-            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             frozenset({"BTC-PERP", "ETH-PERP"}),
         ),
         (
-            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
-            datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+            datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             frozenset({"BTC-PERP", "ETH-PERP"}),
         ),
     ]
@@ -800,12 +805,17 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     assert decision_payload["gate_details"]["min_windows"] == "2 >= 2"
     assert decision_payload["gate_details"]["min_total_trades"] == "40 >= 30"
 
-    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    cost_fill_sensitivity = json.loads(
+        (result.result_dir / "cost_fill_sensitivity.json").read_text()
+    )
     assert cost_fill_sensitivity["decision"]["decision"] == "mechanical_caution"
     assert cost_fill_sensitivity["decision"]["reasons"] == [
         "multiple_testing_not_corrected_advisory_only"
     ]
-    assert cost_fill_sensitivity["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
+    assert (
+        cost_fill_sensitivity["decision"]["overfit_controls"]
+        == decision_payload["overfit_controls"]
+    )
     assert cost_fill_sensitivity["decision"]["failed_gates"] == []
     assert "gate_details" in cost_fill_sensitivity["decision"]
     assert len(cost_fill_sensitivity["scenarios"]) == 8
@@ -829,7 +839,9 @@ def test_run_validation_records_data_audit_failure(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("quant_strategies.core.execution.load_data", raise_data_load_error)
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert "data_audit_failed" in result.decision.reasons
@@ -862,7 +874,9 @@ def test_run_validation_normalizes_nonfinite_research_fields_in_row_snapshot(
         lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
 
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
@@ -891,7 +905,9 @@ selection_rule = "manual shortlist"
         .replace('strategy_path = "strategy.py"', 'strategy_path = "missing.py"')
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_import_failed",)
@@ -905,9 +921,14 @@ selection_rule = "manual shortlist"
     assert decision_payload["overfit_controls"]["candidate_count"] == 20
     assert decision_payload["overfit_controls"]["trial_count"] == 5
     assert decision_payload["overfit_controls"]["selection_rule"] == "manual shortlist"
-    cost_fill_sensitivity = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
+    cost_fill_sensitivity = json.loads(
+        (result.result_dir / "cost_fill_sensitivity.json").read_text()
+    )
     assert cost_fill_sensitivity["failure_details"] == decision_payload["failure_details"]
-    assert cost_fill_sensitivity["decision"]["overfit_controls"] == decision_payload["overfit_controls"]
+    assert (
+        cost_fill_sensitivity["decision"]["overfit_controls"]
+        == decision_payload["overfit_controls"]
+    )
 
 
 def test_run_validation_records_backend_selection_failure_details(
@@ -955,7 +976,10 @@ def test_run_validation_ignores_unconfigured_manifest_next_to_config(
             }
         )
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1011,7 +1035,9 @@ def test_run_validation_rejects_external_config_pointing_at_candidate_strategy(t
         (candidate / "validation.toml")
         .read_text()
         .replace('strategy_path = "strategy.py"', 'strategy_path = "../candidate/strategy.py"')
-        .replace('results_dir = "validation_results/demo"', 'results_dir = "validation_results/external"')
+        .replace(
+            'results_dir = "validation_results/demo"', 'results_dir = "validation_results/external"'
+        )
     )
     backend = RecordingBackend()
 
@@ -1061,7 +1087,10 @@ def test_run_validation_blocks_missing_required_observations(tmp_path: Path, mon
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1088,7 +1117,10 @@ def test_run_validation_applies_crypto_perp_funding_readiness_defaults(
         .read_text()
         .replace('kind = "bars"\ndataset = "unit-test-bars"', 'kind = "crypto_perp_funding"')
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1123,7 +1155,10 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1155,7 +1190,10 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
         "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
         "    )]\n"
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1173,7 +1211,10 @@ def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, 
 def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     monkeypatch.setattr(
         "quant_strategies.core.execution._load_strategy",
         lambda path, repo_root: _validated(lambda loaded_rows, params: [decision("other")]),
@@ -1193,7 +1234,10 @@ def test_run_validation_rejects_wrong_strategy_id(tmp_path: Path, monkeypatch):
 def test_run_validation_rejects_non_decision_output(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     backend = RecordingBackend()
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     monkeypatch.setattr(
         "quant_strategies.core.execution._load_strategy",
         lambda path, repo_root: _validated(lambda loaded_rows, params: "not decisions"),
@@ -1222,17 +1266,22 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
     # No backend injected -> the engine is the default (and only) verdict source.
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml").read_text()
-        + "\n[mechanical_thresholds]\nenabled = false\n"
+        (candidate / "validation.toml").read_text() + "\n[mechanical_thresholds]\nenabled = false\n"
     )
     (candidate / "strategy.py").write_text(
         (candidate / "strategy.py")
         .read_text()
-        .replace("def generate_decisions(rows, params):\n", "def generate_decisions(rows, params):\n    if len(rows) < 2:\n        return []\n")
+        .replace(
+            "def generate_decisions(rows, params):\n",
+            "def generate_decisions(rows, params):\n    if len(rows) < 2:\n        return []\n",
+        )
         .replace("decision_time=rows[0]['timestamp']", "decision_time=rows[1]['timestamp']")
         .replace("as_of_time=rows[0]['timestamp']", "as_of_time=rows[1]['timestamp']")
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
@@ -1274,8 +1323,8 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     long_rows = [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=UTC),
             "open": 100.0 + minute,
             "high": 100.0 + minute,
             "low": 100.0 + minute,
@@ -1285,13 +1334,16 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
         for minute in range(5)
     ]
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=long_rows)
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=long_rows),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    statuses = {item["result"]["backend"]: item["result"]["status"] for item in backend_summary["results"]}
+    statuses = {
+        item["result"]["backend"]: item["result"]["status"] for item in backend_summary["results"]
+    }
     # The capability gap is gone: the engine completes the threshold-exit decision
     # across every scenario (vbt would have returned unsupported -> mechanical_fail).
     assert statuses == {"engine": "completed"}
@@ -1322,8 +1374,8 @@ def _upward_rows(n: int = 5) -> list[dict[str, Any]]:
     return [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, minute, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, minute, tzinfo=UTC),
             "open": 100.0 + minute,
             "high": 100.0 + minute,
             "low": 100.0 + minute,
@@ -1345,9 +1397,13 @@ def _agreement_oracle_statuses(result) -> dict[str, set[str]]:
     cost_fill = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     return {
-        "backend_summary": {item["agreement_oracle"]["status"] for item in backend_summary["results"]},
+        "backend_summary": {
+            item["agreement_oracle"]["status"] for item in backend_summary["results"]
+        },
         "cost_fill": {item["agreement_oracle"]["status"] for item in cost_fill["scenarios"]},
-        "manifest": {item["agreement_oracle"]["status"] for item in manifest["backend"]["scenarios"]},
+        "manifest": {
+            item["agreement_oracle"]["status"] for item in manifest["backend"]["scenarios"]
+        },
     }
 
 
@@ -1371,7 +1427,8 @@ def _assert_agreement_oracle_status(result, expected: str, *, raw_agreement_pres
 def test_run_validation_agreement_oracle_disabled_status_is_explicit(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1386,7 +1443,8 @@ def test_run_validation_agreement_oracle_not_run_status_when_backend_does_not_co
     candidate = write_candidate(tmp_path)
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     backend = FakeBackend(
         BackendRunResult(
@@ -1414,7 +1472,8 @@ def test_run_validation_agreement_oracle_result_status_is_explicit_everywhere(
     candidate = write_candidate(tmp_path)
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
     monkeypatch.setattr(
         "quant_strategies.validation.agreement.evaluate_agreement",
@@ -1441,7 +1500,8 @@ def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path
     (candidate / "strategy.py").write_text(_long_strategy_text())
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=_upward_rows()),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1450,7 +1510,9 @@ def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path
     statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
     assert statuses == {"pass"}
     assert result.failure_stage != "agreement_oracle"
-    assert all(not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons)
+    assert all(
+        not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons
+    )
 
 
 def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, monkeypatch):
@@ -1459,7 +1521,8 @@ def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, mo
     candidate = write_candidate(tmp_path)
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
     def diverging(**_kwargs):
@@ -1496,7 +1559,8 @@ def test_run_validation_agreement_oracle_skips_threshold_exit(tmp_path: Path, mo
     )
     _enable_oracle(candidate)
     monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows())
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=_upward_rows()),
     )
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
@@ -1504,7 +1568,9 @@ def test_run_validation_agreement_oracle_skips_threshold_exit(tmp_path: Path, mo
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
     assert statuses == {"skipped"}
-    assert all(not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons)
+    assert all(
+        not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons
+    )
 
 
 def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
@@ -1532,8 +1598,8 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     loaded_rows = rows() + [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
-            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "open": 103.0,
             "high": 103.0,
             "low": 103.0,
@@ -1569,7 +1635,10 @@ def test_run_validation_fails_before_backend_on_leveraged_target_weight(
     candidate = write_candidate(tmp_path)
     config_path = candidate / "validation.toml"
     config_path.write_text(config_path.read_text().replace("weight = 1.0", "weight = 1.01"))
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1615,7 +1684,10 @@ def test_run_validation_fails_before_backend_on_overlapping_gross_exposure(
         "        ))\n"
         "    return decisions\n"
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=_upward_rows(8)))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=_upward_rows(8)),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1625,7 +1697,10 @@ def test_run_validation_fails_before_backend_on_overlapping_gross_exposure(
     assert result.failure_stage == "exposure_admissibility"
     assert backend.calls == 0
     data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert any("portfolio_target_weight_exceeds_one" in item for item in data_audit["windows"][0]["violations"])
+    assert any(
+        "portfolio_target_weight_exceeds_one" in item
+        for item in data_audit["windows"][0]["violations"]
+    )
 
 
 def test_run_validation_checks_exposure_against_required_scenario_fill_models(
@@ -1633,7 +1708,9 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
 ):
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
-        (candidate / "validation.toml").read_text().replace(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace(
             'symbols = ["BTC-PERP"]',
             'symbols = ["BTC-PERP", "ETH-PERP"]',
         )
@@ -1671,7 +1748,7 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
         "        ))\n"
         "    return decisions\n"
     )
-    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    base = datetime(2026, 1, 1, tzinfo=UTC)
     loaded_rows = [
         _bar("BTC-PERP", base + timedelta(minutes=0), 100.0),
         _bar("BTC-PERP", base + timedelta(minutes=1), 101.0),
@@ -1703,7 +1780,10 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = ScenarioAwareBackend(
         {
             "validation_2026_h1/stressed_costs": BackendRunResult(
@@ -1765,14 +1845,19 @@ def test_run_validation_loads_rows_once_per_window_and_reuses_across_matrix(
 
 def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
     assert result.decision.decision == "mechanical_caution"
     configs = {item.scenario_id: item for item in backend.configs}
-    decision_sizes = {scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario}
+    decision_sizes = {
+        scenario_id: sizes for scenario_id, sizes in backend.decision_sizes_by_scenario
+    }
     assert configs["validation_2026_h1/base"].cost_model.fee_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].cost_model.slippage_bps_per_side == 0.0
     assert configs["validation_2026_h1/base"].fill_model.entry_lag_bars == 1
@@ -1789,9 +1874,7 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
     assert not any(item["scenario_kind"] == "parameter" for item in summary["results"])
 
 
-def test_run_validation_rejects_unknown_params_with_strategy_validator(
-    tmp_path: Path, monkeypatch
-):
+def test_run_validation_rejects_unknown_params_with_strategy_validator(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
@@ -1815,7 +1898,10 @@ def test_run_validation_rejects_unknown_params_with_strategy_validator(
     (candidate / "validation.toml").write_text(
         validation_config.replace("weight = 1.0", "weight = 1.0\ntypo = 2.0")
     )
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = RecordingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1852,7 +1938,9 @@ def test_run_validation_blocks_strategy_row_mutation(tmp_path: Path, monkeypatch
         lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -1876,7 +1964,9 @@ def test_run_validation_blocks_strategy_param_mutation(tmp_path: Path, monkeypat
         lambda config, **_kwargs: LoadedData(rows=rows()),
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -1889,7 +1979,10 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def raise_generation_error(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
         raise RuntimeError("signal code failed")
@@ -1899,7 +1992,9 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
         lambda path, repo_root: _validated(raise_generation_error),
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("strategy_generation_failed",)
@@ -1915,11 +2010,12 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_excepti
     assert summary["results"] == []
 
 
-def test_run_validation_writes_failure_artifacts_for_backend_exception(
-    tmp_path: Path, monkeypatch
-):
+def test_run_validation_writes_failure_artifacts_for_backend_exception(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = ExplodingBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1940,7 +2036,10 @@ def test_run_validation_trusts_backend_run_result_without_pydantic_revalidation(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def reject_revalidation(*args: object, **kwargs: object) -> None:
         raise AssertionError("BackendRunResult.model_validate should not be called")
@@ -1968,7 +2067,10 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = MalformedBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -1987,7 +2089,10 @@ def test_run_validation_writes_failure_artifacts_for_malformed_backend_result(
 
 def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
     backend = InvalidStatusBackend()
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
@@ -2003,7 +2108,10 @@ def test_run_validation_rejects_invalid_backend_status(tmp_path: Path, monkeypat
 
 def test_run_validation_propagates_backend_system_exit(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     with pytest.raises(SystemExit, match="backend exited"):
         run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=ExitingBackend())
@@ -2013,7 +2121,10 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
-    monkeypatch.setattr("quant_strategies.core.execution.load_data", lambda config, **_kwargs: LoadedData(rows=rows()))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
 
     def exit_generation(loaded_rows: list[dict[str, Any]], params: dict[str, Any]):
         raise SystemExit("signal code exited")
@@ -2023,7 +2134,9 @@ def test_run_validation_writes_failure_artifacts_for_strategy_generation_system_
         lambda path, repo_root: _validated(exit_generation),
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "decision_generation"
@@ -2043,7 +2156,9 @@ def test_run_validation_writes_failure_artifacts_for_validate_params_system_exit
         "    return []\n"
     )
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "param_validation"
@@ -2060,14 +2175,18 @@ def test_run_validation_writes_failure_artifacts_for_strategy_import_system_exit
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text("raise SystemExit('import exited')\n")
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend())
+    result = run_validation(
+        candidate / "validation.toml", repo_root=tmp_path, backend=RecordingBackend()
+    )
 
     assert result.decision.decision == "mechanical_fail"
     assert result.failure_stage == "strategy_import"
     assert result.result_dir is not None
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
     assert decision_payload["failure_details"][0]["stage"] == "strategy_import"
-    assert "strategy import exited: import exited" in decision_payload["failure_details"][0]["message"]
+    assert (
+        "strategy import exited: import exited" in decision_payload["failure_details"][0]["message"]
+    )
 
 
 class RecordingBackend:
@@ -2321,12 +2440,16 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
         ledger_file = result.result_dir / item["trade_ledger_path"]
         assert item["trade_ledger_sha256"] == file_sha256(ledger_file)
         # the ledger is hash-pinned as an audit artifact in the manifest
-        assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(ledger_file)
+        assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(
+            ledger_file
+        )
         trades = read_jsonl(ledger_file)
         metrics = item["result"]["metrics"]
         assert len(trades) == metrics["trade_count"]
         # the verdict net_return is exactly the sum of the emitted per-trade net returns
-        assert sum(t["net_return"] for t in trades) == pytest.approx(metrics["net_return"], abs=1e-9)
+        assert sum(t["net_return"] for t in trades) == pytest.approx(
+            metrics["net_return"], abs=1e-9
+        )
 
 
 def test_run_validation_failure_path_artifact_write_error_returns_structured_result(

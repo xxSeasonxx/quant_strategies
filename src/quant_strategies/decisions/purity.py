@@ -15,7 +15,6 @@ import ast
 from collections.abc import Mapping
 from pathlib import Path
 
-
 BANNED_IMPORT_ROOTS = {
     "multiprocessing",
     "quant_data",
@@ -129,8 +128,7 @@ def strategy_purity_violations(path: str | Path) -> tuple[str, ...]:
 
 def _is_banned_import(module: str) -> bool:
     return any(
-        module == banned or module.startswith(f"{banned}.")
-        for banned in BANNED_IMPORT_ROOTS
+        module == banned or module.startswith(f"{banned}.") for banned in BANNED_IMPORT_ROOTS
     )
 
 
@@ -183,7 +181,9 @@ def _is_getattr_dynamic_import(node: ast.Call, aliases: Mapping[str, str]) -> bo
 
 
 def _is_dynamic_import_call(node: ast.AST, aliases: Mapping[str, str]) -> bool:
-    return isinstance(node, ast.Call) and _is_dynamic_import_call_name(_call_name(node.func, aliases))
+    return isinstance(node, ast.Call) and _is_dynamic_import_call_name(
+        _call_name(node.func, aliases)
+    )
 
 
 def _is_dynamic_import_call_name(call_name: str) -> bool:

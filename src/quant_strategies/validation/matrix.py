@@ -52,8 +52,7 @@ def expand_validation_matrix(
             kind="cost_stress",
             cost_model={
                 "fee_bps_per_side": float(base_costs.get("fee_bps_per_side", 0.0)) * 2.0,
-                "slippage_bps_per_side": float(base_costs.get("slippage_bps_per_side", 0.0))
-                * 2.0,
+                "slippage_bps_per_side": float(base_costs.get("slippage_bps_per_side", 0.0)) * 2.0,
             },
         ),
         MatrixScenario(

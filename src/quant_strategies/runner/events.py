@@ -9,7 +9,6 @@ from quant_strategies.core.events import (
     jsonl_event_sink,
 )
 
-
 RunnerEvent = StageEvent
 RunnerEventSink = StageEventSink
 

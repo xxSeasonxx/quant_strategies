@@ -7,12 +7,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
 )
-from quant_strategies.datetime_utils import parse_aware_datetime
 
 
 class DataAudit(BaseModel):
@@ -106,4 +106,6 @@ def _normalized_observation_row_index(
 
 
 def _is_aware_datetime(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )

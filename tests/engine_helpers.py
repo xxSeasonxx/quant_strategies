@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
 from quant_strategies.engine import Bar, Side
 
 
 def bars_for(symbol: str, closes: list[float]) -> tuple[Bar, ...]:
-    start = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    start = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
     bars = []
     for offset, close in enumerate(closes):
         timestamp = start + timedelta(minutes=offset)
@@ -37,7 +37,7 @@ def decision_for(
     metadata: dict[str, object] | None = None,
     strategy_id: str = "test_strategy",
 ) -> StrategyDecision:
-    timestamp = decision_time or datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
+    timestamp = decision_time or datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
     return StrategyDecision(
         strategy_id=strategy_id,
         instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),

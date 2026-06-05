@@ -113,7 +113,9 @@ def agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
             "status": item.agreement_oracle_status,
             "enabled": item.agreement_oracle_status != "disabled",
             "ran": item.agreement is not None,
-            "note": item.agreement.note if item.agreement is not None else item.agreement_oracle_note,
+            "note": item.agreement.note
+            if item.agreement is not None
+            else item.agreement_oracle_note,
         }
     }
     if item.agreement is not None:

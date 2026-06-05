@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.decisions import (
     ExitPolicy,
     InstrumentRef,
@@ -13,12 +14,10 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-from quant_strategies.core.data_audit import audit_decision_rows
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
-FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
+FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
 
 
 def row(symbol: str, timestamp: datetime, close: float) -> dict[str, object]:
@@ -147,7 +146,9 @@ def test_poisoning_future_rows_does_not_change_generated_decision_ids():
         row("EURJPY", AS_OF, 101.0),
     ]
 
-    assert decision_fingerprint(generate_cross_sectional_decisions(cross_section_rows)) == decision_fingerprint(
+    assert decision_fingerprint(
+        generate_cross_sectional_decisions(cross_section_rows)
+    ) == decision_fingerprint(
         generate_cross_sectional_decisions(poison_future_rows(cross_section_rows))
     )
     assert decision_fingerprint(generate_fx_triangle_decisions(fx_rows)) == decision_fingerprint(
@@ -166,7 +167,11 @@ def test_declared_future_fx_observation_is_caught_by_audit():
     poisoned_decision = clean_decision.model_copy(
         update={
             "observations": clean_decision.observations
-            + (ObservationRef(symbol="EURJPY", timestamp=FUTURE, field="close", source="synthetic"),)
+            + (
+                ObservationRef(
+                    symbol="EURJPY", timestamp=FUTURE, field="close", source="synthetic"
+                ),
+            )
         }
     )
 

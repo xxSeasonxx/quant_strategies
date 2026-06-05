@@ -3,20 +3,20 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from quant_strategies.core import data_loader
-from quant_strategies.runner.config import load_config
 from quant_strategies.core.errors import DataLoadError
+from quant_strategies.runner.config import load_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def row(symbol: str, close: float = 100.0, **extra: object) -> dict[str, object]:
-    timestamp = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     base = {
         "symbol": symbol,
         "timestamp": timestamp,
@@ -88,7 +88,9 @@ def test_importing_data_loader_does_not_import_quant_data():
     subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=env, check=True)
 
 
-def test_bars_adapter_loads_one_symbol_via_contract_loader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_bars_adapter_loads_one_symbol_via_contract_loader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     config = make_config(tmp_path)
     engine = object()
     calls: list[tuple[object, str, str, bool]] = []
@@ -107,12 +109,14 @@ def test_bars_adapter_loads_one_symbol_via_contract_loader(tmp_path: Path, monke
     assert loaded.rows == loaded.normalized_rows.projection_rows()
 
 
-def test_universe_adapter_preserves_upstream_row_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_universe_adapter_preserves_upstream_row_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     config = make_config(tmp_path, symbols=["SPY", "QQQ"])
     calls: list[tuple[list[str], str, bool]] = []
 
-    t_early = datetime(2024, 1, 1, tzinfo=timezone.utc)
-    t_late = datetime(2024, 1, 2, tzinfo=timezone.utc)
+    t_early = datetime(2024, 1, 1, tzinfo=UTC)
+    t_late = datetime(2024, 1, 2, tzinfo=UTC)
 
     def fake_load_strategy_universe_bars(engine, symbols, dataset, start, end, *, strict):
         calls.append((symbols, dataset, strict))
@@ -125,7 +129,9 @@ def test_universe_adapter_preserves_upstream_row_order(tmp_path: Path, monkeypat
         ]
 
     monkeypatch.setattr(
-        data_loader.contract_loaders, "load_strategy_universe_bars", fake_load_strategy_universe_bars
+        data_loader.contract_loaders,
+        "load_strategy_universe_bars",
+        fake_load_strategy_universe_bars,
     )
 
     loaded = data_loader.load_data(config, engine=object())
@@ -142,7 +148,7 @@ def test_load_data_returns_row_contract_issues_for_mixed_timestamp_rows(
     monkeypatch: pytest.MonkeyPatch,
 ):
     config = make_config(tmp_path)
-    available_at = datetime(2024, 1, 1, 9, 31, tzinfo=timezone.utc)
+    available_at = datetime(2024, 1, 1, 9, 31, tzinfo=UTC)
     missing_timestamp = row("SPY", close=101.0, available_at=available_at)
     del missing_timestamp["timestamp"]
 
@@ -151,7 +157,7 @@ def test_load_data_returns_row_contract_issues_for_mixed_timestamp_rows(
             row(
                 "SPY",
                 close=102.0,
-                timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 2, tzinfo=UTC),
                 available_at=available_at,
             ),
             missing_timestamp,
@@ -183,13 +189,22 @@ def test_loader_proxy_prefers_override_then_falls_back_to_real_module():
     assert proxy.resolve("MappingProxyType") is real_types.MappingProxyType
 
 
-def test_crypto_perp_funding_adapter_loads_funding_rows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_crypto_perp_funding_adapter_loads_funding_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     config = make_config(tmp_path, kind="crypto_perp_funding", symbols=["BTC-PERP"], dataset=None)
     calls: list[tuple[str, bool]] = []
 
     def fake_load_crypto(engine, symbol, start, end, *, strict):
         calls.append((symbol, strict))
-        return [row(symbol, funding_rate=0.0001, funding_timestamp=row(symbol)["timestamp"], has_funding_event=True)]
+        return [
+            row(
+                symbol,
+                funding_rate=0.0001,
+                funding_timestamp=row(symbol)["timestamp"],
+                has_funding_event=True,
+            )
+        ]
 
     monkeypatch.setattr(data_loader.loader, "load_crypto_perp_bars_with_funding", fake_load_crypto)
 
@@ -199,8 +214,12 @@ def test_crypto_perp_funding_adapter_loads_funding_rows(tmp_path: Path, monkeypa
     assert loaded.rows[0]["funding_rate"] == 0.0001
 
 
-def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    config = make_config(tmp_path, kind="forex_with_quotes", symbols=["EURUSD"], dataset=None, fill_price="quote")
+def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = make_config(
+        tmp_path, kind="forex_with_quotes", symbols=["EURUSD"], dataset=None, fill_price="quote"
+    )
     calls: list[tuple[str, bool, bool]] = []
 
     def fake_load_fx(engine, symbol, start, end, *, strict, require_quotes):
@@ -218,7 +237,9 @@ def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(tmp_path: P
 
 def test_empty_loaded_data_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = make_config(tmp_path)
-    monkeypatch.setattr(data_loader.contract_loaders, "load_strategy_bars", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        data_loader.contract_loaders, "load_strategy_bars", lambda *args, **kwargs: []
+    )
 
     with pytest.raises(DataLoadError, match="no rows"):
         data_loader.load_data(config, engine=object())

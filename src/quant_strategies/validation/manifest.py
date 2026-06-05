@@ -9,8 +9,7 @@ from quant_strategies.provenance import (
     file_sha256,
     source_identity,
 )
-from quant_strategies.validation.artifacts import write_json_artifact
-from quant_strategies.validation.artifacts import agreement_payload
+from quant_strategies.validation.artifacts import agreement_payload, write_json_artifact
 from quant_strategies.validation.backends import ScenarioBackendRunResult
 
 
@@ -114,7 +113,9 @@ def _verdict_replayable(backend_results: list[ScenarioBackendRunResult]) -> bool
         for item in backend_results
         if item.required and not item.diagnostic_only and item.result.status == "completed"
     ]
-    return bool(required_completed) and all(_scenario_replayable(item) for item in required_completed)
+    return bool(required_completed) and all(
+        _scenario_replayable(item) for item in required_completed
+    )
 
 
 def _scenario_replayable(item: ScenarioBackendRunResult) -> bool:

@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
 
-from quant_strategies.engine import Bar, CostModel, FillModel, Side, StrategySpec, Trade
-from quant_strategies.core.config import CostModelConfig, FillModelConfig
-
 from engine_helpers import decision_for
+from quant_strategies.core.config import CostModelConfig, FillModelConfig
+from quant_strategies.engine import Bar, CostModel, FillModel, Side, StrategySpec, Trade
 
 
 def test_engine_fill_and_cost_models_are_shared_core_contracts():
@@ -63,7 +62,7 @@ def test_cost_model_keeps_round_trip_bps_on_shared_contract():
 
 
 def test_trade_accepts_decision_metadata():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
 
     trade = Trade(
         decision_id="decision-1",
@@ -86,7 +85,7 @@ def test_trade_accepts_decision_metadata():
 
 
 def test_bar_accepts_valid_optional_quotes():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
 
     bar = Bar(
         symbol="EURUSD",
@@ -106,7 +105,7 @@ def test_bar_accepts_valid_optional_quotes():
 
 
 def test_bar_rejects_invalid_quote_shapes():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
     base = {
         "symbol": "EURUSD",
         "timestamp": aware_time,
@@ -131,7 +130,7 @@ def test_fill_model_accepts_quote_price():
 
 
 def test_bar_accepts_valid_funding_event():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
 
     bar = Bar(
         symbol="BTC-PERP",
@@ -151,7 +150,7 @@ def test_bar_accepts_valid_funding_event():
 
 
 def test_bar_rejects_incomplete_or_invalid_funding_event():
-    aware_time = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
     base = {
         "symbol": "BTC-PERP",
         "timestamp": aware_time,

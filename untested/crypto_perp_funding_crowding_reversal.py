@@ -35,9 +35,9 @@ costs and funding drag, reject this crowding proxy before tuning filters.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-import math
 from typing import Any
 
 from quant_strategies.decisions import (
@@ -48,10 +48,16 @@ from quant_strategies.decisions import (
     StrategyDecision,
 )
 
-
 __all__ = ["generate_decisions", "validate_params"]
 
-_REQUIRED_FIELDS = {"symbol", "timestamp", "close", "funding_timestamp", "funding_rate", "has_funding_event"}
+_REQUIRED_FIELDS = {
+    "symbol",
+    "timestamp",
+    "close",
+    "funding_timestamp",
+    "funding_rate",
+    "has_funding_event",
+}
 _EXIT_CONTROL_KEYS = ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps")
 _PARAM_KEYS = {
     "funding_lookback_events",
@@ -72,8 +78,12 @@ _PARAM_KEYS = {
 
 def validate_params(params: Mapping[str, object]) -> dict[str, object]:
     _reject_unknown_params(params, _PARAM_KEYS)
-    session_start_hour = _bounded_int(params.get("session_start_hour", 0), "session_start_hour", minimum=0, maximum=23)
-    session_end_hour = _bounded_int(params.get("session_end_hour", 24), "session_end_hour", minimum=1, maximum=24)
+    session_start_hour = _bounded_int(
+        params.get("session_start_hour", 0), "session_start_hour", minimum=0, maximum=23
+    )
+    session_end_hour = _bounded_int(
+        params.get("session_end_hour", 24), "session_end_hour", minimum=1, maximum=24
+    )
     if session_start_hour >= session_end_hour:
         raise ValueError("session_end_hour must be greater than session_start_hour")
 
@@ -171,14 +181,42 @@ def generate_decisions(
 
         for candidate in sorted(
             positive_tail,
-            key=lambda item: (-item["funding_pressure_bps"], -item["return_extension_bps"], item["symbol"]),
+            key=lambda item: (
+                -item["funding_pressure_bps"],
+                -item["return_extension_bps"],
+                item["symbol"],
+            ),
         )[:top_n]:
-            decisions.append(_decision(candidate, decision_time, as_of_time, "short", weight, max_hold_bars, exit_controls))
+            decisions.append(
+                _decision(
+                    candidate,
+                    decision_time,
+                    as_of_time,
+                    "short",
+                    weight,
+                    max_hold_bars,
+                    exit_controls,
+                )
+            )
         for candidate in sorted(
             negative_tail,
-            key=lambda item: (item["funding_pressure_bps"], item["return_extension_bps"], item["symbol"]),
+            key=lambda item: (
+                item["funding_pressure_bps"],
+                item["return_extension_bps"],
+                item["symbol"],
+            ),
         )[:top_n]:
-            decisions.append(_decision(candidate, decision_time, as_of_time, "long", weight, max_hold_bars, exit_controls))
+            decisions.append(
+                _decision(
+                    candidate,
+                    decision_time,
+                    as_of_time,
+                    "long",
+                    weight,
+                    max_hold_bars,
+                    exit_controls,
+                )
+            )
 
     return decisions
 
@@ -324,8 +362,15 @@ def _decision_candidates(
                 "funding_pressure_bps": funding_pressure_bps,
                 "return_extension_bps": (observed_close / base_close - 1.0) * 10_000.0,
                 "observations": (
-                    ObservationRef(symbol=symbol, timestamp=base_time, field="close", source="strategy_input"),
-                    ObservationRef(symbol=symbol, timestamp=observed_time, field="close", source="strategy_input"),
+                    ObservationRef(
+                        symbol=symbol, timestamp=base_time, field="close", source="strategy_input"
+                    ),
+                    ObservationRef(
+                        symbol=symbol,
+                        timestamp=observed_time,
+                        field="close",
+                        source="strategy_input",
+                    ),
                     *funding_observations,
                 ),
             }
@@ -334,11 +379,15 @@ def _decision_candidates(
 
 
 def _exact_close_at(rows: list[dict[str, Any]], timestamp: datetime) -> float | None:
-    closes = [row["close"] for row in rows if row["timestamp"] == timestamp and row["close"] is not None]
+    closes = [
+        row["close"] for row in rows if row["timestamp"] == timestamp and row["close"] is not None
+    ]
     if not closes:
         return None
     first = float(closes[0])
-    if any(not math.isclose(first, float(close), rel_tol=0.0, abs_tol=1e-12) for close in closes[1:]):
+    if any(
+        not math.isclose(first, float(close), rel_tol=0.0, abs_tol=1e-12) for close in closes[1:]
+    ):
         raise ValueError(f"conflicting duplicate close rows at {timestamp.isoformat()}")
     return first
 
@@ -363,12 +412,16 @@ def _funding_pressure(
         if existing is not None:
             _, existing_rate = existing
             if not math.isclose(existing_rate, funding_rate, rel_tol=0.0, abs_tol=1e-15):
-                raise ValueError(f"conflicting duplicate funding rates at {funding_time.isoformat()}")
+                raise ValueError(
+                    f"conflicting duplicate funding rates at {funding_time.isoformat()}"
+                )
         funding_events[funding_time] = (row["timestamp"], funding_rate)
 
     if len(funding_events) < funding_lookback_events:
         return None
-    recent = sorted(funding_events.items(), key=lambda item: (item[0], item[1][0]))[-funding_lookback_events:]
+    recent = sorted(funding_events.items(), key=lambda item: (item[0], item[1][0]))[
+        -funding_lookback_events:
+    ]
     observations = tuple(
         observation
         for _, (row_timestamp, _) in recent
@@ -396,7 +449,9 @@ def _funding_pressure(
     return sum(rate for _, (_, rate) in recent) * 10_000.0, observations
 
 
-def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, params: Mapping[str, object]) -> bool:
+def _is_decision_time(
+    timestamp: datetime, decision_interval_minutes: int, params: Mapping[str, object]
+) -> bool:
     session_start_hour = int(params.get("session_start_hour", 0))
     session_end_hour = int(params.get("session_end_hour", 24))
     if timestamp.second or timestamp.microsecond:

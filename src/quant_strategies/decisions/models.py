@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import math
 from collections.abc import Mapping
 from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
-
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 InstrumentKind = Literal["equity_or_etf", "fx_pair", "crypto_perp"]
 Direction = Literal["long", "short", "flat"]
@@ -134,7 +140,9 @@ class ExitPolicy(DecisionModel):
     @model_validator(mode="after")
     def validate_exit_thresholds(self) -> ExitPolicy:
         values = (self.stop_loss_bps, self.take_profit_bps, self.trailing_stop_bps)
-        if any(value is not None and (not math.isfinite(value) or value <= 0.0) for value in values):
+        if any(
+            value is not None and (not math.isfinite(value) or value <= 0.0) for value in values
+        ):
             raise ValueError("exit bps values must be finite and positive")
         return self
 

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import math
+from datetime import UTC, datetime, timedelta
 
 import pytest
-
-from quant_strategies.core.data_audit import audit_decision_rows
 from untested.crypto_perp_multivote_trend_following import (
     _atr_bps,
     _bollinger_width_percentile,
@@ -17,8 +15,9 @@ from untested.crypto_perp_multivote_trend_following import (
     validate_params,
 )
 
+from quant_strategies.core.data_audit import audit_decision_rows
 
-START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+START = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def hourly_bar(
@@ -41,7 +40,9 @@ def hourly_bar(
     }
 
 
-def trend_rows(symbol: str = "BTC-PERP", *, direction: int = 1, hours: int = 90) -> list[dict[str, object]]:
+def trend_rows(
+    symbol: str = "BTC-PERP", *, direction: int = 1, hours: int = 90
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     previous_close = 100.0 if direction > 0 else 120.0
     for hour in range(hours):
@@ -192,7 +193,9 @@ def test_generate_decisions_preserves_behavior_with_validated_params():
     rows = trend_rows(direction=1)
     raw_params = params(base_position_pct="0.17", dynamic_threshold_window_hours="48")
 
-    assert generate_decisions(rows, validate_params(raw_params)) == generate_decisions(rows, raw_params)
+    assert generate_decisions(rows, validate_params(raw_params)) == generate_decisions(
+        rows, raw_params
+    )
 
 
 def test_generate_decisions_requires_ohlc_and_timezone_aware_timestamps():
@@ -289,9 +292,13 @@ def test_generate_decisions_are_stable_when_future_rows_after_boundary_are_remov
     boundary = decisions[0].as_of_time
     truncated_rows = [row for row in rows if row["timestamp"] <= boundary]
 
-    truncated_decisions = generate_decisions(truncated_rows, params(max_hold_bars=1, cooldown_bars=0))
+    truncated_decisions = generate_decisions(
+        truncated_rows, params(max_hold_bars=1, cooldown_bars=0)
+    )
 
-    assert [decision for decision in decisions if decision.as_of_time <= boundary] == truncated_decisions
+    assert [
+        decision for decision in decisions if decision.as_of_time <= boundary
+    ] == truncated_decisions
 
 
 def test_generate_decisions_builds_hourly_snapshots_from_minute_rows():
@@ -328,7 +335,9 @@ def test_generate_decisions_consumes_optional_funding_rate_when_present():
 
 
 def test_generate_decisions_suppresses_overlapping_entries_and_applies_cooldown():
-    decisions = generate_decisions(trend_rows(direction=1), params(max_hold_bars=1, cooldown_bars=2))
+    decisions = generate_decisions(
+        trend_rows(direction=1), params(max_hold_bars=1, cooldown_bars=2)
+    )
     gaps = [
         int((current.as_of_time - previous.as_of_time).total_seconds() / 3600)
         for previous, current in zip(decisions, decisions[1:])
@@ -340,7 +349,9 @@ def test_generate_decisions_suppresses_overlapping_entries_and_applies_cooldown(
 
 def test_generate_decisions_suppresses_same_symbol_overlap_for_assumed_hold_window():
     max_hold_bars = 12
-    decisions = generate_decisions(trend_rows(direction=1, hours=140), params(max_hold_bars=max_hold_bars, cooldown_bars=0))
+    decisions = generate_decisions(
+        trend_rows(direction=1, hours=140), params(max_hold_bars=max_hold_bars, cooldown_bars=0)
+    )
     gaps = [
         int((current.as_of_time - previous.as_of_time).total_seconds() / 3600)
         for previous, current in zip(decisions, decisions[1:])
@@ -371,7 +382,9 @@ def test_generate_decisions_applies_param_overrides_to_votes_sizing_and_exit():
 
     assert decision.target.size == pytest.approx(0.17)
     assert decision.exit_policy.max_hold_bars == 5
-    assert decision.exit_policy.trailing_stop_bps == pytest.approx(decision.metadata["atr_bps"] * 2.0)
+    assert decision.exit_policy.trailing_stop_bps == pytest.approx(
+        decision.metadata["atr_bps"] * 2.0
+    )
     assert decision.metadata["min_votes"] == 5
 
 

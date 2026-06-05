@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
-import tomllib
 
 import pytest
 
 import quant_strategies.evaluation.dependencies as deps_module
-from quant_strategies.evaluation.dependencies import EvaluationDependencyError, require_evaluation_dependencies
+from quant_strategies.evaluation.dependencies import (
+    EvaluationDependencyError,
+    require_evaluation_dependencies,
+)
 
 
 def test_require_evaluation_dependencies_returns_imported_modules(monkeypatch: pytest.MonkeyPatch):

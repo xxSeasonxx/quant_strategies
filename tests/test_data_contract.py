@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -9,9 +9,8 @@ import pytest
 
 from quant_strategies.data_contract import NormalizedRows
 
-
-TIMESTAMP = datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc)
-AVAILABLE_AT = datetime(2024, 1, 1, 9, 31, tzinfo=timezone.utc)
+TIMESTAMP = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
+AVAILABLE_AT = datetime(2024, 1, 1, 9, 31, tzinfo=UTC)
 
 
 def config(kind: str = "bars", *, fill_price: str = "close") -> SimpleNamespace:
@@ -166,15 +165,16 @@ def test_missing_available_at_is_error():
         ("row_missing_available_at", "error")
     ]
     assert normalized.row_contract_summary()["required_fields"][-1] == "available_at"
-    assert normalized.row_contract_summary()["missing_required_fields"] == {
-        "available_at": 1
-    }
+    assert normalized.row_contract_summary()["missing_required_fields"] == {"available_at": 1}
     assert normalized.row_contract_summary()["quant_data_feedback"] == [
         "row_missing_available_at:available_at:1"
     ]
-    assert normalized.evidence_quality(
-        emitted_replay_verified=True, strict_no_emission_verified=True
-    )["causality_verified"] is False
+    assert (
+        normalized.evidence_quality(emitted_replay_verified=True, strict_no_emission_verified=True)[
+            "causality_verified"
+        ]
+        is False
+    )
 
 
 def test_invalid_available_at_is_error():
@@ -278,7 +278,7 @@ def test_crypto_funding_event_missing_or_invalid_fields_emit_funding_issue():
             valid_row(symbol="BTC-PERP", has_funding_event=True, funding_rate=Decimal("-0.0001")),
             valid_row(
                 symbol="BTC-PERP",
-                timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=timezone.utc),
+                timestamp=datetime(2024, 1, 1, 10, 0, tzinfo=UTC),
                 has_funding_event=True,
                 funding_timestamp=TIMESTAMP,
                 funding_rate="not-a-number",

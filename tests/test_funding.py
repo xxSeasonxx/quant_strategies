@@ -1,20 +1,26 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
-from quant_strategies.decisions import DecisionIntent, ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    DecisionIntent,
+    ExitPolicy,
+    InstrumentRef,
+    PositionTarget,
+    StrategyDecision,
+)
 from quant_strategies.engine.bar_index import build_bar_index
 from quant_strategies.engine.evaluation import EvaluationError, _funding_return
 from quant_strategies.engine.models import Bar, Side
-from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.scenarios import EvaluationScenario
+from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
 from quant_strategies.funding import funding_rates_match, funding_return_over_window
 
-START = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 
 
 def _ts(minute: int) -> datetime:
@@ -250,7 +256,9 @@ def _run_ledger(
         (-0.01, 1.0, -1.0),
     ],
 )
-def test_perp_ledger_funding_signs_longs_and_shorts(rate: float, long_funding: float, short_funding: float):
+def test_perp_ledger_funding_signs_longs_and_shorts(
+    rate: float, long_funding: float, short_funding: float
+):
     rows = _ledger_rows(events=((2, 2, rate),))
 
     long = _run_ledger(direction="long", rows=rows)
@@ -319,7 +327,9 @@ def test_perp_ledger_pins_price_pnl_plus_funding_cashflow():
 
 
 def test_perp_ledger_duplicate_matching_funding_rates_dedupe():
-    rows = _ledger_rows(closes=(100.0, 100.0, 100.0, 100.0, 100.0), events=((2, 2, 0.01), (4, 2, 0.01)))
+    rows = _ledger_rows(
+        closes=(100.0, 100.0, 100.0, 100.0, 100.0), events=((2, 2, 0.01), (4, 2, 0.01))
+    )
 
     result = _run_ledger(rows=rows)
 
@@ -337,11 +347,7 @@ def test_perp_ledger_ignores_unused_symbol_funding_events():
                 "timestamp": _ts(minute),
                 "close": 200.0,
                 "has_funding_event": minute == 2,
-                **(
-                    {"funding_timestamp": _ts(2), "funding_rate": 0.50}
-                    if minute == 2
-                    else {}
-                ),
+                **({"funding_timestamp": _ts(2), "funding_rate": 0.50} if minute == 2 else {}),
             }
             for minute in range(4)
         ]
@@ -371,7 +377,9 @@ def test_perp_ledger_allows_same_symbol_exit_and_reentry_on_same_timestamp():
 
 
 def test_perp_ledger_conflicting_duplicate_funding_rates_fail():
-    rows = _ledger_rows(closes=(100.0, 100.0, 100.0, 100.0, 100.0), events=((2, 2, 0.01), (4, 2, 0.02)))
+    rows = _ledger_rows(
+        closes=(100.0, 100.0, 100.0, 100.0, 100.0), events=((2, 2, 0.01), (4, 2, 0.02))
+    )
 
     result = _run_ledger(rows=rows)
 

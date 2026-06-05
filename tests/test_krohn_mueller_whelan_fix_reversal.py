@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-
-from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.core.engine_runner import build_request, evaluate_request
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.core.data_audit import audit_decision_rows
 from untested.krohn_mueller_whelan_fix_reversal import generate_decisions, validate_params
 
+from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.core.engine_runner import build_request, evaluate_request
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.runner.config import CostModelConfig, FillModelConfig
 
 FIXES = {
     "tokyo": ("Asia/Tokyo", time(9, 55)),
@@ -22,7 +21,7 @@ FIXES = {
 def fix_utc(local_date: date, fix_name: str) -> datetime:
     zone_name, local_time = FIXES[fix_name]
     local_fix = datetime.combine(local_date, local_time, tzinfo=ZoneInfo(zone_name))
-    return local_fix.astimezone(timezone.utc)
+    return local_fix.astimezone(UTC)
 
 
 def decision_time(local_date: date, fix_name: str, lead_minutes: int = 2) -> datetime:
@@ -76,7 +75,9 @@ def payload(decision: StrategyDecision) -> dict[str, object]:
     return result
 
 
-def payloads(rows: list[dict[str, object]], params: dict[str, object] | None = None) -> list[dict[str, object]]:
+def payloads(
+    rows: list[dict[str, object]], params: dict[str, object] | None = None
+) -> list[dict[str, object]]:
     return [payload(decision) for decision in generate_decisions(rows, params or {})]
 
 
@@ -170,8 +171,8 @@ def test_generate_decisions_uses_paper_fix_times_and_dst_offsets():
     assert signals == [
         {
             "symbol": "EURUSD",
-            "decision_time": datetime(2024, 7, 1, 0, 53, tzinfo=timezone.utc),
-            "as_of_time": datetime(2024, 7, 1, 0, 52, tzinfo=timezone.utc),
+            "decision_time": datetime(2024, 7, 1, 0, 53, tzinfo=UTC),
+            "as_of_time": datetime(2024, 7, 1, 0, 52, tzinfo=UTC),
             "side": "long",
             "weight": 0.5,
             "max_hold_bars": 2,
@@ -184,8 +185,8 @@ def test_generate_decisions_uses_paper_fix_times_and_dst_offsets():
         },
         {
             "symbol": "EURUSD",
-            "decision_time": datetime(2024, 7, 1, 12, 13, tzinfo=timezone.utc),
-            "as_of_time": datetime(2024, 7, 1, 12, 12, tzinfo=timezone.utc),
+            "decision_time": datetime(2024, 7, 1, 12, 13, tzinfo=UTC),
+            "as_of_time": datetime(2024, 7, 1, 12, 12, tzinfo=UTC),
             "side": "long",
             "weight": 0.5,
             "max_hold_bars": 2,
@@ -198,8 +199,8 @@ def test_generate_decisions_uses_paper_fix_times_and_dst_offsets():
         },
         {
             "symbol": "EURUSD",
-            "decision_time": datetime(2024, 7, 1, 14, 58, tzinfo=timezone.utc),
-            "as_of_time": datetime(2024, 7, 1, 14, 57, tzinfo=timezone.utc),
+            "decision_time": datetime(2024, 7, 1, 14, 58, tzinfo=UTC),
+            "as_of_time": datetime(2024, 7, 1, 14, 57, tzinfo=UTC),
             "side": "long",
             "weight": 0.5,
             "max_hold_bars": 2,

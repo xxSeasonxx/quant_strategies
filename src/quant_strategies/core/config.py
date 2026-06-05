@@ -8,7 +8,6 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-
 DataKind = Literal["bars", "crypto_perp_funding", "forex_with_quotes"]
 
 
@@ -63,7 +62,9 @@ class CostModelConfig(SharedConfigModel):
 
     @model_validator(mode="after")
     def validate_costs(self) -> CostModelConfig:
-        if not math.isfinite(self.fee_bps_per_side) or not math.isfinite(self.slippage_bps_per_side):
+        if not math.isfinite(self.fee_bps_per_side) or not math.isfinite(
+            self.slippage_bps_per_side
+        ):
             raise ValueError("cost values must be finite")
         return self
 

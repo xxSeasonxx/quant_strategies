@@ -4,7 +4,7 @@ import math
 import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from numbers import Real
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,13 @@ from quant_strategies.causality import (
     check_hidden_lookahead,
 )
 from quant_strategies.core.config import default_repo_root
+from quant_strategies.core.data_audit import audit_decision_rows
+from quant_strategies.core.decision_readiness import check_decision_readiness
+from quant_strategies.core.execution import (
+    StrategyExecutionError,
+    StrategyExecutionResult,
+    execute_strategy_run,
+)
 from quant_strategies.evaluation.artifacts import (
     create_evaluation_result_dir,
     initialize_evaluation_artifacts,
@@ -25,13 +32,16 @@ from quant_strategies.evaluation.artifacts import (
     write_parquet_artifact,
     write_text_artifact,
 )
-from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.backends import (
     DataKindNamedEvaluationBackend,
     EvaluationBackend,
     PreparedEvaluationBackend,
 )
-from quant_strategies.evaluation.config import load_evaluation_config, resolve_evaluation_config_path
+from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
+from quant_strategies.evaluation.config import (
+    load_evaluation_config,
+    resolve_evaluation_config_path,
+)
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.errors import EvaluationConfigError
 from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
@@ -39,13 +49,6 @@ from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEvaluationResult
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
 from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
-from quant_strategies.core.data_audit import audit_decision_rows
-from quant_strategies.core.decision_readiness import check_decision_readiness
-from quant_strategies.core.execution import (
-    StrategyExecutionError,
-    StrategyExecutionResult,
-    execute_strategy_run,
-)
 
 
 @dataclass(frozen=True)
@@ -427,9 +430,13 @@ def _run_window_portfolio_evaluation(
         configured_scenarios=context.config.scenarios,
     )
     state.expected_scenario_ids.extend(scenario.scenario_id for scenario in scenarios)
-    state.required_scenario_ids.extend(scenario.scenario_id for scenario in scenarios if scenario.required)
+    state.required_scenario_ids.extend(
+        scenario.scenario_id for scenario in scenarios if scenario.required
+    )
     projection_rows = execution.normalized_rows.projection_rows()
-    benchmark_metrics, benchmark_failure = _window_benchmark_metrics(context, state, window, projection_rows)
+    benchmark_metrics, benchmark_failure = _window_benchmark_metrics(
+        context, state, window, projection_rows
+    )
     if benchmark_failure is not None:
         return benchmark_failure
     prepared, preparation_failure = _prepare_portfolio_inputs(
@@ -473,7 +480,7 @@ def _window_benchmark_metrics(
             strategy_id=context.config.strategy_id,
             window_id=window.id,
             benchmark_symbol=context.config.benchmark.symbol,
-        ) as benchmark_event:
+        ):
             metrics = benchmark_metrics_for_rows(
                 projection_rows,
                 symbol=context.config.benchmark.symbol,
@@ -569,7 +576,8 @@ def _run_portfolio_scenario(
                 scenario=scenario,
                 metrics=context.config.metrics,
             )
-            if prepared is not None and isinstance(context.selected_backend, PreparedEvaluationBackend)
+            if prepared is not None
+            and isinstance(context.selected_backend, PreparedEvaluationBackend)
             else context.selected_backend.run(
                 decisions=execution.decisions,
                 rows=projection_rows,
@@ -613,7 +621,9 @@ def _run_portfolio_scenario(
         metric_failure = _completed_metric_failure(scenario_result)
         if metric_failure is not None:
             if not scenario.required:
-                state.backend_results.append(_strip_trace_tables(_failed_optional_result(scenario_result, metric_failure)))
+                state.backend_results.append(
+                    _strip_trace_tables(_failed_optional_result(scenario_result, metric_failure))
+                )
                 _record_optional_scenario_failure(state, scenario, metric_failure)
                 return None
             scenario_event.fail(metric_failure, backend_status=scenario_result.status)
@@ -627,7 +637,9 @@ def _run_portfolio_scenario(
         if scenario_result.tables is None:
             message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
             if not scenario.required:
-                state.backend_results.append(_strip_trace_tables(_failed_optional_result(scenario_result, message)))
+                state.backend_results.append(
+                    _strip_trace_tables(_failed_optional_result(scenario_result, message))
+                )
                 _record_optional_scenario_failure(state, scenario, message)
                 return None
             scenario_event.fail(message, backend_status=scenario_result.status)
@@ -647,12 +659,13 @@ def _scenario_id_mismatch_failure(scenario: Any, result: PortfolioEvaluationResu
     if result.scenario_id == scenario.scenario_id:
         return None
     return (
-        "backend scenario id mismatch: "
-        f"expected={scenario.scenario_id} actual={result.scenario_id}"
+        f"backend scenario id mismatch: expected={scenario.scenario_id} actual={result.scenario_id}"
     )
 
 
-def _failed_optional_result(result: PortfolioEvaluationResult, message: str) -> PortfolioEvaluationResult:
+def _failed_optional_result(
+    result: PortfolioEvaluationResult, message: str
+) -> PortfolioEvaluationResult:
     return result.model_copy(
         update={
             "status": "failed",
@@ -755,7 +768,9 @@ def _write_completion_artifacts(
                 path_base=context.config.base_dir,
                 config=context.config,
                 config_path=context.config_path,
-                backend_name=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
+                backend_name=_backend_name(
+                    context.selected_backend, data_kind=context.config.data.kind
+                ),
                 data_windows=state.data_windows,
                 table_artifacts=table_artifacts,
                 scenario_summary=scenario_summary,
@@ -929,10 +944,7 @@ def _portfolio_path_cadence_groups(
         if frame is None or "timestamp" not in getattr(frame, "columns", ()):
             continue
         frame_groups = (
-            (
-                (str(scenario_id), group)
-                for scenario_id, group in frame.groupby("scenario_id")
-            )
+            ((str(scenario_id), group) for scenario_id, group in frame.groupby("scenario_id"))
             if "scenario_id" in frame.columns and hasattr(frame, "groupby")
             else ((result.scenario_id, frame),)
         )
@@ -988,7 +1000,9 @@ def _backend_name(backend: Any, *, data_kind: str | None = None) -> str:
     return getattr(backend, "name", "unknown")
 
 
-def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResult]) -> list[dict[str, Any]]:
+def _write_trace_tables(
+    result_dir: Path, results: list[PortfolioEvaluationResult]
+) -> list[dict[str, Any]]:
     scenario_ids = tuple(result.scenario_id for result in results)
     artifact_kinds = (
         "portfolio_path",
@@ -997,7 +1011,10 @@ def _write_trace_tables(result_dir: Path, results: list[PortfolioEvaluationResul
         "target_exposure_summary",
         "funding_cashflows",
     )
-    frames = {artifact_kind: _combine_trace_frames(results, artifact_kind) for artifact_kind in artifact_kinds}
+    frames = {
+        artifact_kind: _combine_trace_frames(results, artifact_kind)
+        for artifact_kind in artifact_kinds
+    }
     final_dir = result_dir / "tables"
     staging_dir = result_dir / "tables_staging"
     if staging_dir.exists():
@@ -1138,7 +1155,7 @@ def _write_failure_artifacts(
     )
     payload = {
         "schema_version": "quant_strategies.evaluation.failure/v1",
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "generated_at_utc": datetime.now(UTC).isoformat(),
         "strategy_id": context.config.strategy_id,
         "backend": _backend_name(context.selected_backend, data_kind=context.config.data.kind),
         "failure_stage": failure_stage,
@@ -1192,7 +1209,9 @@ def _scenario_summary(
     completed_ids = [result.scenario_id for result in results if result.status == "completed"]
     expected_id_set = set(expected_ids)
     required_id_set = set(required_ids)
-    optional_ids = [scenario_id for scenario_id in expected_ids if scenario_id not in required_id_set]
+    optional_ids = [
+        scenario_id for scenario_id in expected_ids if scenario_id not in required_id_set
+    ]
     unexpected_ids = sorted(set(completed_ids) - expected_id_set)
     missing_required_ids = sorted(required_id_set - set(completed_ids))
     missing_optional_ids = sorted(set(optional_ids) - set(completed_ids))

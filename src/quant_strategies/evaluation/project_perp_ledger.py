@@ -18,7 +18,11 @@ from quant_strategies.evaluation._portfolio_common import (
     target_positions_frame,
 )
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
-from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none, required_drawdown_metric
+from quant_strategies.evaluation.metrics import (
+    MetricValue,
+    finite_metric_or_none,
+    required_drawdown_metric,
+)
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PortfolioMetricPayload,
@@ -27,7 +31,6 @@ from quant_strategies.evaluation.results import (
 )
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 from quant_strategies.funding import funding_rates_match
-
 
 INITIAL_EQUITY = 100.0
 PROJECT_PERP_FUNDING_MODEL = "project_perp_ledger_v1"
@@ -128,12 +131,16 @@ def run_perp_ledger(
         if entry_events:
             equity_snapshot = equity_at_mark(prepared.close, active.values(), timestamp, cash)
             if equity_snapshot <= 0.0:
-                raise ValueError(f"nonpositive_equity_for_entry:{timestamp.isoformat()}:{equity_snapshot}")
+                raise ValueError(
+                    f"nonpositive_equity_for_entry:{timestamp.isoformat()}:{equity_snapshot}"
+                )
             for position_key, window in entry_events:
                 item = window["decision"]
                 symbol = window["symbol"]
                 mark_price = mark_price_at(prepared.close, symbol, timestamp)
-                entry_fill_price = entry_fill_price_at(mark_price, item.target.direction, slippage_fraction)
+                entry_fill_price = entry_fill_price_at(
+                    mark_price, item.target.direction, slippage_fraction
+                )
                 target_weight = signed_target_weight(window)
                 signed_target_notional = target_weight * equity_snapshot
                 signed_units = signed_target_notional / entry_fill_price
@@ -241,17 +248,23 @@ def funding_events_by_symbol(
             raise ValueError("invalid_funding_event:empty_symbol")
         if symbol not in close.columns:
             continue
-        funding_timestamp = coerce_utc_timestamp(pd, row.get("funding_timestamp"), "funding_timestamp")
+        funding_timestamp = coerce_utc_timestamp(
+            pd, row.get("funding_timestamp"), "funding_timestamp"
+        )
         try:
             funding_rate = float(row["funding_rate"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"invalid_funding_rate:{symbol}:{funding_timestamp.isoformat()}") from exc
+            raise ValueError(
+                f"invalid_funding_rate:{symbol}:{funding_timestamp.isoformat()}"
+            ) from exc
         if not math.isfinite(funding_rate):
             raise ValueError(f"invalid_funding_rate:{symbol}:{funding_timestamp.isoformat()}")
         try:
             mark_price_at(close, symbol, funding_timestamp)
         except ValueError as exc:
-            raise ValueError(f"funding_timestamp_not_aligned:{symbol}:{funding_timestamp.isoformat()}") from exc
+            raise ValueError(
+                f"funding_timestamp_not_aligned:{symbol}:{funding_timestamp.isoformat()}"
+            ) from exc
 
         symbol_events = events.setdefault(symbol, {})
         existing = symbol_events.get(funding_timestamp)
@@ -261,7 +274,9 @@ def funding_events_by_symbol(
     return events
 
 
-def funding_events_at(events: Mapping[str, Mapping[Any, float]], timestamp: Any) -> list[tuple[str, float]]:
+def funding_events_at(
+    events: Mapping[str, Mapping[Any, float]], timestamp: Any
+) -> list[tuple[str, float]]:
     return [
         (symbol, float(rate))
         for symbol, by_timestamp in events.items()
@@ -284,7 +299,9 @@ def coerce_utc_timestamp(pd: Any, value: Any, field: str) -> Any:
     return timestamp
 
 
-def equity_at_mark(close: Any, positions: Sequence[PerpPosition], timestamp: Any, cash: float) -> float:
+def equity_at_mark(
+    close: Any, positions: Sequence[PerpPosition], timestamp: Any, cash: float
+) -> float:
     equity = cash
     for position in positions:
         mark_price = mark_price_at(close, position.symbol, timestamp)
@@ -339,7 +356,9 @@ def perp_ledger_metrics(
         min(series_values(drawdowns)) if series_values(drawdowns) else None,
     )
 
-    trade_pnls = [float(value) for value in series_values(trades["net_pnl"])] if "net_pnl" in trades else []
+    trade_pnls = (
+        [float(value) for value in series_values(trades["net_pnl"])] if "net_pnl" in trades else []
+    )
     wins = [value for value in trade_pnls if value > 0.0]
     losses = [value for value in trade_pnls if value < 0.0]
     trade_count = len(trade_pnls)
@@ -384,7 +403,10 @@ def perp_ledger_metrics(
             annualized_return = (
                 None
                 if total_return <= -1.0
-                else ((1.0 + total_return) ** (annualization_periods_per_year / coverage.sample_count)) - 1.0
+                else (
+                    (1.0 + total_return) ** (annualization_periods_per_year / coverage.sample_count)
+                )
+                - 1.0
             )
             mean_return = sum(observed_returns) / len(observed_returns)
             volatility = (
@@ -407,6 +429,8 @@ def perp_ledger_metrics(
             )
             max_dd = finite_metric_or_none(payload["max_drawdown"])
             payload["calmar"] = (
-                None if annualized_return is None or max_dd in (None, 0.0) else annualized_return / abs(max_dd)
+                None
+                if annualized_return is None or max_dd in (None, 0.0)
+                else annualized_return / abs(max_dd)
             )
     return PortfolioMetricPayload(metrics=payload, warnings=tuple(warnings))

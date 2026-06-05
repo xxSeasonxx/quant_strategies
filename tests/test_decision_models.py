@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -12,21 +12,26 @@ from quant_strategies.decisions import (
     InstrumentRef,
     ObservationRef,
     PositionTarget,
-    StrategyGenerator,
     StrategyDecision,
+    StrategyGenerator,
     validate_decision_output,
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
+)
+from quant_strategies.decisions.extended_ontology import (
     InstrumentLeg,
     MultiLegInstrumentRef,
+)
+from quant_strategies.decisions.extended_ontology import (
     PositionTarget as ExtendedPositionTarget,
+)
+from quant_strategies.decisions.extended_ontology import (
     StrategyDecision as ExtendedStrategyDecision,
 )
 
-
-DECISION_TIME = datetime(2026, 1, 2, 12, 1, tzinfo=timezone.utc)
-AS_OF_TIME = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+DECISION_TIME = datetime(2026, 1, 2, 12, 1, tzinfo=UTC)
+AS_OF_TIME = datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
 
 
 def test_strategy_decision_accepts_explicit_position_target():
@@ -57,13 +62,17 @@ def test_strategy_decision_accepts_multiple_typed_observations():
         exit_policy=ExitPolicy(max_hold_bars=5),
         observations=(
             ObservationRef(symbol="AAPL", timestamp=AS_OF_TIME, field="close", source="quant_data"),
-            ObservationRef(symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"),
+            ObservationRef(
+                symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"
+            ),
         ),
     )
 
     assert decision.observations == (
         ObservationRef(symbol="AAPL", timestamp=AS_OF_TIME, field="close", source="quant_data"),
-        ObservationRef(symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"),
+        ObservationRef(
+            symbol="MSFT", timestamp=AS_OF_TIME, field="return_21d", source="quant_data"
+        ),
     )
 
 
@@ -184,7 +193,7 @@ def test_validate_decision_output_allows_distinct_execution_keys():
         decision_id="decision-2",
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
-        decision_time=datetime(2026, 1, 2, 12, 2, tzinfo=timezone.utc),
+        decision_time=datetime(2026, 1, 2, 12, 2, tzinfo=UTC),
         as_of_time=AS_OF_TIME,
         target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
         exit_policy=ExitPolicy(max_hold_bars=5),
@@ -289,8 +298,16 @@ def test_extended_strategy_decision_accepts_multi_leg_instruments():
         kind="multi_leg",
         symbol="SPY_QQQ_PAIR",
         legs=(
-            InstrumentLeg(instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"), direction="long", ratio=1.0),
-            InstrumentLeg(instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"), direction="short", ratio=0.8),
+            InstrumentLeg(
+                instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+                direction="long",
+                ratio=1.0,
+            ),
+            InstrumentLeg(
+                instrument=InstrumentRef(kind="equity_or_etf", symbol="QQQ"),
+                direction="short",
+                ratio=0.8,
+            ),
         ),
     )
 
@@ -395,7 +412,9 @@ def test_strategy_decision_serializes_observations_to_json():
         as_of_time=AS_OF_TIME,
         target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
         exit_policy=ExitPolicy(max_hold_bars=5),
-        observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF_TIME, field="funding_rate"),),
+        observations=(
+            ObservationRef(symbol="BTC-PERP", timestamp=AS_OF_TIME, field="funding_rate"),
+        ),
     )
 
     assert decision.model_dump(mode="json")["observations"] == [

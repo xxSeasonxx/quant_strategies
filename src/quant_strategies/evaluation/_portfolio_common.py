@@ -96,7 +96,9 @@ def validate_duplicate_signals(windows: list[dict[str, Any]]) -> None:
 
 def validate_overlapping_symbol_windows(windows: list[dict[str, Any]]) -> None:
     previous_by_symbol: dict[str, dict[str, Any]] = {}
-    sorted_windows = sorted(windows, key=lambda item: (item["symbol"], item["entry_idx"], item["exit_idx"]))
+    sorted_windows = sorted(
+        windows, key=lambda item: (item["symbol"], item["entry_idx"], item["exit_idx"])
+    )
     for window in sorted_windows:
         symbol = window["symbol"]
         previous = previous_by_symbol.get(symbol)
@@ -296,7 +298,9 @@ def sample_stdev(values: Sequence[float]) -> float:
     return math.sqrt(variance)
 
 
-def downside_deviation(values: Sequence[float], annualization_periods_per_year: int) -> float | None:
+def downside_deviation(
+    values: Sequence[float], annualization_periods_per_year: int
+) -> float | None:
     downside_returns = [value for value in values if value < 0.0]
     if not downside_returns:
         return None

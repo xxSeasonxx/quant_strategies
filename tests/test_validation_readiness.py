@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from quant_strategies.decisions import (
     ExitPolicy,
@@ -12,8 +12,7 @@ from quant_strategies.decisions import (
 from quant_strategies.validation.config import ValidationReadinessConfig
 from quant_strategies.validation.readiness import check_validation_readiness
 
-
-AS_OF = datetime(2026, 1, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def decision(*, observations: tuple[ObservationRef, ...]) -> StrategyDecision:
@@ -39,9 +38,7 @@ def test_validation_readiness_passes_with_required_observation_field():
     violations = check_validation_readiness(
         [
             decision(
-                observations=(
-                    ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),
-                )
+                observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),)
             )
         ],
         readiness(),
@@ -94,9 +91,7 @@ def test_validation_readiness_fails_when_distinct_symbol_floor_is_not_met():
         config,
     )
 
-    assert violations == (
-        "decision[0] has 1 distinct observation symbols; requires at least 2",
-    )
+    assert violations == ("decision[0] has 1 distinct observation symbols; requires at least 2",)
 
 
 def test_crypto_perp_funding_readiness_infers_complete_funding_event_fields():
@@ -107,20 +102,21 @@ def test_crypto_perp_funding_readiness_infers_complete_funding_event_fields():
         ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="has_funding_event"),
     )
 
-    assert check_validation_readiness(
-        [decision(observations=observations)],
-        readiness(),
-        data_kind="crypto_perp_funding",
-    ) == ()
+    assert (
+        check_validation_readiness(
+            [decision(observations=observations)],
+            readiness(),
+            data_kind="crypto_perp_funding",
+        )
+        == ()
+    )
 
 
 def test_crypto_perp_funding_readiness_rejects_close_only_observations():
     violations = check_validation_readiness(
         [
             decision(
-                observations=(
-                    ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),
-                )
+                observations=(ObservationRef(symbol="BTC-PERP", timestamp=AS_OF, field="close"),)
             )
         ],
         readiness(),

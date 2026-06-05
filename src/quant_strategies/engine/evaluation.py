@@ -12,22 +12,24 @@ from quant_strategies.engine.bar_index import (
 )
 from quant_strategies.engine.executable import (
     ExecutableDecision as _ExecutableDecision,
+)
+from quant_strategies.engine.executable import (
     executable_decision,
 )
-from quant_strategies.funding import funding_return_over_window
 from quant_strategies.engine.models import (
     Bar,
     EvaluationRequest,
     ExitReason,
     FillModel,
+    GateResult,
     GatingConfig,
     GatingReport,
-    GateResult,
     ScreeningResult,
     Side,
-    TradeResult,
     Trade,
+    TradeResult,
 )
+from quant_strategies.funding import funding_return_over_window
 
 
 class EvaluationError(ValueError):
@@ -57,7 +59,9 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
             raise EvaluationError(f"entry fill is outside available bars: {executable.symbol}")
 
         entry_bar = symbol_bars[entry_index]
-        entry_price = _fill_price(entry_bar, request.fill_model.price, executable.side, is_entry=True)
+        entry_price = _fill_price(
+            entry_bar, request.fill_model.price, executable.side, is_entry=True
+        )
         exit_selection = _select_exit(
             symbol_bars,
             executable,
@@ -66,7 +70,9 @@ def screen(request: EvaluationRequest) -> ScreeningResult:
             request.fill_model,
         )
         exit_bar = exit_selection.exit_bar
-        exit_price = _fill_price(exit_bar, request.fill_model.price, executable.side, is_entry=False)
+        exit_price = _fill_price(
+            exit_bar, request.fill_model.price, executable.side, is_entry=False
+        )
         direction = 1.0 if executable.side is Side.LONG else -1.0
         gross_return = direction * ((exit_price - entry_price) / entry_price) * executable.weight
         funding_return = _funding_return(
@@ -188,7 +194,9 @@ def _decision_index(indexed: IndexedBars, symbol: str, decision_time: datetime) 
     position = indexed.positions_by_symbol.get(symbol, {}).get(decision_time)
     if position is not None:
         return position
-    raise EvaluationError(f"decision_time does not match a bar timestamp: {decision_time.isoformat()}")
+    raise EvaluationError(
+        f"decision_time does not match a bar timestamp: {decision_time.isoformat()}"
+    )
 
 
 def _select_exit(
@@ -231,7 +239,9 @@ def _side_return_bps(entry_price: float, current_price: float, side: Side) -> fl
     return direction * ((current_price - entry_price) / entry_price) * 10_000.0
 
 
-def _exit_reason(decision: StrategyDecision, side_return_bps: float, best_return_bps: float) -> ExitReason | None:
+def _exit_reason(
+    decision: StrategyDecision, side_return_bps: float, best_return_bps: float
+) -> ExitReason | None:
     exit_policy = decision.exit_policy
     if exit_policy.stop_loss_bps is not None and side_return_bps <= -exit_policy.stop_loss_bps:
         return "stop_loss"
@@ -257,7 +267,9 @@ def _fill_price(bar: Bar, field: str, side: Side, *, is_entry: bool) -> float:
         return bar.close
 
     if bar.bid is None or bar.ask is None:
-        raise EvaluationError(f"quote fill requires bid and ask: {bar.symbol} at {bar.timestamp.isoformat()}")
+        raise EvaluationError(
+            f"quote fill requires bid and ask: {bar.symbol} at {bar.timestamp.isoformat()}"
+        )
     if side is Side.LONG:
         return bar.ask if is_entry else bar.bid
     return bar.bid if is_entry else bar.ask
@@ -289,7 +301,5 @@ def _funding_return(
         exit_time=exit_time,
         direction_sign=direction_sign,
         weight=weight,
-        conflict_error=lambda ts: EvaluationError(
-            f"conflicting funding rates at {ts.isoformat()}"
-        ),
+        conflict_error=lambda ts: EvaluationError(f"conflicting funding rates at {ts.isoformat()}"),
     )

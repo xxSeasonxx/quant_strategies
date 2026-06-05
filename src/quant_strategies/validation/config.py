@@ -26,7 +26,6 @@ from quant_strategies.core.config import (
 from quant_strategies.validation.artifact_names import validation_artifact_path_collisions
 from quant_strategies.validation.errors import ValidationConfigError
 
-
 # The execution kernel is the single verdict PnL source. VectorBT Pro is no
 # longer a co-equal verdict backend; it is only available as an opt-in agreement
 # oracle (see AgreementOracleConfig).
@@ -188,8 +187,7 @@ class SearchPressureConfig(ValidationConfigModel):
             )
             if missing:
                 raise ValueError(
-                    "search_pressure.prior_search='known' requires: "
-                    + ", ".join(missing)
+                    "search_pressure.prior_search='known' requires: " + ", ".join(missing)
                 )
         return self
 
@@ -245,7 +243,9 @@ class ValidationConfig(ValidationConfigModel):
     @model_validator(mode="after")
     def validate_window_identity(self) -> ValidationConfig:
         window_ids = [window.id for window in self.windows]
-        duplicate_ids = sorted({window_id for window_id in window_ids if window_ids.count(window_id) > 1})
+        duplicate_ids = sorted(
+            {window_id for window_id in window_ids if window_ids.count(window_id) > 1}
+        )
         if duplicate_ids:
             raise ValueError(f"windows.id values must be unique: {duplicate_ids}")
 
@@ -312,8 +312,7 @@ def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -
     search_pressure_payload = payload.get("search_pressure") if isinstance(payload, dict) else None
     if isinstance(search_pressure_payload, dict) and "prior_search" not in search_pressure_payload:
         raise ValidationConfigError(
-            "search_pressure.prior_search is required; set it to "
-            '"none", "known", or "unknown"'
+            'search_pressure.prior_search is required; set it to "none", "known", or "unknown"'
         )
 
     try:

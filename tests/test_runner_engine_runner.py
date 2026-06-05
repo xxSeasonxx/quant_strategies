@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
 
+from quant_strategies.core.engine_runner import build_request, evaluate_request, request_json
+from quant_strategies.core.errors import RequestBuildError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     DecisionIntent,
@@ -16,17 +18,20 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
+)
+from quant_strategies.decisions.extended_ontology import (
     InstrumentLeg,
     MultiLegInstrumentRef,
+)
+from quant_strategies.decisions.extended_ontology import (
     PositionTarget as ExtendedPositionTarget,
+)
+from quant_strategies.decisions.extended_ontology import (
     StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
-from quant_strategies.core.engine_runner import build_request, evaluate_request, request_json
-from quant_strategies.core.errors import RequestBuildError
 
-
-START = datetime(2024, 1, 1, tzinfo=timezone.utc)
+START = datetime(2024, 1, 1, tzinfo=UTC)
 
 
 def config() -> SimpleNamespace:
@@ -123,7 +128,9 @@ def test_build_request_converts_rows_to_engine_ohlc_bars_and_decisions():
     assert request.spec.decisions == (source_decision,)
 
 
-def test_build_request_accepts_normalized_rows_without_timestamp_parsing(monkeypatch: pytest.MonkeyPatch):
+def test_build_request_accepts_normalized_rows_without_timestamp_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+):
     raw_rows = bars(100.0, 101.0, 102.0, 104.0)
     for raw_row in raw_rows:
         raw_row["timestamp"] = raw_row["timestamp"].isoformat().replace("+00:00", "Z")
@@ -135,7 +142,9 @@ def test_build_request_accepts_normalized_rows_without_timestamp_parsing(monkeyp
     monkeypatch.setattr(
         runner_engine_runner,
         "_as_datetime",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("should not parse normalized rows")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("should not parse normalized rows")
+        ),
     )
 
     request = build_request(
@@ -259,9 +268,9 @@ def test_build_request_allows_active_trade_without_funding_events_as_zero_fundin
 
 
 def test_evaluate_request_reuses_request_build_bar_index(monkeypatch: pytest.MonkeyPatch):
+    import quant_strategies.core.engine_runner as runner_engine_runner
     import quant_strategies.engine.bar_index as shared_bar_index
     import quant_strategies.engine.evaluation as evaluation
-    import quant_strategies.core.engine_runner as runner_engine_runner
 
     build_calls = 0
     original_build_bar_index = shared_bar_index.build_bar_index

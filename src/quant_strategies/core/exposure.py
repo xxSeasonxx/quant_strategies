@@ -5,10 +5,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from quant_strategies.core.config import FillModelConfig
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
-from quant_strategies.core.config import FillModelConfig
-
 
 _EXPOSURE_TOLERANCE = 1e-12
 
@@ -63,8 +62,7 @@ def _timestamps_by_symbol(
         if isinstance(symbol, str) and _is_aware_datetime(timestamp):
             grouped.setdefault(symbol, []).append(timestamp)
     return {
-        symbol: tuple(sorted(dict.fromkeys(timestamps)))
-        for symbol, timestamps in grouped.items()
+        symbol: tuple(sorted(dict.fromkeys(timestamps))) for symbol, timestamps in grouped.items()
     }
 
 
@@ -107,4 +105,6 @@ def _gross_exposure_violation(windows: Sequence[ExposureWindow]) -> str | None:
 
 
 def _is_aware_datetime(value: object) -> bool:
-    return isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    return (
+        isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None
+    )

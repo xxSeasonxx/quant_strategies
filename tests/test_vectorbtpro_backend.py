@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -15,16 +15,21 @@ from quant_strategies.decisions import (
 )
 from quant_strategies.decisions.extended_ontology import (
     DecisionIntent as ExtendedDecisionIntent,
+)
+from quant_strategies.decisions.extended_ontology import (
     InstrumentLeg,
     MultiLegInstrumentRef,
+)
+from quant_strategies.decisions.extended_ontology import (
     PositionTarget as ExtendedPositionTarget,
+)
+from quant_strategies.decisions.extended_ontology import (
     StrategyDecision as ExtendedStrategyDecision,
 )
 from quant_strategies.validation.vectorbtpro_backend import VectorBTProBackend
 
-
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
-DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
 def rows():
@@ -33,12 +38,12 @@ def rows():
         {"symbol": "BTC-PERP", "timestamp": DECISION, "close": 101.0},
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 102.0,
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "close": 103.0,
         },
     ]
@@ -50,12 +55,12 @@ def multi_symbol_rows():
         {"symbol": "ETH-PERP", "timestamp": DECISION, "close": 200.0},
         {
             "symbol": "ETH-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 200.0,
         },
         {
             "symbol": "ETH-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "close": 200.0,
         },
     ]
@@ -66,12 +71,12 @@ def sparse_symbol_rows():
         {"symbol": "ETH-PERP", "timestamp": AS_OF, "close": 200.0},
         {
             "symbol": "ETH-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 201.0,
         },
         {
             "symbol": "ETH-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "close": 202.0,
         },
     ]
@@ -81,7 +86,7 @@ def overlapping_window_rows():
     return rows() + [
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "close": 104.0,
         },
     ]
@@ -91,7 +96,7 @@ def unrelated_symbol_timestamp_rows():
     return rows() + [
         {
             "symbol": "ETH-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 1, 30, tzinfo=UTC),
             "close": 200.0,
         },
     ]
@@ -155,14 +160,14 @@ def funding_rows():
         {"symbol": "BTC-PERP", "timestamp": DECISION, "close": 101.0},
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 102.0,
         },
         {
             "symbol": "BTC-PERP",
-            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "close": 103.0,
-            "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc),
+            "funding_timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "funding_rate": 0.0003,
             "has_funding_event": True,
         },
@@ -311,7 +316,9 @@ def test_vectorbtpro_backend_runs_max_hold_decisions():
     assert quarter_result.status == "completed"
     assert quarter_result.metrics["trade_count"] == 1
     assert 0.0 < quarter_result.metrics["net_return"] < full_result.metrics["net_return"]
-    assert quarter_result.metrics["net_return"] == pytest.approx(full_result.metrics["net_return"] * 0.25, rel=0.05)
+    assert quarter_result.metrics["net_return"] == pytest.approx(
+        full_result.metrics["net_return"] * 0.25, rel=0.05
+    )
 
 
 def test_vectorbtpro_backend_fails_on_missing_symbol():
@@ -341,7 +348,7 @@ def test_vectorbtpro_backend_fails_on_missing_decision_bar():
     result = VectorBTProBackend().run(
         decisions=[
             decision(
-                decision_time=datetime(2026, 1, 1, 0, 10, tzinfo=timezone.utc),
+                decision_time=datetime(2026, 1, 1, 0, 10, tzinfo=UTC),
             )
         ],
         rows=rows(),
@@ -559,7 +566,7 @@ def test_vectorbtpro_backend_runs_conservative_multi_asset_target_weights(monkey
         config=None,
     )
 
-    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc)
+    entry_time = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
     assert result.status == "completed"
     assert result.unsupported_semantics == ()
     assert captured["size_type"] == "valuepercent"
@@ -568,7 +575,9 @@ def test_vectorbtpro_backend_runs_conservative_multi_asset_target_weights(monkey
     assert captured["init_cash"] == pytest.approx(100.0)  # F4: pinned explicitly
     assert captured["size"].loc[entry_time, "BTC-PERP"] == pytest.approx(0.6)
     assert captured["size"].loc[entry_time, "ETH-PERP"] == pytest.approx(0.4)
-    assert result.metrics["portfolio_target_weight_model"] == "vectorbtpro_valuepercent_cash_sharing"
+    assert (
+        result.metrics["portfolio_target_weight_model"] == "vectorbtpro_valuepercent_cash_sharing"
+    )
     assert result.metrics["max_gross_target_weight"] == pytest.approx(1.0)
 
 
@@ -594,7 +603,7 @@ def test_vectorbtpro_backend_fails_when_staggered_active_portfolio_target_weight
             decision(symbol="BTC-PERP", decision_time=AS_OF, max_hold_bars=3, size=0.6),
             decision(
                 symbol="ETH-PERP",
-                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
                 max_hold_bars=1,
                 size=0.5,
             ),
@@ -628,7 +637,7 @@ def test_vectorbtpro_backend_fails_on_duplicate_exit_signal():
         decisions=[
             decision(max_hold_bars=2),
             decision(
-                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
                 max_hold_bars=1,
             ),
         ],
@@ -647,7 +656,7 @@ def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
         decisions=[
             decision(max_hold_bars=3),
             decision(
-                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc),
+                decision_time=datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
                 max_hold_bars=1,
             ),
         ],
@@ -659,10 +668,14 @@ def test_vectorbtpro_backend_fails_on_overlapping_same_symbol_windows():
     assert any("overlapping_decision_window" in warning for warning in result.warnings)
 
 
-def test_vectorbtpro_backend_ignores_unrelated_symbol_timestamps_for_single_symbol_lags(monkeypatch):
+def test_vectorbtpro_backend_ignores_unrelated_symbol_timestamps_for_single_symbol_lags(
+    monkeypatch,
+):
     vbt = pytest.importorskip("vectorbtpro")
     captured = {}
-    config = SimpleNamespace(fill_model=SimpleNamespace(price="close", entry_lag_bars=1, exit_lag_bars=0))
+    config = SimpleNamespace(
+        fill_model=SimpleNamespace(price="close", entry_lag_bars=1, exit_lag_bars=0)
+    )
 
     class FakeTrades:
         def count(self):
@@ -689,9 +702,9 @@ def test_vectorbtpro_backend_ignores_unrelated_symbol_timestamps_for_single_symb
 
     assert result.status == "completed"
     assert list(captured["close"].columns) == ["BTC-PERP"]
-    assert datetime(2026, 1, 1, 0, 1, 30, tzinfo=timezone.utc) not in captured["close"].index
-    assert captured["long_entries"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "BTC-PERP"]
-    assert captured["long_exits"].loc[datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "BTC-PERP"]
+    assert datetime(2026, 1, 1, 0, 1, 30, tzinfo=UTC) not in captured["close"].index
+    assert captured["long_entries"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=UTC), "BTC-PERP"]
+    assert captured["long_exits"].loc[datetime(2026, 1, 1, 0, 3, tzinfo=UTC), "BTC-PERP"]
 
 
 def test_vectorbtpro_backend_reads_mapping_config_fill_and_cost_overrides(monkeypatch):
@@ -729,7 +742,7 @@ def test_vectorbtpro_backend_reads_mapping_config_fill_and_cost_overrides(monkey
     assert captured["fees"] == pytest.approx(0.0005)
     assert captured["slippage"] == pytest.approx(0.00025)
     assert captured["long_entries"].loc[DECISION, "BTC-PERP"]
-    assert captured["long_exits"].loc[datetime(2026, 1, 1, 0, 3, tzinfo=timezone.utc), "BTC-PERP"]
+    assert captured["long_exits"].loc[datetime(2026, 1, 1, 0, 3, tzinfo=UTC), "BTC-PERP"]
 
 
 @pytest.mark.parametrize("close", [float("nan"), float("inf"), float("-inf")])
@@ -819,7 +832,7 @@ def test_vectorbtpro_backend_passes_target_weight_size_to_vectorbtpro(monkeypatc
     assert result.status == "completed"
     assert "size" in captured_kwargs
     assert "size_type" in captured_kwargs
-    assert captured_kwargs["size"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=timezone.utc), "BTC-PERP"] == 0.25
+    assert captured_kwargs["size"].loc[datetime(2026, 1, 1, 0, 2, tzinfo=UTC), "BTC-PERP"] == 0.25
 
 
 def test_vectorbtpro_backend_reports_vectorbtpro_run_failure(monkeypatch):
@@ -913,7 +926,9 @@ def test_vectorbtpro_backend_fails_when_metric_extraction_raises(monkeypatch):
     )
 
     assert result.status == "failed"
-    assert any("metric_extraction_failed:metrics unavailable" in warning for warning in result.warnings)
+    assert any(
+        "metric_extraction_failed:metrics unavailable" in warning for warning in result.warnings
+    )
 
 
 @pytest.mark.parametrize("trade_count", [0, 2])

@@ -6,13 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
-from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile, runner_evidence_semantics
-from quant_strategies.observation_dependencies import (
-    audit_observation_dependencies,
-    observation_row_index,
-)
 from quant_strategies.core import engine_runner as _engine_runner
 from quant_strategies.core.errors import RunnerError
 from quant_strategies.core.execution import (
@@ -20,11 +13,23 @@ from quant_strategies.core.execution import (
     StrategyExecutionResult,
     execute_strategy_run,
 )
+from quant_strategies.data_contract import NormalizedRows
+from quant_strategies.decisions import StrategyDecision
+from quant_strategies.evidence_semantics import (
+    replayable_from_artifacts_for_profile,
+    runner_evidence_semantics,
+)
+from quant_strategies.observation_dependencies import (
+    audit_observation_dependencies,
+    observation_row_index,
+)
 from quant_strategies.runner import (
     artifacts,
-    config as config_module,
     data_readiness,
     economic_metrics,
+)
+from quant_strategies.runner import (
+    config as config_module,
 )
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 
@@ -76,7 +81,9 @@ def run_config(
     repo_root: Path | None = None,
     event_sink: RunnerEventSink | None = None,
 ) -> RunResult:
-    effective_repo_root = Path(repo_root).resolve() if repo_root is not None else config_module.default_repo_root()
+    effective_repo_root = (
+        Path(repo_root).resolve() if repo_root is not None else config_module.default_repo_root()
+    )
     events = RunnerStageEmitter(event_sink)
     try:
         with events.stage(
@@ -84,7 +91,9 @@ def run_config(
             config_path=str(config_path),
             repo_root=str(effective_repo_root),
         ):
-            config_file = config_module.resolve_config_path(config_path, repo_root=effective_repo_root)
+            config_file = config_module.resolve_config_path(
+                config_path, repo_root=effective_repo_root
+            )
             config = config_module.load_config(config_file, repo_root=effective_repo_root)
     except RunnerError as exc:
         return RunResult(
@@ -267,9 +276,7 @@ def _write_strategy_input_rows_if_full(
         normalized_rows.projection_rows(),
     )
     if written_hash != normalized_rows.normalized_rows_sha256:
-        raise RunnerError(
-            "strategy_input_rows.jsonl hash does not match normalized_rows_sha256"
-        )
+        raise RunnerError("strategy_input_rows.jsonl hash does not match normalized_rows_sha256")
 
 
 def _write_execution_data_manifest(
@@ -344,7 +351,9 @@ def _prepare_engine_request(
             strategy_id=config.strategy_id,
             decision_count=len(execution.decisions),
         ):
-            data_readiness.assert_decision_rows_ready(execution.normalized_rows, execution.decisions)
+            data_readiness.assert_decision_rows_ready(
+                execution.normalized_rows, execution.decisions
+            )
     except RunnerError as exc:
         return None, _failure_result(
             config,
@@ -461,7 +470,9 @@ def _write_completion_artifacts(
 ) -> tuple[str, str]:
     if engine_run is None:
         raise ValueError("engine_run is required when no failure was returned")
-    with event_emitter.stage("artifact_writes", strategy_id=config.strategy_id, status_stage="completed"):
+    with event_emitter.stage(
+        "artifact_writes", strategy_id=config.strategy_id, status_stage="completed"
+    ):
         engine_summary_with_trades = artifacts.compact_engine_summary(
             engine_run,
             include_diagnostic_trades=True,
@@ -669,7 +680,9 @@ def _run_evidence(
 ) -> RunEvidence:
     quality = evidence_quality or {}
     return RunEvidence(
-        replayable_from_artifacts=replayable_from_artifacts_for_profile(config.output.artifact_profile),
+        replayable_from_artifacts=replayable_from_artifacts_for_profile(
+            config.output.artifact_profile
+        ),
         data_availability_status=_optional_str(quality.get("data_availability_status")),
         availability_coverage=_optional_dict(quality.get("availability_coverage")),
         row_contract=_optional_dict(quality.get("row_contract")),

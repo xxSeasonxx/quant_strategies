@@ -4,7 +4,6 @@ import math
 from collections.abc import Callable, Iterable
 from datetime import datetime
 
-
 FUNDING_RATE_ABS_TOLERANCE = 1e-12
 
 

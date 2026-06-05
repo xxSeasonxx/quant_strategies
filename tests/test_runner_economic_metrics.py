@@ -200,9 +200,9 @@ def test_trades_from_engine_summary_returns_copied_trade_dicts():
 
 
 def test_trades_from_engine_summary_accepts_integral_float_trade_count():
-    assert trades_from_engine_summary(
-        {"trade_count": 1.0, "diagnostic_trades": [trade(0.01)]}
-    ) == [trade(0.01)]
+    assert trades_from_engine_summary({"trade_count": 1.0, "diagnostic_trades": [trade(0.01)]}) == [
+        trade(0.01)
+    ]
 
 
 def test_trade_result_from_engine_summary_returns_copied_dict():

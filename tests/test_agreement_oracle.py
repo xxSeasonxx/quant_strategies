@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -12,18 +12,18 @@ from quant_strategies.decisions import (
     PositionTarget,
     StrategyDecision,
 )
-from quant_strategies.validation.agreement import AgreementResult, compare, evaluate_agreement
+from quant_strategies.validation.agreement import compare, evaluate_agreement
 from quant_strategies.validation.config import ScenarioRunConfig
 from quant_strategies.validation.engine_backend import EngineBackend
 
-AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 
 ATOL = 1e-6
 RTOL = 1e-3
 
 
 def bar(minute: int, close: float, *, symbol: str = "BTC-PERP") -> dict:
-    ts = datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc)
+    ts = datetime(2026, 1, 1, 0, minute, tzinfo=UTC)
     return {
         "symbol": symbol,
         "timestamp": ts,
@@ -36,8 +36,15 @@ def bar(minute: int, close: float, *, symbol: str = "BTC-PERP") -> dict:
     }
 
 
-def decision(*, minute: int = 0, direction: str = "long", size: float = 1.0, symbol: str = "BTC-PERP", **exit_kwargs):
-    ts = datetime(2026, 1, 1, 0, minute, tzinfo=timezone.utc)
+def decision(
+    *,
+    minute: int = 0,
+    direction: str = "long",
+    size: float = 1.0,
+    symbol: str = "BTC-PERP",
+    **exit_kwargs,
+):
+    ts = datetime(2026, 1, 1, 0, minute, tzinfo=UTC)
     return StrategyDecision(
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
