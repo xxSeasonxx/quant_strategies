@@ -251,6 +251,12 @@ def funding_events_by_symbol(
         funding_timestamp = coerce_utc_timestamp(
             pd, row.get("funding_timestamp"), "funding_timestamp"
         )
+        # Funding settles at a sub-minute instant (real quant_data stamps the exact
+        # settlement, e.g. 08:00:00.003), but it is marked and applied at the 1-minute
+        # bar that contains it. Snap to that bar so the mark lookup hits the
+        # minute-indexed close; a funding_timestamp outside the bar grid (wrong/missing
+        # bar) still floors to a missing mark and is reported as not-aligned.
+        bar_timestamp = funding_timestamp.floor("min")
         try:
             funding_rate = float(row["funding_rate"])
         except (KeyError, TypeError, ValueError) as exc:
@@ -260,17 +266,17 @@ def funding_events_by_symbol(
         if not math.isfinite(funding_rate):
             raise ValueError(f"invalid_funding_rate:{symbol}:{funding_timestamp.isoformat()}")
         try:
-            mark_price_at(close, symbol, funding_timestamp)
+            mark_price_at(close, symbol, bar_timestamp)
         except ValueError as exc:
             raise ValueError(
                 f"funding_timestamp_not_aligned:{symbol}:{funding_timestamp.isoformat()}"
             ) from exc
 
         symbol_events = events.setdefault(symbol, {})
-        existing = symbol_events.get(funding_timestamp)
+        existing = symbol_events.get(bar_timestamp)
         if existing is not None and not funding_rates_match(existing, funding_rate):
             raise ValueError(f"conflicting_funding_rates:{symbol}:{funding_timestamp.isoformat()}")
-        symbol_events[funding_timestamp] = funding_rate
+        symbol_events[bar_timestamp] = funding_rate
     return events
 
 

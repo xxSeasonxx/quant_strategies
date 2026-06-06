@@ -394,6 +394,25 @@ def test_perp_ledger_missing_funding_timestamp_alignment_fails():
     assert "funding_timestamp_not_aligned:BTC-PERP:" in result.warnings[0]
 
 
+def test_perp_ledger_subminute_funding_timestamp_snaps_to_bar():
+    # Real quant_data stamps the exact funding settlement instant, which lands a few ms
+    # past the minute (e.g. 08:00:00.003). It must be marked/applied at the 1-minute bar
+    # that contains it, not rejected as misaligned.
+    rows = _ledger_rows()
+    for row in rows:
+        if row["timestamp"] == _ts(2):
+            row["has_funding_event"] = True
+            row["funding_timestamp"] = _ts(2) + timedelta(milliseconds=3)
+            row["funding_rate"] = 0.01
+
+    result = _run_ledger(rows=rows)
+
+    assert result.status == "completed"
+    assert result.metrics["funding_event_count"] == 1
+    assert result.metrics["funding_cashflow_total"] == pytest.approx(-1.0)
+    assert list(result.tables.funding_cashflows["timestamp"]) == [_ts(2)]
+
+
 def test_perp_ledger_fees_and_slippage_affect_realized_pnl():
     scenario = _ledger_scenario(fee_bps_per_side=100.0, slippage_bps_per_side=100.0)
     result = _run_ledger(
