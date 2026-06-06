@@ -361,6 +361,36 @@ Evaluation writes Parquet-only traces (`tables/portfolio_path.parquet`,
 `trades`, `target_positions`, `target_exposure_summary`, `funding_cashflows`) and
 requires `pyarrow`. There is no JSONL fallback for row snapshots or traces.
 
+**Per-fold OOS returns in-process (no Parquet scraping).** A completed
+`EvaluationRunResult` also carries the per-`(window, scenario)` out-of-sample
+return series typed and in-process, so a consumer never has to read
+`tables/portfolio_path.parquet`. Orchestrate one window (one fold) per `evaluate`
+call and read the series for the scenario your protocol selects:
+
+```python
+result = run_evaluation("candidate/evaluation.toml")
+if not result.succeeded:
+    raise SystemExit(f"{result.failure_stage}: {result.message}")
+
+# per-fold Tier-0 causal-replay / decision-contract integrity
+assert result.causal_replay_passed is True
+
+# pick the costs-on / fixed-fill scenario your protocol uses
+series = result.returns_for("eval_2026_h1", "eval_2026_h1/realistic_costs/base_fill")
+returns = series.values            # numpy float64, net of costs (synthetic first return dropped)
+times = series.timestamps          # numpy datetime64[ns], aligned to returns
+ppy = series.periods_per_year      # annualization cadence from [metrics]
+
+metrics = result.metrics_for(series.window_id, series.scenario_id)
+sharpe = metrics.sharpe            # undeflated; None under a cadence/sample guard
+```
+
+The series `values` use the same observed-return definition as the summary metrics
+(drop the synthetic first return, exclude non-finite), so they match the
+`period_return` rows in the Parquet trace. `series.per_symbol` is `None` for the
+current grouped cash-shared backends. No significance statistics (PSR/DSR/PBO) are
+provided — significance is the consumer's job.
+
 ---
 
 ## Reading results programmatically

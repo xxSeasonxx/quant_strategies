@@ -24,6 +24,7 @@ Import only these. Everything else (including `quant_strategies.engine` and any
 | `quant_strategies.validation.ValidationRunResult` | dataclass | Validation result type |
 | `quant_strategies.evaluation.run_evaluation` | function | Run the evaluation surface |
 | `quant_strategies.evaluation.EvaluationRunResult` | dataclass | Evaluation result type |
+| `quant_strategies.evaluation.FoldReturnSeries` / `FoldScenarioMetrics` | dataclass | Typed per-fold OOS return series + summary scalars on the evaluation result |
 | `quant_strategies.evaluation.EvaluationConfig` / `EvaluationScenarioConfig` / `BenchmarkConfig` | model | Evaluation config models (for typed construction) |
 | `quant_strategies.decisions.StrategyDecision` | model | The decision your strategy returns |
 | `quant_strategies.decisions.InstrumentRef` (alias `DecisionInstrument`) | model | Instrument reference |
@@ -255,7 +256,51 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 | `failure_stage` | `str \| None` | e.g. `data_audit`, `preflight` |
 | `assessment_status` | `str` | default `evaluation_failed`; `evaluation_preflight_failed` on preflight/audit fail |
 | `evidence_quality_warnings` | `tuple[str, …]` | — |
+| `fold_returns` | `tuple[FoldReturnSeries, …]` | per-`(window, scenario)` OOS return series, in-process (no Parquet); `()` unless completed |
+| `scenario_metrics` | `tuple[FoldScenarioMetrics, …]` | per-`(window, scenario)` summary risk scalars + provenance; `()` unless completed |
+| `causal_replay_passed` | `bool \| None` | Tier-0 causal-replay / decision-contract integrity: `True` on a completed run, `False` on a causal/audit failure stage (`data_audit`, `preflight`), `None` on a pre-causal failure |
+| `provenance` | `Mapping[str, str]` | run provenance (backend, python + package versions, data-snapshot `normalized_rows_sha256`); `{}` unless populated |
 | `succeeded` | `bool` (property) | `run_completed and failure_stage is None` |
+| `window_ids` | `tuple[str, …]` (property) | distinct window ids with a completed series |
+| `scenario_ids_for(window_id)` | `tuple[str, …]` | completed scenario ids for a window |
+| `returns_for(window_id, scenario_id)` | `FoldReturnSeries \| None` | typed OOS return series for one fold |
+| `metrics_for(window_id, scenario_id)` | `FoldScenarioMetrics \| None` | typed summary scalars for one fold |
+
+The new fields are **additive** (all defaulted); existing programmatic consumers and
+`succeeded` are unaffected. They let an in-process consumer read each fold's OOS return
+series without scraping `tables/portfolio_path.parquet`. No significance statistics
+(PSR/DSR/PBO) are added — significance stays with the consumer.
+
+#### `FoldReturnSeries`
+
+Per-`(window, scenario)` OOS return series at fixed grouped exposure, net of the
+scenario's configured costs. Arrays are numpy; `values` use the same observed-return
+definition as the summary metrics (drop the synthetic first return, exclude non-finite),
+so they match the on-disk `period_return` trace.
+
+| Field | Type | Notes |
+|---|---|---|
+| `window_id` | `str` | — |
+| `scenario_id` | `str` | `"{window_id}/{cost}/{fill}"` (or `"{window_id}/{custom_id}"`) |
+| `timestamps` | `np.ndarray` | `datetime64[ns]` (naive UTC), strictly increasing, aligned to `values` |
+| `values` | `np.ndarray` | `float64` per-period returns (net of costs) |
+| `periods_per_year` | `float` | the config's `metrics.annualization_periods_per_year` |
+| `per_symbol` | `Mapping[str, FoldReturnSeries] \| None` | `None` for the current grouped cash-shared backends (no per-symbol return path is computed) |
+
+#### `FoldScenarioMetrics`
+
+Per-`(window, scenario)` undeflated summary risk scalars. Annualized/risk scalars honor
+the annualized-metric trust boundary (they are `None` under a non-ok cadence or an
+insufficient return sample), exactly as the artifact metrics.
+
+| Field | Type | Notes |
+|---|---|---|
+| `window_id` / `scenario_id` | `str` | — |
+| `sharpe` / `sortino` / `calmar` | `float \| None` | annualized; nulled under cadence/sample guards |
+| `max_drawdown` / `worst_period_return` | `float \| None` | core economics |
+| `trade_count` / `return_sample_count` | `int \| None` | — |
+| `causal_ok` | `bool` | per-fold Tier-0 integrity (`True` for completed scenarios) |
+| `provenance` | `Mapping[str, str]` | data-snapshot + version identity (FR-I1) |
 
 ---
 

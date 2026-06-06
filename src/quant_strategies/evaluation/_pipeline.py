@@ -45,10 +45,19 @@ from quant_strategies.evaluation.config import (
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
 from quant_strategies.evaluation.errors import EvaluationConfigError
 from quant_strategies.evaluation.events import EvaluationEventSink, EvaluationStageEmitter
+from quant_strategies.evaluation.fold_returns import (
+    FoldReturnSeries,
+    FoldScenarioMetrics,
+    fold_metrics_from_scenario,
+    fold_series_from_portfolio_path,
+    split_portfolio_path_by_scenario,
+    window_id_for_scenario,
+)
 from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEvaluationResult
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
 from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
+from quant_strategies.provenance import package_versions, python_identity
 
 
 @dataclass(frozen=True)
@@ -59,6 +68,7 @@ class _EvaluationContext:
     result_dir: Path
     selected_backend: EvaluationBackend
     event_emitter: EvaluationStageEmitter
+    provenance: Mapping[str, str]
 
 
 @dataclass
@@ -85,6 +95,10 @@ _REQUIRED_COMPLETED_COUNT_METRICS = (
     "funding_event_count",
 )
 _REQUIRED_COMPLETED_FUNDING_MODELS = {"none", "project_perp_ledger_v1"}
+# Stages whose failure means the Tier-0 causal-replay / decision-contract
+# integrity check did not pass (vs. a pre-causal failure, which leaves it unknown).
+_CAUSAL_FAILURE_STAGES = frozenset({"data_audit", "preflight"})
+_PROVENANCE_PACKAGE_NAMES = ("quant-strategies", "quant-data", "vectorbtpro")
 _SECONDS_PER_YEAR = 365.2425 * 24 * 60 * 60
 _ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 1.1
 _ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
@@ -152,6 +166,9 @@ def _run_evaluation(
         result_dir=result_dir,
         selected_backend=selected_backend,
         event_emitter=events,
+        provenance=_run_provenance(
+            backend_name=_backend_name(selected_backend, data_kind=config.data.kind),
+        ),
     )
     state = _EvaluationState()
 
@@ -196,6 +213,15 @@ def _run_evaluation(
     if artifact_failure is not None:
         return artifact_failure
 
+    run_provenance = _completion_provenance(context, state)
+    fold_returns, scenario_metrics = _build_fold_outputs(
+        trace_results=state.trace_results,
+        metric_results=artifact_results,
+        known_window_ids=tuple(window.id for window in context.config.windows),
+        periods_per_year=float(context.config.metrics.annualization_periods_per_year),
+        provenance=run_provenance,
+    )
+
     return EvaluationRunResult(
         result_dir=result_dir,
         message=f"evaluation complete: {len(state.backend_results)} scenarios",
@@ -203,6 +229,10 @@ def _run_evaluation(
         failure_stage=None,
         assessment_status="evaluation_complete",
         evidence_quality_warnings=tuple(state.all_warnings),
+        fold_returns=fold_returns,
+        scenario_metrics=scenario_metrics,
+        causal_replay_passed=True,
+        provenance=run_provenance,
     )
 
 
@@ -789,6 +819,80 @@ def _write_completion_artifacts(
     return None
 
 
+def _run_provenance(*, backend_name: str) -> dict[str, str]:
+    """Run-level provenance: package + python versions + backend name.
+
+    Deterministic and side-effect-light (no git shell-out; the manifest already
+    records git identity). Only string-valued entries are kept so the mapping
+    satisfies the typed `Mapping[str, str]` contract.
+    """
+    provenance: dict[str, str] = {"backend": backend_name}
+    provenance["python"] = python_identity()["version"]
+    for name, version in package_versions(_PROVENANCE_PACKAGE_NAMES).items():
+        if version is not None:
+            provenance[f"{name}_version"] = version
+    return provenance
+
+
+def _completion_provenance(context: _EvaluationContext, state: _EvaluationState) -> dict[str, str]:
+    """Augment run provenance with the data-snapshot identity (FR-I1)."""
+    provenance = dict(context.provenance)
+    snapshot_hashes = [
+        str(window["normalized_rows_sha256"])
+        for window in state.data_windows
+        if window.get("normalized_rows_sha256")
+    ]
+    if snapshot_hashes:
+        provenance["normalized_rows_sha256"] = ",".join(snapshot_hashes)
+    return provenance
+
+
+def _build_fold_outputs(
+    *,
+    trace_results: Sequence[PortfolioEvaluationResult],
+    metric_results: Sequence[PortfolioEvaluationResult],
+    known_window_ids: Sequence[str],
+    periods_per_year: float,
+    provenance: Mapping[str, str],
+) -> tuple[tuple[FoldReturnSeries, ...], tuple[FoldScenarioMetrics, ...]]:
+    """Build typed per-fold return series + summary metrics from trace tables.
+
+    Return series come from the in-process `portfolio_path` frames (`trace_results`);
+    the cadence-corrected scalars come from `metric_results` (tables stripped). Both
+    are keyed by `(window_id, scenario_id)`; the window id is resolved from the
+    scenario id against the known window ids.
+    """
+    metrics_by_scenario = {result.scenario_id: result.metrics for result in metric_results}
+    fold_returns: list[FoldReturnSeries] = []
+    scenario_metrics: list[FoldScenarioMetrics] = []
+    for result in trace_results:
+        if result.tables is None:
+            continue
+        per_scenario = split_portfolio_path_by_scenario(result.tables.portfolio_path)
+        if not per_scenario:
+            per_scenario = {result.scenario_id: result.tables.portfolio_path}
+        for scenario_id, frame in per_scenario.items():
+            window_id = window_id_for_scenario(scenario_id, known_window_ids)
+            fold_returns.append(
+                fold_series_from_portfolio_path(
+                    window_id,
+                    scenario_id,
+                    frame,
+                    periods_per_year=periods_per_year,
+                )
+            )
+            scenario_metrics.append(
+                fold_metrics_from_scenario(
+                    window_id,
+                    scenario_id,
+                    metrics_by_scenario.get(scenario_id, {}),
+                    provenance=provenance,
+                    causal_ok=True,
+                )
+            )
+    return tuple(fold_returns), tuple(scenario_metrics)
+
+
 def _completion_artifact_results(
     results: Sequence[PortfolioEvaluationResult],
     *,
@@ -1135,6 +1239,8 @@ def _failure_result(
         failure_stage=failure_stage,
         assessment_status=assessment_status,
         evidence_quality_warnings=warnings,
+        causal_replay_passed=(False if failure_stage in _CAUSAL_FAILURE_STAGES else None),
+        provenance=dict(context.provenance),
     )
 
 

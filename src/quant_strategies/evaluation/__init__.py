@@ -6,6 +6,7 @@ from quant_strategies.evaluation.config import (
     EvaluationConfig,
     EvaluationScenarioConfig,
 )
+from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.results import EvaluationRunResult
 
 __all__ = [
@@ -13,5 +14,7 @@ __all__ = [
     "EvaluationConfig",
     "EvaluationRunResult",
     "EvaluationScenarioConfig",
+    "FoldReturnSeries",
+    "FoldScenarioMetrics",
     "run_evaluation",
 ]

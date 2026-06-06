@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from quant_strategies.decisions import StrategyDecision
+from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.metrics import MetricValue
 
 EvaluationBackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
@@ -58,7 +59,36 @@ class EvaluationRunResult:
     failure_stage: str | None = None
     assessment_status: str = "evaluation_failed"
     evidence_quality_warnings: tuple[str, ...] = ()
+    fold_returns: tuple[FoldReturnSeries, ...] = ()
+    scenario_metrics: tuple[FoldScenarioMetrics, ...] = ()
+    causal_replay_passed: bool | None = None
+    provenance: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def succeeded(self) -> bool:
         return self.run_completed and self.failure_stage is None
+
+    @property
+    def window_ids(self) -> tuple[str, ...]:
+        """Distinct window ids with at least one completed scenario series."""
+        return tuple(dict.fromkeys(series.window_id for series in self.fold_returns))
+
+    def scenario_ids_for(self, window_id: str) -> tuple[str, ...]:
+        """Completed scenario ids for a window, in completion order."""
+        return tuple(
+            series.scenario_id for series in self.fold_returns if series.window_id == window_id
+        )
+
+    def returns_for(self, window_id: str, scenario_id: str) -> FoldReturnSeries | None:
+        """Typed OOS return series for one `(window, scenario)`; `None` if absent."""
+        for series in self.fold_returns:
+            if series.window_id == window_id and series.scenario_id == scenario_id:
+                return series
+        return None
+
+    def metrics_for(self, window_id: str, scenario_id: str) -> FoldScenarioMetrics | None:
+        """Typed summary scalars for one `(window, scenario)`; `None` if absent."""
+        for metrics in self.scenario_metrics:
+            if metrics.window_id == window_id and metrics.scenario_id == scenario_id:
+                return metrics
+        return None

@@ -27,6 +27,20 @@ validation support is limited to the explicit opt-in agreement oracle.
 `quant_strategies.evaluation.run_evaluation` and returns
 `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
 `pyarrow`.
+- **Per-fold return-series accessor (additive):** `EvaluationRunResult` also
+exposes the per-`(window, scenario)` out-of-sample return series typed and
+in-process — `fold_returns` (`FoldReturnSeries`: numpy `timestamps`/`values`,
+`periods_per_year`, `per_symbol`), `scenario_metrics` (`FoldScenarioMetrics`:
+undeflated `sharpe`/`sortino`/`calmar`/`max_drawdown`/`worst_period_return`/
+`trade_count`/`return_sample_count` + `causal_ok` + `provenance`),
+`causal_replay_passed`, `provenance`, and the `returns_for`/`metrics_for`/
+`window_ids`/`scenario_ids_for` helpers. This lets consumers read per-fold OOS
+returns without scraping `tables/portfolio_path.parquet`; the `values` reuse the
+existing observed-return semantics (drop synthetic first return, exclude
+non-finite) and honor the annualized-metric trust boundary. The accessor adds no
+significance statistics (PSR/DSR/PBO) — significance stays with the consumer
+(`quant_autoresearch`). The fields are additive and default empty/None;
+`succeeded` is unchanged.
 - **Decision/spec kernel:** the public surfaces use one shared decision/spec
 kernel plus separate price-evidence paths: internal engine trade-activity
 evidence for quick run and validation, and portfolio/NAV evidence for
