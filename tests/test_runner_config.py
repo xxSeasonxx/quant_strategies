@@ -147,6 +147,16 @@ def test_committed_run_configs_default_to_diagnostic_profile():
             assert config.output.artifact_profile == "diagnostic"
 
 
+def test_committed_run_configs_use_focused_causality_for_iteration():
+    repo_root = REPO_ROOT
+    paths = sorted((repo_root / "runs").glob("*.toml"))
+    assert paths, "expected at least one committed run config"
+
+    for path in paths:
+        config = load_config(path, repo_root=repo_root)
+        assert config.output.causality_check == "focused", path
+
+
 def test_output_quick_checks_accepts_explicit_true_and_false(tmp_path: Path):
     write_strategy(tmp_path)
 

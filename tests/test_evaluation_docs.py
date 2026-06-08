@@ -128,6 +128,26 @@ def test_docs_lock_sortino_funding_and_no_lookahead_semantics():
     assert "does not prove freedom from in-sample fitting" in docs
 
 
+def test_consumer_docs_route_autoresearch_to_focused_causality():
+    usage = read("docs/consumer/usage-guide.md")
+    reference = read("docs/consumer/reference.md")
+
+    assert 'causality_check = "focused"' in usage
+    assert "result.evidence.focused_causality.status" in usage
+    assert "result.evidence.causality.verified" not in usage
+    assert "focused causality" in usage
+    assert "validation/evaluation" in usage
+    assert "materialize emitted mode for Train iteration" not in usage
+    assert '"emitted"' not in usage
+    assert '"strict"' not in usage
+    assert "`strict_probe_limit`" not in usage
+    assert "RunFocusedCausalityEvidence" in reference
+    assert "focused_causality" in reference
+    assert '"emitted"' in reference
+    assert '"strict"' in reference
+    assert "advanced" in reference
+
+
 def test_lock_todos_and_review_track_p1_annualized_metric_guards():
     for path in [
         "FOUNDATION_LOCK.md",

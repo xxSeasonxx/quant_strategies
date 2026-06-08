@@ -26,3 +26,4 @@ results_dir = "results"
 quick_checks = true
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5
+causality_check = "focused"

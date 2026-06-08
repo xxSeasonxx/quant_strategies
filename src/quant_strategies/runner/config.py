@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tomllib
 from pathlib import Path
 from typing import Any, Literal
@@ -17,7 +18,7 @@ from quant_strategies.core.config import (
 from quant_strategies.core.errors import ConfigError
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
-CausalityCheck = Literal["off", "emitted", "strict"]
+CausalityCheck = Literal["off", "emitted", "strict", "focused"]
 
 _GENERATED_OUTPUT_ROOT = "results"
 
@@ -67,6 +68,8 @@ class OutputConfig(RunnerConfigModel):
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
     causality_check: CausalityCheck = "strict"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
+    focused_probe_limit: StrictInt = Field(default=64, ge=1)
+    focused_timeout_seconds: float = Field(default=60.0, ge=0.0)
 
     @field_validator("results_dir")
     @classmethod
@@ -75,6 +78,13 @@ class OutputConfig(RunnerConfigModel):
         resolved = _resolve_inside_repo(value, repo_root, "output.results_dir")
         _reject_non_generated_output_dir(resolved, repo_root, "output.results_dir")
         return resolved
+
+    @field_validator("focused_timeout_seconds")
+    @classmethod
+    def validate_focused_timeout_seconds(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("output.focused_timeout_seconds must be finite")
+        return value
 
 
 class RunConfig(RunnerConfigModel):

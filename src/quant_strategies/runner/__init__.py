@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
@@ -7,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.causality import (
+    FOCUSED_CAUSALITY_PROFILE_VERSION,
+    FocusedCausalityConfig,
+    FocusedCausalityKey,
+    FocusedCausalityResult,
     LookaheadCheckResult,
+    check_focused_causality,
     check_hidden_lookahead,
     strict_replay_boundaries,
 )
@@ -18,6 +25,7 @@ from quant_strategies.core.execution import (
     StrategyExecutionResult,
     execute_strategy_run,
 )
+from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.evidence_semantics import (
@@ -28,6 +36,7 @@ from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
 )
+from quant_strategies.provenance import file_sha256
 from quant_strategies.runner import (
     artifacts,
     data_readiness,
@@ -55,12 +64,32 @@ class RunCausalityEvidence:
 
 
 @dataclass(frozen=True)
+class RunFocusedCausalityEvidence:
+    status: str = "not_run"
+    scoring_allowed: bool = False
+    strategy_source_sha256: str | None = None
+    strategy_id: str | None = None
+    data_kind: str | None = None
+    profile_version: str | None = None
+    normalized_rows_sha256: str | None = None
+    params_sha256: str | None = None
+    max_probes: int | None = None
+    timeout_seconds_key: float | None = None
+    cache_hit: bool = False
+    timeout_seconds: float | None = None
+    candidate_probe_count: int | None = None
+    selected_probe_count: int | None = None
+    rejection_reason: str | None = None
+
+
+@dataclass(frozen=True)
 class RunEvidence:
     replayable_from_artifacts: bool | None = None
     data_availability_status: str | None = None
     availability_coverage: dict[str, object] | None = None
     row_contract: dict[str, object] | None = None
     causality: RunCausalityEvidence = RunCausalityEvidence()
+    focused_causality: RunFocusedCausalityEvidence = RunFocusedCausalityEvidence()
     warnings: tuple[str, ...] = ()
 
 
@@ -327,6 +356,9 @@ def _prepare_causality_evidence(
     execution: StrategyExecutionResult,
     event_emitter: RunnerStageEmitter,
 ) -> tuple[LookaheadCheckResult, dict[str, object]]:
+    if config.output.causality_check == "focused":
+        return _prepare_focused_causality_evidence(config, execution, event_emitter)
+
     with event_emitter.stage(
         "causality_check",
         strategy_id=config.strategy_id,
@@ -348,6 +380,169 @@ def _prepare_causality_evidence(
         skipped_probe_reasons=causality.skipped_probe_reasons,
     )
     return causality, evidence_quality
+
+
+def _prepare_focused_causality_evidence(
+    config: config_module.RunConfig,
+    execution: StrategyExecutionResult,
+    event_emitter: RunnerStageEmitter,
+) -> tuple[LookaheadCheckResult, dict[str, object]]:
+    focused_config = FocusedCausalityConfig(
+        max_probes=config.output.focused_probe_limit,
+        timeout_seconds=config.output.focused_timeout_seconds,
+        profile_version=FOCUSED_CAUSALITY_PROFILE_VERSION,
+    )
+    key = _focused_causality_key(config, focused_config, execution)
+    with event_emitter.stage(
+        "causality_check",
+        strategy_id=config.strategy_id,
+        decision_count=len(execution.decisions),
+        mode="focused",
+    ) as causality_event:
+        focused = _read_focused_causality_cache(config, key)
+        if focused is None:
+            focused = check_focused_causality(
+                execution.generate_decisions,
+                rows=execution.normalized_rows,
+                params=execution.frozen_params,
+                baseline_decisions=execution.decisions,
+                strategy_id=config.strategy_id,
+                key=key,
+                config=focused_config,
+            )
+            _write_focused_causality_cache(config, focused)
+        else:
+            focused = replace(focused, cache_hit=True)
+        if not focused.scoring_allowed:
+            causality_event.fail(focused.rejection_reason or f"focused_causality_{focused.status}")
+
+    causality = _focused_result_as_lookahead(focused)
+    evidence_quality = artifacts.with_causality_verification(
+        execution.evidence_quality,
+        causality_check=config.output.causality_check,
+        deterministic_replay_verified=False,
+        emitted_replay_verified=False,
+        strict_no_emission_verified=False,
+    )
+    evidence_quality["focused_causality"] = _focused_causality_payload(focused)
+    return causality, evidence_quality
+
+
+def _focused_causality_key(
+    config: config_module.RunConfig,
+    focused_config: FocusedCausalityConfig,
+    execution: StrategyExecutionResult,
+) -> FocusedCausalityKey:
+    return FocusedCausalityKey(
+        strategy_source_sha256=file_sha256(config.strategy_path),
+        strategy_id=config.strategy_id,
+        data_kind=config.data.kind,
+        profile_version=focused_config.profile_version,
+        normalized_rows_sha256=execution.normalized_rows_sha256,
+        params_sha256=_params_sha256(execution.validated_params),
+        max_probes=focused_config.max_probes,
+        timeout_seconds=focused_config.timeout_seconds,
+    )
+
+
+def _focused_result_as_lookahead(focused: FocusedCausalityResult) -> LookaheadCheckResult:
+    if focused.scoring_allowed:
+        return LookaheadCheckResult(
+            passed=True,
+            mode="emitted",
+            deterministic_replay_verified=False,
+            emitted_replay_verified=False,
+            strict_suppression_verified=False,
+        )
+    return LookaheadCheckResult(
+        passed=False,
+        mode="emitted",
+        violations=(focused.rejection_reason or f"focused_causality_{focused.status}",),
+    )
+
+
+def _focused_causality_payload(focused: FocusedCausalityResult) -> dict[str, object]:
+    return {
+        "status": focused.status,
+        "scoring_allowed": focused.scoring_allowed,
+        "strategy_source_sha256": focused.key.strategy_source_sha256,
+        "strategy_id": focused.key.strategy_id,
+        "data_kind": focused.key.data_kind,
+        "profile_version": focused.profile_version,
+        "normalized_rows_sha256": focused.key.normalized_rows_sha256,
+        "params_sha256": focused.key.params_sha256,
+        "max_probes": focused.key.max_probes,
+        "timeout_seconds_key": focused.key.timeout_seconds,
+        "cache_hit": focused.cache_hit,
+        "timeout_seconds": focused.timeout_seconds,
+        "candidate_probe_count": focused.candidate_probe_count,
+        "selected_probe_count": focused.selected_probe_count,
+        "rejection_reason": focused.rejection_reason,
+    }
+
+
+def _focused_cache_path(config: config_module.RunConfig, key: FocusedCausalityKey) -> Path:
+    digest_payload = {
+        "strategy_source_sha256": key.strategy_source_sha256,
+        "strategy_id": key.strategy_id,
+        "data_kind": key.data_kind,
+        "profile_version": key.profile_version,
+        "normalized_rows_sha256": key.normalized_rows_sha256,
+        "params_sha256": key.params_sha256,
+        "max_probes": key.max_probes,
+        "timeout_seconds": key.timeout_seconds,
+    }
+    digest = hashlib.sha256(
+        json.dumps(digest_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    return config.output.results_dir / ".focused_causality_cache" / f"{digest}.json"
+
+
+def _params_sha256(params: Mapping[str, Any]) -> str:
+    payload = json_safe_value(dict(params))
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+
+
+def _read_focused_causality_cache(
+    config: config_module.RunConfig,
+    key: FocusedCausalityKey,
+) -> FocusedCausalityResult | None:
+    path = _focused_cache_path(config, key)
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if payload.get("profile_version") != key.profile_version:
+        return None
+    status = payload.get("status")
+    if status not in {"passed", "failed", "timeout"}:
+        return None
+    return FocusedCausalityResult(
+        status=status,
+        scoring_allowed=bool(payload.get("scoring_allowed")),
+        key=key,
+        profile_version=str(payload.get("profile_version")),
+        timeout_seconds=float(payload.get("timeout_seconds") or 0.0),
+        candidate_probe_count=int(payload.get("candidate_probe_count") or 0),
+        selected_probe_count=int(payload.get("selected_probe_count") or 0),
+        rejection_reason=_optional_str(payload.get("rejection_reason")),
+    )
+
+
+def _write_focused_causality_cache(
+    config: config_module.RunConfig,
+    focused: FocusedCausalityResult,
+) -> None:
+    path = _focused_cache_path(config, focused.key)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(_focused_causality_payload(focused), indent=2, sort_keys=True) + "\n"
+        )
+    except OSError:
+        return
 
 
 def _prepare_engine_request(
@@ -833,12 +1028,43 @@ def _run_evidence(
             skipped_probe_count=int(quality.get("skipped_probe_count") or 0),
             skipped_probe_reasons=_string_tuple(quality.get("skipped_probe_reasons")),
         ),
+        focused_causality=_run_focused_causality_evidence(quality.get("focused_causality")),
         warnings=_string_tuple(quality.get("evidence_quality_warnings")),
+    )
+
+
+def _run_focused_causality_evidence(value: object) -> RunFocusedCausalityEvidence:
+    if not isinstance(value, Mapping):
+        return RunFocusedCausalityEvidence()
+    return RunFocusedCausalityEvidence(
+        status=str(value.get("status") or "not_run"),
+        scoring_allowed=bool(value.get("scoring_allowed")),
+        strategy_source_sha256=_optional_str(value.get("strategy_source_sha256")),
+        strategy_id=_optional_str(value.get("strategy_id")),
+        data_kind=_optional_str(value.get("data_kind")),
+        profile_version=_optional_str(value.get("profile_version")),
+        normalized_rows_sha256=_optional_str(value.get("normalized_rows_sha256")),
+        params_sha256=_optional_str(value.get("params_sha256")),
+        max_probes=_optional_int(value.get("max_probes")),
+        timeout_seconds_key=_optional_float(value.get("timeout_seconds_key")),
+        cache_hit=bool(value.get("cache_hit")),
+        timeout_seconds=_optional_float(value.get("timeout_seconds")),
+        candidate_probe_count=_optional_int(value.get("candidate_probe_count")),
+        selected_probe_count=_optional_int(value.get("selected_probe_count")),
+        rejection_reason=_optional_str(value.get("rejection_reason")),
     )
 
 
 def _optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
 
 
 def _optional_dict(value: object) -> dict[str, object] | None:

@@ -13,7 +13,11 @@ import pytest
 import quant_strategies.core.execution as execution
 import quant_strategies.runner as runner_module
 import quant_strategies.runner.artifacts as artifacts
-from quant_strategies.causality import LookaheadCheckResult
+from quant_strategies.causality import (
+    FOCUSED_CAUSALITY_PROFILE_VERSION,
+    FocusedCausalityResult,
+    LookaheadCheckResult,
+)
 from quant_strategies.core import engine_runner
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
@@ -161,6 +165,9 @@ def write_config(
     diagnostic_sample_trades: int | None = None,
     causality_check: str | None = None,
     strict_probe_limit: object | None = None,
+    focused_probe_limit: object | None = None,
+    focused_timeout_seconds: object | None = None,
+    params_extra: str = "",
     data_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
@@ -178,6 +185,14 @@ def write_config(
     strict_probe_limit_line = (
         f"strict_probe_limit = {strict_probe_limit}\n" if strict_probe_limit is not None else ""
     )
+    focused_probe_limit_line = (
+        f"focused_probe_limit = {focused_probe_limit}\n" if focused_probe_limit is not None else ""
+    )
+    focused_timeout_seconds_line = (
+        f"focused_timeout_seconds = {focused_timeout_seconds}\n"
+        if focused_timeout_seconds is not None
+        else ""
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -193,6 +208,7 @@ end = "{end}"
 {data_extra}
 
 [params]
+{params_extra}
 
 [fill_model]
 price = "{fill_price}"
@@ -205,8 +221,8 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-	{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}
-	'''.lstrip()
+		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}
+		'''.lstrip()
     )
     return config_path
 
@@ -333,7 +349,7 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
     assert default_config.output.causality_check == "strict"
     assert default_config.output.strict_probe_limit is None
 
-    for mode in ("off", "emitted", "strict"):
+    for mode in ("off", "emitted", "strict", "focused"):
         config = config_module.load_config(
             write_config(tmp_path, relative_path=f"{mode}.toml", causality_check=mode),
             repo_root=tmp_path,
@@ -353,6 +369,20 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
     assert capped.output.causality_check == "strict"
     assert capped.output.strict_probe_limit == 10
 
+    focused = config_module.load_config(
+        write_config(
+            tmp_path,
+            relative_path="focused-custom.toml",
+            causality_check="focused",
+            focused_probe_limit=7,
+            focused_timeout_seconds=12.5,
+        ),
+        repo_root=tmp_path,
+    )
+    assert focused.output.causality_check == "focused"
+    assert focused.output.focused_probe_limit == 7
+    assert focused.output.focused_timeout_seconds == 12.5
+
 
 @pytest.mark.parametrize(
     ("kwargs", "message"),
@@ -361,6 +391,8 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
         ({"strict_probe_limit": -1}, "strict_probe_limit"),
         ({"strict_probe_limit": "true"}, "strict_probe_limit"),
         ({"strict_probe_limit": "1.0"}, "strict_probe_limit"),
+        ({"focused_probe_limit": 0}, "focused_probe_limit"),
+        ({"focused_timeout_seconds": "inf"}, "focused_timeout_seconds"),
     ],
 )
 def test_runner_config_rejects_invalid_causality_policy_fields(
@@ -594,6 +626,573 @@ def test_run_config_capped_strict_replay_records_incomplete_strict_evidence(
     ]
     assert data_manifest["strict_replay_capped"] is True
     assert data_manifest["strict_no_emission_verified"] is False
+
+
+def test_run_config_focused_policy_pass_allows_scoring_and_writes_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        focused_probe_limit=5,
+        focused_timeout_seconds=60.0,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert calls == 1
+    assert result.outcome.completed is True
+    assert result.evidence.focused_causality.status == "passed"
+    assert result.evidence.focused_causality.scoring_allowed is True
+    assert result.evidence.focused_causality.strategy_id == "demo"
+    assert result.evidence.focused_causality.data_kind == "bars"
+    assert result.evidence.focused_causality.normalized_rows_sha256 is not None
+    assert result.evidence.focused_causality.params_sha256 is not None
+    assert result.evidence.focused_causality.max_probes == 5
+    assert result.evidence.focused_causality.timeout_seconds_key == 60.0
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
+    assert summary["focused_causality"]["status"] == "passed"
+    assert summary["focused_causality"]["scoring_allowed"] is True
+    assert summary["focused_causality"]["selected_probe_count"] == 5
+    assert summary["focused_causality"]["max_probes"] == 5
+    assert summary["deterministic_replay_verified"] is False
+    assert summary["emitted_replay_verified"] is False
+    assert summary["strict_no_emission_verified"] is False
+    assert data_manifest["focused_causality"]["status"] == "passed"
+    assert diagnostics["evidence_quality"]["focused_causality"]["status"] == "passed"
+
+
+def test_run_config_focused_policy_real_replay_keeps_low_level_flags_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    first = run_config(config_path, repo_root=tmp_path)
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    for result in (first, second):
+        assert result.evidence.focused_causality.status == "passed"
+        assert result.evidence.causality.deterministic_replay_verified is False
+        assert result.evidence.causality.emitted_replay_verified is False
+        assert result.evidence.causality.strict_no_emission_verified is False
+        summary = read_summary(result.result_dir)
+        assert summary["focused_causality"]["status"] == "passed"
+        assert summary["deterministic_replay_verified"] is False
+        assert summary["emitted_replay_verified"] is False
+        assert summary["strict_no_emission_verified"] is False
+    assert second.evidence.focused_causality.cache_hit is True
+
+
+def test_run_config_focused_policy_failure_rejects_before_engine_scoring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        return FocusedCausalityResult(
+            status="failed",
+            scoring_allowed=False,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+            rejection_reason="hidden_lookahead_detected",
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+    monkeypatch.setattr(
+        engine_runner,
+        "build_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("focused failure should stop before engine scoring")
+        ),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "causality"
+    assert result.evidence.focused_causality.status == "failed"
+    assert result.evidence.focused_causality.scoring_allowed is False
+    assert result.evidence.focused_causality.rejection_reason == "hidden_lookahead_detected"
+    summary = read_summary(result.result_dir)
+    assert summary["focused_causality"]["status"] == "failed"
+    assert summary["focused_causality"]["scoring_allowed"] is False
+    assert summary["focused_causality"]["rejection_reason"] == "hidden_lookahead_detected"
+
+
+def test_run_config_focused_policy_timeout_rejects_before_engine_scoring(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        return FocusedCausalityResult(
+            status="timeout",
+            scoring_allowed=False,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+            rejection_reason="focused_causality_timeout",
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+    monkeypatch.setattr(
+        engine_runner,
+        "build_request",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("focused timeout should stop before engine scoring")
+        ),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "causality"
+    assert result.evidence.focused_causality.status == "timeout"
+    assert result.evidence.focused_causality.rejection_reason == "focused_causality_timeout"
+    summary = read_summary(result.result_dir)
+    assert summary["focused_causality"]["status"] == "timeout"
+    assert summary["focused_causality"]["scoring_allowed"] is False
+
+
+def test_run_config_focused_policy_pass_cache_skips_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 1
+    assert second.evidence.focused_causality.cache_hit is True
+    second_summary = read_summary(second.result_dir)
+    assert second_summary["focused_causality"]["cache_hit"] is True
+    assert (
+        second_summary["focused_causality"]["profile_version"] == FOCUSED_CAUSALITY_PROFILE_VERSION
+    )
+
+
+def test_run_config_focused_policy_failed_cache_rejects_without_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="failed",
+            scoring_allowed=False,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+            rejection_reason="hidden_lookahead_detected",
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is False
+    assert second.outcome.completed is False
+    assert calls == 1
+    assert second.evidence.focused_causality.cache_hit is True
+    second_summary = read_summary(second.result_dir)
+    assert second_summary["focused_causality"]["cache_hit"] is True
+    assert second_summary["focused_causality"]["status"] == "failed"
+
+
+def test_run_config_focused_policy_profile_version_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    monkeypatch.setattr(runner_module, "FOCUSED_CAUSALITY_PROFILE_VERSION", "focused-test/v2")
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
+    second_summary = read_summary(second.result_dir)
+    assert second_summary["focused_causality"]["profile_version"] == "focused-test/v2"
+
+
+def test_run_config_focused_policy_source_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.write_text(strategy.read_text() + "\n# source hash changed\n")
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
+
+
+def test_run_config_focused_policy_probe_limit_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    first_config = write_config(
+        tmp_path,
+        relative_path="focused-small.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        focused_probe_limit=1,
+    )
+    second_config = write_config(
+        tmp_path,
+        relative_path="focused-large.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        focused_probe_limit=8,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=config.max_probes,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(first_config, repo_root=tmp_path)
+    second = run_config(second_config, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
+    second_summary = read_summary(second.result_dir)
+    assert second_summary["focused_causality"]["max_probes"] == 8
+
+
+def test_run_config_focused_policy_row_hash_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="focused",
+    )
+    loaded_batches = [
+        rows(100.0, 101.0, 102.0, 104.0),
+        rows(100.0, 101.0, 103.0, 104.0),
+    ]
+
+    def load_data(config, **_kwargs):
+        return LoadedData(rows=loaded_batches.pop(0))
+
+    monkeypatch.setattr(execution, "load_data", load_data)
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(config_path, repo_root=tmp_path)
+    second = run_config(config_path, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
+
+
+def test_run_config_focused_policy_params_hash_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    first_config = write_config(
+        tmp_path,
+        relative_path="focused-param-a.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        params_extra="threshold = 1\n",
+    )
+    second_config = write_config(
+        tmp_path,
+        relative_path="focused-param-b.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        params_extra="threshold = 2\n",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(first_config, repo_root=tmp_path)
+    second = run_config(second_config, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
+
+
+def test_run_config_focused_policy_timeout_budget_change_invalidates_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    first_config = write_config(
+        tmp_path,
+        relative_path="focused-timeout-a.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        focused_timeout_seconds=30.0,
+    )
+    second_config = write_config(
+        tmp_path,
+        relative_path="focused-timeout-b.toml",
+        artifact_profile="diagnostic",
+        causality_check="focused",
+        focused_timeout_seconds=60.0,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    calls = 0
+
+    def fake_check_focused_causality(*args, key, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=9,
+            selected_probe_count=5,
+        )
+
+    monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
+
+    first = run_config(first_config, repo_root=tmp_path)
+    second = run_config(second_config, repo_root=tmp_path)
+
+    assert first.outcome.completed is True
+    assert second.outcome.completed is True
+    assert calls == 2
+    assert second.evidence.focused_causality.cache_hit is False
 
 
 def test_run_config_strategy_and_replay_do_not_see_execution_buffer_rows(

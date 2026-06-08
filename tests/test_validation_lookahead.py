@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
 import quant_strategies.causality as causality
-from quant_strategies.causality import ReplayBoundary, check_hidden_lookahead
+from quant_strategies.causality import (
+    FocusedCausalityConfig,
+    FocusedCausalityKey,
+    ReplayBoundary,
+    check_focused_causality,
+    check_hidden_lookahead,
+    focused_replay_plan,
+)
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     ExitPolicy,
@@ -122,6 +130,198 @@ def test_hidden_lookahead_check_detects_future_sensitive_strategy():
 
     assert result.passed is False
     assert result.violations == ("hidden_lookahead_detected",)
+
+
+def focused_key() -> FocusedCausalityKey:
+    return FocusedCausalityKey(
+        strategy_source_sha256="source-a",
+        strategy_id="demo",
+        data_kind="bars",
+        profile_version="focused-test/v1",
+    )
+
+
+def test_focused_replay_plan_is_deterministic_capped_and_mixed():
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    source_rows = [
+        {
+            "symbol": "BTC-PERP" if index % 2 == 0 else "ETH-PERP",
+            "timestamp": start.replace(minute=index),
+            "available_at": start.replace(minute=index),
+            "close": 100.0 + index,
+        }
+        for index in range(8)
+    ]
+    baseline = [
+        decision().model_copy(
+            update={
+                "decision_id": "demo:first",
+                "as_of_time": source_rows[2]["timestamp"],
+                "decision_time": source_rows[3]["timestamp"],
+            }
+        ),
+        decision().model_copy(
+            update={
+                "decision_id": "demo:last",
+                "as_of_time": source_rows[6]["timestamp"],
+                "decision_time": source_rows[7]["timestamp"],
+            }
+        ),
+    ]
+    config = FocusedCausalityConfig(max_probes=5, timeout_seconds=60.0)
+
+    first = focused_replay_plan(source_rows, baseline, key=focused_key(), config=config)
+    second = focused_replay_plan(source_rows, baseline, key=focused_key(), config=config)
+
+    assert first == second
+    assert first.selected_probe_count == 5
+    assert first.candidate_probe_count > first.selected_probe_count
+    assert any(boundary.expected_decision_ids for boundary in first.boundaries)
+    assert any(not boundary.expected_decision_ids for boundary in first.boundaries)
+
+
+def test_focused_replay_plan_does_not_materialize_full_strict_grid(monkeypatch):
+    source_rows = [
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, index, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, index, tzinfo=UTC),
+            "close": 100.0 + index,
+        }
+        for index in range(20)
+    ]
+
+    monkeypatch.setattr(
+        causality,
+        "strict_replay_boundaries",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("focused planning should not build the full strict grid")
+        ),
+    )
+
+    plan = focused_replay_plan(
+        source_rows,
+        [],
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=5, timeout_seconds=60.0),
+    )
+
+    assert plan.candidate_probe_count == 20
+    assert plan.selected_probe_count == 5
+
+
+def test_focused_causality_passes_causal_strategy():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+    baseline = as_of_strategy(source_rows, {})
+
+    result = check_focused_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=60.0),
+    )
+
+    assert result.status == "passed"
+    assert result.scoring_allowed is True
+    assert result.rejection_reason is None
+    assert result.selected_probe_count > 0
+
+
+def test_focused_causality_rejects_future_sensitive_strategy():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+    baseline = future_sensitive_strategy(source_rows, {})
+
+    result = check_focused_causality(
+        future_sensitive_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=60.0),
+    )
+
+    assert result.status == "failed"
+    assert result.scoring_allowed is False
+    assert result.rejection_reason == "hidden_lookahead_detected"
+
+
+def test_focused_causality_timeout_rejects_variant():
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+
+    result = check_focused_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=0.0),
+    )
+
+    assert result.status == "timeout"
+    assert result.scoring_allowed is False
+    assert result.rejection_reason == "focused_causality_timeout"
+
+
+def test_focused_causality_interrupts_slow_replay():
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+
+    def slow_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        time.sleep(1.0)
+        return []
+
+    started = time.perf_counter()
+    result = check_focused_causality(
+        slow_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=[],
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=0.01),
+    )
+    elapsed = time.perf_counter() - started
+
+    assert result.status == "timeout"
+    assert result.scoring_allowed is False
+    assert result.rejection_reason == "focused_causality_timeout"
+    assert elapsed < 0.5
+
+
+def test_focused_causality_rejects_skipped_sampled_probe():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+
+    def prefix_fragile_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        if all(item.get("timestamp") != FUTURE for item in rows):
+            raise ValueError("needs warmup")
+        return []
+
+    result = check_focused_causality(
+        prefix_fragile_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=prefix_fragile_strategy(source_rows, {}),
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=60.0),
+    )
+
+    assert result.status == "failed"
+    assert result.scoring_allowed is False
+    assert result.rejection_reason == "focused_probe_skipped: ValueError: needs warmup"
 
 
 def test_hidden_lookahead_detects_payload_change_with_stable_decision_id():

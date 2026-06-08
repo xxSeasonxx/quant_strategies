@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import hashlib
+import heapq
+import json
+import signal
+import threading
+import time
 from bisect import bisect_right
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
@@ -12,6 +18,8 @@ from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.decisions import StrategyDecision, validate_decision_output
 
 ReplayMode = Literal["emitted", "strict"]
+FocusedCausalityStatus = Literal["passed", "failed", "timeout"]
+FOCUSED_CAUSALITY_PROFILE_VERSION = "focused-causality/v1"
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,46 @@ class ReplayBoundary:
 
 
 @dataclass(frozen=True)
+class FocusedCausalityKey:
+    strategy_source_sha256: str
+    strategy_id: str
+    data_kind: str
+    profile_version: str = FOCUSED_CAUSALITY_PROFILE_VERSION
+    normalized_rows_sha256: str | None = None
+    params_sha256: str | None = None
+    max_probes: int | None = None
+    timeout_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class FocusedCausalityConfig:
+    max_probes: int = 64
+    timeout_seconds: float = 60.0
+    profile_version: str = FOCUSED_CAUSALITY_PROFILE_VERSION
+
+
+@dataclass(frozen=True)
+class FocusedReplayPlan:
+    boundaries: tuple[ReplayBoundary, ...]
+    candidate_probe_count: int
+    selected_probe_count: int
+
+
+@dataclass(frozen=True)
+class FocusedCausalityResult:
+    status: FocusedCausalityStatus
+    scoring_allowed: bool
+    key: FocusedCausalityKey
+    profile_version: str
+    timeout_seconds: float
+    candidate_probe_count: int = 0
+    selected_probe_count: int = 0
+    lookahead: LookaheadCheckResult | None = None
+    rejection_reason: str | None = None
+    cache_hit: bool = False
+
+
+@dataclass(frozen=True)
 class _VisibleRow:
     row: Mapping[str, Any]
     timestamp: datetime | None
@@ -65,10 +113,114 @@ class _VisibleRowIndex:
     timestamps: tuple[datetime, ...]
 
 
+class _FocusedCausalityDeadline(BaseException):
+    pass
+
+
 DecisionGenerator = Callable[
     [Sequence[Mapping[str, Any]], Mapping[str, Any]],
     object,
 ]
+
+
+def focused_replay_plan(
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+    baseline_decisions: Sequence[StrategyDecision],
+    *,
+    key: FocusedCausalityKey,
+    config: FocusedCausalityConfig,
+) -> FocusedReplayPlan:
+    row_index = _visible_row_index(rows)
+    candidates, candidate_count = _focused_candidate_boundaries(
+        row_index,
+        baseline_decisions,
+        key=key,
+        config=config,
+    )
+    if config.max_probes <= 0 or not candidates:
+        return FocusedReplayPlan(
+            boundaries=(),
+            candidate_probe_count=candidate_count,
+            selected_probe_count=0,
+        )
+    return FocusedReplayPlan(
+        boundaries=candidates,
+        candidate_probe_count=candidate_count,
+        selected_probe_count=len(candidates),
+    )
+
+
+def check_focused_causality(
+    generate_decisions: DecisionGenerator,
+    *,
+    rows: NormalizedRows | Sequence[Mapping[str, Any]],
+    params: Mapping[str, Any],
+    baseline_decisions: list[StrategyDecision],
+    strategy_id: str,
+    key: FocusedCausalityKey,
+    config: FocusedCausalityConfig | None = None,
+) -> FocusedCausalityResult:
+    if config is None:
+        config = FocusedCausalityConfig()
+    if config.timeout_seconds <= 0:
+        return _focused_timeout_result(key=key, config=config)
+
+    started = time.perf_counter()
+    plan = focused_replay_plan(rows, baseline_decisions, key=key, config=config)
+    if _timed_out(started, config.timeout_seconds):
+        return _focused_timeout_result(key=key, config=config, plan=plan)
+    if not _focused_timeout_supported(config.timeout_seconds):
+        return _focused_timeout_result(key=key, config=config, plan=plan)
+
+    try:
+        with _focused_timeout(config.timeout_seconds):
+            lookahead = check_hidden_lookahead(
+                generate_decisions,
+                rows=rows,
+                params=params,
+                baseline_decisions=baseline_decisions,
+                strategy_id=strategy_id,
+                mode="strict",
+                boundaries=plan.boundaries,
+            )
+    except _FocusedCausalityDeadline:
+        return _focused_timeout_result(key=key, config=config, plan=plan)
+    if _timed_out(started, config.timeout_seconds):
+        return _focused_timeout_result(key=key, config=config, plan=plan, lookahead=lookahead)
+    if lookahead.passed and lookahead.skipped_probe_count:
+        return FocusedCausalityResult(
+            status="failed",
+            scoring_allowed=False,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=plan.candidate_probe_count,
+            selected_probe_count=plan.selected_probe_count,
+            lookahead=lookahead,
+            rejection_reason=_focused_skipped_probe_reason(lookahead),
+        )
+    if lookahead.passed:
+        return FocusedCausalityResult(
+            status="passed",
+            scoring_allowed=True,
+            key=key,
+            profile_version=config.profile_version,
+            timeout_seconds=config.timeout_seconds,
+            candidate_probe_count=plan.candidate_probe_count,
+            selected_probe_count=plan.selected_probe_count,
+            lookahead=lookahead,
+        )
+    return FocusedCausalityResult(
+        status="failed",
+        scoring_allowed=False,
+        key=key,
+        profile_version=config.profile_version,
+        timeout_seconds=config.timeout_seconds,
+        candidate_probe_count=plan.candidate_probe_count,
+        selected_probe_count=plan.selected_probe_count,
+        lookahead=lookahead,
+        rejection_reason=_focused_rejection_reason(lookahead),
+    )
 
 
 def check_hidden_lookahead(
@@ -127,7 +279,6 @@ def check_hidden_lookahead(
         )
 
     row_index = _visible_row_index(rows)
-    visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]] = {}
     replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
     replay_decisions_cache: dict[tuple[datetime, datetime], tuple[StrategyDecision, ...]] = {}
     replay_payloads_cache: dict[tuple[datetime, datetime], tuple[dict[str, Any], ...]] = {}
@@ -136,11 +287,7 @@ def check_hidden_lookahead(
         cache_key = (boundary.as_of_time, boundary.decision_time)
         replay_decisions = replay_decisions_cache.get(cache_key)
         if replay_decisions is None:
-            replay_rows = _visible_rows_for_boundary(
-                row_index,
-                boundary,
-                visible_rows_cache=visible_rows_cache,
-            )
+            replay_rows = _visible_rows_for_boundary(row_index, boundary)
             try:
                 replay_output = generate_decisions(replay_rows, replay_params)
             except SystemExit as exc:
@@ -339,6 +486,318 @@ def _exception_reason(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
+def _focused_timeout_result(
+    *,
+    key: FocusedCausalityKey,
+    config: FocusedCausalityConfig,
+    plan: FocusedReplayPlan | None = None,
+    lookahead: LookaheadCheckResult | None = None,
+) -> FocusedCausalityResult:
+    return FocusedCausalityResult(
+        status="timeout",
+        scoring_allowed=False,
+        key=key,
+        profile_version=config.profile_version,
+        timeout_seconds=config.timeout_seconds,
+        candidate_probe_count=0 if plan is None else plan.candidate_probe_count,
+        selected_probe_count=0 if plan is None else plan.selected_probe_count,
+        lookahead=lookahead,
+        rejection_reason="focused_causality_timeout",
+    )
+
+
+def _focused_rejection_reason(lookahead: LookaheadCheckResult) -> str:
+    if lookahead.violations:
+        return lookahead.violations[0]
+    return "focused_causality_failed"
+
+
+def _focused_skipped_probe_reason(lookahead: LookaheadCheckResult) -> str:
+    if lookahead.skipped_probe_reasons:
+        return f"focused_probe_skipped: {lookahead.skipped_probe_reasons[0]}"
+    return "focused_probe_skipped"
+
+
+def _timed_out(started: float, timeout_seconds: float) -> bool:
+    return time.perf_counter() - started > timeout_seconds
+
+
+class _focused_timeout:
+    def __init__(self, timeout_seconds: float) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._enabled = _focused_timeout_supported(timeout_seconds)
+        self._previous_handler: object | None = None
+        self._previous_timer: tuple[float, float] | None = None
+
+    def __enter__(self) -> None:
+        if not self._enabled:
+            return
+        self._previous_handler = signal.getsignal(signal.SIGALRM)
+        self._previous_timer = signal.setitimer(signal.ITIMER_REAL, self._timeout_seconds)
+        signal.signal(signal.SIGALRM, self._raise_deadline)
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        if not self._enabled:
+            return False
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        if self._previous_handler is not None:
+            signal.signal(signal.SIGALRM, self._previous_handler)
+        if self._previous_timer is not None and self._previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, *self._previous_timer)
+        return False
+
+    def _raise_deadline(self, signum: int, frame: object) -> None:
+        raise _FocusedCausalityDeadline()
+
+
+def _focused_timeout_supported(timeout_seconds: float) -> bool:
+    return (
+        hasattr(signal, "setitimer")
+        and hasattr(signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+        and timeout_seconds > 0
+    )
+
+
+def _dedupe_boundaries(boundaries: Sequence[ReplayBoundary]) -> tuple[ReplayBoundary, ...]:
+    unique: dict[tuple[object, ...], ReplayBoundary] = {}
+    for boundary in boundaries:
+        unique.setdefault(_boundary_identity(boundary), boundary)
+    return tuple(unique.values())
+
+
+def _focused_candidate_boundaries(
+    row_index: _VisibleRowIndex,
+    baseline_decisions: Sequence[StrategyDecision],
+    *,
+    key: FocusedCausalityKey,
+    config: FocusedCausalityConfig,
+) -> tuple[tuple[ReplayBoundary, ...], int]:
+    emitted = _emitted_boundaries(baseline_decisions)
+    row_boundaries, row_grid_count = _focused_row_grid_boundaries(
+        row_index,
+        baseline_decisions,
+        key=key,
+        max_items=config.max_probes,
+    )
+    candidates = _dedupe_boundaries((*emitted, *row_boundaries))
+    selected = _select_focused_boundaries(candidates, key=key, max_probes=config.max_probes)
+    return selected, row_grid_count + len(emitted)
+
+
+def _focused_row_grid_boundaries(
+    row_index: _VisibleRowIndex,
+    baseline_decisions: Sequence[StrategyDecision],
+    *,
+    key: FocusedCausalityKey,
+    max_items: int,
+) -> tuple[tuple[ReplayBoundary, ...], int]:
+    total = _row_grid_boundary_count(row_index)
+    if total == 0 or max_items <= 0:
+        return (), total
+    anchors: list[tuple[datetime, datetime, str]] = []
+    anchor_positions = {0, total // 2, total - 1}
+    for index, item in enumerate(_row_grid_boundary_keys(row_index)):
+        if index in anchor_positions and item not in anchors:
+            anchors.append(item)
+    remaining = max_items - len(anchors)
+    if remaining > 0:
+        anchor_set = set(anchors)
+        anchors.extend(
+            heapq.nsmallest(
+                remaining,
+                (item for item in _row_grid_boundary_keys(row_index) if item not in anchor_set),
+                key=lambda item: _row_grid_key_score(item, key),
+            )
+        )
+    return (
+        tuple(
+            ReplayBoundary(
+                as_of_time=as_of_time,
+                decision_time=decision_time,
+                allowed_decision_ids=_allowed_decision_ids(
+                    baseline_decisions,
+                    as_of_time=as_of_time,
+                    symbols=frozenset({symbol}),
+                ),
+                symbols=frozenset({symbol}),
+            )
+            for as_of_time, decision_time, symbol in anchors[:max_items]
+        ),
+        total,
+    )
+
+
+def _row_grid_boundary_count(row_index: _VisibleRowIndex) -> int:
+    return sum(1 for _ in _row_grid_boundary_keys(row_index))
+
+
+def _row_grid_boundary_keys(
+    row_index: _VisibleRowIndex,
+) -> Iterator[tuple[datetime, datetime, str]]:
+    for symbol, timestamps in sorted(_timestamps_by_symbol(row_index).items()):
+        ordered = sorted(dict.fromkeys(timestamps))
+        for index, timestamp in enumerate(ordered):
+            decision_time = ordered[index + 1] if index + 1 < len(ordered) else timestamp
+            yield (timestamp, decision_time, symbol)
+
+
+def _timestamps_by_symbol(row_index: _VisibleRowIndex) -> dict[str, list[datetime]]:
+    timestamps_by_symbol: dict[str, list[datetime]] = {}
+    for item in row_index.rows:
+        symbol = item.row.get("symbol")
+        if isinstance(symbol, str) and item.timestamp is not None:
+            timestamps_by_symbol.setdefault(symbol, []).append(item.timestamp)
+    return timestamps_by_symbol
+
+
+def _allowed_decision_ids(
+    decisions: Sequence[StrategyDecision],
+    *,
+    as_of_time: datetime,
+    symbols: frozenset[str],
+) -> frozenset[str | None]:
+    return frozenset(
+        decision.decision_id
+        for decision in decisions
+        if decision.as_of_time == as_of_time
+        and (not symbols or decision.instrument.symbol in symbols)
+    )
+
+
+def _row_grid_key_score(
+    item: tuple[datetime, datetime, str],
+    key: FocusedCausalityKey,
+) -> str:
+    as_of_time, decision_time, symbol = item
+    payload = {
+        "key": {
+            "strategy_source_sha256": key.strategy_source_sha256,
+            "strategy_id": key.strategy_id,
+            "data_kind": key.data_kind,
+            "profile_version": key.profile_version,
+            "normalized_rows_sha256": key.normalized_rows_sha256,
+            "params_sha256": key.params_sha256,
+            "max_probes": key.max_probes,
+            "timeout_seconds": key.timeout_seconds,
+        },
+        "row_grid": {
+            "as_of_time": as_of_time.isoformat(),
+            "decision_time": decision_time.isoformat(),
+            "symbol": symbol,
+        },
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _select_focused_boundaries(
+    boundaries: Sequence[ReplayBoundary],
+    *,
+    key: FocusedCausalityKey,
+    max_probes: int,
+) -> tuple[ReplayBoundary, ...]:
+    if len(boundaries) <= max_probes:
+        return tuple(boundaries)
+
+    selected: list[ReplayBoundary] = []
+    emitted = [boundary for boundary in boundaries if boundary.expected_decision_ids]
+    no_signal = [boundary for boundary in boundaries if not boundary.expected_decision_ids]
+    _append_ranked(selected, emitted, key=key, limit=max(1, max_probes // 2))
+    remaining = max_probes - len(selected)
+    if remaining > 0:
+        _append_anchor_boundaries(selected, no_signal, limit=remaining)
+    remaining = max_probes - len(selected)
+    if remaining > 0:
+        pool = [boundary for boundary in boundaries if boundary not in selected]
+        _append_ranked(selected, pool, key=key, limit=remaining)
+    return tuple(sorted(selected[:max_probes], key=_boundary_sort_key))
+
+
+def _append_anchor_boundaries(
+    selected: list[ReplayBoundary],
+    boundaries: Sequence[ReplayBoundary],
+    *,
+    limit: int,
+) -> None:
+    if limit <= 0 or not boundaries:
+        return
+    appended = 0
+    positions = (0, len(boundaries) // 2, len(boundaries) - 1)
+    for position in positions:
+        if appended >= limit:
+            return
+        boundary = boundaries[position]
+        if boundary not in selected:
+            selected.append(boundary)
+            appended += 1
+
+
+def _append_ranked(
+    selected: list[ReplayBoundary],
+    boundaries: Sequence[ReplayBoundary],
+    *,
+    key: FocusedCausalityKey,
+    limit: int,
+) -> None:
+    if limit <= 0:
+        return
+    appended = 0
+    for boundary in heapq.nsmallest(limit, boundaries, key=lambda item: _boundary_score(item, key)):
+        if appended >= limit:
+            return
+        if boundary not in selected:
+            selected.append(boundary)
+            appended += 1
+
+
+def _boundary_score(boundary: ReplayBoundary, key: FocusedCausalityKey) -> str:
+    payload = {
+        "key": {
+            "strategy_source_sha256": key.strategy_source_sha256,
+            "strategy_id": key.strategy_id,
+            "data_kind": key.data_kind,
+            "profile_version": key.profile_version,
+            "normalized_rows_sha256": key.normalized_rows_sha256,
+            "params_sha256": key.params_sha256,
+            "max_probes": key.max_probes,
+            "timeout_seconds": key.timeout_seconds,
+        },
+        "boundary": _boundary_jsonable(boundary),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _boundary_identity(boundary: ReplayBoundary) -> tuple[object, ...]:
+    return (
+        boundary.as_of_time,
+        boundary.decision_time,
+        tuple(sorted(boundary.expected_decision_ids, key=str)),
+        tuple(sorted(boundary.allowed_decision_ids, key=str)),
+        tuple(sorted(boundary.symbols)),
+    )
+
+
+def _boundary_sort_key(boundary: ReplayBoundary) -> tuple[object, ...]:
+    return (
+        boundary.as_of_time,
+        boundary.decision_time,
+        tuple(sorted(boundary.symbols)),
+        tuple(sorted(boundary.expected_decision_ids, key=str)),
+    )
+
+
+def _boundary_jsonable(boundary: ReplayBoundary) -> dict[str, object]:
+    return {
+        "as_of_time": boundary.as_of_time.isoformat(),
+        "decision_time": boundary.decision_time.isoformat(),
+        "expected_decision_ids": sorted(boundary.expected_decision_ids, key=str),
+        "allowed_decision_ids": sorted(boundary.allowed_decision_ids, key=str),
+        "symbols": sorted(boundary.symbols),
+    }
+
+
 def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBoundary, ...]:
     items: dict[tuple[datetime, datetime], set[str | None]] = {}
     symbols: dict[tuple[datetime, datetime], set[str]] = {}
@@ -351,6 +810,7 @@ def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBo
             as_of_time=as_of_time,
             decision_time=decision_time,
             expected_decision_ids=frozenset(items[(as_of_time, decision_time)]),
+            allowed_decision_ids=frozenset(items[(as_of_time, decision_time)]),
             symbols=frozenset(symbols[(as_of_time, decision_time)]),
         )
         for as_of_time, decision_time in sorted(items)
@@ -473,23 +933,15 @@ def _visible_row(row: Mapping[str, Any]) -> _VisibleRow:
 def _visible_rows_for_boundary(
     row_index: _VisibleRowIndex,
     boundary: ReplayBoundary,
-    *,
-    visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]],
 ) -> tuple[Mapping[str, Any], ...]:
-    cache_key = (boundary.as_of_time, boundary.decision_time)
-    cached = visible_rows_cache.get(cache_key)
-    if cached is not None:
-        return cached
-
     prefix_end = bisect_right(row_index.timestamps, boundary.as_of_time)
     replay_rows = frozen_rows(
         [
-            item.row
-            for item in row_index.rows[:prefix_end]
-            if _row_available_for_boundary(item, boundary)
+            row_index.rows[index].row
+            for index in range(prefix_end)
+            if _row_available_for_boundary(row_index.rows[index], boundary)
         ]
     )
-    visible_rows_cache[cache_key] = replay_rows
     return replay_rows
 
 

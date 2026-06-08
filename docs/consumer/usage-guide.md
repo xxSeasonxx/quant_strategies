@@ -239,17 +239,17 @@ if not result.succeeded:
 
 print(result.result_dir)
 print(result.outcome.assessment_status)      # diagnostic status, not a verdict
-print(result.evidence.causality.verified)    # causal replay passed
-print(result.evidence.causality.causality_check)
+print(result.evidence.focused_causality.status)
+print(result.evidence.focused_causality.scoring_allowed)
 print(result.evidence.row_contract)          # row-contract summary
 print(result.economics.trade_count)          # after-cost trade ledger summary
 ```
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
-with `results_dir`, `quick_checks`, `artifact_profile`, optional
-`causality_check`, optional `strict_probe_limit`, and (for the diagnostic
-profile) `diagnostic_sample_trades`. See
+with `results_dir`, `quick_checks`, `artifact_profile`, optional focused
+`causality_check`, and (for the diagnostic profile) `diagnostic_sample_trades`.
+Use `causality_check = "focused"` for Train/autoresearch iteration. See
 [`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
 
 For Train iteration, `[data].start` / `[data].end` are the strategy-visible
@@ -269,15 +269,13 @@ Programmatic consumers can read quick-run after-cost economics from
 ledger plus the same summary scalars/slices written to artifacts, even under
 `artifact_profile = "summary"`; no `summary.json` scraping is required.
 
-`causality_check` defaults to `strict`. Large Train iteration loops may set
-`causality_check = "emitted"` only after the candidate passes deterministic and
-emitted-decision replay; artifacts will still mark strict no-emission replay as
-unverified. Use `strict` for survivor or dedicated audit runs, optionally with
-`strict_probe_limit` when a large row grid needs capped evidence. Use `off` only
-for profiling/debugging; it writes causality-unverified evidence. Downstream
-tools such as `quant_autoresearch` should materialize emitted mode for Train
-iteration and either rerun strict mode or hand off an explicit strict-unverified
-survivor note for Season review.
+The focused causality policy is the Train/autoresearch hygiene gate. It runs a bounded,
+deterministic source-hash certification and rejects a source variant on focused
+failure or timeout before scoring. Repeated runs for the same source hash can use
+the focused cache instead of replaying. Survivor and audit evidence belongs in
+validation/evaluation, which keep the stronger strict preflight gates. Low-level
+replay settings are advanced debug/audit controls documented in the reference;
+the strategy-writing LLM should not choose them during research iteration.
 
 **Reading it:** success is `result.succeeded`. On failure, `result.outcome
 .failure_stage` names the stage that failed and `summary.json` sets

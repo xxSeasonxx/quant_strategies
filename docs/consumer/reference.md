@@ -163,7 +163,7 @@ strategy_path, strategy_id            # top-level
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
-         causality_check, strict_probe_limit
+         causality_check, focused_probe_limit, focused_timeout_seconds, strict_probe_limit
 ```
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
@@ -171,11 +171,15 @@ engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary
 (compact). Only `full` is replayable from artifacts. Relative paths are
 repo-root-relative (or pass `--repo-root`).
 
-`causality_check` defaults to `"strict"` and may be set to `"emitted"` for
-Train iteration loops that need deterministic + emitted-decision replay without
-full row-grid no-emission replay, or `"off"` for explicit profiling/debugging
-only. `strict_probe_limit` optionally caps strict no-emission probes; capped
-strict runs are marked incomplete and do not claim full strict replay evidence.
+`causality_check` defaults to `"strict"` for backward compatibility. New
+Train/autoresearch iteration should use `"focused"`: it runs or reuses bounded
+source-hash focused causality evidence, rejects focused failures/timeouts before
+scoring, and does not require full-window emitted or strict replay. Advanced
+callers may still set `"emitted"` for deterministic + emitted-decision replay
+without full row-grid no-emission replay, `"strict"` for audit replay, or `"off"`
+for explicit profiling/debugging only. `strict_probe_limit` optionally caps
+strict no-emission probes; capped strict runs are marked incomplete and do not
+claim full strict replay evidence.
 
 Quick runs can set optional `[data].load_start` / `[data].load_end` when the
 engine needs extra rows outside the decision window for fills or exits. Strategy
@@ -244,14 +248,22 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 
 **`RunEvidence`**: `replayable_from_artifacts` (bool|None), `data_availability_status`
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
-`causality` (`RunCausalityEvidence`), `warnings` (tuple[str, …]).
-**`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict`),
+`causality` (`RunCausalityEvidence`), `focused_causality`
+(`RunFocusedCausalityEvidence`), `warnings` (tuple[str, …]).
+**`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict` / `focused`),
 `verified`, `deterministic_replay_verified`, `emitted_replay_verified`,
 `strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
 `strict_probe_limit`, `skipped_probe_count`, and `skipped_probe_reasons`.
 `verified` is true only when complete availability, emitted replay, and strict
 no-emission replay all passed. Emitted-only, capped-strict, and off-policy runs
 are usable only as explicitly labeled development evidence.
+**`RunFocusedCausalityEvidence`**: `status`, `scoring_allowed`,
+`strategy_source_sha256`, `strategy_id`, `data_kind`, `profile_version`,
+`normalized_rows_sha256`, `params_sha256`, `max_probes`,
+`timeout_seconds_key`, `cache_hit`, `timeout_seconds`,
+`candidate_probe_count`, `selected_probe_count`, and `rejection_reason`.
+For Train/autoresearch quick runs, use this focused evidence to decide whether
+a source variant was eligible for scoring.
 
 #### `RunEconomics` / `RunTrade`
 

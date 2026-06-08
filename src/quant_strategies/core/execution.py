@@ -121,7 +121,9 @@ def execute_strategy_run(
         normalized_rows = NormalizedRows.from_rows(config, loaded.rows)
     execution_rows = normalized_rows.projection_rows()
     strategy_rows = _strategy_visible_rows(config, execution_rows)
-    if (config.data.load_start is not None or config.data.load_end is not None) and not strategy_rows:
+    if (
+        config.data.load_start is not None or config.data.load_end is not None
+    ) and not strategy_rows:
         raise StrategyExecutionError(
             "data_load",
             "decision window returned no rows",
