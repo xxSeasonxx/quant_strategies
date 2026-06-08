@@ -111,8 +111,15 @@ def validation_evidence_semantics() -> dict[str, object]:
 def causality_evidence_fields(
     data_availability_status: object,
     *,
+    causality_check: str = "strict",
+    deterministic_replay_verified: bool | None = None,
     emitted_replay_verified: bool,
     strict_no_emission_verified: bool,
+    strict_replay_capped: bool = False,
+    strict_probe_count: int | None = None,
+    strict_probe_limit: int | None = None,
+    skipped_probe_count: int = 0,
+    skipped_probe_reasons: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Single home for the availability->causal-verification policy.
 
@@ -127,15 +134,25 @@ def causality_evidence_fields(
     if data_availability_status == "complete":
         emitted = bool(emitted_replay_verified)
         strict = bool(strict_no_emission_verified)
+        deterministic = (
+            emitted and strict
+            if deterministic_replay_verified is None
+            else bool(deterministic_replay_verified)
+        )
         verified = emitted and strict
         warnings: list[str] = []
+        if causality_check == "off":
+            warnings.append("causality_replay_skipped")
         if emitted and not strict:
             # Emitted-replay subset check passed but strict suppression replay did
             # not run; surface that the run did not earn full causal verification.
             warnings.append("strict_suppression_replay_not_verified")
+        if strict_replay_capped:
+            warnings.append("strict_replay_capped")
         if not verified:
             warnings.append("runner_causality_not_verified")
     else:
+        deterministic = False
         emitted = False
         strict = False
         verified = False
@@ -145,8 +162,15 @@ def causality_evidence_fields(
         }.get(str(data_availability_status), "available_at_missing")
         warnings = [availability_warning, "runner_causality_not_verified"]
     return {
+        "causality_check": causality_check,
         "causality_verified": verified,
+        "deterministic_replay_verified": deterministic,
         "emitted_replay_verified": emitted,
         "strict_no_emission_verified": strict,
+        "strict_replay_capped": bool(strict_replay_capped),
+        "strict_probe_count": strict_probe_count,
+        "strict_probe_limit": strict_probe_limit,
+        "skipped_probe_count": int(skipped_probe_count),
+        "skipped_probe_reasons": list(skipped_probe_reasons),
         "evidence_quality_warnings": warnings,
     }

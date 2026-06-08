@@ -240,12 +240,15 @@ if not result.succeeded:
 print(result.result_dir)
 print(result.outcome.assessment_status)      # diagnostic status, not a verdict
 print(result.evidence.causality.verified)    # causal replay passed
+print(result.evidence.causality.causality_check)
 print(result.evidence.row_contract)          # row-contract summary
+print(result.economics.trade_count)          # after-cost trade ledger summary
 ```
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
-with `results_dir`, `quick_checks`, `artifact_profile`, and (for the diagnostic
+with `results_dir`, `quick_checks`, `artifact_profile`, optional
+`causality_check`, optional `strict_probe_limit`, and (for the diagnostic
 profile) `diagnostic_sample_trades`. See
 [`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
 
@@ -255,6 +258,21 @@ records, engine request, and evidence). `summary` and `diagnostic` are compact;
 `diagnostic` adds `diagnostics.json` with economic slices. Completed runs always
 write `summary.json` (with `economic_metrics`), `run_manifest.json`, `notes.md`,
 `config.toml`, `strategy_snapshot.py`, and `environment.json`.
+
+Programmatic consumers can read quick-run after-cost economics from
+`result.economics` on completed engine runs. The object carries the raw per-trade
+ledger plus the same summary scalars/slices written to artifacts, even under
+`artifact_profile = "summary"`; no `summary.json` scraping is required.
+
+`causality_check` defaults to `strict`. Large Train iteration loops may set
+`causality_check = "emitted"` only after the candidate passes deterministic and
+emitted-decision replay; artifacts will still mark strict no-emission replay as
+unverified. Use `strict` for survivor or dedicated audit runs, optionally with
+`strict_probe_limit` when a large row grid needs capped evidence. Use `off` only
+for profiling/debugging; it writes causality-unverified evidence. Downstream
+tools such as `quant_autoresearch` should materialize emitted mode for Train
+iteration and either rerun strict mode or hand off an explicit strict-unverified
+survivor note for Season review.
 
 **Reading it:** success is `result.succeeded`. On failure, `result.outcome
 .failure_stage` names the stage that failed and `summary.json` sets
@@ -424,6 +442,11 @@ from quant_strategies.evaluation import run_evaluation  # -> EvaluationRunResult
 
 Each accepts `(config_path, *, repo_root=None, event_sink=None)`. Pass an
 `event_sink` for structured stage observability.
+
+For quick-run search loops, use `RunResult.economics.trades` as the in-process
+after-cost trade sample for Train slicing by time or symbol. This is trade-unit,
+point-to-point engine economics only; use `run_evaluation` for OOS period-return
+series or portfolio/NAV evidence.
 
 **In scope downstream:** generating candidate strategies and configs, deciding
 what to run, and reading the typed results/artifacts. **Out of scope (stays in

@@ -124,6 +124,36 @@ def test_hidden_lookahead_check_detects_future_sensitive_strategy():
     assert result.violations == ("hidden_lookahead_detected",)
 
 
+def test_hidden_lookahead_detects_payload_change_with_stable_decision_id():
+    rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+
+    def stable_id_future_sensitive_strategy(
+        rows: Sequence[Mapping[str, Any]],
+        params: Mapping[str, Any],
+    ):
+        future_rows = [item for item in rows if item.get("timestamp") == FUTURE]
+        size = 2.0 if future_rows else 1.0
+        item = decision(size)
+        return [item.model_copy(update={"decision_id": "stable"})]
+
+    baseline = stable_id_future_sensitive_strategy(rows, {})
+
+    result = check_hidden_lookahead(
+        stable_id_future_sensitive_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+        mode="emitted",
+    )
+
+    assert result.passed is False
+    assert result.violations == ("hidden_lookahead_detected",)
+
+
 def test_hidden_lookahead_check_excludes_future_timestamp_even_when_available_early():
     rows = [
         row(AS_OF, 100.0, available_at=AS_OF),

@@ -4,7 +4,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import Field, ValidationError, ValidationInfo, field_validator
+from pydantic import Field, StrictInt, ValidationError, ValidationInfo, field_validator
 
 from quant_strategies.core.config import (
     CostModelConfig,
@@ -17,6 +17,7 @@ from quant_strategies.core.config import (
 from quant_strategies.core.errors import ConfigError
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
+CausalityCheck = Literal["off", "emitted", "strict"]
 
 _GENERATED_OUTPUT_ROOT = "results"
 
@@ -64,6 +65,8 @@ class OutputConfig(RunnerConfigModel):
     quick_checks: bool = False
     artifact_profile: ArtifactProfile = "diagnostic"
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
+    causality_check: CausalityCheck = "strict"
+    strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
 
     @field_validator("results_dir")
     @classmethod

@@ -20,6 +20,7 @@ Import only these. Everything else (including `quant_strategies.engine` and any
 |---|---|---|
 | `quant_strategies.runner.run_config` | function | Run the quick-run surface |
 | `quant_strategies.runner.RunResult` / `RunOutcome` / `RunEvidence` / `RunCausalityEvidence` | dataclass | Quick-run result types |
+| `quant_strategies.runner.RunEconomics` / `RunTrade` | dataclass | Typed quick-run trade ledger + summary/slice economics |
 | `quant_strategies.validation.run_validation` | function | Run the validation surface |
 | `quant_strategies.validation.ValidationRunResult` | dataclass | Validation result type |
 | `quant_strategies.evaluation.run_evaluation` | function | Run the evaluation surface |
@@ -160,13 +161,20 @@ strategy_path, strategy_id            # top-level
 [params] …
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
-[output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int)
+[output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
+         causality_check, strict_probe_limit
 ```
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
 engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary`
 (compact). Only `full` is replayable from artifacts. Relative paths are
 repo-root-relative (or pass `--repo-root`).
+
+`causality_check` defaults to `"strict"` and may be set to `"emitted"` for
+Train iteration loops that need deterministic + emitted-decision replay without
+full row-grid no-emission replay, or `"off"` for explicit profiling/debugging
+only. `strict_probe_limit` optionally caps strict no-emission probes; capped
+strict runs are marked incomplete and do not claim full strict replay evidence.
 
 ### Validation (`validation.toml`)
 
@@ -220,6 +228,7 @@ the run completed and `failure_stage is None`.
 | `message` | `str` | human-readable summary |
 | `outcome` | `RunOutcome` | terminal status (below) |
 | `evidence` | `RunEvidence` | evidence quality (below) |
+| `economics` | `RunEconomics \| None` | per-trade after-cost economics, populated on completed engine runs even under compact artifact profiles |
 | `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` |
 
 **`RunOutcome`**: `completed` (bool), `failure_stage` (str|None), `assessment_status`
@@ -230,8 +239,38 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 **`RunEvidence`**: `replayable_from_artifacts` (bool|None), `data_availability_status`
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
 `causality` (`RunCausalityEvidence`), `warnings` (tuple[str, …]).
-**`RunCausalityEvidence`**: `verified`, `emitted_replay_verified`,
-`strict_no_emission_verified` (all bool).
+**`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict`),
+`verified`, `deterministic_replay_verified`, `emitted_replay_verified`,
+`strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
+`strict_probe_limit`, `skipped_probe_count`, and `skipped_probe_reasons`.
+`verified` is true only when complete availability, emitted replay, and strict
+no-emission replay all passed. Emitted-only, capped-strict, and off-policy runs
+are usable only as explicitly labeled development evidence.
+
+#### `RunEconomics` / `RunTrade`
+
+`RunEconomics` is the in-process quick-run economics accessor. It is populated after
+completed engine evaluation, independent of `artifact_profile`, and mirrors the same
+trade-unit sample written to `summary.json` / `diagnostics.json`. It does **not** expose a
+per-period return series, NAV path, or significance statistics.
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` / `basis` | `str` | Same schema/basis markers as `summary.json["economic_metrics"]` |
+| `trades` | `tuple[RunTrade, ...]` | Engine trade ledger in engine order |
+| `trade_count`, win/loss/flat counts | `int` | Summary scalar counts |
+| `hit_rate`, `average_trade_net`, `average_win_net`, `average_loss_net`, `profit_factor` | `float \| None` | Undeflated trade-unit scalars |
+| `cost_share_of_abs_gross`, `funding_share_of_abs_gross` | `float \| None` | Cost/funding shares of absolute gross trade activity |
+| `by_symbol`, `by_direction`, `by_exit_reason` | `dict[str, dict]` | Same economic slice groupings as diagnostics |
+| `win_loss_distribution` | `dict[str, object]` | Largest/median/sum win-loss slice payload |
+| `summary_payload()` | `dict[str, object]` | Dict equal to `summary.json["economic_metrics"]` |
+| `slices_payload()` | `dict[str, object]` | Dict equal to diagnostic `economic_slices` |
+
+`RunTrade` fields: `symbol`, `side`, `weight`, tz-aware `decision_time` /
+`entry_time` / `exit_time`, `entry_price`, `exit_price`, `exit_reason`,
+`gross_return`, `funding_return`, `cost_return`, `net_return`, and `decision_id`.
+`net_return` is the engine after-cost value (`gross_return + funding_return -
+cost_return`) for that trade.
 
 ### `ValidationRunResult`
 

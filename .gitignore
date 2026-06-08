@@ -8,3 +8,4 @@ validation_results/
 evaluation_results/
 .worktrees/
 *.egg-info/
+playground/

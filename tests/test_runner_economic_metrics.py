@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
 import pytest
 
 from quant_strategies.runner.economic_metrics import (
+    RunEconomics,
+    RunTrade,
+    build_run_economics,
     diagnostic_slices,
     summary_metrics,
     trade_result_from_engine_summary,
@@ -38,6 +44,65 @@ def trade_result(
         "sum_signed_trade_activity_cost": cost,
         "sum_signed_trade_activity_net": gross + funding - cost if net is None else net,
     }
+
+
+def full_trade(
+    net_return: float,
+    *,
+    gross_return: float,
+    funding_return: float = 0.0,
+    cost_return: float = 0.0,
+) -> dict[str, object]:
+    timestamp = datetime(2024, 1, 1, tzinfo=UTC)
+    return {
+        "decision_id": "decision-1",
+        "symbol": "SPY",
+        "side": "long",
+        "weight": 1.0,
+        "decision_time": timestamp.isoformat(),
+        "entry_time": timestamp.replace(day=2).isoformat(),
+        "exit_time": timestamp.replace(day=3).isoformat(),
+        "entry_price": 100.0,
+        "exit_price": 103.0,
+        "exit_reason": "max_hold",
+        "gross_return": gross_return,
+        "funding_return": funding_return,
+        "cost_return": cost_return,
+        "net_return": net_return,
+    }
+
+
+def test_build_run_economics_exposes_typed_ledger_and_artifact_payloads():
+    engine_trade = full_trade(0.02, gross_return=0.03, funding_return=0.0, cost_return=0.01)
+    engine_trade_result = trade_result(gross=0.03, funding=0.0, cost=0.01, net=0.02)
+    engine_run = SimpleNamespace(
+        screen_summary={
+            "trade_count": 1,
+            "trade_result": engine_trade_result,
+            "trades": [engine_trade],
+        },
+        validate_summary=None,
+        passed=True,
+    )
+
+    economics = build_run_economics(engine_run)
+
+    assert isinstance(economics, RunEconomics)
+    assert economics.summary_payload() == summary_metrics([engine_trade], engine_trade_result)
+    assert economics.slices_payload() == diagnostic_slices([engine_trade])
+    assert economics.trade_count == 1
+    assert economics.by_symbol["SPY"]["count"] == 1
+    assert isinstance(economics.trades[0], RunTrade)
+    assert economics.trades[0].decision_time.tzinfo is not None
+    with pytest.raises(TypeError):
+        economics.by_symbol["SPY"]["count"] = 2
+    with pytest.raises(TypeError):
+        economics.win_loss_distribution["sum_positive_net"] = 0.0
+    assert economics.trades[0].net_return == pytest.approx(
+        economics.trades[0].gross_return
+        + economics.trades[0].funding_return
+        - economics.trades[0].cost_return
+    )
 
 
 def test_summary_metrics_for_no_trades_emit_zero_counts_and_null_rates():

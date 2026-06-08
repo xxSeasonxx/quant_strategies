@@ -3,7 +3,10 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from statistics import median
+from types import MappingProxyType
 from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value
@@ -11,6 +14,106 @@ from quant_strategies.core.serialization import json_safe_value
 SUMMARY_SCHEMA_VERSION = "quant_strategies.runner.economic_metrics/v1"
 SLICES_SCHEMA_VERSION = "quant_strategies.runner.economic_slices/v1"
 BASIS = "engine_trade_ledger"
+
+
+@dataclass(frozen=True)
+class RunTrade:
+    symbol: str
+    side: str
+    weight: float
+    decision_time: datetime
+    entry_time: datetime
+    exit_time: datetime
+    entry_price: float
+    exit_price: float
+    exit_reason: str
+    gross_return: float
+    funding_return: float
+    cost_return: float
+    net_return: float
+    decision_id: str | None
+
+
+@dataclass(frozen=True)
+class RunEconomics:
+    schema_version: str
+    basis: str
+    trades: tuple[RunTrade, ...]
+    trade_count: int
+    winning_trade_count: int
+    losing_trade_count: int
+    flat_trade_count: int
+    hit_rate: float | None
+    average_trade_net: float | None
+    average_win_net: float | None
+    average_loss_net: float | None
+    profit_factor: float | None
+    cost_share_of_abs_gross: float | None
+    funding_share_of_abs_gross: float | None
+    by_symbol: Mapping[str, Mapping[str, Any]]
+    by_direction: Mapping[str, Mapping[str, Any]]
+    by_exit_reason: Mapping[str, Mapping[str, Any]]
+    win_loss_distribution: Mapping[str, Any]
+
+    def summary_payload(self) -> dict[str, Any]:
+        return json_safe_value(
+            {
+                "schema_version": self.schema_version,
+                "basis": self.basis,
+                "trade_count": self.trade_count,
+                "winning_trade_count": self.winning_trade_count,
+                "losing_trade_count": self.losing_trade_count,
+                "flat_trade_count": self.flat_trade_count,
+                "hit_rate": self.hit_rate,
+                "average_trade_net": self.average_trade_net,
+                "average_win_net": self.average_win_net,
+                "average_loss_net": self.average_loss_net,
+                "profit_factor": self.profit_factor,
+                "cost_share_of_abs_gross": self.cost_share_of_abs_gross,
+                "funding_share_of_abs_gross": self.funding_share_of_abs_gross,
+            }
+        )
+
+    def slices_payload(self) -> dict[str, Any]:
+        return json_safe_value(
+            {
+                "schema_version": SLICES_SCHEMA_VERSION,
+                "basis": self.basis,
+                "by_symbol": self.by_symbol,
+                "by_direction": self.by_direction,
+                "by_exit_reason": self.by_exit_reason,
+                "win_loss_distribution": self.win_loss_distribution,
+            }
+        )
+
+
+def build_run_economics(engine_run: Any) -> RunEconomics:
+    engine_summary = _engine_summary_with_trades(engine_run)
+    completed_trades = trades_from_engine_summary(engine_summary)
+    trade_result = trade_result_from_engine_summary(engine_summary)
+    summary = summary_metrics(completed_trades, trade_result)
+    slices = diagnostic_slices(completed_trades)
+
+    return RunEconomics(
+        schema_version=str(summary["schema_version"]),
+        basis=str(summary["basis"]),
+        trades=tuple(_run_trade_from_mapping(trade) for trade in completed_trades),
+        trade_count=int(summary["trade_count"]),
+        winning_trade_count=int(summary["winning_trade_count"]),
+        losing_trade_count=int(summary["losing_trade_count"]),
+        flat_trade_count=int(summary["flat_trade_count"]),
+        hit_rate=_optional_float(summary["hit_rate"]),
+        average_trade_net=_optional_float(summary["average_trade_net"]),
+        average_win_net=_optional_float(summary["average_win_net"]),
+        average_loss_net=_optional_float(summary["average_loss_net"]),
+        profit_factor=_optional_float(summary["profit_factor"]),
+        cost_share_of_abs_gross=_optional_float(summary["cost_share_of_abs_gross"]),
+        funding_share_of_abs_gross=_optional_float(summary["funding_share_of_abs_gross"]),
+        by_symbol=_dict_of_dicts(slices["by_symbol"]),
+        by_direction=_dict_of_dicts(slices["by_direction"]),
+        by_exit_reason=_dict_of_dicts(slices["by_exit_reason"]),
+        win_loss_distribution=_mapping_proxy(slices["win_loss_distribution"]),
+    )
 
 
 def summary_metrics(
@@ -88,6 +191,145 @@ def trade_result_from_engine_summary(engine: Mapping[str, Any]) -> dict[str, Any
     if not isinstance(trade_result, Mapping):
         raise ValueError("engine trade_result must be a mapping")
     return dict(trade_result)
+
+
+def _engine_summary_with_trades(engine_run: Any) -> dict[str, object]:
+    source = getattr(engine_run, "screen_summary", None)
+    validate_summary = getattr(engine_run, "validate_summary", None)
+    if source is None and isinstance(validate_summary, Mapping):
+        screening_result = validate_summary.get("screening_result")
+        source = screening_result if isinstance(screening_result, Mapping) else None
+
+    summary: dict[str, object] = {
+        "passed": getattr(engine_run, "passed", None),
+        "trade_count": _engine_trade_count(source),
+    }
+    trade_result = source.get("trade_result") if isinstance(source, Mapping) else None
+    if isinstance(trade_result, Mapping):
+        summary["trade_result"] = {
+            "sum_signed_trade_activity_gross": trade_result.get("sum_signed_trade_activity_gross"),
+            "sum_signed_trade_activity_funding": trade_result.get(
+                "sum_signed_trade_activity_funding"
+            ),
+            "sum_signed_trade_activity_cost": trade_result.get("sum_signed_trade_activity_cost"),
+            "sum_signed_trade_activity_net": trade_result.get("sum_signed_trade_activity_net"),
+        }
+    else:
+        summary["trade_result"] = {
+            "sum_signed_trade_activity_gross": None,
+            "sum_signed_trade_activity_funding": None,
+            "sum_signed_trade_activity_cost": None,
+            "sum_signed_trade_activity_net": None,
+        }
+
+    trades = source.get("trades") if isinstance(source, Mapping) else None
+    if isinstance(trades, list):
+        summary["diagnostic_trades"] = trades
+    return summary
+
+
+def _engine_trade_count(source: object) -> int | None:
+    if not isinstance(source, Mapping):
+        return None
+    value = source.get("trade_count")
+    return int(value) if value is not None else None
+
+
+def _run_trade_from_mapping(trade: Mapping[str, Any]) -> RunTrade:
+    return RunTrade(
+        symbol=_required_str_field(trade, "symbol"),
+        side=_required_str_field(trade, "side"),
+        weight=_required_trade_numeric_field(trade, "weight"),
+        decision_time=_required_datetime_field(trade, "decision_time"),
+        entry_time=_required_datetime_field(trade, "entry_time"),
+        exit_time=_required_datetime_field(trade, "exit_time"),
+        entry_price=_required_trade_numeric_field(trade, "entry_price"),
+        exit_price=_required_trade_numeric_field(trade, "exit_price"),
+        exit_reason=_required_str_field(trade, "exit_reason"),
+        gross_return=_required_trade_numeric_field(trade, "gross_return"),
+        funding_return=_required_trade_numeric_field(trade, "funding_return"),
+        cost_return=_required_trade_numeric_field(trade, "cost_return"),
+        net_return=_required_trade_numeric_field(trade, "net_return"),
+        decision_id=_optional_str_field(trade, "decision_id"),
+    )
+
+
+def _required_str_field(trade: Mapping[str, Any], field: str) -> str:
+    value = trade.get(field)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"trade {field} must be a non-empty string")
+    return value
+
+
+def _optional_str_field(trade: Mapping[str, Any], field: str) -> str | None:
+    value = trade.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"trade {field} must be a non-empty string when provided")
+    return value
+
+
+def _required_datetime_field(trade: Mapping[str, Any], field: str) -> datetime:
+    value = trade.get(field)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"trade {field} must be a valid ISO datetime") from exc
+    else:
+        raise ValueError(f"trade {field} must be a datetime or ISO datetime string")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"trade {field} must be timezone-aware")
+    return parsed
+
+
+def _required_trade_numeric_field(trade: Mapping[str, Any], field: str) -> float:
+    if field not in trade or trade[field] is None:
+        raise ValueError(f"trade {field} is required")
+    value = trade[field]
+    if isinstance(value, bool) or isinstance(value, str | bytes):
+        raise ValueError(f"trade {field} must be finite numeric")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"trade {field} must be finite numeric") from exc
+    if not math.isfinite(numeric):
+        raise ValueError(f"trade {field} must be finite numeric")
+    return numeric
+
+
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or isinstance(value, str | bytes):
+        raise ValueError("optional float value must be finite numeric")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("optional float value must be finite numeric") from exc
+    if not math.isfinite(numeric):
+        raise ValueError("optional float value must be finite numeric")
+    return numeric
+
+
+def _dict_of_dicts(value: object) -> Mapping[str, Mapping[str, Any]]:
+    if not isinstance(value, Mapping):
+        raise ValueError("economic slices must be mappings")
+    result: dict[str, Mapping[str, Any]] = {}
+    for key, item in value.items():
+        if not isinstance(item, Mapping):
+            raise ValueError("economic slice entries must be mappings")
+        result[str(key)] = MappingProxyType(dict(item))
+    return MappingProxyType(result)
+
+
+def _mapping_proxy(value: object) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("economic slice payload must be a mapping")
+    return MappingProxyType(dict(value))
 
 
 def _group_summaries(

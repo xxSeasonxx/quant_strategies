@@ -34,6 +34,7 @@ def diagnostic_payload(
     engine: Mapping[str, Any],
     assessment_status: str,
     evidence_quality: Mapping[str, Any],
+    economic_slices: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     trades = _diagnostic_trades(engine)
     trade_result = _mapping_or_empty(engine.get("trade_result"))
@@ -52,7 +53,9 @@ def diagnostic_payload(
         "holding_period": _holding_period(trades),
         "concentration": _concentration(trades),
         "cost_funding_breakdown": _cost_funding_breakdown(trade_result),
-        "economic_slices": diagnostic_slices(trades),
+        "economic_slices": dict(economic_slices)
+        if economic_slices is not None
+        else diagnostic_slices(trades),
         "sample_trades": _sample_trades(trades, config.output.diagnostic_sample_trades),
     }
 

@@ -24,6 +24,9 @@ class LookaheadCheckResult:
     strict_suppression_verified: bool = False
     skipped_probe_count: int = 0
     skipped_probe_reasons: tuple[str, ...] = ()
+    strict_replay_capped: bool = False
+    strict_probe_count: int | None = None
+    strict_probe_limit: int | None = None
 
 
 def causality_completeness_violations(
@@ -127,6 +130,7 @@ def check_hidden_lookahead(
     visible_rows_cache: dict[tuple[datetime, datetime], tuple[Mapping[str, Any], ...]] = {}
     replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
     replay_decisions_cache: dict[tuple[datetime, datetime], tuple[StrategyDecision, ...]] = {}
+    replay_payloads_cache: dict[tuple[datetime, datetime], tuple[dict[str, Any], ...]] = {}
     skipped_probe_reasons: list[str] = []
     for boundary in replay_boundaries:
         cache_key = (boundary.as_of_time, boundary.decision_time)
@@ -198,6 +202,24 @@ def check_hidden_lookahead(
                 skipped_probe_count=len(skipped_probe_reasons),
                 skipped_probe_reasons=tuple(skipped_probe_reasons),
             )
+        if boundary.expected_decision_ids:
+            replay_payloads = replay_payloads_cache.get(cache_key)
+            if replay_payloads is None:
+                replay_payloads = _decision_payloads(replay_decisions)
+                replay_payloads_cache[cache_key] = replay_payloads
+            expected_payloads = _expected_payloads_for_boundary(
+                baseline_decisions,
+                boundary.expected_decision_ids,
+            )
+            if not _payloads_contain_expected(replay_payloads, expected_payloads):
+                return LookaheadCheckResult(
+                    passed=False,
+                    mode=mode,
+                    deterministic_replay_verified=True,
+                    violations=("hidden_lookahead_detected",),
+                    skipped_probe_count=len(skipped_probe_reasons),
+                    skipped_probe_reasons=tuple(skipped_probe_reasons),
+                )
         if mode == "strict":
             scoped_decision_ids = frozenset(
                 replay.decision_id
@@ -282,6 +304,29 @@ def _decision_payloads(
     decisions: Sequence[StrategyDecision],
 ) -> tuple[dict[str, Any], ...]:
     return tuple(decision.model_dump(mode="json") for decision in decisions)
+
+
+def _expected_payloads_for_boundary(
+    decisions: Sequence[StrategyDecision],
+    expected_decision_ids: frozenset[str | None],
+) -> tuple[dict[str, Any], ...]:
+    return _decision_payloads(
+        [decision for decision in decisions if decision.decision_id in expected_decision_ids]
+    )
+
+
+def _payloads_contain_expected(
+    replay_payloads: Sequence[Mapping[str, Any]],
+    expected_payloads: Sequence[Mapping[str, Any]],
+) -> bool:
+    remaining = [dict(payload) for payload in replay_payloads]
+    for expected in expected_payloads:
+        try:
+            index = remaining.index(dict(expected))
+        except ValueError:
+            return False
+        remaining.pop(index)
+    return True
 
 
 def _exception_reason(exc: BaseException) -> str:

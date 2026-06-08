@@ -96,13 +96,26 @@ def evidence_quality(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
     *,
+    deterministic_replay_verified: bool | None = None,
     emitted_replay_verified: bool = False,
     strict_no_emission_verified: bool = False,
+    strict_replay_capped: bool = False,
+    strict_probe_count: int | None = None,
+    strict_probe_limit: int | None = None,
+    skipped_probe_count: int = 0,
+    skipped_probe_reasons: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     return compact_evidence_quality(
         _normalized_rows(config, rows).evidence_quality(
+            deterministic_replay_verified=deterministic_replay_verified,
             emitted_replay_verified=emitted_replay_verified,
             strict_no_emission_verified=strict_no_emission_verified,
+            causality_check=config.output.causality_check,
+            strict_replay_capped=strict_replay_capped,
+            strict_probe_count=strict_probe_count,
+            strict_probe_limit=strict_probe_limit,
+            skipped_probe_count=skipped_probe_count,
+            skipped_probe_reasons=skipped_probe_reasons,
         )
     )
 
@@ -110,15 +123,29 @@ def evidence_quality(
 def with_causality_verification(
     evidence_quality_payload: Mapping[str, Any],
     *,
+    causality_check: str,
+    deterministic_replay_verified: bool,
     emitted_replay_verified: bool,
     strict_no_emission_verified: bool,
+    strict_replay_capped: bool = False,
+    strict_probe_count: int | None = None,
+    strict_probe_limit: int | None = None,
+    skipped_probe_count: int = 0,
+    skipped_probe_reasons: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     payload = compact_evidence_quality(evidence_quality_payload)
     payload.update(
         causality_evidence_fields(
             payload.get("data_availability_status"),
+            causality_check=causality_check,
+            deterministic_replay_verified=deterministic_replay_verified,
             emitted_replay_verified=emitted_replay_verified,
             strict_no_emission_verified=strict_no_emission_verified,
+            strict_replay_capped=strict_replay_capped,
+            strict_probe_count=strict_probe_count,
+            strict_probe_limit=strict_probe_limit,
+            skipped_probe_count=skipped_probe_count,
+            skipped_probe_reasons=skipped_probe_reasons,
         )
     )
     return payload

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -10,12 +11,14 @@ from pathlib import Path
 import pytest
 
 import quant_strategies.core.execution as execution
+import quant_strategies.runner as runner_module
 import quant_strategies.runner.artifacts as artifacts
+from quant_strategies.causality import LookaheadCheckResult
 from quant_strategies.core import engine_runner
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.runner import RunOutcome, RunResult, run_config
+from quant_strategies.runner import RunEconomics, RunOutcome, RunResult, RunTrade, run_config
 from quant_strategies.runner import config as config_module
 
 SUMMARY_KEYS = {
@@ -44,9 +47,16 @@ SUMMARY_KEYS = {
     "data_availability_status",
     "availability_coverage",
     "row_contract",
+    "causality_check",
     "causality_verified",
+    "deterministic_replay_verified",
     "emitted_replay_verified",
     "strict_no_emission_verified",
+    "strict_replay_capped",
+    "strict_probe_count",
+    "strict_probe_limit",
+    "skipped_probe_count",
+    "skipped_probe_reasons",
     "evidence_quality_warnings",
 }
 TRADE_RESULT_KEYS = {
@@ -147,6 +157,8 @@ def write_config(
     quick_checks: bool = True,
     artifact_profile: str | None = "full",
     diagnostic_sample_trades: int | None = None,
+    causality_check: str | None = None,
+    strict_probe_limit: object | None = None,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -156,6 +168,12 @@ def write_config(
         f"diagnostic_sample_trades = {diagnostic_sample_trades}\n"
         if diagnostic_sample_trades is not None
         else ""
+    )
+    causality_check_line = (
+        f'causality_check = "{causality_check}"\n' if causality_check is not None else ""
+    )
+    strict_probe_limit_line = (
+        f"strict_probe_limit = {strict_probe_limit}\n" if strict_probe_limit is not None else ""
     )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,10 +199,10 @@ fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
 [output]
-results_dir = "results"
-quick_checks = {str(quick_checks).lower()}
-{artifact_profile_line}{diagnostic_sample_trades_line}
-'''.lstrip()
+	results_dir = "results"
+	quick_checks = {str(quick_checks).lower()}
+	{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}
+	'''.lstrip()
     )
     return config_path
 
@@ -305,6 +323,275 @@ def assert_no_mode_fields(value: object) -> None:
             assert_no_mode_fields(item)
 
 
+def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
+    default_config = config_module.load_config(write_config(tmp_path), repo_root=tmp_path)
+
+    assert default_config.output.causality_check == "strict"
+    assert default_config.output.strict_probe_limit is None
+
+    for mode in ("off", "emitted", "strict"):
+        config = config_module.load_config(
+            write_config(tmp_path, relative_path=f"{mode}.toml", causality_check=mode),
+            repo_root=tmp_path,
+        )
+        assert config.output.causality_check == mode
+        assert config.output.strict_probe_limit is None
+
+    capped = config_module.load_config(
+        write_config(
+            tmp_path,
+            relative_path="capped.toml",
+            causality_check="strict",
+            strict_probe_limit=10,
+        ),
+        repo_root=tmp_path,
+    )
+    assert capped.output.causality_check == "strict"
+    assert capped.output.strict_probe_limit == 10
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"causality_check": "sampled"}, "causality_check"),
+        ({"strict_probe_limit": -1}, "strict_probe_limit"),
+        ({"strict_probe_limit": "true"}, "strict_probe_limit"),
+        ({"strict_probe_limit": "1.0"}, "strict_probe_limit"),
+    ],
+)
+def test_runner_config_rejects_invalid_causality_policy_fields(
+    tmp_path: Path,
+    kwargs: dict[str, object],
+    message: str,
+):
+    config_path = write_config(tmp_path, **kwargs)
+
+    with pytest.raises(RunnerError, match=message):
+        config_module.load_config(config_path, repo_root=tmp_path)
+
+
+def test_run_config_routes_default_causality_policy_to_strict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="diagnostic")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    modes: list[str] = []
+
+    def fake_check_hidden_lookahead(*args, mode="missing", **kwargs):
+        modes.append(mode)
+        return LookaheadCheckResult(
+            passed=True,
+            mode=mode,
+            deterministic_replay_verified=True,
+            emitted_replay_verified=True,
+            strict_suppression_verified=mode == "strict",
+        )
+
+    monkeypatch.setattr(runner_module, "check_hidden_lookahead", fake_check_hidden_lookahead)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert modes == ["strict"]
+    assert result.evidence.causality.causality_check == "strict"
+    assert result.evidence.causality.deterministic_replay_verified is True
+    summary = read_summary(result.result_dir)
+    assert summary["causality_check"] == "strict"
+    assert summary["deterministic_replay_verified"] is True
+    assert summary["strict_no_emission_verified"] is True
+
+
+def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
+        "    as_of_row = rows[1]\n"
+        "    future = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
+        "    if any(row['close'] < as_of_row['close'] for row in future):\n"
+        "        return []\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
+        "        decision_time=as_of_row['timestamp'],\n"
+        "        as_of_time=as_of_row['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="emitted",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 99.0, research_fields=True)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.evidence.causality.causality_check == "emitted"
+    assert result.evidence.causality.deterministic_replay_verified is True
+    assert result.evidence.causality.emitted_replay_verified is True
+    assert result.evidence.causality.strict_no_emission_verified is False
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
+    assert summary["stage"] == "completed"
+    assert summary["causality_check"] == "emitted"
+    assert summary["causality_verified"] is False
+    assert summary["deterministic_replay_verified"] is True
+    assert summary["emitted_replay_verified"] is True
+    assert summary["strict_no_emission_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "strict_suppression_replay_not_verified",
+        "runner_causality_not_verified",
+    ]
+    assert data_manifest["causality_check"] == summary["causality_check"]
+    assert data_manifest["deterministic_replay_verified"] is True
+    assert diagnostics["evidence_quality"]["causality_check"] == "emitted"
+    assert diagnostics["evidence_quality"]["strict_no_emission_verified"] is False
+
+
+def test_run_config_off_policy_marks_replay_unverified_but_keeps_other_gates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    as_of_row = rows[1]\n"
+        "    future_rows = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
+        "    decision_id = 'future-visible' if future_rows else 'prefix-only'\n"
+        "    return [StrategyDecision(\n"
+        "        decision_id=decision_id,\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
+        "        decision_time=as_of_row['timestamp'],\n"
+        "        as_of_time=as_of_row['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(tmp_path, artifact_profile="diagnostic", causality_check="off")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.evidence.causality.causality_check == "off"
+    assert result.evidence.causality.deterministic_replay_verified is False
+    assert result.evidence.causality.emitted_replay_verified is False
+    assert result.evidence.causality.strict_no_emission_verified is False
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
+    assert summary["stage"] == "completed"
+    assert summary["causality_check"] == "off"
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "causality_replay_skipped",
+        "runner_causality_not_verified",
+    ]
+    assert summary["promotion_eligible"] is False
+    assert summary["paper_trade_eligible"] is False
+    assert summary["live_eligible"] is False
+    assert data_manifest["causality_check"] == "off"
+    assert diagnostics["evidence_quality"]["causality_check"] == "off"
+
+
+def test_run_config_emitted_policy_failure_before_causality_keeps_selected_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        causality_check="emitted",
+    )
+
+    def fail_data_load(config, **_kwargs):
+        raise DataLoadError("strict data window failed")
+
+    monkeypatch.setattr(execution, "load_data", fail_data_load)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.evidence.causality.causality_check == "emitted"
+    summary = read_summary(result.result_dir)
+    assert summary["stage"] == "data_load"
+    assert summary["causality_check"] == "emitted"
+    assert summary["deterministic_replay_verified"] is False
+    assert summary["emitted_replay_verified"] is False
+    assert summary["strict_no_emission_verified"] is False
+
+
+def test_run_config_capped_strict_replay_records_incomplete_strict_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="strict",
+        strict_probe_limit=1,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.evidence.causality.causality_check == "strict"
+    assert result.evidence.causality.deterministic_replay_verified is True
+    assert result.evidence.causality.emitted_replay_verified is True
+    assert result.evidence.causality.strict_no_emission_verified is False
+    assert result.evidence.causality.strict_replay_capped is True
+    assert result.evidence.causality.strict_probe_limit == 1
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["causality_check"] == "strict"
+    assert summary["strict_probe_limit"] == 1
+    assert summary["strict_replay_capped"] is True
+    assert summary["strict_no_emission_verified"] is False
+    assert summary["evidence_quality_warnings"] == [
+        "strict_suppression_replay_not_verified",
+        "strict_replay_capped",
+        "runner_causality_not_verified",
+    ]
+    assert data_manifest["strict_replay_capped"] is True
+    assert data_manifest["strict_no_emission_verified"] is False
+
+
 def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
@@ -402,6 +689,7 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
 
     assert result.outcome.completed is True
     assert result.result_dir is not None
+    assert result.economics is not None
     names = {path.name for path in result.result_dir.iterdir() if path.is_file()}
     assert names == {
         "config.toml",
@@ -470,6 +758,151 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
     assert "engine_request.json" not in run_manifest["artifacts"]
 
 
+def test_run_config_exposes_typed_in_process_economics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert isinstance(result.economics, RunEconomics)
+    assert len(result.economics.trades) == 1
+    trade = result.economics.trades[0]
+    assert isinstance(trade, RunTrade)
+    assert trade.symbol == "SPY"
+    assert trade.side == "long"
+    assert trade.weight == pytest.approx(1.0)
+    assert trade.decision_time.tzinfo is not None
+    assert trade.entry_time.tzinfo is not None
+    assert trade.exit_time.tzinfo is not None
+    assert trade.entry_price == pytest.approx(102.0)
+    assert trade.exit_price == pytest.approx(104.0)
+    assert trade.exit_reason == "max_hold"
+    assert trade.net_return == pytest.approx(
+        trade.gross_return + trade.funding_return - trade.cost_return
+    )
+
+
+def test_run_config_economics_summary_matches_summary_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.economics is not None
+    summary = read_summary(result.result_dir)
+    assert result.economics.summary_payload() == summary["economic_metrics"]
+    assert result.economics.trade_count == summary["economic_metrics"]["trade_count"]
+    assert result.economics.hit_rate == summary["economic_metrics"]["hit_rate"]
+    assert result.economics.by_symbol["SPY"]["count"] == 1
+    assert result.economics.by_direction["long"]["count"] == 1
+    assert result.economics.by_exit_reason["max_hold"]["count"] == 1
+
+
+def test_run_config_economics_are_profile_independent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    economics_by_profile = []
+    for profile in ("summary", "diagnostic", "full"):
+        config_path = write_config(
+            tmp_path, relative_path=f"{profile}.toml", artifact_profile=profile
+        )
+        result = run_config(config_path, repo_root=tmp_path)
+        assert result.economics is not None
+        economics_by_profile.append(result.economics)
+
+    assert economics_by_profile[0] == economics_by_profile[1] == economics_by_profile[2]
+
+
+def test_run_config_pre_engine_failure_leaves_economics_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+
+    def fail_data_load(config, **_kwargs):
+        raise DataLoadError("strict data window failed")
+
+    monkeypatch.setattr(execution, "load_data", fail_data_load)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.economics is None
+    assert result.succeeded is False
+
+
+def test_quick_run_economics_path_does_not_import_heavy_evaluation_dependencies():
+    code = """
+import sys
+from types import SimpleNamespace
+
+import quant_strategies.core.engine_runner
+import quant_strategies.engine
+import quant_strategies.runner
+from quant_strategies.runner.economic_metrics import build_run_economics
+
+build_run_economics(SimpleNamespace(
+    screen_summary={
+        "trade_count": 0,
+        "trade_result": {
+            "sum_signed_trade_activity_gross": 0.0,
+            "sum_signed_trade_activity_funding": 0.0,
+            "sum_signed_trade_activity_cost": 0.0,
+            "sum_signed_trade_activity_net": 0.0,
+        },
+        "trades": [],
+    },
+    validate_summary=None,
+    passed=None,
+))
+
+forbidden = {
+    "vectorbtpro",
+    "pandas",
+    "numpy",
+    "quant_strategies.evaluation",
+}
+loaded = sorted(name for name in forbidden if name in sys.modules)
+if loaded:
+    raise SystemExit("loaded forbidden modules: " + ", ".join(loaded))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -523,6 +956,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert diagnostics["assessment_status"] == summary["assessment_status"]
     assert diagnostics["trade_count"] == 1
     assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
+    assert result.economics.slices_payload() == diagnostics["economic_slices"]
     slices = diagnostics["economic_slices"]
     assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
     assert slices["basis"] == "engine_trade_ledger"
@@ -2527,6 +2961,8 @@ def test_run_config_completion_write_failure_returns_structured_result(
     assert result.outcome.completed is False
     assert result.result_dir is not None
     assert result.evidence.replayable_from_artifacts is True
+    assert result.economics is not None
+    assert result.economics.trade_count == 1
     assert "artifact write failed" in result.message
 
 

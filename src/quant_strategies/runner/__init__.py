@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from quant_strategies.causality import LookaheadCheckResult, check_hidden_lookahead
+from quant_strategies.causality import (
+    LookaheadCheckResult,
+    check_hidden_lookahead,
+    strict_replay_boundaries,
+)
 from quant_strategies.core import engine_runner as _engine_runner
 from quant_strategies.core.errors import RunnerError
 from quant_strategies.core.execution import (
@@ -31,14 +35,22 @@ from quant_strategies.runner import (
 from quant_strategies.runner import (
     config as config_module,
 )
+from quant_strategies.runner.economic_metrics import RunEconomics, RunTrade
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 
 
 @dataclass(frozen=True)
 class RunCausalityEvidence:
+    causality_check: str = "strict"
     verified: bool = False
+    deterministic_replay_verified: bool = False
     emitted_replay_verified: bool = False
     strict_no_emission_verified: bool = False
+    strict_replay_capped: bool = False
+    strict_probe_count: int | None = None
+    strict_probe_limit: int | None = None
+    skipped_probe_count: int = 0
+    skipped_probe_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -69,6 +81,7 @@ class RunResult:
     message: str
     outcome: RunOutcome = RunOutcome()
     evidence: RunEvidence = RunEvidence()
+    economics: RunEconomics | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -116,7 +129,8 @@ def run_config(
             evidence=RunEvidence(
                 replayable_from_artifacts=replayable_from_artifacts_for_profile(
                     config.output.artifact_profile
-                )
+                ),
+                causality=RunCausalityEvidence(causality_check=config.output.causality_check),
             ),
         )
 
@@ -193,12 +207,14 @@ def run_config(
     if failure is not None:
         return failure
 
+    economics = economic_metrics.build_run_economics(engine_run)
     try:
         assessment_status, notes = _write_completion_artifacts(
             config,
             result_dir,
             execution,
             engine_run,
+            economics,
             evidence_quality,
             repo_root=effective_repo_root,
             event_emitter=events,
@@ -212,6 +228,7 @@ def run_config(
             message=f"artifact write failed: {exc}",
             outcome=RunOutcome(failure_stage="artifact_write"),
             evidence=_run_evidence(config, evidence_quality),
+            economics=economics,
         )
     return RunResult(
         result_dir=result_dir,
@@ -225,6 +242,7 @@ def run_config(
             param_contract=execution.param_contract,
         ),
         evidence=_run_evidence(config, evidence_quality),
+        economics=economics,
     )
 
 
@@ -251,7 +269,7 @@ def _execution_failure_result(
             config,
             rows=exc.loaded_rows,
             normalized_rows=exc.normalized_rows,
-            evidence_quality=exc.evidence_quality,
+            evidence_quality=_policy_evidence_quality(config, exc.evidence_quality),
         )
     return _failure_result(
         config,
@@ -259,7 +277,7 @@ def _execution_failure_result(
         exc.stage,
         str(exc),
         repo_root=repo_root,
-        evidence_quality=exc.evidence_quality,
+        evidence_quality=_policy_evidence_quality(config, exc.evidence_quality),
         event_emitter=event_emitter,
     )
 
@@ -311,8 +329,15 @@ def _prepare_causality_evidence(
             causality_event.fail(_causality_message(causality))
     evidence_quality = artifacts.with_causality_verification(
         execution.evidence_quality,
+        causality_check=config.output.causality_check,
+        deterministic_replay_verified=causality.deterministic_replay_verified,
         emitted_replay_verified=causality.emitted_replay_verified,
         strict_no_emission_verified=causality.strict_suppression_verified,
+        strict_replay_capped=causality.strict_replay_capped,
+        strict_probe_count=causality.strict_probe_count,
+        strict_probe_limit=causality.strict_probe_limit,
+        skipped_probe_count=causality.skipped_probe_count,
+        skipped_probe_reasons=causality.skipped_probe_reasons,
     )
     return causality, evidence_quality
 
@@ -463,6 +488,7 @@ def _write_completion_artifacts(
     result_dir: Path,
     execution: StrategyExecutionResult,
     engine_run: _engine_runner.EngineRun | None,
+    economics: RunEconomics,
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
@@ -476,11 +502,6 @@ def _write_completion_artifacts(
         engine_summary_with_trades = artifacts.compact_engine_summary(
             engine_run,
             include_diagnostic_trades=True,
-        )
-        completed_trades = economic_metrics.trades_from_engine_summary(engine_summary_with_trades)
-        economic_metrics_payload = economic_metrics.summary_metrics(
-            completed_trades,
-            economic_metrics.trade_result_from_engine_summary(engine_summary_with_trades),
         )
         engine_summary = dict(engine_summary_with_trades)
         engine_summary.pop("diagnostic_trades", None)
@@ -517,6 +538,7 @@ def _write_completion_artifacts(
                     engine=engine_summary_with_trades,
                     assessment_status=assessment_status,
                     evidence_quality=evidence_quality,
+                    economic_slices=economics.slices_payload(),
                 ),
             )
         notes = artifacts.completion_notes(config, engine_run)
@@ -539,7 +561,7 @@ def _write_completion_artifacts(
                 assessment_status=assessment_status,
                 evidence_quality=evidence_quality,
                 param_contract=execution.param_contract,
-                economic_metrics=economic_metrics_payload,
+                economic_metrics=economics.summary_payload(),
             ),
         )
     return assessment_status, notes.strip()
@@ -553,17 +575,62 @@ def _check_causality(
     config: config_module.RunConfig,
     execution: StrategyExecutionResult,
 ) -> LookaheadCheckResult:
+    if config.output.causality_check == "off":
+        return LookaheadCheckResult(passed=True, mode="emitted")
+
     try:
+        if (
+            config.output.causality_check == "strict"
+            and config.output.strict_probe_limit is not None
+        ):
+            boundaries = strict_replay_boundaries(execution.normalized_rows, execution.decisions)
+            limit = config.output.strict_probe_limit
+            emitted_boundaries = tuple(
+                boundary for boundary in boundaries if boundary.expected_decision_ids
+            )
+            strict_probe_boundaries = tuple(
+                boundary for boundary in boundaries if not boundary.expected_decision_ids
+            )
+            capped = len(strict_probe_boundaries) > limit
+            selected_boundaries = (
+                *emitted_boundaries,
+                *(strict_probe_boundaries[:limit] if capped else strict_probe_boundaries),
+            )
+            causality = check_hidden_lookahead(
+                execution.generate_decisions,
+                rows=execution.normalized_rows,
+                params=execution.frozen_params,
+                baseline_decisions=execution.decisions,
+                strategy_id=config.strategy_id,
+                mode="strict",
+                boundaries=selected_boundaries,
+            )
+            if capped:
+                return replace(
+                    causality,
+                    strict_suppression_verified=False,
+                    strict_replay_capped=True,
+                    strict_probe_count=limit,
+                    strict_probe_limit=limit,
+                )
+            return replace(
+                causality,
+                strict_probe_count=len(strict_probe_boundaries),
+                strict_probe_limit=limit,
+            )
+
         return check_hidden_lookahead(
             execution.generate_decisions,
             rows=execution.normalized_rows,
             params=execution.frozen_params,
             baseline_decisions=execution.decisions,
             strategy_id=config.strategy_id,
+            mode=config.output.causality_check,
         )
     except Exception as exc:
         return LookaheadCheckResult(
             passed=False,
+            mode=config.output.causality_check,
             violations=(f"hidden_lookahead_check_failed: {type(exc).__name__}: {exc}",),
         )
 
@@ -589,7 +656,7 @@ def _audit_observation_dependencies(
             config,
             rows=execution.loaded_rows,
             normalized_rows=execution.normalized_rows,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=_policy_evidence_quality(config, execution.evidence_quality),
         )
         return _failure_result(
             config,
@@ -597,7 +664,7 @@ def _audit_observation_dependencies(
             "observation_audit",
             str(exc),
             repo_root=repo_root,
-            evidence_quality=execution.evidence_quality,
+            evidence_quality=_policy_evidence_quality(config, execution.evidence_quality),
             event_emitter=event_emitter,
         )
     return None
@@ -618,6 +685,21 @@ def _assert_declared_observations_causal(
 
 def _causality_message(result: LookaheadCheckResult) -> str:
     return "; ".join(result.violations) if result.violations else "hidden_lookahead_check_failed"
+
+
+def _policy_evidence_quality(
+    config: config_module.RunConfig,
+    evidence_quality: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if evidence_quality is None:
+        return None
+    return artifacts.with_causality_verification(
+        evidence_quality,
+        causality_check=config.output.causality_check,
+        deterministic_replay_verified=False,
+        emitted_replay_verified=False,
+        strict_no_emission_verified=False,
+    )
 
 
 def _failure_result(
@@ -687,9 +769,16 @@ def _run_evidence(
         availability_coverage=_optional_dict(quality.get("availability_coverage")),
         row_contract=_optional_dict(quality.get("row_contract")),
         causality=RunCausalityEvidence(
+            causality_check=str(quality.get("causality_check", config.output.causality_check)),
             verified=bool(quality.get("causality_verified")),
+            deterministic_replay_verified=bool(quality.get("deterministic_replay_verified")),
             emitted_replay_verified=bool(quality.get("emitted_replay_verified")),
             strict_no_emission_verified=bool(quality.get("strict_no_emission_verified")),
+            strict_replay_capped=bool(quality.get("strict_replay_capped")),
+            strict_probe_count=_optional_int(quality.get("strict_probe_count")),
+            strict_probe_limit=_optional_int(quality.get("strict_probe_limit")),
+            skipped_probe_count=int(quality.get("skipped_probe_count") or 0),
+            skipped_probe_reasons=_string_tuple(quality.get("skipped_probe_reasons")),
         ),
         warnings=_string_tuple(quality.get("evidence_quality_warnings")),
     )
@@ -701,6 +790,10 @@ def _optional_str(value: object) -> str | None:
 
 def _optional_dict(value: object) -> dict[str, object] | None:
     return dict(value) if isinstance(value, Mapping) else None
+
+
+def _optional_int(value: object) -> int | None:
+    return int(value) if isinstance(value, int) else None
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:
@@ -715,8 +808,10 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 __all__ = [
     "RunCausalityEvidence",
+    "RunEconomics",
     "RunEvidence",
     "RunOutcome",
     "RunResult",
+    "RunTrade",
     "run_config",
 ]
