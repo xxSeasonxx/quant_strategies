@@ -164,22 +164,32 @@ def write_data_manifest(
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
     *,
     normalized_rows: NormalizedRows | None = None,
+    execution_normalized_rows: NormalizedRows | None = None,
     evidence_quality_payload: dict[str, Any] | None = None,
 ) -> None:
     normalized = _normalized_rows(config, rows, normalized_rows=normalized_rows)
     quality = compact_evidence_quality(evidence_quality_payload or normalized.evidence_quality())
+    execution_rows = execution_normalized_rows or normalized
+    data_payload = {
+        "kind": config.data.kind,
+        "dataset": config.data.dataset,
+        "symbols": list(config.data.symbols),
+        "start": config.data.start.isoformat(),
+        "end": config.data.end.isoformat(),
+    }
+    has_explicit_load_window = (
+        config.data.load_start is not None or config.data.load_end is not None
+    )
+    if has_explicit_load_window:
+        data_payload["load_start"] = config.data.effective_load_start.isoformat()
+        data_payload["load_end"] = config.data.effective_load_end.isoformat()
+
     payload = {
         "artifact_profile": config.output.artifact_profile,
         "replayable_from_artifacts": replayable_from_artifacts_for_profile(
             config.output.artifact_profile
         ),
-        "data": {
-            "kind": config.data.kind,
-            "dataset": config.data.dataset,
-            "symbols": list(config.data.symbols),
-            "start": config.data.start.isoformat(),
-            "end": config.data.end.isoformat(),
-        },
+        "data": data_payload,
         "rows": {
             "total": len(normalized),
             "by_symbol": normalized.ranges_by_symbol,
@@ -188,6 +198,13 @@ def write_data_manifest(
         "metric_semantics": trade_result_metric_semantics(config.data.kind),
         **quality,
     }
+    if has_explicit_load_window:
+        payload["execution_rows"] = {
+            "total": len(execution_rows),
+            "by_symbol": execution_rows.ranges_by_symbol,
+            "normalized_rows_sha256": execution_rows.normalized_rows_sha256,
+            "row_contract": execution_rows.row_contract_summary(),
+        }
     _write_json(result_dir / "data_manifest.json", payload)
 
 
@@ -304,6 +321,8 @@ def summary_payload(
     evidence_quality: dict[str, object],
     param_contract: str = "unknown",
     economic_metrics: Mapping[str, object] | None = None,
+    generated_decision_count: int | None = None,
+    excluded_decision_count: int | None = None,
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
@@ -330,6 +349,10 @@ def summary_payload(
     }
     if economic_metrics is not None:
         payload["economic_metrics"] = json_safe_value(dict(economic_metrics))
+    if generated_decision_count is not None:
+        payload["generated_decision_count"] = generated_decision_count
+    if excluded_decision_count is not None:
+        payload["excluded_decision_count"] = excluded_decision_count
     return payload
 
 

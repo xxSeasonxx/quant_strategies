@@ -37,6 +37,7 @@ def make_config(
     symbols: list[str] | None = None,
     dataset: str | None = "equity_1min",
     fill_price: str = "close",
+    data_extra: str = "",
 ):
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +55,7 @@ kind = "{kind}"
 {dataset_line}symbols = [{symbols_text}]
 start = "2024-01-01"
 end = "2024-01-05"
+{data_extra}
 
 [fill_model]
 price = "{fill_price}"
@@ -107,6 +109,36 @@ def test_bars_adapter_loads_one_symbol_via_contract_loader(
     assert [dict(item) for item in loaded.rows] == [row("SPY")]
     assert loaded.normalized_rows is not None
     assert loaded.rows == loaded.normalized_rows.projection_rows()
+
+
+def test_bars_adapter_uses_explicit_load_window_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = make_config(
+        tmp_path,
+        data_extra='load_start = "2023-12-31"\nload_end = "2024-01-07"\n',
+    )
+    engine = object()
+    calls: list[tuple[object, str, str, object, object, bool]] = []
+
+    def fake_load_strategy_bars(engine_arg, symbol, dataset, start, end, *, strict):
+        calls.append((engine_arg, symbol, dataset, start, end, strict))
+        return [row(symbol)]
+
+    monkeypatch.setattr(data_loader.contract_loaders, "load_strategy_bars", fake_load_strategy_bars)
+
+    data_loader.load_data(config, engine=engine)
+
+    assert calls == [
+        (
+            engine,
+            "SPY",
+            "equity_1min",
+            config.data.load_start,
+            config.data.load_end,
+            True,
+        )
+    ]
 
 
 def test_universe_adapter_preserves_upstream_row_order(
@@ -212,6 +244,36 @@ def test_crypto_perp_funding_adapter_loads_funding_rows(
 
     assert calls == [("BTC-PERP", True)]
     assert loaded.rows[0]["funding_rate"] == 0.0001
+
+
+def test_crypto_perp_funding_adapter_uses_explicit_load_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = make_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbols=["BTC-PERP"],
+        dataset=None,
+        data_extra='load_end = "2024-01-07"\n',
+    )
+    calls: list[tuple[str, object, object, bool]] = []
+
+    def fake_load_crypto(engine, symbol, start, end, *, strict):
+        calls.append((symbol, start, end, strict))
+        return [
+            row(
+                symbol,
+                funding_rate=0.0001,
+                funding_timestamp=row(symbol)["timestamp"],
+                has_funding_event=True,
+            )
+        ]
+
+    monkeypatch.setattr(data_loader.loader, "load_crypto_perp_bars_with_funding", fake_load_crypto)
+
+    data_loader.load_data(config, engine=object())
+
+    assert calls == [("BTC-PERP", config.data.start, config.data.load_end, True)]
 
 
 def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(

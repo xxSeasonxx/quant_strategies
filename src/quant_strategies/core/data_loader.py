@@ -81,6 +81,8 @@ def load_data(
 
 def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, Any]]:
     data = config.data
+    load_start = data.effective_load_start
+    load_end = data.effective_load_end
     if data.kind == "bars":
         if data.dataset is None:
             raise DataLoadError("data.dataset is required for bars")
@@ -89,8 +91,8 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
                 engine,
                 data.symbols[0],
                 data.dataset,
-                data.start,
-                data.end,
+                load_start,
+                load_end,
                 strict=True,
             )
             return _rows_from_frame(frame)
@@ -98,8 +100,8 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
             engine,
             list(data.symbols),
             data.dataset,
-            data.start,
-            data.end,
+            load_start,
+            load_end,
             strict=True,
         )
         return _rows_from_frame(frame)
@@ -110,8 +112,8 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
             frame = loader.resolve("load_crypto_perp_bars_with_funding")(
                 engine,
                 symbol,
-                data.start,
-                data.end,
+                load_start,
+                load_end,
                 strict=True,
             )
             rows.extend(_rows_from_frame(frame))
@@ -124,8 +126,8 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
             frame = loader.resolve("load_fx_bars_with_quotes")(
                 engine,
                 symbol,
-                data.start,
-                data.end,
+                load_start,
+                load_end,
                 strict=True,
                 require_quotes=require_quotes,
             )

@@ -42,12 +42,26 @@ class WindowedDataConfig(SharedConfigModel):
 class DataConfig(WindowedDataConfig):
     start: date
     end: date
+    load_start: date | None = None
+    load_end: date | None = None
 
     @model_validator(mode="after")
     def validate_window(self) -> Self:
         if self.end < self.start:
             raise ValueError("data.end must be on or after data.start")
+        if self.load_start is not None and self.load_start > self.start:
+            raise ValueError("data.load_start must be on or before data.start")
+        if self.load_end is not None and self.load_end < self.end:
+            raise ValueError("data.load_end must be on or after data.end")
         return self
+
+    @property
+    def effective_load_start(self) -> date:
+        return self.load_start or self.start
+
+    @property
+    def effective_load_end(self) -> date:
+        return self.load_end or self.end
 
 
 class FillModelConfig(SharedConfigModel):

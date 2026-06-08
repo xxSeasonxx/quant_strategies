@@ -252,6 +252,11 @@ with `results_dir`, `quick_checks`, `artifact_profile`, optional
 profile) `diagnostic_sample_trades`. See
 [`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
 
+For Train iteration, `[data].start` / `[data].end` are the strategy-visible
+decision and scoring window. If exits need later bars, add `[data].load_end`
+as execution-only coverage. The strategy and causality replay still cannot see
+those buffer rows; the engine can use them only to resolve fills and exits.
+
 **`artifact_profile`** controls how much is written. `full` is the only profile
 that is replayable from artifacts (it writes the strategy input rows, decision
 records, engine request, and evidence). `summary` and `diagnostic` are compact;

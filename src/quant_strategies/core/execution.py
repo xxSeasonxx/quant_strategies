@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -44,6 +45,9 @@ class StrategyExecutionResult:
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
     param_contract: str = "validated"
+    execution_loaded_rows: Sequence[Mapping[str, Any]] | None = None
+    execution_normalized_rows: NormalizedRows | None = None
+    execution_normalized_rows_sha256: str | None = None
 
 
 class StrategyExecutionError(RunnerError):
@@ -57,6 +61,7 @@ class StrategyExecutionError(RunnerError):
         evidence_quality: dict[str, Any] | None = None,
         violations: tuple[str, ...] = (),
         decision_count: int | None = None,
+        execution_normalized_rows: NormalizedRows | None = None,
     ) -> None:
         super().__init__(message)
         self.stage = stage
@@ -68,6 +73,7 @@ class StrategyExecutionError(RunnerError):
         self.evidence_quality = evidence_quality
         self.violations = violations
         self.decision_count = decision_count
+        self.execution_normalized_rows = execution_normalized_rows
 
 
 def execute_strategy_run(
@@ -113,16 +119,31 @@ def execute_strategy_run(
         normalized_rows = loaded.rows
     else:
         normalized_rows = NormalizedRows.from_rows(config, loaded.rows)
-    rows = normalized_rows.projection_rows()
-    row_hash = normalized_rows.normalized_rows_sha256
-    evidence = compact_evidence_quality(normalized_rows.evidence_quality())
-    row_contract = normalized_rows.row_contract_summary()
+    execution_rows = normalized_rows.projection_rows()
+    strategy_rows = _strategy_visible_rows(config, execution_rows)
+    if (config.data.load_start is not None or config.data.load_end is not None) and not strategy_rows:
+        raise StrategyExecutionError(
+            "data_load",
+            "decision window returned no rows",
+            loaded_rows=(),
+            normalized_rows=None,
+            evidence_quality=None,
+            execution_normalized_rows=normalized_rows,
+        )
+    if len(strategy_rows) == len(execution_rows):
+        strategy_normalized_rows = normalized_rows
+    else:
+        strategy_normalized_rows = NormalizedRows.from_rows(config, strategy_rows)
+    rows = strategy_normalized_rows.projection_rows()
+    row_hash = strategy_normalized_rows.normalized_rows_sha256
+    evidence = compact_evidence_quality(strategy_normalized_rows.evidence_quality())
+    row_contract = strategy_normalized_rows.row_contract_summary()
     if require_passed_row_contract and row_contract["status"] != "passed":
         raise StrategyExecutionError(
             "data_load",
             _row_contract_failure_message(row_contract),
             loaded_rows=rows,
-            normalized_rows=normalized_rows,
+            normalized_rows=strategy_normalized_rows,
             evidence_quality=evidence,
         )
     strategy_rows = frozen_rows(rows)
@@ -138,7 +159,7 @@ def execute_strategy_run(
                 "decision_generation",
                 "; ".join(violations),
                 loaded_rows=rows,
-                normalized_rows=normalized_rows,
+                normalized_rows=strategy_normalized_rows,
                 evidence_quality=evidence,
                 violations=tuple(violations),
                 decision_count=decision_count,
@@ -150,31 +171,36 @@ def execute_strategy_run(
             "decision_generation",
             f"strategy execution exited: {_system_exit_message(exc)}",
             loaded_rows=rows,
-            normalized_rows=normalized_rows,
+            normalized_rows=strategy_normalized_rows,
             evidence_quality=evidence,
             decision_count=decision_count,
+            execution_normalized_rows=normalized_rows,
         ) from exc
     except Exception as exc:
         raise StrategyExecutionError(
             "decision_generation",
             f"strategy execution failed: {exc}",
             loaded_rows=rows,
-            normalized_rows=normalized_rows,
+            normalized_rows=strategy_normalized_rows,
             evidence_quality=evidence,
             decision_count=decision_count,
+            execution_normalized_rows=normalized_rows,
         ) from exc
 
     return StrategyExecutionResult(
         generate_decisions=generate_decisions,
         validated_params=validated_params,
         loaded_rows=rows,
-        normalized_rows=normalized_rows,
+        normalized_rows=strategy_normalized_rows,
         frozen_rows=strategy_rows,
         frozen_params=strategy_params,
         decisions=decisions,
         normalized_rows_sha256=row_hash,
         evidence_quality=evidence,
         param_contract="validated" if had_param_validator else "unvalidated_passthrough",
+        execution_loaded_rows=execution_rows,
+        execution_normalized_rows=normalized_rows,
+        execution_normalized_rows_sha256=normalized_rows.normalized_rows_sha256,
     )
 
 
@@ -196,3 +222,26 @@ def _row_contract_failure_message(row_contract: Mapping[str, Any]) -> str:
         if reasons:
             return f"row contract failed: {'; '.join(reasons)}"
     return f"row contract {row_contract['status']}"
+
+
+def _strategy_visible_rows(
+    config: StrategyExecutionSpec,
+    rows: Sequence[Mapping[str, Any]],
+) -> Sequence[Mapping[str, Any]]:
+    if config.data.load_start is None and config.data.load_end is None:
+        return rows
+    start = config.data.start
+    end = config.data.end
+    return tuple(row for row in rows if _row_date(row.get("timestamp")) in _date_window(start, end))
+
+
+def _date_window(start: date, end: date) -> range:
+    return range(start.toordinal(), end.toordinal() + 1)
+
+
+def _row_date(value: object) -> int:
+    if isinstance(value, datetime):
+        return value.date().toordinal()
+    if isinstance(value, date):
+        return value.toordinal()
+    return -1

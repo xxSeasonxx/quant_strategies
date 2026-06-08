@@ -146,7 +146,8 @@ Common sections, then per-surface differences. Dates are ISO strings
 | `kind` | `str` | `bars`, `forex_with_quotes`, or `crypto_perp_funding` |
 | `dataset` | `str` | **required for `kind="bars"`** (`equity_1min`, `equity_daily`, `crypto_perp_1min`, `forex_1min`, `forex_daily`, …); inferred for derived kinds |
 | `symbols` | `list[str]` | one entry = single name; many = universe panel (missing symbol raises) |
-| `start` / `end` | `str` (date) | **quick run only** — validation/evaluation carry dates in `[[windows]]` |
+| `start` / `end` | `str` (date) | **quick run only** — strategy-visible decision/scoring window |
+| `load_start` / `load_end` | `str` (date, optional) | **quick run only** — wider execution/load window; must cover `start`/`end`; omitted means same as decision window |
 
 **`[fill_model]`** — `price` (`"close"` or `"quote"`; use `quote` for
 `forex_with_quotes`), `entry_lag_bars` (int), `exit_lag_bars` (int).
@@ -175,6 +176,11 @@ Train iteration loops that need deterministic + emitted-decision replay without
 full row-grid no-emission replay, or `"off"` for explicit profiling/debugging
 only. `strict_probe_limit` optionally caps strict no-emission probes; capped
 strict runs are marked incomplete and do not claim full strict replay evidence.
+
+Quick runs can set optional `[data].load_start` / `[data].load_end` when the
+engine needs extra rows outside the decision window for fills or exits. Strategy
+generation, strategy-input artifacts, and causality replay still use only
+`start` / `end`; execution-buffer rows are engine support, not scoreable entries.
 
 ### Validation (`validation.toml`)
 

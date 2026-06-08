@@ -26,8 +26,10 @@ def summary_profile_payload(
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
     row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
+    execution_normalized_rows_hash: str | None = None,
+    execution_row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "artifact_profile": "summary",
         "replayable_from_artifacts": replayable_from_artifacts_for_profile("summary"),
         "strategy_id": config.strategy_id,
@@ -42,6 +44,15 @@ def summary_profile_payload(
         "engine": json_safe_value(engine),
         "metric_semantics": trade_result_metric_semantics(config.data.kind),
     }
+    if execution_normalized_rows_hash is not None or execution_row_ranges is not None:
+        payload["execution_rows"] = {
+            "normalized_rows_sha256": execution_normalized_rows_hash,
+            "by_symbol": dict(execution_row_ranges or {}),
+            "row_count": sum(
+                int(item.get("count", 0)) for item in (execution_row_ranges or {}).values()
+            ),
+        }
+    return payload
 
 
 def write_summary_profile_artifact(
@@ -53,6 +64,8 @@ def write_summary_profile_artifact(
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
     row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
+    execution_normalized_rows_hash: str | None = None,
+    execution_row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> Path:
     path = result_dir / "artifact_profile_summary.json"
     payload = summary_profile_payload(
@@ -62,6 +75,8 @@ def write_summary_profile_artifact(
         engine=engine,
         normalized_rows_hash=normalized_rows_hash,
         row_ranges=row_ranges,
+        execution_normalized_rows_hash=execution_normalized_rows_hash,
+        execution_row_ranges=execution_row_ranges,
     )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n")
     return path

@@ -31,6 +31,7 @@ def write_config(
     fill_model_extra: str = "",
     artifact_profile: str | None = None,
     output_extra: str = "",
+    data_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -47,11 +48,12 @@ strategy_id = "demo"
 
 [data]
 kind = "{data_kind}"
-{dataset_line}symbols = ["SPY"]
-start = "2024-01-01"
-end = "2024-01-05"
+	{dataset_line}symbols = ["SPY"]
+	start = "2024-01-01"
+	end = "2024-01-05"
+	{data_extra}
 
-[params]
+	[params]
 weight = 1.0
 
 [fill_model]
@@ -84,6 +86,44 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.output.artifact_profile == "diagnostic"
     assert config.output.diagnostic_sample_trades == 5
     assert config.params == {"weight": 1.0}
+    assert config.data.load_start is None
+    assert config.data.load_end is None
+
+
+def test_data_load_window_fields_are_optional_and_validated(tmp_path: Path):
+    write_strategy(tmp_path)
+    config = load_config(
+        write_config(
+            tmp_path,
+            data_extra='load_start = "2023-12-31"\nload_end = "2024-01-07"\n',
+        ),
+        repo_root=tmp_path,
+    )
+
+    assert config.data.start.isoformat() == "2024-01-01"
+    assert config.data.end.isoformat() == "2024-01-05"
+    assert config.data.load_start is not None
+    assert config.data.load_start.isoformat() == "2023-12-31"
+    assert config.data.load_end is not None
+    assert config.data.load_end.isoformat() == "2024-01-07"
+
+
+@pytest.mark.parametrize(
+    ("data_extra", "message"),
+    [
+        ('load_end = "2024-01-04"\n', "load_end"),
+        ('load_start = "2024-01-02"\n', "load_start"),
+    ],
+)
+def test_data_load_window_must_cover_decision_window(
+    tmp_path: Path,
+    data_extra: str,
+    message: str,
+):
+    write_strategy(tmp_path)
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(write_config(tmp_path, data_extra=data_extra), repo_root=tmp_path)
 
 
 def test_committed_run_configs_parse_without_live_data_access():

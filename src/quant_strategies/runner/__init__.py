@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +171,7 @@ def run_config(
         config,
         rows=execution.loaded_rows,
         normalized_rows=execution.normalized_rows,
+        execution_normalized_rows=execution.execution_normalized_rows,
         evidence_quality=evidence_quality,
     )
     if not causality.passed:
@@ -182,13 +184,15 @@ def run_config(
             evidence_quality=evidence_quality,
             event_emitter=events,
         )
+    decision_window_decisions = _decision_window_decisions(config, execution.decisions)
     if config.output.artifact_profile == "full":
-        artifacts.write_decision_records(result_dir, execution.decisions)
+        artifacts.write_decision_records(result_dir, decision_window_decisions)
 
     request, failure = _prepare_engine_request(
         config,
         result_dir,
         execution,
+        decision_window_decisions,
         evidence_quality,
         repo_root=effective_repo_root,
         event_emitter=events,
@@ -213,6 +217,7 @@ def run_config(
             config,
             result_dir,
             execution,
+            decision_window_decisions,
             engine_run,
             economics,
             evidence_quality,
@@ -270,6 +275,7 @@ def _execution_failure_result(
             rows=exc.loaded_rows,
             normalized_rows=exc.normalized_rows,
             evidence_quality=_policy_evidence_quality(config, exc.evidence_quality),
+            execution_normalized_rows=exc.execution_normalized_rows,
         )
     return _failure_result(
         config,
@@ -304,12 +310,14 @@ def _write_execution_data_manifest(
     rows: Sequence[Mapping[str, Any]],
     normalized_rows: NormalizedRows,
     evidence_quality: dict[str, object] | None,
+    execution_normalized_rows: NormalizedRows | None = None,
 ) -> None:
     artifacts.write_data_manifest(
         result_dir,
         config,
         rows,
         normalized_rows=normalized_rows,
+        execution_normalized_rows=execution_normalized_rows,
         evidence_quality_payload=evidence_quality,
     )
 
@@ -346,6 +354,7 @@ def _prepare_engine_request(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
+    decision_window_decisions: list[StrategyDecision],
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
@@ -355,10 +364,13 @@ def _prepare_engine_request(
         with event_emitter.stage(
             "request_build",
             strategy_id=config.strategy_id,
-            decision_count=len(execution.decisions),
+            decision_count=len(decision_window_decisions),
         ):
             _assert_row_contract_allows_engine_request(evidence_quality)
-            _engine_runner.assert_supported_decisions(execution.decisions)
+            _assert_execution_row_contract_allows_engine_request(
+                execution.execution_normalized_rows
+            )
+            _engine_runner.assert_supported_decisions(decision_window_decisions)
     except RunnerError as exc:
         return None, _failure_result(
             config,
@@ -374,10 +386,10 @@ def _prepare_engine_request(
         with event_emitter.stage(
             "data_readiness",
             strategy_id=config.strategy_id,
-            decision_count=len(execution.decisions),
+            decision_count=len(decision_window_decisions),
         ):
             data_readiness.assert_decision_rows_ready(
-                execution.normalized_rows, execution.decisions
+                execution.normalized_rows, decision_window_decisions
             )
     except RunnerError as exc:
         return None, _failure_result(
@@ -394,13 +406,13 @@ def _prepare_engine_request(
         with event_emitter.stage(
             "request_build",
             strategy_id=config.strategy_id,
-            row_count=len(execution.loaded_rows),
-            decision_count=len(execution.decisions),
+            row_count=len(execution.execution_normalized_rows or execution.normalized_rows),
+            decision_count=len(decision_window_decisions),
         ):
             request = _engine_runner.build_request(
                 strategy_id=config.strategy_id,
-                rows=execution.normalized_rows,
-                decisions=execution.decisions,
+                rows=execution.execution_normalized_rows or execution.normalized_rows,
+                decisions=decision_window_decisions,
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
             )
@@ -426,6 +438,16 @@ def _assert_row_contract_allows_engine_request(evidence_quality: dict[str, objec
     raise RunnerError(_row_contract_failure_message(row_contract))
 
 
+def _assert_execution_row_contract_allows_engine_request(
+    normalized_rows: NormalizedRows | None,
+) -> None:
+    if normalized_rows is None:
+        return
+    row_contract = normalized_rows.row_contract_summary()
+    if row_contract.get("status") == "failed":
+        raise RunnerError(_row_contract_failure_message(row_contract))
+
+
 def _row_contract_failure_message(row_contract: Mapping[str, object]) -> str:
     feedback = row_contract.get("quant_data_feedback")
     if isinstance(feedback, Sequence) and not isinstance(feedback, str):
@@ -443,6 +465,22 @@ def _row_contract_failure_message(row_contract: Mapping[str, object]) -> str:
             return f"row_contract_failed: {'; '.join(reasons)}"
 
     return "row_contract_failed"
+
+
+def _decision_window_decisions(
+    config: config_module.RunConfig,
+    decisions: Sequence[StrategyDecision],
+) -> list[StrategyDecision]:
+    return [
+        decision
+        for decision in decisions
+        if _date_in_window(decision.decision_time, config.data.start, config.data.end)
+    ]
+
+
+def _date_in_window(value: datetime | date, start: date, end: date) -> bool:
+    item = value.date() if isinstance(value, datetime) else value
+    return start <= item <= end
 
 
 def _evaluate_engine_request(
@@ -487,6 +525,7 @@ def _write_completion_artifacts(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
+    decision_window_decisions: list[StrategyDecision],
     engine_run: _engine_runner.EngineRun | None,
     economics: RunEconomics,
     evidence_quality: dict[str, object],
@@ -519,14 +558,25 @@ def _write_completion_artifacts(
         if config.output.artifact_profile == "summary":
             from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 
+            has_explicit_load_window = (
+                config.data.load_start is not None or config.data.load_end is not None
+            )
             write_summary_profile_artifact(
                 result_dir,
                 config=config,
                 rows=execution.loaded_rows,
-                decisions=execution.decisions,
+                decisions=decision_window_decisions,
                 engine=engine_summary,
                 normalized_rows_hash=execution.normalized_rows_sha256,
                 row_ranges=execution.normalized_rows.ranges_by_symbol,
+                execution_normalized_rows_hash=(
+                    execution.execution_normalized_rows_sha256 if has_explicit_load_window else None
+                ),
+                execution_row_ranges=(
+                    None
+                    if not has_explicit_load_window or execution.execution_normalized_rows is None
+                    else execution.execution_normalized_rows.ranges_by_symbol
+                ),
             )
         if config.output.artifact_profile == "diagnostic":
             from quant_strategies.runner import diagnostics
@@ -562,6 +612,8 @@ def _write_completion_artifacts(
                 evidence_quality=evidence_quality,
                 param_contract=execution.param_contract,
                 economic_metrics=economics.summary_payload(),
+                generated_decision_count=len(execution.decisions),
+                excluded_decision_count=len(execution.decisions) - len(decision_window_decisions),
             ),
         )
     return assessment_status, notes.strip()
@@ -657,6 +709,7 @@ def _audit_observation_dependencies(
             rows=execution.loaded_rows,
             normalized_rows=execution.normalized_rows,
             evidence_quality=_policy_evidence_quality(config, execution.evidence_quality),
+            execution_normalized_rows=execution.execution_normalized_rows,
         )
         return _failure_result(
             config,

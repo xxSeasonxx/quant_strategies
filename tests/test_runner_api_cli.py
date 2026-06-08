@@ -152,6 +152,8 @@ def write_config(
     kind: str = "bars",
     symbol: str = "SPY",
     dataset: str | None = "equity_1min",
+    start: str = "2024-01-01",
+    end: str = "2024-01-05",
     fill_price: str = "close",
     entry_lag_bars: int = 1,
     quick_checks: bool = True,
@@ -159,6 +161,7 @@ def write_config(
     diagnostic_sample_trades: int | None = None,
     causality_check: str | None = None,
     strict_probe_limit: object | None = None,
+    data_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -185,8 +188,9 @@ strategy_id = "demo"
 [data]
 kind = "{kind}"
 {dataset_line}symbols = ["{symbol}"]
-start = "2024-01-01"
-end = "2024-01-05"
+start = "{start}"
+end = "{end}"
+{data_extra}
 
 [params]
 
@@ -590,6 +594,202 @@ def test_run_config_capped_strict_replay_records_incomplete_strict_evidence(
     ]
     assert data_manifest["strict_replay_capped"] is True
     assert data_manifest["strict_no_emission_verified"] is False
+
+
+def test_run_config_strategy_and_replay_do_not_see_execution_buffer_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if any(row['timestamp'].isoformat().startswith('2024-01-03') for row in rows):\n"
+        "        raise RuntimeError('strategy saw execution buffer row')\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
+        "        decision_time=rows[-1]['timestamp'],\n"
+        "        as_of_time=rows[-1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        metadata={'strategy_row_count': len(rows)},\n"
+        "    )]\n"
+    )
+    config_path = write_config(
+        tmp_path,
+        end="2024-01-02",
+        data_extra='load_end = "2024-01-04"\n',
+        artifact_profile="full",
+        causality_check="emitted",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.economics.trade_count == 1
+    decision_record = json.loads(
+        (result.result_dir / "decision_records.jsonl").read_text().splitlines()[0]
+    )
+    assert decision_record["metadata"]["strategy_row_count"] == 2
+    strategy_rows = (result.result_dir / "strategy_input_rows.jsonl").read_text().splitlines()
+    assert len(strategy_rows) == 2
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["rows"]["total"] == 2
+    assert data_manifest["execution_rows"]["total"] == 4
+
+
+def test_run_config_execution_buffer_fills_late_decision_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [StrategyDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
+        "        decision_time=rows[-1]['timestamp'],\n"
+        "        as_of_time=rows[-1]['timestamp'],\n"
+        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "    )]\n"
+    )
+    config_path = write_config(
+        tmp_path,
+        end="2024-01-02",
+        data_extra='load_end = "2024-01-04"\n',
+        artifact_profile="diagnostic",
+        causality_check="emitted",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.economics.trade_count == 1
+    assert result.economics.trades[0].decision_time.isoformat().startswith("2024-01-02")
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["rows"]["total"] == 2
+    assert data_manifest["execution_rows"]["total"] == 4
+
+
+def test_run_config_fails_when_buffer_has_no_decision_window_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        end="2024-01-02",
+        data_extra='load_end = "2024-01-04"\n',
+        artifact_profile="diagnostic",
+    )
+    buffer_only = rows(102.0, 104.0)
+    for row in buffer_only:
+        row["timestamp"] = row["timestamp"] + timedelta(days=2)
+        row["available_at"] = row["available_at"] + timedelta(days=2)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=buffer_only),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "data_load"
+    assert "decision window returned no rows" in result.message
+
+
+def test_run_config_reports_execution_row_contract_failure_with_buffer_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        end="2024-01-02",
+        data_extra='load_end = "2024-01-03"\n',
+        artifact_profile="diagnostic",
+    )
+    loaded_rows = rows(100.0, 101.0, 102.0)
+    loaded_rows[-1]["timestamp"] = "not-a-timestamp"
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "request_build"
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert data_manifest["rows"]["total"] == 2
+    assert data_manifest["execution_rows"]["total"] == 3
+    assert data_manifest["execution_rows"]["row_contract"]["status"] == "failed"
+    assert "row_invalid_timestamp" in result.message
+
+
+def test_run_config_engine_artifacts_use_only_decision_window_decisions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    strategy = tmp_path / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    decisions = []\n"
+        "    for row in rows:\n"
+        "        decisions.append(StrategyDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=InstrumentRef(kind='equity_or_etf', symbol=row['symbol']),\n"
+        "            decision_time=row['timestamp'],\n"
+        "            as_of_time=row['timestamp'],\n"
+        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
+        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        ))\n"
+        "    return decisions\n"
+    )
+    config_path = write_config(
+        tmp_path,
+        end="2024-01-02",
+        data_extra='load_end = "2024-01-04"\n',
+        artifact_profile="full",
+        causality_check="off",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
+    request = json.loads((result.result_dir / "engine_request.json").read_text())
+    summary = read_summary(result.result_dir)
+    assert len(decision_records) == 2
+    assert len(request["spec"]["decisions"]) == 2
+    assert summary["generated_decision_count"] == 2
+    assert summary["excluded_decision_count"] == 0
 
 
 def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
