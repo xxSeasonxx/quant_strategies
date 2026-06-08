@@ -209,7 +209,7 @@ def check_hidden_lookahead(
                 replay_payloads_cache[cache_key] = replay_payloads
             expected_payloads = _expected_payloads_for_boundary(
                 baseline_decisions,
-                boundary.expected_decision_ids,
+                boundary,
             )
             if not _payloads_contain_expected(replay_payloads, expected_payloads):
                 return LookaheadCheckResult(
@@ -308,10 +308,16 @@ def _decision_payloads(
 
 def _expected_payloads_for_boundary(
     decisions: Sequence[StrategyDecision],
-    expected_decision_ids: frozenset[str | None],
+    boundary: ReplayBoundary,
 ) -> tuple[dict[str, Any], ...]:
     return _decision_payloads(
-        [decision for decision in decisions if decision.decision_id in expected_decision_ids]
+        [
+            decision
+            for decision in decisions
+            if decision.decision_id in boundary.expected_decision_ids
+            and _decision_matches_boundary(decision, boundary)
+            and decision.decision_time == boundary.decision_time
+        ]
     )
 
 
