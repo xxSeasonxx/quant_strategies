@@ -16,6 +16,7 @@ from quant_strategies.core.config import (
     default_repo_root,
 )
 from quant_strategies.core.errors import ConfigError
+from quant_strategies.core.portfolio_foundation import MAX_FOUNDATION_SUBWINDOWS
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
 CausalityCheck = Literal["off", "emitted", "strict", "focused", "micro"]
@@ -85,6 +86,11 @@ class OutputConfig(RunnerConfigModel):
     quick_checks: bool = False
     artifact_profile: ArtifactProfile = "diagnostic"
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
+    foundation_enabled: bool = True
+    foundation_subwindows: StrictInt = Field(default=6, ge=1, le=MAX_FOUNDATION_SUBWINDOWS)
+    foundation_trial_count: StrictInt | None = Field(default=None, ge=1)
+    foundation_benchmark_sharpe: float = 0.0
+    foundation_cost_stress_multiplier: float = Field(default=2.0, ge=1.0)
     causality_check: CausalityCheck = "strict"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)
@@ -103,6 +109,13 @@ class OutputConfig(RunnerConfigModel):
     @field_validator("focused_timeout_seconds", "micro_timeout_seconds")
     @classmethod
     def validate_timeout_seconds(cls, value: float, info: ValidationInfo) -> float:
+        if not math.isfinite(value):
+            raise ValueError(f"output.{info.field_name} must be finite")
+        return value
+
+    @field_validator("foundation_benchmark_sharpe", "foundation_cost_stress_multiplier")
+    @classmethod
+    def validate_foundation_floats(cls, value: float, info: ValidationInfo) -> float:
         if not math.isfinite(value):
             raise ValueError(f"output.{info.field_name} must be finite")
         return value

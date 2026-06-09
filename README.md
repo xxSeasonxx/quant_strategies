@@ -120,9 +120,14 @@ for one strategy version. For Train/autoresearch iteration, `micro` replay is a
 cheap annotation that never blocks scoring; complete replay remains available
 through explicit strict replay and the later validation/evaluation surfaces.
 Completed quick-run summaries include engine-derived
-`economic_metrics` from the internal trade ledger. Python callers receive
+`economic_metrics` from the internal trade ledger plus diagnostic
+`portfolio_foundation` metrics for Train scoring. The foundation is a
+dependency-light quick-run portfolio-return matrix, not survivor-grade
+evaluation evidence. Python callers receive
 `RunResult`; status lives under `result.outcome`, while replayability,
-row-contract, causality, and warning fields live under `result.evidence`.
+row-contract, causality, and warning fields live under `result.evidence`;
+trade economics live under `result.economics`, and portfolio-foundation
+diagnostics live under `result.foundation`.
 The runner API does not keep flat compatibility aliases for older result fields.
 Use `result.succeeded` as the preferred terminal success check.
 Runner-stage failures return `result.outcome.completed is False`, set

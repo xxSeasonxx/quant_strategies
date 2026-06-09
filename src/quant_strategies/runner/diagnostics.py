@@ -35,6 +35,7 @@ def diagnostic_payload(
     assessment_status: str,
     evidence_quality: Mapping[str, Any],
     economic_slices: Mapping[str, Any] | None = None,
+    portfolio_foundation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     trades = _diagnostic_trades(engine)
     trade_result = _mapping_or_empty(engine.get("trade_result"))
@@ -56,6 +57,9 @@ def diagnostic_payload(
         "economic_slices": dict(economic_slices)
         if economic_slices is not None
         else diagnostic_slices(trades),
+        "portfolio_foundation": dict(portfolio_foundation)
+        if portfolio_foundation is not None
+        else None,
         "sample_trades": _sample_trades(trades, config.output.diagnostic_sample_trades),
     }
 

@@ -22,7 +22,14 @@ from quant_strategies.core import engine_runner
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.runner import RunEconomics, RunOutcome, RunResult, RunTrade, run_config
+from quant_strategies.runner import (
+    RunEconomics,
+    RunOutcome,
+    RunPortfolioFoundation,
+    RunResult,
+    RunTrade,
+    run_config,
+)
 from quant_strategies.runner import config as config_module
 
 SUMMARY_KEYS = {
@@ -170,6 +177,11 @@ def write_config(
     focused_timeout_seconds: object | None = None,
     micro_probe_limit: object | None = None,
     micro_timeout_seconds: object | None = None,
+    foundation_enabled: bool | None = None,
+    foundation_subwindows: object | None = None,
+    foundation_trial_count: object | None = None,
+    foundation_benchmark_sharpe: object | None = None,
+    foundation_cost_stress_multiplier: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
 ) -> Path:
@@ -204,6 +216,31 @@ def write_config(
         if micro_timeout_seconds is not None
         else ""
     )
+    foundation_enabled_line = (
+        f"foundation_enabled = {str(foundation_enabled).lower()}\n"
+        if foundation_enabled is not None
+        else ""
+    )
+    foundation_subwindows_line = (
+        f"foundation_subwindows = {foundation_subwindows}\n"
+        if foundation_subwindows is not None
+        else ""
+    )
+    foundation_trial_count_line = (
+        f"foundation_trial_count = {foundation_trial_count}\n"
+        if foundation_trial_count is not None
+        else ""
+    )
+    foundation_benchmark_sharpe_line = (
+        f"foundation_benchmark_sharpe = {foundation_benchmark_sharpe}\n"
+        if foundation_benchmark_sharpe is not None
+        else ""
+    )
+    foundation_cost_stress_multiplier_line = (
+        f"foundation_cost_stress_multiplier = {foundation_cost_stress_multiplier}\n"
+        if foundation_cost_stress_multiplier is not None
+        else ""
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -232,8 +269,8 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}
-		'''.lstrip()
+		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
+			'''.lstrip()
     )
     return config_path
 
@@ -1770,6 +1807,127 @@ def test_run_config_economics_summary_matches_summary_json(
     assert result.economics.by_exit_reason["max_hold"]["count"] == 1
 
 
+def test_run_config_exposes_portfolio_foundation_and_summary_json(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        foundation_subwindows=1,
+        foundation_trial_count=10,
+        foundation_benchmark_sharpe=0.0,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0, 104.0, 105.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert isinstance(result.foundation, RunPortfolioFoundation)
+    summary = read_summary(result.result_dir)
+    assert result.foundation.summary_payload() == summary["portfolio_foundation"]
+    payload = summary["portfolio_foundation"]
+    assert payload["evidence_class"] == "quick_run_portfolio_foundation_diagnostic"
+    assert payload["basis"] == "quick_run_lightweight_portfolio_path"
+    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
+    realistic = payload["scenarios"]["realistic_costs"]
+    assert realistic["subwindow_count"] == 1
+    assert realistic["min_closed_trade_count"] == 1
+    assert realistic["max_symbol_concentration"] == pytest.approx(1.0)
+    assert "subwindows" not in realistic
+    assert "period_returns" not in json.dumps(payload)
+
+
+def test_run_config_pre_engine_failure_leaves_foundation_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+
+    def fail_data_load(config, **_kwargs):
+        raise DataLoadError("strict data window failed")
+
+    monkeypatch.setattr(execution, "load_data", fail_data_load)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.economics is None
+    assert result.foundation is None
+
+
+def test_run_config_foundation_can_be_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        foundation_enabled=False,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.foundation is None
+    summary = read_summary(result.result_dir)
+    assert "portfolio_foundation" not in summary
+
+
+def test_run_config_foundation_failure_is_nonblocking_diagnostic_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
+    )
+
+    def fail_foundation(**_kwargs):
+        raise ValueError("foundation unavailable")
+
+    monkeypatch.setattr(runner_module, "build_portfolio_foundation", fail_foundation)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.foundation is None
+    assert any(
+        warning.startswith("portfolio_foundation_unavailable:")
+        for warning in result.evidence.warnings
+    )
+    summary = read_summary(result.result_dir)
+    assert "portfolio_foundation" not in summary
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    assert summary["evidence_quality_warnings"] == data_manifest["evidence_quality_warnings"]
+    assert summary["evidence_quality_warnings"] == list(result.evidence.warnings)
+
+
+def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, foundation_subwindows=65)
+
+    with pytest.raises(RunnerError, match="foundation_subwindows"):
+        config_module.load_config(config_path, repo_root=tmp_path)
+
+
 def test_run_config_economics_are_profile_independent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1818,6 +1976,7 @@ import sys
 from types import SimpleNamespace
 
 import quant_strategies.core.engine_runner
+import quant_strategies.core.portfolio_foundation
 import quant_strategies.engine
 import quant_strategies.runner
 from quant_strategies.runner.economic_metrics import build_run_economics
@@ -1912,6 +2071,8 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert diagnostics["trade_count"] == 1
     assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
     assert result.economics.slices_payload() == diagnostics["economic_slices"]
+    assert result.foundation.matrix_payload() == diagnostics["portfolio_foundation"]
+    assert "period_returns" not in json.dumps(diagnostics["portfolio_foundation"])
     slices = diagnostics["economic_slices"]
     assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
     assert slices["basis"] == "engine_trade_ledger"

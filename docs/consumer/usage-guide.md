@@ -250,7 +250,12 @@ print(result.economics.trade_count)          # after-cost trade ledger summary
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
 with `results_dir`, `quick_checks`, `artifact_profile`, optional
-`causality_check`, and (for the diagnostic profile) `diagnostic_sample_trades`.
+`causality_check`, quick-run foundation controls
+(`foundation_enabled`, `foundation_subwindows`, `foundation_trial_count`,
+`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for
+the diagnostic profile) `diagnostic_sample_trades`.
+`foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
+you want DSR to stay null with an explicit missing-trial warning.
 Use `causality_check = "micro"` for Train/autoresearch iteration. See
 [`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
 Research candidates live as candidate-local bundles:
@@ -268,14 +273,21 @@ those buffer rows; the engine can use them only to resolve fills and exits.
 **`artifact_profile`** controls how much is written. `full` is the only profile
 that is replayable from artifacts (it writes the strategy input rows, decision
 records, engine request, and evidence). `summary` and `diagnostic` are compact;
-`diagnostic` adds `diagnostics.json` with economic slices. Completed runs always
-write `summary.json` (with `economic_metrics`), `run_manifest.json`, `notes.md`,
-`config.toml`, `strategy_snapshot.py`, and `environment.json`.
+`diagnostic` adds `diagnostics.json` with economic slices and the
+portfolio-foundation matrix. Completed runs always write `summary.json` (with
+`economic_metrics` and compact `portfolio_foundation` when the foundation is
+available), `run_manifest.json`, `notes.md`, `config.toml`,
+`strategy_snapshot.py`, and `environment.json`.
 
 Programmatic consumers can read quick-run after-cost economics from
 `result.economics` on completed engine runs. The object carries the raw per-trade
 ledger plus the same summary scalars/slices written to artifacts, even under
 `artifact_profile = "summary"`; no `summary.json` scraping is required.
+Completed quick runs also expose diagnostic Train portfolio-return foundation
+metrics on `result.foundation`. Use that object for subwindow return statistics,
+DSR inputs, drawdown, trade-count, concentration, and cost-stressed foundation
+metrics. It remains quick-run diagnostic evidence, not evaluation evidence, and
+default artifacts write compact metrics rather than full per-period traces.
 
 The micro causality policy is the Train/autoresearch replay annotation. It runs a
 tiny bounded replay sample, records probe and timeout evidence, and never blocks
@@ -457,9 +469,10 @@ Each accepts `(config_path, *, repo_root=None, event_sink=None)`. Pass an
 `event_sink` for structured stage observability.
 
 For quick-run search loops, use `RunResult.economics.trades` as the in-process
-after-cost trade sample for Train slicing by time or symbol. This is trade-unit,
-point-to-point engine economics only; use `run_evaluation` for OOS period-return
-series or portfolio/NAV evidence.
+after-cost trade sample for trade-unit slicing by time or symbol, and use
+`RunResult.foundation` for diagnostic Train portfolio-return foundation metrics.
+Use `run_evaluation` for OOS portfolio/NAV evidence and survivor-grade trace
+artifacts.
 
 **In scope downstream:** generating candidate strategies and configs, deciding
 what to run, and reading the typed results/artifacts. **Out of scope (stays in

@@ -67,16 +67,23 @@ write per-trade diagnostics to disk.
 
 ### Requirement: The Train path stays trade-unit and dependency-light
 
-This capability SHALL expose only the trade-level (point-to-point, per-trade) economics the
-engine computes. It MUST NOT add a per-period / bar-level return series, a portfolio/NAV path,
-or any significance statistic (PSR/DSR/PBO) to the quick-run surface. The quick-run code path
+This capability SHALL preserve the existing trade-level quick-run economics
+contract: `RunEconomics` exposes only the trade-level (point-to-point,
+per-trade) economics the engine computes. A separate diagnostic portfolio
+foundation MAY expose portfolio-path-derived foundation metrics for Train
+scoring, but it MUST remain outside `RunEconomics`. The quick-run code path
 MUST NOT introduce a runtime dependency on `vectorbtpro`, `pandas`, `numpy`, or
 `quant_strategies.evaluation`.
 
-#### Scenario: No period series or significance statistics are added
+#### Scenario: Trade economics remain trade-unit
 - **WHEN** the quick-run economics object is read
 - **THEN** it exposes per-trade records and undeflated summary scalars/slices only
 - **AND** it exposes no per-period return series, no portfolio NAV path, and no PSR/DSR/PBO field
+
+#### Scenario: Portfolio foundation is separate from trade economics
+- **WHEN** a completed quick run exposes diagnostic portfolio foundation metrics
+- **THEN** those metrics are available from a separate `RunResult` field
+- **AND** `RunResult.economics` remains the engine trade-ledger object
 
 #### Scenario: Quick-run path imports no heavyweight backend dependency
 - **WHEN** the quick-run path (`runner`, `engine`, `core`) is imported and exercised

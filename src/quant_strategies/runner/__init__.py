@@ -26,6 +26,11 @@ from quant_strategies.core.execution import (
     StrategyExecutionResult,
     execute_strategy_run,
 )
+from quant_strategies.core.portfolio_foundation import (
+    PortfolioFoundationConfig,
+    RunPortfolioFoundation,
+    build_portfolio_foundation,
+)
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import StrategyDecision
@@ -120,6 +125,7 @@ class RunResult:
     outcome: RunOutcome = RunOutcome()
     evidence: RunEvidence = RunEvidence()
     economics: RunEconomics | None = None
+    foundation: RunPortfolioFoundation | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -249,6 +255,26 @@ def run_config(
         return failure
 
     economics = economic_metrics.build_run_economics(engine_run)
+    foundation, failure = _build_portfolio_foundation(
+        config,
+        result_dir,
+        execution,
+        decision_window_decisions,
+        economics,
+        evidence_quality,
+        repo_root=effective_repo_root,
+        event_emitter=events,
+    )
+    if failure is not None:
+        return failure
+    _write_execution_data_manifest(
+        result_dir,
+        config,
+        rows=execution.loaded_rows,
+        normalized_rows=execution.normalized_rows,
+        execution_normalized_rows=execution.execution_normalized_rows,
+        evidence_quality=evidence_quality,
+    )
     try:
         assessment_status, notes = _write_completion_artifacts(
             config,
@@ -257,6 +283,7 @@ def run_config(
             decision_window_decisions,
             engine_run,
             economics,
+            foundation,
             evidence_quality,
             repo_root=effective_repo_root,
             event_emitter=events,
@@ -271,6 +298,7 @@ def run_config(
             outcome=RunOutcome(failure_stage="artifact_write"),
             evidence=_run_evidence(config, evidence_quality),
             economics=economics,
+            foundation=None,
         )
     return RunResult(
         result_dir=result_dir,
@@ -285,6 +313,7 @@ def run_config(
         ),
         evidence=_run_evidence(config, evidence_quality),
         economics=economics,
+        foundation=foundation,
     )
 
 
@@ -780,6 +809,53 @@ def _evaluate_engine_request(
         )
 
 
+def _build_portfolio_foundation(
+    config: config_module.RunConfig,
+    result_dir: Path,
+    execution: StrategyExecutionResult,
+    decision_window_decisions: list[StrategyDecision],
+    economics: RunEconomics,
+    evidence_quality: dict[str, object],
+    *,
+    repo_root: Path,
+    event_emitter: RunnerStageEmitter,
+) -> tuple[RunPortfolioFoundation | None, RunResult | None]:
+    if not config.output.foundation_enabled:
+        return None, None
+    rows = (execution.execution_normalized_rows or execution.normalized_rows).projection_rows()
+    try:
+        with event_emitter.stage(
+            "portfolio_foundation",
+            strategy_id=config.strategy_id,
+            scenario_count=2,
+            subwindows=config.output.foundation_subwindows,
+        ):
+            return (
+                build_portfolio_foundation(
+                    rows=rows,
+                    decisions=decision_window_decisions,
+                    executed_trades=economics.trades,
+                    data=config.data,
+                    fill_model=config.fill_model,
+                    cost_model=config.cost_model,
+                    config=PortfolioFoundationConfig(
+                        enabled=config.output.foundation_enabled,
+                        subwindows=config.output.foundation_subwindows,
+                        trial_count=config.output.foundation_trial_count,
+                        benchmark_sharpe=config.output.foundation_benchmark_sharpe,
+                        cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
+                    ),
+                ),
+                None,
+            )
+    except Exception as exc:
+        _append_evidence_warning(
+            evidence_quality,
+            f"portfolio_foundation_unavailable:{type(exc).__name__}:{exc}",
+        )
+        return None, None
+
+
 def _write_completion_artifacts(
     config: config_module.RunConfig,
     result_dir: Path,
@@ -787,6 +863,7 @@ def _write_completion_artifacts(
     decision_window_decisions: list[StrategyDecision],
     engine_run: _engine_runner.EngineRun | None,
     economics: RunEconomics,
+    foundation: RunPortfolioFoundation | None,
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
@@ -848,6 +925,9 @@ def _write_completion_artifacts(
                     assessment_status=assessment_status,
                     evidence_quality=evidence_quality,
                     economic_slices=economics.slices_payload(),
+                    portfolio_foundation=(
+                        None if foundation is None else foundation.matrix_payload()
+                    ),
                 ),
             )
         notes = artifacts.completion_notes(config, engine_run)
@@ -871,6 +951,7 @@ def _write_completion_artifacts(
                 evidence_quality=evidence_quality,
                 param_contract=execution.param_contract,
                 economic_metrics=economics.summary_payload(),
+                portfolio_foundation=(None if foundation is None else foundation.summary_payload()),
                 generated_decision_count=len(execution.decisions),
                 excluded_decision_count=len(execution.decisions) - len(decision_window_decisions),
             ),
@@ -1105,6 +1186,11 @@ def _run_evidence(
     )
 
 
+def _append_evidence_warning(evidence_quality: dict[str, object], warning: str) -> None:
+    existing = _string_tuple(evidence_quality.get("evidence_quality_warnings"))
+    evidence_quality["evidence_quality_warnings"] = (*existing, warning)
+
+
 def _run_focused_causality_evidence(value: object) -> RunFocusedCausalityEvidence:
     if not isinstance(value, Mapping):
         return RunFocusedCausalityEvidence()
@@ -1162,6 +1248,7 @@ __all__ = [
     "RunEconomics",
     "RunEvidence",
     "RunOutcome",
+    "RunPortfolioFoundation",
     "RunResult",
     "RunTrade",
     "run_config",

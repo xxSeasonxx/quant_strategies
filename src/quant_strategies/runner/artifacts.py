@@ -349,6 +349,7 @@ def summary_payload(
     evidence_quality: dict[str, object],
     param_contract: str = "unknown",
     economic_metrics: Mapping[str, object] | None = None,
+    portfolio_foundation: Mapping[str, object] | None = None,
     generated_decision_count: int | None = None,
     excluded_decision_count: int | None = None,
 ) -> dict[str, object]:
@@ -377,6 +378,8 @@ def summary_payload(
     }
     if economic_metrics is not None:
         payload["economic_metrics"] = json_safe_value(dict(economic_metrics))
+    if portfolio_foundation is not None:
+        payload["portfolio_foundation"] = json_safe_value(dict(portfolio_foundation))
     if generated_decision_count is not None:
         payload["generated_decision_count"] = generated_decision_count
     if excluded_decision_count is not None:

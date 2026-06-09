@@ -164,8 +164,14 @@ strategy_path, strategy_id            # top-level
 [cost_model] fee_bps_per_side, slippage_bps_per_side
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
-         focused_probe_limit, focused_timeout_seconds, strict_probe_limit
+         focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
+         foundation_enabled, foundation_subwindows, foundation_trial_count,
+         foundation_benchmark_sharpe, foundation_cost_stress_multiplier
 ```
+
+`foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
+when omitted, foundation subwindow `dsr` values are null with a
+`missing_trial_count` warning.
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
 engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary`
@@ -253,6 +259,7 @@ the run completed and `failure_stage is None`.
 | `outcome` | `RunOutcome` | terminal status (below) |
 | `evidence` | `RunEvidence` | evidence quality (below) |
 | `economics` | `RunEconomics \| None` | per-trade after-cost economics, populated on completed engine runs even under compact artifact profiles |
+| `foundation` | `RunPortfolioFoundation \| None` | diagnostic Train portfolio-return foundation metrics, populated on completed engine runs when enabled |
 | `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` |
 
 **`RunOutcome`**: `completed` (bool), `failure_stage` (str|None), `assessment_status`
@@ -306,6 +313,25 @@ per-period return series, NAV path, or significance statistics.
 `gross_return`, `funding_return`, `cost_return`, `net_return`, and `decision_id`.
 `net_return` is the engine after-cost value (`gross_return + funding_return -
 cost_return`) for that trade.
+
+#### `RunPortfolioFoundation`
+
+`RunPortfolioFoundation` is the in-process quick-run portfolio-return foundation
+accessor. It is diagnostic Train evidence only. It is separate from
+`RunEconomics`: the latter remains a trade-unit engine ledger, while the
+foundation carries compact per-subwindow portfolio-return metrics for
+downstream scoring. The default scenarios are `realistic_costs` and
+`cost_stress`; full per-period return traces are not included in default
+artifacts.
+
+Important payload fields include `schema_version`, `basis`, `evidence_class`,
+and `scenarios`. Each scenario reports subwindow metrics such as
+`return_sample_count`, `effective_sample_size`, `sharpe`,
+`sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, `dsr`,
+`max_drawdown`, `closed_trade_count`, and `max_symbol_concentration`.
+When trial-count metadata is missing, `dsr` is `None` and the subwindow warning
+list includes `missing_trial_count`. `dsr_inputs` includes a `formula` field so
+consumers can pin the DSR threshold convention.
 
 ### `ValidationRunResult`
 
@@ -402,7 +428,7 @@ Artifacts are evidence to inspect, not truth by construction. Generated roots
 
 | Surface | Always written | Notable extras |
 |---|---|---|
-| Quick run | `config.toml`, `strategy_snapshot.py`, `run_manifest.json`, `summary.json` (with `economic_metrics`), `notes.md`, `environment.json`, `data_manifest.json` (when data loads) | `diagnostics.json` (`diagnostic`); decision records + evidence + engine request + strategy input rows (`full`) |
+| Quick run | `config.toml`, `strategy_snapshot.py`, `run_manifest.json`, `summary.json` (with `economic_metrics` and optional compact `portfolio_foundation`), `notes.md`, `environment.json`, `data_manifest.json` (when data loads) | `diagnostics.json` (`diagnostic`, includes `economic_slices` and portfolio-foundation matrix); decision records + evidence + engine request + strategy input rows (`full`) |
 | Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | per-scenario `agreement_oracle` status; raw `agreement` only when the opt-in oracle ran |
 | Evaluation | `evaluation_config.toml`, `strategy_snapshot.py`, `data_manifest.json`, `evaluation_metrics.json`, `scenario_summary.json`, `evaluation_manifest.json`, `environment.json`, `notes.md` | Parquet traces under `tables/` (requires `pyarrow`); `audit/` input rows + decision records; `evaluation_failure.json` on failure |
 

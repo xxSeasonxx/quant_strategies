@@ -37,9 +37,11 @@ undeflated `sharpe`/`sortino`/`calmar`/`max_drawdown`/`worst_period_return`/
 `window_ids`/`scenario_ids_for` helpers. This lets consumers read per-fold OOS
 returns without scraping `tables/portfolio_path.parquet`; the `values` reuse the
 existing observed-return semantics (drop synthetic first return, exclude
-non-finite) and honor the annualized-metric trust boundary. The accessor adds no
-significance statistics (PSR/DSR/PBO) — significance stays with the consumer
-(`quant_autoresearch`). The fields are additive and default empty/None;
+non-finite) and honor the annualized-metric trust boundary. The evaluation
+accessor adds no significance statistics (PSR/DSR/PBO) — evaluation significance
+stays with the consumer (`quant_autoresearch`). Quick run may emit diagnostic
+Train portfolio-foundation DSR inputs/values, but they are not survivor-grade
+evaluation or promotion evidence. The fields are additive and default empty/None;
 `succeeded` is unchanged.
 - **Decision/spec kernel:** the public surfaces use one shared decision/spec
 kernel plus separate price-evidence paths: internal engine trade-activity

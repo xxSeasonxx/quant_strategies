@@ -140,6 +140,7 @@ Purpose:
 
 - diagnose one strategy version quickly;
 - produce trade-level diagnostic evidence from the internal engine;
+- produce diagnostic portfolio-return foundation metrics for Train scoring;
 - support iteration feedback, not retained-candidate review, variant ranking, or
 promotion.
 
@@ -161,9 +162,11 @@ Common artifacts include `config.toml`, `strategy_snapshot.py`,
 `run_manifest.json`, `summary.json`, `environment.json`, `notes.md`,
 `data_manifest.json` when data loading is reached, and optional diagnostic or
 full-profile artifacts. Completed quick-run `summary.json` files include
-`economic_metrics`, a compact summary derived from the engine trade
-ledger. Diagnostic-profile runs additionally write `diagnostics.json` with
-`economic_slices`.
+`economic_metrics`, a compact summary derived from the engine trade ledger, and
+`portfolio_foundation`, a compact diagnostic summary for Train scoring.
+Diagnostic-profile runs additionally write `diagnostics.json` with
+`economic_slices` and the portfolio-foundation matrix. Full per-period return
+traces are not written by default.
 Failed quick-run `summary.json` files set `run_completed` to `false` and
 `failure_stage` to the failed runner stage.
 
