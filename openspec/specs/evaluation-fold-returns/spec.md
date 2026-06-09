@@ -1,7 +1,10 @@
 # evaluation-fold-returns Specification
 
 ## Purpose
-TBD - created by archiving change foundation-perfold-returns. Update Purpose after archive.
+Define typed in-process per-fold evaluation return series, fold-level metrics,
+and causal/audit integrity signals for research evaluation consumers. This spec
+keeps fold evidence accessible without scraping Parquet artifacts while
+preserving the foundation boundary around significance statistics.
 ## Requirements
 ### Requirement: Per-fold OOS return series are exposed typed and in-process
 
@@ -104,4 +107,3 @@ are unaffected, and the existing public evaluation entry-point signature MUST be
 - **WHEN** existing code constructs or reads an `EvaluationRunResult` using only the prior fields
 - **THEN** it continues to work unchanged
 - **AND** `succeeded` is still `run_completed and failure_stage is None`
-

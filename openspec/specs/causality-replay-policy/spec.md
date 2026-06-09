@@ -1,7 +1,10 @@
 # causality-replay-policy Specification
 
 ## Purpose
-TBD - created by archiving change causality-replay-performance. Update Purpose after archive.
+Define replay-scope evidence and bounded replay behavior shared by quick run,
+validation, and evaluation. This spec lets consumers distinguish micro,
+bounded, complete, and skipped replay evidence without inferring from low-level
+implementation flags.
 ## Requirements
 ### Requirement: Replay evidence exposes replay scope
 The system SHALL expose the causality replay scope for quick run, validation,
@@ -82,4 +85,3 @@ refreezing all replay rows per probe when a safe slice is sufficient.
 #### Scenario: Availability filtering remains causal
 - **WHEN** replay rows have `available_at` later than a probe decision time
 - **THEN** replay excludes those rows from the prefix for that probe
-

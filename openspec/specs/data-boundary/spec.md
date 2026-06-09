@@ -1,7 +1,10 @@
 # data-boundary Specification
 
 ## Purpose
-TBD - created by archiving change adopt-quant-data-contract-loaders. Update Purpose after archive.
+Define the data-loading and row-contract boundary between `quant_strategies`
+and upstream `quant_data`. This spec keeps strategy-visible rows, execution
+buffer rows, availability timestamps, row ordering, and upstream feedback
+semantics explicit and auditable.
 ## Requirements
 ### Requirement: Strategy bars are loaded through the upstream contract layer
 
