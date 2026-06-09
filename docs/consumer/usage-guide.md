@@ -208,12 +208,13 @@ at bar *t+1*, not on the signal close. This is how you keep a close signal causa
 
 **Path anchoring.**
 
-- Quick-run relative paths are **repo-root-relative** (or pass `--repo-root`).
+- Quick-run config paths are **repo-root-relative** (or pass `--repo-root`);
+  quick-run `strategy_path` resolves relative to the TOML file.
 - Validation/evaluation config paths resolve from the current directory (or
   `--repo-root`); once the TOML is found, its `strategy_path` and
   `output.results_dir` resolve **relative to the config's directory**. This is why
-  candidate-local `validation.toml` / `evaluation.toml` use `strategy_path =
-  "simple_momentum.py"` (sibling file) rather than a repo-root path.
+  candidate-local configs use `strategy_path = "strategy.py"` (sibling file)
+  rather than a repo-root path.
 
 Generated output roots — `results/`, `validation_results/`, `evaluation_results/`
 — are git-ignored. Treat them as regenerable evidence, never as source.
@@ -301,7 +302,7 @@ Runs strict row-contract, observation, and hidden-lookahead checks, and rejects
 levered or aggregate-overexposed target-weight evidence before backend scenarios.
 
 ```bash
-conda run -n quant quant-strategies validate path/to/candidate/validation.toml
+conda run -n quant quant-strategies validate candidates/<candidate_id>/validation.toml
 ```
 
 ```python
@@ -398,7 +399,7 @@ return series typed and in-process, so a consumer never has to read
 call and read the series for the scenario your protocol selects:
 
 ```python
-result = run_evaluation("candidate/evaluation.toml")
+result = run_evaluation("candidates/<candidate_id>/evaluation.toml")
 if not result.succeeded:
     raise SystemExit(f"{result.failure_stage}: {result.message}")
 

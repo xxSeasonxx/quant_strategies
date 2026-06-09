@@ -167,16 +167,14 @@ def test_committed_run_configs_default_to_diagnostic_profile():
             assert config.output.artifact_profile == "diagnostic"
 
 
-def test_committed_run_configs_declare_causality_policy_for_iteration():
+def test_committed_run_configs_use_micro_causality_for_iteration():
     repo_root = REPO_ROOT
     paths = committed_run_configs(repo_root)
     assert paths, "expected at least one committed run config"
 
     for path in paths:
         config = load_config(path, repo_root=repo_root)
-        assert config.output.causality_check in {"micro", "off"}, path
-        if config.output.causality_check == "off":
-            assert path.parent.name == "fx_session_activity_profile_rejection"
+        assert config.output.causality_check == "micro", path
 
 
 def test_output_quick_checks_accepts_explicit_true_and_false(tmp_path: Path):
@@ -296,8 +294,20 @@ def test_unsupported_data_kind_is_rejected(tmp_path: Path):
 def test_strategy_path_escape_is_rejected(tmp_path: Path):
     write_strategy(tmp_path)
 
-    with pytest.raises(ConfigError, match="strategy_path must resolve inside repository"):
+    with pytest.raises(ConfigError, match="strategy_path must resolve inside config directory"):
         load_config(write_config(tmp_path, strategy_path="../outside.py"), repo_root=tmp_path)
+
+
+def test_candidate_local_strategy_path_cannot_escape_config_directory(tmp_path: Path):
+    candidate = tmp_path / "candidates" / "demo"
+    sibling = tmp_path / "candidates" / "sibling"
+    candidate.mkdir(parents=True)
+    sibling.mkdir(parents=True)
+    (sibling / "strategy.py").write_text("def generate_decisions(rows, params):\n    return []\n")
+    config_path = write_config(candidate, strategy_path="../sibling/strategy.py")
+
+    with pytest.raises(ConfigError, match="strategy_path must resolve inside config directory"):
+        load_config(config_path, repo_root=tmp_path)
 
 
 def test_output_path_escape_is_rejected(tmp_path: Path):

@@ -80,7 +80,7 @@ simulation workbench:
 - independently sanity-checking simple engine cases.
 
 This makes it valuable for the implemented research evaluation layer. Evaluation
-uses `quant-strategies evaluate candidate/evaluation.toml` or
+uses `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
 `quant_strategies.evaluation.run_evaluation` and writes detailed trace artifacts
 as Parquet through `pyarrow`. It does not by itself prove alpha, statistical
 significance, economic durability, data quality, or paper-trading or

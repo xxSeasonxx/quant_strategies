@@ -55,7 +55,10 @@ non-funding data or the project perp ledger for `crypto_perp_funding`.
 
 Path anchoring:
 
-- quick-run relative paths are repo-root-relative;
+- quick-run config paths are repo-root-relative;
+- after a quick-run TOML is found, its `strategy_path` field is resolved
+  relative to the config directory, while `output.results_dir` remains
+  repo-root-relative under ignored `results/`;
 - validation/evaluation config paths are resolved from the current directory,
   or from `--repo-root` when the CLI flag/API argument is provided;
 - after a validation/evaluation TOML is found, its `strategy_path` and
@@ -173,7 +176,7 @@ at bar timestamps, not as intrabar high/low barrier orders.
 Command:
 
 ```bash
-conda run -n quant quant-strategies validate path/to/candidate/validation.toml
+conda run -n quant quant-strategies validate candidates/<candidate_id>/validation.toml
 ```
 
 Python API:
@@ -181,7 +184,7 @@ Python API:
 ```python
 from quant_strategies.validation import run_validation
 
-result = run_validation("path/to/candidate/validation.toml")
+result = run_validation("candidates/<candidate_id>/validation.toml")
 ```
 
 Purpose:
@@ -242,7 +245,7 @@ CLI exit codes:
 Command:
 
 ```bash
-conda run -n quant quant-strategies evaluate candidate/evaluation.toml
+conda run -n quant quant-strategies evaluate candidates/<candidate_id>/evaluation.toml
 ```
 
 Use `--events-jsonl` to stream structured `evaluation_stage` events to stderr.
@@ -252,7 +255,7 @@ Python API: `quant_strategies.evaluation.run_evaluation`
 ```python
 from quant_strategies.evaluation import run_evaluation
 
-result = run_evaluation("candidate/evaluation.toml")
+result = run_evaluation("candidates/<candidate_id>/evaluation.toml")
 ```
 
 Python callers that need stage observability can pass `event_sink`.

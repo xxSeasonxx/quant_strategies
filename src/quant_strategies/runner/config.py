@@ -51,6 +51,10 @@ def _resolve_strategy_path(value: Path, base_dir: Path, repo_root: Path) -> Path
     resolved = value if value.is_absolute() else base_dir / value
     resolved = resolved.resolve()
     try:
+        resolved.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"strategy_path must resolve inside config directory: {base_dir}") from exc
+    try:
         resolved.relative_to(repo_root)
     except ValueError as exc:
         raise ValueError(f"strategy_path must resolve inside repository: {repo_root}") from exc

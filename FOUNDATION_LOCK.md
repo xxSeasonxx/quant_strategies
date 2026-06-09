@@ -23,7 +23,7 @@ retained-candidate mechanical evidence. It is not quant strategy evaluation.
 The production verdict backend is the internal engine only; VectorBT Pro
 validation support is limited to the explicit opt-in agreement oracle.
 - **Evaluation run:** evaluation uses
-`quant-strategies evaluate candidate/evaluation.toml` or
+`quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
 `quant_strategies.evaluation.run_evaluation` and returns
 `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
 `pyarrow`.

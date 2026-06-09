@@ -10,10 +10,10 @@ symbols = [
   "AUDUSD",
   "USDCAD",
 ]
-start = "2025-07-13"
-end = "2026-04-13"
-load_start = "2025-07-13"
-load_end = "2026-04-13"
+start = "2024-01-07"
+end = "2024-01-12"
+load_start = "2024-01-07"
+load_end = "2024-01-12"
 
 [params]
 profile_bin_count = 40
@@ -45,4 +45,4 @@ slippage_bps_per_side = 0.0
 results_dir = "results"
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5
-causality_check = "off"
+causality_check = "micro"

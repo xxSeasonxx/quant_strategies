@@ -21,7 +21,7 @@ def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
         "docs/vectorbtpro.md",
     ]:
         text = read(path)
-        assert "quant-strategies evaluate candidate/evaluation.toml" in text, path
+        assert "quant-strategies evaluate candidates/<candidate_id>/evaluation.toml" in text, path
         assert "quant_strategies.evaluation.run_evaluation" in text, path
         assert "EvaluationRunResult" in text, path
         assert "evaluation.toml" in text, path

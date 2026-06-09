@@ -128,7 +128,7 @@ Use `result.succeeded` as the preferred terminal success check.
 Runner-stage failures return `result.outcome.completed is False`, set
 `failure_stage`, and write `summary.json` with `run_completed: false`.
 
-**Validation run** — `quant-strategies validate candidate/validation.toml`
+**Validation run** — `quant-strategies validate candidates/<candidate_id>/validation.toml`
 
 Runs the same kernel across configured windows and stress scenarios, then returns
 advisory retained-candidate mechanical evidence. It is an evidence audit, not
@@ -143,7 +143,7 @@ decision observations for `close`, `funding_timestamp`, `funding_rate`, and
 opt-in oracle ran. Validation causality replay defaults to complete replay and
 can be explicitly configured as bounded for large-panel research runs.
 
-**Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
+**Evaluation run** — `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml`
 
 Runs a frozen candidate through the research evaluation surface and writes
 portfolio, economic, and path evidence. Evaluation uses VectorBT Pro for
@@ -230,8 +230,8 @@ conda run -n quant quant-strategies --help
 conda run -n quant pytest
 conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
 conda run -n quant quant-strategies run path/to/config.toml
-conda run -n quant quant-strategies validate path/to/candidate/validation.toml
-conda run -n quant quant-strategies evaluate path/to/candidate/evaluation.toml
+conda run -n quant quant-strategies validate candidates/<candidate_id>/validation.toml
+conda run -n quant quant-strategies evaluate candidates/<candidate_id>/evaluation.toml
 ```
 
 Run `make check` before relying on the local environment for foundation runs.
@@ -243,12 +243,12 @@ Controlled evaluation runs should install the optional evaluation stack with
 `constraints/evaluation.txt`; `pyproject.toml` keeps broad optional dependency
 ranges for installability.
 
-Path anchoring differs by surface. Quick-run configs resolve relative paths
-against the repository root. Validation and evaluation configs are
-candidate-local: after the TOML file is found, `strategy_path` and
-`output.results_dir` resolve beside that config file. CLI `--repo-root` anchors
-relative config-path lookup; it does not turn candidate-local fields into
-repo-root-relative fields.
+Path anchoring differs by field. CLI/API config-path lookup is repo-root
+anchored when `--repo-root` / `repo_root` is provided. After a quick-run,
+validation, or evaluation TOML is found, `strategy_path` resolves beside that
+config file. Quick-run `output.results_dir` remains repo-root-relative and must
+live under ignored `results/`; validation/evaluation output dirs remain
+candidate-local.
 
 ## Documentation
 
