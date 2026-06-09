@@ -113,6 +113,37 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
     )
 
 
+def test_evaluation_causality_replay_defaults_to_complete(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(candidate / "evaluation.toml")
+
+    config = load_evaluation_config(candidate / "evaluation.toml")
+
+    assert config.causality_replay.scope == "complete"
+
+
+def test_evaluation_accepts_bounded_causality_replay(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(
+        candidate / "evaluation.toml",
+        extra="""
+
+[causality_replay]
+scope = "bounded"
+probe_limit = 7
+timeout_seconds = 1.5
+""",
+    )
+
+    config = load_evaluation_config(candidate / "evaluation.toml")
+
+    assert config.causality_replay.scope == "bounded"
+    assert config.causality_replay.probe_limit == 7
+    assert config.causality_replay.timeout_seconds == 1.5
+
+
 def test_checked_in_simple_momentum_evaluation_example_loads():
     config_path = ROOT / "examples" / "strategies" / "simple_momentum_spy_daily_evaluation.toml"
 

@@ -16,6 +16,7 @@ from quant_strategies.causality import (
     LookaheadCheckResult,
     check_focused_causality,
     check_hidden_lookahead,
+    check_micro_causality,
     strict_replay_boundaries,
 )
 from quant_strategies.core import engine_runner as _engine_runner
@@ -61,6 +62,13 @@ class RunCausalityEvidence:
     strict_probe_limit: int | None = None
     skipped_probe_count: int = 0
     skipped_probe_reasons: tuple[str, ...] = ()
+    replay_scope: str | None = None
+    candidate_probe_count: int | None = None
+    selected_probe_count: int | None = None
+    elapsed_seconds: float | None = None
+    timeout_seconds: float | None = None
+    timed_out: bool = False
+    replay_warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -358,6 +366,8 @@ def _prepare_causality_evidence(
 ) -> tuple[LookaheadCheckResult, dict[str, object]]:
     if config.output.causality_check == "focused":
         return _prepare_focused_causality_evidence(config, execution, event_emitter)
+    if config.output.causality_check == "micro":
+        return _prepare_micro_causality_evidence(config, execution, event_emitter)
 
     with event_emitter.stage(
         "causality_check",
@@ -378,8 +388,61 @@ def _prepare_causality_evidence(
         strict_probe_limit=causality.strict_probe_limit,
         skipped_probe_count=causality.skipped_probe_count,
         skipped_probe_reasons=causality.skipped_probe_reasons,
+        replay_scope=causality.replay_scope,
+        candidate_probe_count=causality.candidate_probe_count,
+        selected_probe_count=causality.selected_probe_count,
+        elapsed_seconds=causality.elapsed_seconds,
+        timeout_seconds=causality.timeout_seconds,
+        timed_out=causality.timed_out,
+        replay_warning=causality.replay_warning,
     )
     return causality, evidence_quality
+
+
+def _prepare_micro_causality_evidence(
+    config: config_module.RunConfig,
+    execution: StrategyExecutionResult,
+    event_emitter: RunnerStageEmitter,
+) -> tuple[LookaheadCheckResult, dict[str, object]]:
+    with event_emitter.stage(
+        "causality_check",
+        strategy_id=config.strategy_id,
+        decision_count=len(execution.decisions),
+        mode="micro",
+    ):
+        micro = check_micro_causality(
+            execution.generate_decisions,
+            rows=execution.normalized_rows,
+            params=execution.frozen_params,
+            baseline_decisions=execution.decisions,
+            strategy_id=config.strategy_id,
+            max_probes=config.output.micro_probe_limit,
+            timeout_seconds=config.output.micro_timeout_seconds,
+        )
+    evidence_quality = artifacts.with_causality_verification(
+        execution.evidence_quality,
+        causality_check=config.output.causality_check,
+        deterministic_replay_verified=micro.passed and micro.deterministic_replay_verified,
+        emitted_replay_verified=False,
+        strict_no_emission_verified=False,
+        skipped_probe_count=micro.skipped_probe_count,
+        skipped_probe_reasons=micro.skipped_probe_reasons,
+        replay_scope="micro",
+        candidate_probe_count=micro.candidate_probe_count,
+        selected_probe_count=micro.selected_probe_count,
+        elapsed_seconds=micro.elapsed_seconds,
+        timeout_seconds=micro.timeout_seconds,
+        timed_out=micro.timed_out,
+        replay_warning=micro.replay_warning,
+    )
+    return (
+        LookaheadCheckResult(
+            passed=True,
+            mode="emitted",
+            replay_scope="micro",
+        ),
+        evidence_quality,
+    )
 
 
 def _prepare_focused_causality_evidence(
@@ -423,6 +486,7 @@ def _prepare_focused_causality_evidence(
         deterministic_replay_verified=False,
         emitted_replay_verified=False,
         strict_no_emission_verified=False,
+        replay_scope="focused",
     )
     evidence_quality["focused_causality"] = _focused_causality_payload(focused)
     return causality, evidence_quality
@@ -823,7 +887,7 @@ def _check_causality(
     execution: StrategyExecutionResult,
 ) -> LookaheadCheckResult:
     if config.output.causality_check == "off":
-        return LookaheadCheckResult(passed=True, mode="emitted")
+        return LookaheadCheckResult(passed=True, mode="emitted", replay_scope="off")
 
     try:
         if (
@@ -947,6 +1011,7 @@ def _policy_evidence_quality(
         deterministic_replay_verified=False,
         emitted_replay_verified=False,
         strict_no_emission_verified=False,
+        replay_scope=config.output.causality_check,
     )
 
 
@@ -1027,6 +1092,13 @@ def _run_evidence(
             strict_probe_limit=_optional_int(quality.get("strict_probe_limit")),
             skipped_probe_count=int(quality.get("skipped_probe_count") or 0),
             skipped_probe_reasons=_string_tuple(quality.get("skipped_probe_reasons")),
+            replay_scope=_optional_str(quality.get("replay_scope")),
+            candidate_probe_count=_optional_int(quality.get("candidate_probe_count")),
+            selected_probe_count=_optional_int(quality.get("selected_probe_count")),
+            elapsed_seconds=_optional_float(quality.get("elapsed_seconds")),
+            timeout_seconds=_optional_float(quality.get("timeout_seconds")),
+            timed_out=bool(quality.get("timed_out")),
+            replay_warning=_optional_str(quality.get("replay_warning")),
         ),
         focused_causality=_run_focused_causality_evidence(quality.get("focused_causality")),
         warnings=_string_tuple(quality.get("evidence_quality_warnings")),

@@ -6,14 +6,19 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
+
 import quant_strategies.causality as causality
 from quant_strategies.causality import (
     FocusedCausalityConfig,
     FocusedCausalityKey,
     ReplayBoundary,
+    bounded_replay_plan,
     check_focused_causality,
     check_hidden_lookahead,
+    check_micro_causality,
     focused_replay_plan,
+    micro_replay_plan,
 )
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
@@ -322,6 +327,143 @@ def test_focused_causality_rejects_skipped_sampled_probe():
     assert result.status == "failed"
     assert result.scoring_allowed is False
     assert result.rejection_reason == "focused_probe_skipped: ValueError: needs warmup"
+
+
+def test_micro_replay_plan_does_not_enumerate_full_row_grid(monkeypatch: pytest.MonkeyPatch):
+    source_rows = [
+        {
+            "symbol": f"SYM{index % 10}",
+            "timestamp": AS_OF + (FUTURE - AS_OF) * index,
+            "available_at": AS_OF + (FUTURE - AS_OF) * index,
+            "close": 100.0 + index,
+        }
+        for index in range(100)
+    ]
+    baseline = [
+        StrategyDecision(
+            decision_id="demo:emitted",
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="SYM1"),
+            decision_time=source_rows[10]["timestamp"],
+            as_of_time=source_rows[10]["timestamp"],
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=1),
+        )
+    ]
+
+    monkeypatch.setattr(
+        causality,
+        "_row_grid_boundary_keys",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("micro replay must not enumerate the full row grid")
+        ),
+    )
+
+    plan = micro_replay_plan(source_rows, baseline, max_probes=5)
+
+    assert plan.selected_probe_count <= 5
+    assert plan.selected_probe_count == len(plan.boundaries)
+    assert plan.candidate_probe_count >= plan.selected_probe_count
+
+
+def test_micro_causality_timeout_reports_unverified_result():
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+
+    result = check_micro_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        max_probes=3,
+        timeout_seconds=0.0,
+    )
+
+    assert result.passed is False
+    assert result.replay_scope == "micro"
+    assert result.timed_out is True
+    assert result.violations == ("micro_causality_timeout",)
+
+
+def test_micro_causality_timeout_after_slow_planning(monkeypatch: pytest.MonkeyPatch):
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+    plan = causality.FocusedReplayPlan(
+        boundaries=(),
+        candidate_probe_count=1,
+        selected_probe_count=0,
+    )
+
+    def slow_plan(*_args: object, **_kwargs: object):
+        time.sleep(0.02)
+        return plan
+
+    def should_not_replay(*_args: object, **_kwargs: object):
+        raise AssertionError("replay should not start after planning consumed timeout")
+
+    monkeypatch.setattr(
+        causality,
+        "_micro_replay_plan_with_index",
+        lambda *_args, **_kwargs: (slow_plan(), causality._visible_row_index(source_rows)),
+    )
+    monkeypatch.setattr(causality, "check_hidden_lookahead", should_not_replay)
+
+    result = check_micro_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        max_probes=3,
+        timeout_seconds=0.01,
+    )
+
+    assert result.timed_out is True
+    assert result.violations == ("micro_causality_timeout",)
+
+
+def test_bounded_replay_plan_always_includes_emitted_boundaries():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+    baseline = [
+        StrategyDecision(
+            decision_id="demo:emitted",
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=DECISION,
+            as_of_time=AS_OF,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=1),
+        )
+    ]
+
+    plan = bounded_replay_plan(source_rows, baseline, max_row_probes=0)
+
+    assert plan.selected_probe_count == 1
+    assert plan.boundaries[0].expected_decision_ids == frozenset({"demo:emitted"})
+
+
+def test_bounded_causality_detects_emitted_future_sensitive_strategy_with_low_row_cap():
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 999.0, available_at=FUTURE),
+    ]
+    baseline = future_sensitive_strategy(source_rows, {})
+
+    result = causality.check_bounded_causality(
+        future_sensitive_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+        max_probes=0,
+        timeout_seconds=60.0,
+    )
+
+    assert result.passed is False
+    assert result.violations == ("hidden_lookahead_detected",)
+    assert result.replay_scope == "bounded"
 
 
 def test_hidden_lookahead_detects_payload_change_with_stable_decision_id():

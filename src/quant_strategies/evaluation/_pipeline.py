@@ -11,6 +11,7 @@ from typing import Any
 
 from quant_strategies.causality import (
     causality_completeness_violations,
+    check_bounded_causality,
     check_hidden_lookahead,
 )
 from quant_strategies.core.config import default_repo_root
@@ -293,7 +294,7 @@ def _run_evaluation_window(
     audit_failure = _run_data_audit(context, state, window, execution, data_window)
     if audit_failure is not None:
         return audit_failure
-    causality_failure = _run_causality_check(context, state, window, execution)
+    causality_failure = _run_causality_check(context, state, window, execution, data_window)
     if causality_failure is not None:
         return causality_failure
     return _run_window_portfolio_evaluation(context, state, window, execution)
@@ -416,24 +417,25 @@ def _run_causality_check(
     state: _EvaluationState,
     window: Any,
     execution: StrategyExecutionResult,
+    data_window: dict[str, Any],
 ) -> EvaluationRunResult | None:
     with context.event_emitter.stage(
         "causality_check",
         strategy_id=context.config.strategy_id,
         window_id=window.id,
-        mode="strict",
+        mode=context.config.causality_replay.scope,
         decision_count=len(execution.decisions),
     ) as causality_event:
-        lookahead = check_hidden_lookahead(
-            execution.generate_decisions,
-            rows=execution.normalized_rows,
-            params=execution.validated_params,
-            baseline_decisions=execution.decisions,
-            strategy_id=context.config.strategy_id,
-            mode="strict",
+        lookahead = _run_configured_causality_replay(context, execution)
+        data_window["causality_replay"] = _lookahead_replay_payload(
+            lookahead,
+            replay_scope=context.config.causality_replay.scope,
         )
         state.all_warnings.extend(lookahead.skipped_probe_reasons)
-        causality_violations = causality_completeness_violations(lookahead)
+        causality_violations = _configured_causality_violations(
+            context.config.causality_replay.scope,
+            lookahead,
+        )
         if causality_violations:
             message = "; ".join(causality_violations)
             causality_event.fail(message)
@@ -445,6 +447,57 @@ def _run_causality_check(
                 message,
             )
     return None
+
+
+def _run_configured_causality_replay(
+    context: _EvaluationContext,
+    execution: StrategyExecutionResult,
+) -> Any:
+    if context.config.causality_replay.scope == "bounded":
+        return check_bounded_causality(
+            execution.generate_decisions,
+            rows=execution.normalized_rows,
+            params=execution.validated_params,
+            baseline_decisions=execution.decisions,
+            strategy_id=context.config.strategy_id,
+            max_probes=context.config.causality_replay.probe_limit,
+            timeout_seconds=context.config.causality_replay.timeout_seconds,
+        )
+    return check_hidden_lookahead(
+        execution.generate_decisions,
+        rows=execution.normalized_rows,
+        params=execution.validated_params,
+        baseline_decisions=execution.decisions,
+        strategy_id=context.config.strategy_id,
+        mode="strict",
+    )
+
+
+def _configured_causality_violations(scope: str, lookahead: Any) -> tuple[str, ...]:
+    if scope == "bounded":
+        violations = list(lookahead.violations)
+        if lookahead.skipped_probe_reasons:
+            violations.append(f"bounded_probe_skipped: {lookahead.skipped_probe_reasons[0]}")
+        return tuple(dict.fromkeys(violations))
+    return causality_completeness_violations(lookahead)
+
+
+def _lookahead_replay_payload(lookahead: Any, *, replay_scope: str) -> dict[str, Any]:
+    return {
+        "replay_scope": replay_scope,
+        "replay_mode": lookahead.mode,
+        "deterministic_replay_verified": lookahead.deterministic_replay_verified,
+        "emitted_replay_verified": lookahead.emitted_replay_verified,
+        "strict_suppression_verified": lookahead.strict_suppression_verified,
+        "skipped_probe_count": lookahead.skipped_probe_count,
+        "skipped_probe_reasons": list(lookahead.skipped_probe_reasons),
+        "candidate_probe_count": lookahead.candidate_probe_count,
+        "selected_probe_count": lookahead.selected_probe_count,
+        "elapsed_seconds": lookahead.elapsed_seconds,
+        "timeout_seconds": lookahead.timeout_seconds,
+        "timed_out": lookahead.timed_out,
+        "replay_warning": lookahead.replay_warning,
+    }
 
 
 def _run_window_portfolio_evaluation(
@@ -844,6 +897,7 @@ def _completion_provenance(context: _EvaluationContext, state: _EvaluationState)
     ]
     if snapshot_hashes:
         provenance["normalized_rows_sha256"] = ",".join(snapshot_hashes)
+    provenance["causality_replay_scope"] = context.config.causality_replay.scope
     return provenance
 
 
@@ -1240,7 +1294,10 @@ def _failure_result(
         assessment_status=assessment_status,
         evidence_quality_warnings=warnings,
         causal_replay_passed=(False if failure_stage in _CAUSAL_FAILURE_STAGES else None),
-        provenance=dict(context.provenance),
+        provenance={
+            **dict(context.provenance),
+            "causality_replay_scope": context.config.causality_replay.scope,
+        },
     )
 
 

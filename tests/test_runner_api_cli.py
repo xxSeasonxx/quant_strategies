@@ -167,6 +167,8 @@ def write_config(
     strict_probe_limit: object | None = None,
     focused_probe_limit: object | None = None,
     focused_timeout_seconds: object | None = None,
+    micro_probe_limit: object | None = None,
+    micro_timeout_seconds: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
 ) -> Path:
@@ -191,6 +193,14 @@ def write_config(
     focused_timeout_seconds_line = (
         f"focused_timeout_seconds = {focused_timeout_seconds}\n"
         if focused_timeout_seconds is not None
+        else ""
+    )
+    micro_probe_limit_line = (
+        f"micro_probe_limit = {micro_probe_limit}\n" if micro_probe_limit is not None else ""
+    )
+    micro_timeout_seconds_line = (
+        f"micro_timeout_seconds = {micro_timeout_seconds}\n"
+        if micro_timeout_seconds is not None
         else ""
     )
     config_path = repo_root / relative_path
@@ -221,7 +231,7 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}
+		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}
 		'''.lstrip()
     )
     return config_path
@@ -349,7 +359,7 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
     assert default_config.output.causality_check == "strict"
     assert default_config.output.strict_probe_limit is None
 
-    for mode in ("off", "emitted", "strict", "focused"):
+    for mode in ("off", "emitted", "strict", "focused", "micro"):
         config = config_module.load_config(
             write_config(tmp_path, relative_path=f"{mode}.toml", causality_check=mode),
             repo_root=tmp_path,
@@ -383,6 +393,20 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
     assert focused.output.focused_probe_limit == 7
     assert focused.output.focused_timeout_seconds == 12.5
 
+    micro = config_module.load_config(
+        write_config(
+            tmp_path,
+            relative_path="micro-custom.toml",
+            causality_check="micro",
+            micro_probe_limit=3,
+            micro_timeout_seconds=1.5,
+        ),
+        repo_root=tmp_path,
+    )
+    assert micro.output.causality_check == "micro"
+    assert micro.output.micro_probe_limit == 3
+    assert micro.output.micro_timeout_seconds == 1.5
+
 
 @pytest.mark.parametrize(
     ("kwargs", "message"),
@@ -393,6 +417,8 @@ def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
         ({"strict_probe_limit": "1.0"}, "strict_probe_limit"),
         ({"focused_probe_limit": 0}, "focused_probe_limit"),
         ({"focused_timeout_seconds": "inf"}, "focused_timeout_seconds"),
+        ({"micro_probe_limit": 0}, "micro_probe_limit"),
+        ({"micro_timeout_seconds": "inf"}, "micro_timeout_seconds"),
     ],
 )
 def test_runner_config_rejects_invalid_causality_policy_fields(
@@ -720,6 +746,135 @@ def test_run_config_focused_policy_real_replay_keeps_low_level_flags_unverified(
         assert summary["emitted_replay_verified"] is False
         assert summary["strict_no_emission_verified"] is False
     assert second.evidence.focused_causality.cache_hit is True
+
+
+def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="micro",
+        micro_probe_limit=3,
+        micro_timeout_seconds=0.01,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    def fake_check_micro_causality(*args, **kwargs):
+        return LookaheadCheckResult(
+            passed=False,
+            mode="strict",
+            violations=("micro_causality_timeout",),
+            replay_scope="micro",
+            candidate_probe_count=9,
+            selected_probe_count=3,
+            elapsed_seconds=0.02,
+            timeout_seconds=0.01,
+            timed_out=True,
+            replay_warning="micro_causality_timeout",
+        )
+
+    monkeypatch.setattr(runner_module, "check_micro_causality", fake_check_micro_causality)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.evidence.causality.causality_check == "micro"
+    assert result.evidence.causality.verified is False
+    assert result.evidence.causality.replay_scope == "micro"
+    assert result.evidence.causality.timed_out is True
+    assert result.evidence.causality.replay_warning == "micro_causality_timeout"
+    summary = read_summary(result.result_dir)
+    assert summary["status"] == "completed"
+    assert summary["causality_check"] == "micro"
+    assert summary["causality_verified"] is False
+    assert summary["replay_scope"] == "micro"
+    assert summary["timed_out"] is True
+    assert "economic_metrics" in summary
+
+
+@pytest.mark.parametrize(
+    ("micro_result", "verified", "warning"),
+    [
+        (
+            LookaheadCheckResult(
+                passed=True,
+                mode="strict",
+                deterministic_replay_verified=True,
+                emitted_replay_verified=True,
+                strict_suppression_verified=True,
+                replay_scope="micro",
+                candidate_probe_count=9,
+                selected_probe_count=3,
+                elapsed_seconds=0.01,
+                timeout_seconds=2.0,
+            ),
+            False,
+            None,
+        ),
+        (
+            LookaheadCheckResult(
+                passed=False,
+                mode="strict",
+                violations=("hidden_lookahead_detected",),
+                replay_scope="micro",
+                candidate_probe_count=9,
+                selected_probe_count=3,
+                elapsed_seconds=0.01,
+                timeout_seconds=2.0,
+                replay_warning="hidden_lookahead_detected",
+            ),
+            False,
+            "hidden_lookahead_detected",
+        ),
+    ],
+)
+def test_run_config_micro_policy_pass_or_failure_still_scores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    micro_result: LookaheadCheckResult,
+    verified: bool,
+    warning: str | None,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="micro",
+        micro_probe_limit=3,
+        micro_timeout_seconds=2.0,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "check_micro_causality",
+        lambda *_args, **_kwargs: micro_result,
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    assert result.evidence.causality.verified is verified
+    assert result.evidence.causality.replay_scope == "micro"
+    assert result.evidence.causality.selected_probe_count == 3
+    assert result.evidence.causality.replay_warning == warning
+    summary = read_summary(result.result_dir)
+    assert summary["status"] == "completed"
+    assert summary["replay_scope"] == "micro"
+    assert summary["selected_probe_count"] == 3
+    assert "economic_metrics" in summary
 
 
 def test_run_config_focused_policy_failure_rejects_before_engine_scoring(

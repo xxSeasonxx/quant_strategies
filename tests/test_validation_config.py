@@ -49,6 +49,7 @@ def write_config(
     *,
     include_readiness: bool = True,
     search_pressure: str | None = 'prior_search = "none"',
+    extra: str = "",
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     readiness = (
@@ -95,6 +96,7 @@ exit_lag_bars = 0
 [cost_model]
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
+{extra}
 {readiness}
 
 [output]
@@ -112,6 +114,37 @@ def test_resolve_validation_config_from_file_path(tmp_path: Path):
     resolved = resolve_validation_config_path(config_path)
 
     assert resolved == config_path
+
+
+def test_validation_causality_replay_defaults_to_complete(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+
+    config = load_validation_config(config_path)
+
+    assert config.causality_replay.scope == "complete"
+
+
+def test_validation_accepts_bounded_causality_replay(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    config_path = candidate / "validation.toml"
+    write_config(
+        config_path,
+        extra="""
+
+[causality_replay]
+scope = "bounded"
+probe_limit = 7
+timeout_seconds = 1.5
+""",
+    )
+
+    config = load_validation_config(config_path)
+
+    assert config.causality_replay.scope == "bounded"
+    assert config.causality_replay.probe_limit == 7
+    assert config.causality_replay.timeout_seconds == 1.5
 
 
 def test_resolve_validation_config_from_relative_path_uses_cwd(

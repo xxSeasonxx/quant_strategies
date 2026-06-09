@@ -418,6 +418,13 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         strict_probe_limit: int | None = None,
         skipped_probe_count: int = 0,
         skipped_probe_reasons: tuple[str, ...] = (),
+        replay_scope: str | None = None,
+        candidate_probe_count: int | None = None,
+        selected_probe_count: int | None = None,
+        elapsed_seconds: float | None = None,
+        timeout_seconds: float | None = None,
+        timed_out: bool = False,
+        replay_warning: str | None = None,
     ) -> dict[str, Any]:
         payload = {
             "data_availability_status": self.data_availability_status,
@@ -436,6 +443,13 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                 strict_probe_limit=strict_probe_limit,
                 skipped_probe_count=skipped_probe_count,
                 skipped_probe_reasons=skipped_probe_reasons,
+                replay_scope=replay_scope,
+                candidate_probe_count=candidate_probe_count,
+                selected_probe_count=selected_probe_count,
+                elapsed_seconds=elapsed_seconds,
+                timeout_seconds=timeout_seconds,
+                timed_out=timed_out,
+                replay_warning=replay_warning,
             )
         )
         return payload

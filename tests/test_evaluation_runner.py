@@ -11,6 +11,7 @@ import pytest
 
 import quant_strategies.evaluation._pipeline as evaluation_runner
 import quant_strategies.evaluation.vectorbtpro_backend as backend_module
+from quant_strategies.causality import LookaheadCheckResult
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
@@ -110,6 +111,7 @@ def write_candidate(
     data_kind: str = "bars",
     window_ids: Sequence[str] = ("eval_2026_h1",),
     annualization: int = 365,
+    extra_config: str = "",
 ) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
@@ -170,6 +172,7 @@ slippage_bps_per_side = 0.5
 
 [metrics]
 annualization_periods_per_year = {annualization}
+{extra_config}
 
 [output]
 results_dir = "evaluation_results/demo"
@@ -487,6 +490,8 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert len(data_manifest["windows"][0]["normalized_rows_sha256"]) == 64
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
     assert data_manifest["windows"][0]["decision_count"] == 1
+    assert data_manifest["windows"][0]["causality_replay"]["replay_scope"] == "complete"
+    assert data_manifest["windows"][0]["causality_replay"]["replay_mode"] == "strict"
     assert (
         data_manifest["windows"][0]["input_rows_artifact"]["path"]
         == input_rows_path.relative_to(result.result_dir).as_posix()
@@ -622,6 +627,76 @@ exit_lag_bars = 0
     assert summary["scenario_coverage"]["expected_ids"] == backend.run_prepared_scenario_ids
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
     assert manifest["scenario_coverage"]["expected_count"] == 2
+
+
+def test_run_evaluation_bounded_causality_records_replay_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(
+        tmp_path,
+        extra_config="""
+
+[causality_replay]
+scope = "bounded"
+probe_limit = 2
+timeout_seconds = 5.0
+""",
+    )
+    backend = FakeBackend()
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is True
+    assert result.provenance["causality_replay_scope"] == "bounded"
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    replay = data_manifest["windows"][0]["causality_replay"]
+    assert replay["replay_scope"] == "bounded"
+    assert replay["replay_mode"] == "strict"
+    assert replay["candidate_probe_count"] >= replay["selected_probe_count"]
+    assert replay["timed_out"] is False
+
+
+def test_run_evaluation_causality_failure_result_records_replay_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(
+        tmp_path,
+        extra_config="""
+
+[causality_replay]
+scope = "bounded"
+probe_limit = 2
+timeout_seconds = 5.0
+""",
+    )
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    monkeypatch.setattr(
+        evaluation_runner,
+        "check_bounded_causality",
+        lambda *_args, **_kwargs: LookaheadCheckResult(
+            passed=False,
+            mode="strict",
+            violations=("hidden_lookahead_detected",),
+            replay_scope="bounded",
+        ),
+    )
+
+    result = run_evaluation(
+        candidate / "evaluation.toml", repo_root=tmp_path, backend=FakeBackend()
+    )
+
+    assert result.run_completed is False
+    assert result.failure_stage == "preflight"
+    assert result.provenance["causality_replay_scope"] == "bounded"
 
 
 def test_run_evaluation_keeps_optional_custom_scenario_failures_non_blocking(

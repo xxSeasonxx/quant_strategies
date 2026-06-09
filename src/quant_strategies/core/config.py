@@ -9,6 +9,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 DataKind = Literal["bars", "crypto_perp_funding", "forex_with_quotes"]
+CausalityReplayScope = Literal["complete", "bounded"]
 
 
 def default_repo_root() -> Path:
@@ -85,6 +86,19 @@ class CostModelConfig(SharedConfigModel):
     @property
     def round_trip_bps(self) -> float:
         return 2.0 * (self.fee_bps_per_side + self.slippage_bps_per_side)
+
+
+class CausalityReplayConfig(SharedConfigModel):
+    scope: CausalityReplayScope = "complete"
+    probe_limit: int = Field(default=64, ge=1)
+    timeout_seconds: float = Field(default=60.0, ge=0.0)
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def validate_timeout_seconds(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("causality_replay.timeout_seconds must be finite")
+        return value
 
 
 @dataclass(frozen=True)

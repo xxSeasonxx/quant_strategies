@@ -163,7 +163,8 @@ strategy_path, strategy_id            # top-level
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
-         causality_check, focused_probe_limit, focused_timeout_seconds, strict_probe_limit
+         causality_check, micro_probe_limit, micro_timeout_seconds,
+         focused_probe_limit, focused_timeout_seconds, strict_probe_limit
 ```
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
@@ -172,14 +173,14 @@ engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary
 repo-root-relative (or pass `--repo-root`).
 
 `causality_check` defaults to `"strict"` for backward compatibility. New
-Train/autoresearch iteration should use `"focused"`: it runs or reuses bounded
-source-hash focused causality evidence, rejects focused failures/timeouts before
-scoring, and does not require full-window emitted or strict replay. Advanced
-callers may still set `"emitted"` for deterministic + emitted-decision replay
-without full row-grid no-emission replay, `"strict"` for audit replay, or `"off"`
-for explicit profiling/debugging only. `strict_probe_limit` optionally caps
-strict no-emission probes; capped strict runs are marked incomplete and do not
-claim full strict replay evidence.
+Train/autoresearch iteration should use `"micro"`: it runs a tiny bounded replay
+sample, records probe/timeout evidence, and never blocks quick-run scoring.
+Advanced callers may still set `"focused"` for source-hash replay,
+`"emitted"` for deterministic + emitted-decision replay without full row-grid
+no-emission replay, `"strict"` for audit replay, or `"off"` for explicit
+profiling/debugging only. `strict_probe_limit` optionally caps strict
+no-emission probes; capped strict runs are marked incomplete and do not claim
+full strict replay evidence.
 
 Quick runs can set optional `[data].load_start` / `[data].load_end` when the
 engine needs extra rows outside the decision window for fills or exits. Strategy
@@ -194,6 +195,7 @@ strategy_path, strategy_id, verdict_source?   # top-level
 [data]   kind, dataset, symbols               # no inline start/end
 [params], [fill_model], [cost_model]
 [readiness] min_observations_per_decision (int), required_observation_fields (list[str])
+[causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [output] results_dir
 [search_pressure] prior_search                # e.g. "none"
 [mechanical_thresholds]?                       # optional
@@ -203,6 +205,10 @@ strategy_path, strategy_id, verdict_source?   # top-level
 `crypto_perp_funding` additionally requires `close`, `funding_timestamp`,
 `funding_rate`, `has_funding_event` observations per decision. `strategy_path` and
 `output.results_dir` resolve relative to the config directory.
+Validation defaults to complete replay. Use `[causality_replay] scope = "bounded"`
+only for explicitly bounded large-panel research runs. In bounded replay,
+`probe_limit` caps representative row-anchor probes; emitted-decision replay is
+still included.
 
 ### Evaluation (`evaluation.toml`)
 
@@ -212,11 +218,17 @@ strategy_path, strategy_id                     # top-level
 [data]   kind, dataset, symbols
 [params], [fill_model], [cost_model]
 [metrics] annualization_periods_per_year (int), min_annualized_samples (int, default 20)
+[causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [readiness]?                                    # optional; defaults to >=1 obs + >=1 symbol per decision
 [benchmark]?  symbol                            # must also be in data.symbols; passive evidence only
 [[scenarios]]?  id, labels, required (bool), [scenarios.cost_model]?, [scenarios.fill_model]?
 [output] results_dir
 ```
+
+Evaluation defaults to complete replay. Use `[causality_replay] scope = "bounded"`
+only when the run should produce portfolio evidence with bounded replay
+provenance. In bounded replay, `probe_limit` caps representative row-anchor
+probes; emitted-decision replay is still included.
 
 No `[[scenarios]]` ⇒ default fixed six-scenario cost/fill matrix per window.
 `annualization_periods_per_year` must match bar cadence (e.g. minute bars
@@ -250,10 +262,12 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
 `causality` (`RunCausalityEvidence`), `focused_causality`
 (`RunFocusedCausalityEvidence`), `warnings` (tuple[str, …]).
-**`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict` / `focused`),
+**`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict` / `focused` / `micro`),
 `verified`, `deterministic_replay_verified`, `emitted_replay_verified`,
 `strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
-`strict_probe_limit`, `skipped_probe_count`, and `skipped_probe_reasons`.
+`strict_probe_limit`, `skipped_probe_count`, `skipped_probe_reasons`,
+`replay_scope`, `candidate_probe_count`, `selected_probe_count`,
+`elapsed_seconds`, `timeout_seconds`, `timed_out`, and `replay_warning`.
 `verified` is true only when complete availability, emitted replay, and strict
 no-emission replay all passed. Emitted-only, capped-strict, and off-policy runs
 are usable only as explicitly labeled development evidence.
@@ -262,8 +276,9 @@ are usable only as explicitly labeled development evidence.
 `normalized_rows_sha256`, `params_sha256`, `max_probes`,
 `timeout_seconds_key`, `cache_hit`, `timeout_seconds`,
 `candidate_probe_count`, `selected_probe_count`, and `rejection_reason`.
-For Train/autoresearch quick runs, use this focused evidence to decide whether
-a source variant was eligible for scoring.
+Focused evidence is present when focused replay is explicitly selected. For
+Train/autoresearch quick runs, prefer micro replay fields on
+`RunCausalityEvidence`.
 
 #### `RunEconomics` / `RunTrade`
 

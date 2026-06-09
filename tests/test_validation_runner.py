@@ -56,6 +56,7 @@ def write_candidate(
     *,
     window_ids: tuple[str, ...] = ("validation_2026_h1",),
     search_pressure: str = 'prior_search = "none"',
+    extra_config: str = "",
 ) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir(parents=True)
@@ -111,6 +112,7 @@ exit_lag_bars = 0
 [cost_model]
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
+{extra_config}
 
 [readiness]
 min_observations_per_decision = 1
@@ -319,6 +321,8 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
     assert '": ' not in main_decision_line
     assert main_decision_file.exists()
     assert (result.result_dir / "data_audit.json").exists()
+    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    assert data_audit["windows"][0]["replay_scope"] == "complete"
     assert not (result.result_dir / "backend_capability_matrix.json").exists()
     assert (result.result_dir / "validation_config.toml").exists()
     assert (result.result_dir / "strategy_snapshot.py").exists()
@@ -382,6 +386,46 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
     environment = json.loads((result.result_dir / "environment.json").read_text())
     assert environment["python"]["version"]
     assert "packages" in environment
+
+
+def test_run_validation_bounded_causality_records_replay_scope(
+    tmp_path: Path,
+    monkeypatch,
+):
+    candidate = write_candidate(
+        tmp_path,
+        extra_config="""
+
+[causality_replay]
+scope = "bounded"
+probe_limit = 2
+timeout_seconds = 5.0
+""",
+    )
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+    backend = FakeBackend(
+        BackendRunResult(
+            backend="fake",
+            status="completed",
+            metrics={"net_return": 0.02, "trade_count": 20},
+            warnings=(),
+            unsupported_semantics=(),
+        )
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+
+    assert result.run_completed is True
+    assert result.result_dir is not None
+    audit = json.loads((result.result_dir / "data_audit.json").read_text())
+    window = audit["windows"][0]
+    assert window["replay_scope"] == "bounded"
+    assert window["replay_mode"] == "strict"
+    assert window["candidate_probe_count"] >= window["selected_probe_count"]
+    assert window["timed_out"] is False
 
 
 def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(

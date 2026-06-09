@@ -114,9 +114,12 @@ generate_decisions(rows, params) -> list[StrategyDecision]
 
 **Quick run** — `quant-strategies run config.toml`
 
-Loads rows, runs the pure strategy, validates the decision contract, replays for
-hidden lookahead, and computes trade-level diagnostic evidence for one strategy
-version. Completed quick-run summaries include engine-derived
+Loads rows, runs the pure strategy, validates the decision contract, applies the
+configured causality replay policy, and computes trade-level diagnostic evidence
+for one strategy version. For Train/autoresearch iteration, `micro` replay is a
+cheap annotation that never blocks scoring; complete replay remains available
+through explicit strict replay and the later validation/evaluation surfaces.
+Completed quick-run summaries include engine-derived
 `economic_metrics` from the internal trade ledger. Python callers receive
 `RunResult`; status lives under `result.outcome`, while replayability,
 row-contract, causality, and warning fields live under `result.evidence`.
@@ -137,7 +140,8 @@ observation coverage. For `crypto_perp_funding`, readiness also requires
 decision observations for `close`, `funding_timestamp`, `funding_rate`, and
 `has_funding_event`. Per-scenario validation artifacts always expose
 `agreement_oracle.status`; raw `agreement` details are emitted only when the
-opt-in oracle ran.
+opt-in oracle ran. Validation causality replay defaults to complete replay and
+can be explicitly configured as bounded for large-panel research runs.
 
 **Evaluation run** — `quant-strategies evaluate candidate/evaluation.toml`
 
@@ -170,6 +174,8 @@ Evaluation is not validation. It does not authorize promotion, paper trading, or
 Benchmark-relative metrics are evidence only: when `[benchmark]` is configured,
 evaluation reports passive benchmark and excess total return per scenario
 without ranking, promotion, paper-trading, or live-trading authority.
+Evaluation causality replay defaults to complete replay and can be explicitly
+configured as bounded; result provenance records the replay scope.
 
 ## Boundaries
 

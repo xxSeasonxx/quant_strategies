@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from quant_strategies.core.config import (
+    CausalityReplayConfig,
     CostModelConfig,
     DataConfig,
     FillModelConfig,
@@ -211,6 +212,7 @@ class ValidationConfig(ValidationConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig
     mechanical_thresholds: MechanicalThresholdsConfig = Field(

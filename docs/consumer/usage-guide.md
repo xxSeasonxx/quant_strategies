@@ -239,17 +239,18 @@ if not result.succeeded:
 
 print(result.result_dir)
 print(result.outcome.assessment_status)      # diagnostic status, not a verdict
-print(result.evidence.focused_causality.status)
-print(result.evidence.focused_causality.scoring_allowed)
+print(result.evidence.causality.replay_scope)
+print(result.evidence.causality.verified)    # false for micro failures/timeouts
+print(result.evidence.causality.replay_warning)
 print(result.evidence.row_contract)          # row-contract summary
 print(result.economics.trade_count)          # after-cost trade ledger summary
 ```
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
-with `results_dir`, `quick_checks`, `artifact_profile`, optional focused
+with `results_dir`, `quick_checks`, `artifact_profile`, optional
 `causality_check`, and (for the diagnostic profile) `diagnostic_sample_trades`.
-Use `causality_check = "focused"` for Train/autoresearch iteration. See
+Use `causality_check = "micro"` for Train/autoresearch iteration. See
 [`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
 
 For Train iteration, `[data].start` / `[data].end` are the strategy-visible
@@ -269,13 +270,15 @@ Programmatic consumers can read quick-run after-cost economics from
 ledger plus the same summary scalars/slices written to artifacts, even under
 `artifact_profile = "summary"`; no `summary.json` scraping is required.
 
-The focused causality policy is the Train/autoresearch hygiene gate. It runs a bounded,
-deterministic source-hash certification and rejects a source variant on focused
-failure or timeout before scoring. Repeated runs for the same source hash can use
-the focused cache instead of replaying. Survivor and audit evidence belongs in
-validation/evaluation, which keep the stronger strict preflight gates. Low-level
-replay settings are advanced debug/audit controls documented in the reference;
-the strategy-writing LLM should not choose them during research iteration.
+The micro causality policy is the Train/autoresearch replay annotation. It runs a
+tiny bounded replay sample, records probe and timeout evidence, and never blocks
+quick-run scoring. If micro replay fails or times out, quick-run economics still
+complete when request building and engine evaluation succeed, and causality is
+marked unverified; downstream ranking should read that replay status explicitly.
+Survivor and audit evidence belongs in validation/evaluation. Low-level replay
+settings and focused source-hash replay are advanced controls documented in the
+reference; the strategy-writing LLM should not choose them during research
+iteration.
 
 **Reading it:** success is `result.succeeded`. On failure, `result.outcome
 .failure_stage` names the stage that failed and `summary.json` sets

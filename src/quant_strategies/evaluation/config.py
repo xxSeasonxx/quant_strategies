@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from quant_strategies.core.config import (
+    CausalityReplayConfig,
     CostModelConfig,
     DataConfig,
     FillModelConfig,
@@ -128,6 +129,7 @@ class EvaluationConfig(EvaluationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     metrics: EvaluationMetricsConfig
+    causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
     readiness: DecisionReadinessConfig = Field(default_factory=DecisionReadinessConfig)
     benchmark: BenchmarkConfig | None = None
     scenarios: tuple[EvaluationScenarioConfig, ...] = ()

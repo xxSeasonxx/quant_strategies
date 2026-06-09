@@ -114,9 +114,9 @@ repair, or duplicate upstream data coverage.
 - **THEN** the smoke is skipped and the default test run does not require a live database
 
 ### Requirement: Quick-run load windows preserve strict upstream loading
-When quick-run config declares execution/load window fields, `quant_strategies`
-SHALL load rows through the same strict upstream loader contracts used for the
-decision window. The widened load window SHALL NOT relax strictness, repair
+`quant_strategies` SHALL load rows through the same strict upstream loader
+contracts used for the decision window when quick-run config declares
+execution/load window fields. The widened load window SHALL NOT relax strictness, repair
 rows locally, or change upstream-owned row ordering.
 
 #### Scenario: Buffered bars load remains strict
@@ -130,9 +130,9 @@ rows locally, or change upstream-owned row ordering.
 - **AND** each row still satisfies the row contract before engine use
 
 ### Requirement: Strategy-visible row projection is bounded by the decision window
-When the loaded execution rows cover a wider window than the decision window,
-the shared execution path SHALL derive a separate strategy-visible row set
-bounded by `data.start` and `data.end`. Strategy-input hashes and causality
+The shared execution path SHALL derive a separate strategy-visible row set
+bounded by `data.start` and `data.end` when loaded execution rows cover a wider
+window than the decision window. Strategy-input hashes and causality
 evidence SHALL be based on that strategy-visible row set.
 
 #### Scenario: Post-window rows are execution-only

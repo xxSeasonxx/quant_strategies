@@ -18,7 +18,7 @@ from quant_strategies.core.config import (
 from quant_strategies.core.errors import ConfigError
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
-CausalityCheck = Literal["off", "emitted", "strict", "focused"]
+CausalityCheck = Literal["off", "emitted", "strict", "focused", "micro"]
 
 _GENERATED_OUTPUT_ROOT = "results"
 
@@ -70,6 +70,8 @@ class OutputConfig(RunnerConfigModel):
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)
     focused_timeout_seconds: float = Field(default=60.0, ge=0.0)
+    micro_probe_limit: StrictInt = Field(default=5, ge=1)
+    micro_timeout_seconds: float = Field(default=2.0, ge=0.0)
 
     @field_validator("results_dir")
     @classmethod
@@ -79,11 +81,11 @@ class OutputConfig(RunnerConfigModel):
         _reject_non_generated_output_dir(resolved, repo_root, "output.results_dir")
         return resolved
 
-    @field_validator("focused_timeout_seconds")
+    @field_validator("focused_timeout_seconds", "micro_timeout_seconds")
     @classmethod
-    def validate_focused_timeout_seconds(cls, value: float) -> float:
+    def validate_timeout_seconds(cls, value: float, info: ValidationInfo) -> float:
         if not math.isfinite(value):
-            raise ValueError("output.focused_timeout_seconds must be finite")
+            raise ValueError(f"output.{info.field_name} must be finite")
         return value
 
 

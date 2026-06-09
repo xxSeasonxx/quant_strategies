@@ -9,6 +9,7 @@ from typing import Any
 
 from quant_strategies.causality import (
     causality_completeness_violations,
+    check_bounded_causality,
     check_hidden_lookahead,
 )
 from quant_strategies.core.config import default_repo_root
@@ -399,25 +400,31 @@ def _audit_window_execution(
             "causality_check",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            mode="strict",
+            mode=context.config.causality_replay.scope,
             decision_count=len(decisions),
         ) as causality_event:
             # Strict suppression-replay is always on: boundaries auto-derive from the
             # row grid so a peek-to-suppress strategy is caught on the default path,
             # not only when mechanical_thresholds is enabled.
-            lookahead = check_hidden_lookahead(
-                execution.generate_decisions,
-                rows=execution.normalized_rows,
-                params=execution.frozen_params,
-                baseline_decisions=decisions,
-                strategy_id=context.config.strategy_id,
+            lookahead = _run_configured_causality_replay(
+                context,
+                execution,
+                decisions,
             )
-            causality_violations = causality_completeness_violations(lookahead)
+            causality_violations = _configured_causality_violations(
+                context.config.causality_replay.scope,
+                lookahead,
+            )
             if causality_violations:
                 causality_event.fail(
                     _event_failure_message(causality_violations, "hidden_lookahead_check_failed")
                 )
-        audit_payload.update(_lookahead_audit_payload(lookahead))
+            audit_payload.update(
+                _lookahead_audit_payload(
+                    lookahead,
+                    replay_scope=context.config.causality_replay.scope,
+                )
+            )
         if causality_violations:
             reason = _causality_failure_reason(causality_violations)
             state.failure_reasons.append(reason)
@@ -454,6 +461,39 @@ def _audit_window_execution(
     return audit_payload
 
 
+def _run_configured_causality_replay(
+    context: _ValidationContext,
+    execution: _StrategyExecutionResult,
+    decisions: list[Any],
+) -> Any:
+    if context.config.causality_replay.scope == "bounded":
+        return check_bounded_causality(
+            execution.generate_decisions,
+            rows=execution.normalized_rows,
+            params=execution.frozen_params,
+            baseline_decisions=decisions,
+            strategy_id=context.config.strategy_id,
+            max_probes=context.config.causality_replay.probe_limit,
+            timeout_seconds=context.config.causality_replay.timeout_seconds,
+        )
+    return check_hidden_lookahead(
+        execution.generate_decisions,
+        rows=execution.normalized_rows,
+        params=execution.frozen_params,
+        baseline_decisions=decisions,
+        strategy_id=context.config.strategy_id,
+    )
+
+
+def _configured_causality_violations(scope: str, lookahead: Any) -> tuple[str, ...]:
+    if scope == "bounded":
+        violations = list(lookahead.violations)
+        if lookahead.skipped_probe_reasons:
+            violations.append(f"bounded_probe_skipped: {lookahead.skipped_probe_reasons[0]}")
+        return tuple(dict.fromkeys(violations))
+    return causality_completeness_violations(lookahead)
+
+
 def _scenario_exposure_admissibility_violations(
     context: _ValidationContext,
     window: Any,
@@ -483,13 +523,21 @@ def _scenario_exposure_admissibility_violations(
     return tuple(dict.fromkeys(violations))
 
 
-def _lookahead_audit_payload(lookahead: Any) -> dict[str, Any]:
+def _lookahead_audit_payload(lookahead: Any, *, replay_scope: str) -> dict[str, Any]:
     return {
+        "replay_scope": replay_scope,
+        "replay_mode": lookahead.mode,
         "deterministic_replay_verified": lookahead.deterministic_replay_verified,
         "emitted_replay_verified": lookahead.emitted_replay_verified,
         "strict_suppression_verified": lookahead.strict_suppression_verified,
         "skipped_probe_count": lookahead.skipped_probe_count,
         "skipped_probe_reasons": list(lookahead.skipped_probe_reasons),
+        "candidate_probe_count": lookahead.candidate_probe_count,
+        "selected_probe_count": lookahead.selected_probe_count,
+        "elapsed_seconds": lookahead.elapsed_seconds,
+        "timeout_seconds": lookahead.timeout_seconds,
+        "timed_out": lookahead.timed_out,
+        "replay_warning": lookahead.replay_warning,
     }
 
 

@@ -120,6 +120,13 @@ def causality_evidence_fields(
     strict_probe_limit: int | None = None,
     skipped_probe_count: int = 0,
     skipped_probe_reasons: tuple[str, ...] = (),
+    replay_scope: str | None = None,
+    candidate_probe_count: int | None = None,
+    selected_probe_count: int | None = None,
+    elapsed_seconds: float | None = None,
+    timeout_seconds: float | None = None,
+    timed_out: bool = False,
+    replay_warning: str | None = None,
 ) -> dict[str, object]:
     """Single home for the availability->causal-verification policy.
 
@@ -149,6 +156,8 @@ def causality_evidence_fields(
             warnings.append("strict_suppression_replay_not_verified")
         if strict_replay_capped:
             warnings.append("strict_replay_capped")
+        if replay_warning:
+            warnings.append(replay_warning)
         if not verified:
             warnings.append("runner_causality_not_verified")
     else:
@@ -173,4 +182,11 @@ def causality_evidence_fields(
         "skipped_probe_count": int(skipped_probe_count),
         "skipped_probe_reasons": list(skipped_probe_reasons),
         "evidence_quality_warnings": warnings,
+        "replay_scope": replay_scope or causality_check,
+        "candidate_probe_count": candidate_probe_count,
+        "selected_probe_count": selected_probe_count,
+        "elapsed_seconds": elapsed_seconds,
+        "timeout_seconds": timeout_seconds,
+        "timed_out": bool(timed_out),
+        "replay_warning": replay_warning,
     }
