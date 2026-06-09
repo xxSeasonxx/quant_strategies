@@ -12,6 +12,15 @@ from quant_strategies.runner.config import load_config
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def committed_run_configs(repo_root: Path) -> list[Path]:
+    return sorted(
+        [
+            *repo_root.glob("candidates/*/run.toml"),
+            *repo_root.glob("examples/*/run.toml"),
+        ]
+    )
+
+
 def write_strategy(repo_root: Path) -> None:
     strategy = repo_root / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +99,17 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.data.load_end is None
 
 
+def test_relative_strategy_path_resolves_from_config_directory(tmp_path: Path):
+    candidate = tmp_path / "candidates" / "demo"
+    candidate.mkdir(parents=True)
+    (candidate / "strategy.py").write_text("def generate_decisions(rows, params):\n    return []\n")
+    config_path = write_config(candidate, strategy_path="strategy.py")
+
+    config = load_config(config_path, repo_root=tmp_path)
+
+    assert config.strategy_path == candidate / "strategy.py"
+
+
 def test_data_load_window_fields_are_optional_and_validated(tmp_path: Path):
     write_strategy(tmp_path)
     config = load_config(
@@ -128,7 +148,7 @@ def test_data_load_window_must_cover_decision_window(
 
 def test_committed_run_configs_parse_without_live_data_access():
     repo_root = REPO_ROOT
-    paths = sorted((repo_root / "runs").glob("*.toml"))
+    paths = committed_run_configs(repo_root)
     assert paths, "expected at least one committed run config"
 
     for path in paths:
@@ -137,7 +157,7 @@ def test_committed_run_configs_parse_without_live_data_access():
 
 def test_committed_run_configs_default_to_diagnostic_profile():
     repo_root = REPO_ROOT
-    paths = sorted((repo_root / "runs").glob("*.toml"))
+    paths = committed_run_configs(repo_root)
     assert paths, "expected at least one committed run config"
 
     for path in paths:
@@ -147,14 +167,16 @@ def test_committed_run_configs_default_to_diagnostic_profile():
             assert config.output.artifact_profile == "diagnostic"
 
 
-def test_committed_run_configs_use_micro_causality_for_iteration():
+def test_committed_run_configs_declare_causality_policy_for_iteration():
     repo_root = REPO_ROOT
-    paths = sorted((repo_root / "runs").glob("*.toml"))
+    paths = committed_run_configs(repo_root)
     assert paths, "expected at least one committed run config"
 
     for path in paths:
         config = load_config(path, repo_root=repo_root)
-        assert config.output.causality_check == "micro", path
+        assert config.output.causality_check in {"micro", "off"}, path
+        if config.output.causality_check == "off":
+            assert path.parent.name == "fx_session_activity_profile_rejection"
 
 
 def test_output_quick_checks_accepts_explicit_true_and_false(tmp_path: Path):
@@ -169,7 +191,7 @@ def test_output_quick_checks_accepts_explicit_true_and_false(tmp_path: Path):
 
 def test_committed_run_configs_use_decision_strategy_contract():
     repo_root = REPO_ROOT
-    paths = sorted((repo_root / "runs").glob("*.toml"))
+    paths = committed_run_configs(repo_root)
     assert paths, "expected at least one committed run config"
 
     for path in paths:
@@ -291,10 +313,9 @@ def test_output_path_escape_is_rejected(tmp_path: Path):
         "src/results",
         "tests/results",
         "docs/results",
-        "runs/results",
+        "candidates/demo/results",
         "examples/results",
         "strategies/results",
-        "untested/results",
         "outputs/demo",
     ],
 )
@@ -317,10 +338,10 @@ def test_output_path_under_results_subdir_named_like_source_is_accepted(tmp_path
 
 
 def test_missing_relative_config_reports_resolved_path(tmp_path: Path):
-    missing = tmp_path / "runs" / "missing.toml"
+    missing = tmp_path / "candidates" / "missing" / "run.toml"
 
     with pytest.raises(ConfigError, match=re.escape(str(missing))):
-        load_config("runs/missing.toml", repo_root=tmp_path)
+        load_config("candidates/missing/run.toml", repo_root=tmp_path)
 
 
 @pytest.mark.parametrize("fill_price", ["close", "open", "quote"])

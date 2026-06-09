@@ -67,8 +67,8 @@ in consumer code.
 ## Golden path (copy-paste)
 
 Write one pure strategy file and a small config, then run it. A complete working
-example ships in the repo: [`examples/strategies/simple_momentum.py`](../../examples/strategies/simple_momentum.py)
-and [`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
+example ships in the repo: [`examples/simple_momentum/strategy.py`](../../examples/simple_momentum/strategy.py)
+and [`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
 
 ```python
 # my_strategy.py — a pure strategy file

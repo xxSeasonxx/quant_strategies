@@ -1,15 +1,12 @@
-strategy_path = "simple_momentum.py"
+strategy_path = "strategy.py"
 strategy_id = "simple_momentum"
-
-[[windows]]
-id = "evaluation_2024_01"
-start = "2024-01-01"
-end = "2024-01-31"
 
 [data]
 kind = "bars"
 dataset = "equity_1min"
 symbols = ["SPY"]
+start = "2024-01-01"
+end = "2024-01-31"
 
 [params]
 weight = 1.0
@@ -24,9 +21,9 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
-[metrics]
-annualization_periods_per_year = 525949
-min_annualized_samples = 20
-
 [output]
-results_dir = "evaluation_results/simple_momentum"
+results_dir = "results"
+quick_checks = true
+artifact_profile = "diagnostic"
+diagnostic_sample_trades = 5
+causality_check = "micro"

@@ -108,9 +108,10 @@ than strategy signal generation.
 - **Evaluation final-value semantics:** completed evaluation scenarios require
 `ending_value` to be the actual final portfolio value; a missing, NaN, or
 infinite final value fails the scenario.
-- **Current strategy readiness:** all four current `untested/` strategies expose
-`validate_params` and have targeted validator plus causality/data-audit tests.
-They remain under `untested/` until Season explicitly promotes or renames them.
+- **Current strategy readiness:** current candidate strategies under
+`candidates/` expose `validate_params` and have targeted validator plus
+causality/data-audit tests. Candidate folders remain research candidates until
+Season explicitly promotes or renames them.
 - **Evaluation evidence contract:** evaluation backend injection is typed by an
 explicit protocol, configs may opt into custom `[[scenarios]]`, and optional
 `[benchmark]` metrics add passive benchmark and excess return evidence only.

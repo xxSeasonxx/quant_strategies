@@ -145,15 +145,15 @@ timeout_seconds = 1.5
 
 
 def test_checked_in_simple_momentum_evaluation_example_loads():
-    config_path = ROOT / "examples" / "strategies" / "simple_momentum_spy_daily_evaluation.toml"
+    config_path = ROOT / "examples" / "simple_momentum" / "evaluation.toml"
 
     config = load_evaluation_config(config_path)
 
     assert config.base_dir == config_path.parent
-    assert config.strategy_path == ROOT / "examples" / "strategies" / "simple_momentum.py"
+    assert config.strategy_path == ROOT / "examples" / "simple_momentum" / "strategy.py"
     assert (
         config.output.results_dir
-        == ROOT / "examples" / "strategies" / "evaluation_results" / "simple_momentum"
+        == ROOT / "examples" / "simple_momentum" / "evaluation_results" / "simple_momentum"
     )
     assert config.strategy_id == "simple_momentum"
     assert config.windows[0].id == "evaluation_2024_01"

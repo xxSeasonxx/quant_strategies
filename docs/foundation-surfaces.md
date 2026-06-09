@@ -310,7 +310,7 @@ authority.
 
 Primary config file: candidate-local `evaluation.toml`.
 The checked-in minimal example is
-`examples/strategies/simple_momentum_spy_daily_evaluation.toml`.
+`examples/simple_momentum/evaluation.toml`.
 
 Important sections:
 

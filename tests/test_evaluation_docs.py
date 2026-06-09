@@ -37,7 +37,7 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
     vectorbt = read("docs/vectorbtpro.md")
 
     for text in (foundation, vectorbt):
-        assert "examples/strategies/simple_momentum_spy_daily_evaluation.toml" in text
+        assert "examples/simple_momentum/evaluation.toml" in text
 
     assert "candidate-local" in foundation
     assert "candidate-local" in readme
@@ -49,8 +49,8 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
 
 def test_validation_and_evaluation_examples_keep_window_dates_out_of_data_sections():
     for path in [
-        "examples/strategies/simple_momentum_spy_daily_validation.toml",
-        "examples/strategies/simple_momentum_spy_daily_evaluation.toml",
+        "examples/simple_momentum/validation.toml",
+        "examples/simple_momentum/evaluation.toml",
     ]:
         text = read(path)
         data_section = text.split("[data]", 1)[1].split("\n[", 1)[0]

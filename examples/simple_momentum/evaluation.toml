@@ -1,8 +1,8 @@
-strategy_path = "simple_momentum.py"
+strategy_path = "strategy.py"
 strategy_id = "simple_momentum"
 
 [[windows]]
-id = "validation_2024_01"
+id = "evaluation_2024_01"
 start = "2024-01-01"
 end = "2024-01-31"
 
@@ -24,12 +24,9 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
-[readiness]
-min_observations_per_decision = 2
-required_observation_fields = ["close"]
+[metrics]
+annualization_periods_per_year = 525949
+min_annualized_samples = 20
 
 [output]
-results_dir = "validation_results/simple_momentum"
-
-[search_pressure]
-prior_search = "none"
+results_dir = "evaluation_results/simple_momentum"

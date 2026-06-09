@@ -3,15 +3,16 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from untested.fx_session_activity_profile_rejection import (
-    generate_decisions,
-    validate_params,
-)
+from tests.candidate_loader import load_candidate_strategy
 
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
+
+strategy = load_candidate_strategy("fx_session_activity_profile_rejection")
+generate_decisions = strategy.generate_decisions
+validate_params = strategy.validate_params
 
 DAY = datetime(2024, 1, 2, tzinfo=UTC)
 ASIA_START = DAY - timedelta(hours=2)

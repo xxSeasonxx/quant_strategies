@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from untested.crypto_perp_funding_crowding_reversal import generate_decisions, validate_params
+from tests.candidate_loader import load_candidate_strategy
 
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.decisions import StrategyDecision
+
+strategy = load_candidate_strategy("crypto_perp_funding_crowding_reversal")
+generate_decisions = strategy.generate_decisions
+validate_params = strategy.validate_params
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
 

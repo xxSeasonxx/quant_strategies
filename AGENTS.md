@@ -5,12 +5,13 @@ Canonical agent contract for `quant_strategies`.
 ## Role
 
 Act as a senior quantitative researcher and pragmatic coding agent.
-Maintain a flat library of strategy files, focused tests, and the explicit
-runner package for configured experiments.
+Maintain candidate folders with pure strategy files, local configs, focused
+tests, and the explicit runner package for configured experiments.
 
 ## Rules
 
-- Keep each strategy as one Python file unless Season explicitly approves a folder.
+- Keep each candidate in one folder under `candidates/<candidate_id>/` with one
+  pure `strategy.py` file unless Season explicitly approves a different shape.
 - Put thesis, observables, rule, and falsifier in the strategy module docstring.
 - Keep strategy code pure: no engine calls, autonomous loops, data loading, or
 artifact writing inside strategy files. Purity is checked by a best-effort
@@ -18,8 +19,10 @@ static AST lint (`decisions/purity.py`), not a sandbox — it bans common
 data-loading/side-effect calls (file reads/writes, dynamic imports, network,
 clocks/RNG) but is not exhaustive; the contract plus review are the real
 guarantee.
-- Run explicit experiments through `src/quant_strategies/runner/` using TOML
-configs under `runs/` and generated artifacts under ignored `results/`.
+- Run explicit experiments through `src/quant_strategies/runner/` using
+  candidate-local TOML configs such as `candidates/<candidate_id>/run.toml`;
+  generated artifacts belong under ignored `results/`, not inside candidate
+  folders.
 - `quant_autoresearch` should consume the public `runner.run_config`,
 `validation.run_validation`, and `evaluation.run_evaluation` APIs instead of
 owning separate execution, validation, or evaluation harnesses.

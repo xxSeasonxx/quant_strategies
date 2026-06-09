@@ -26,8 +26,9 @@ Current quick-run state:
   after-cost evidence.
 - **S6** Quick-run configs support explicit causality policy:
   `off`, `emitted`, `strict`, `focused`, or `micro`.
-- **S7** Committed configs under `runs/` use `causality_check = "micro"` for Train /
-  iteration diagnostics.
+- **S7** Committed candidate quick-run configs declare an explicit causality policy;
+  Train / iteration diagnostics should use `micro` unless a config is intentionally
+  marked `off` for profiling/debugging.
 - **S8** `micro` evidence is a Train/autoresearch replay annotation, not validation,
   evaluation, promotion, paper-trading, or live-trading evidence; focused evidence
   remains an advanced source-oriented quick-run mode.

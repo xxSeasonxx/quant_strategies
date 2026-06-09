@@ -4,12 +4,16 @@ from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from untested.krohn_mueller_whelan_fix_reversal import generate_decisions, validate_params
+from tests.candidate_loader import load_candidate_strategy
 
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.engine_runner import build_request, evaluate_request
 from quant_strategies.decisions import StrategyDecision
 from quant_strategies.runner.config import CostModelConfig, FillModelConfig
+
+strategy = load_candidate_strategy("krohn_mueller_whelan_fix_reversal")
+generate_decisions = strategy.generate_decisions
+validate_params = strategy.validate_params
 
 FIXES = {
     "tokyo": ("Asia/Tokyo", time(9, 55)),

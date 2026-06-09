@@ -12,7 +12,7 @@ from quant_strategies.validation import run_validation
 
 
 def load_example_strategy():
-    path = Path("examples/strategies/simple_momentum.py")
+    path = Path("examples/simple_momentum/strategy.py")
     spec = importlib.util.spec_from_file_location("_simple_momentum_example", path)
     assert spec is not None
     assert spec.loader is not None
@@ -108,12 +108,12 @@ def test_generate_decisions_returns_empty_list_without_positive_close_change():
 
 
 def test_validation_config_runs_with_fixture_loader_and_engine_backend(tmp_path: Path, monkeypatch):
-    source_dir = Path("examples/strategies")
+    source_dir = Path("examples/simple_momentum")
     workspace = tmp_path / "simple_momentum"
     workspace.mkdir()
-    (workspace / "simple_momentum.py").write_text((source_dir / "simple_momentum.py").read_text())
-    config_path = workspace / "simple_momentum_spy_daily_validation.toml"
-    config_path.write_text((source_dir / "simple_momentum_spy_daily_validation.toml").read_text())
+    (workspace / "strategy.py").write_text((source_dir / "strategy.py").read_text())
+    config_path = workspace / "validation.toml"
+    config_path.write_text((source_dir / "validation.toml").read_text())
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=bars_for([100.0, 101.0, 102.0, 103.0, 104.0])),

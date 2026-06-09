@@ -527,7 +527,7 @@ def test_load_validation_config_rejects_absolute_results_dir_outside_config_dire
 
 
 def test_example_validation_config_keeps_candidate_local_results_dir():
-    config_path = Path("examples/strategies/simple_momentum_spy_daily_validation.toml")
+    config_path = Path("examples/simple_momentum/validation.toml")
 
     config = load_validation_config(config_path)
 

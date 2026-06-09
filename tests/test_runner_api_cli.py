@@ -153,6 +153,7 @@ def write_config(
     repo_root: Path,
     *,
     relative_path: str = "run.toml",
+    strategy_path: str = "strategies/demo.py",
     kind: str = "bars",
     symbol: str = "SPY",
     dataset: str | None = "equity_1min",
@@ -207,7 +208,7 @@ def write_config(
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         f'''
-strategy_path = "strategies/demo.py"
+strategy_path = "{strategy_path}"
 strategy_id = "demo"
 
 [data]
@@ -3636,7 +3637,14 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     write_strategy(repo_root)
-    config_path = write_config(repo_root, relative_path="runs/demo.toml")
+    candidate_dir = repo_root / "candidates" / "demo"
+    candidate_dir.mkdir(parents=True)
+    (candidate_dir / "strategy.py").write_text((repo_root / "strategies" / "demo.py").read_text())
+    config_path = write_config(
+        repo_root,
+        relative_path="candidates/demo/run.toml",
+        strategy_path="strategy.py",
+    )
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3644,7 +3652,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     )
     monkeypatch.chdir(tmp_path)
 
-    result = run_config("runs/demo.toml", repo_root=repo_root)
+    result = run_config("candidates/demo/run.toml", repo_root=repo_root)
 
     assert result.outcome.completed is True
     assert result.result_dir is not None
@@ -3694,7 +3702,14 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     write_strategy(repo_root)
-    write_config(repo_root, relative_path="runs/demo.toml")
+    candidate_dir = repo_root / "candidates" / "demo"
+    candidate_dir.mkdir(parents=True)
+    (candidate_dir / "strategy.py").write_text((repo_root / "strategies" / "demo.py").read_text())
+    write_config(
+        repo_root,
+        relative_path="candidates/demo/run.toml",
+        strategy_path="strategy.py",
+    )
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3702,7 +3717,7 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     )
     monkeypatch.chdir(tmp_path)
 
-    exit_code = cli.main(["run", "--repo-root", str(repo_root), "runs/demo.toml"])
+    exit_code = cli.main(["run", "--repo-root", str(repo_root), "candidates/demo/run.toml"])
     output = capsys.readouterr().out.strip()
 
     assert exit_code == 0, output

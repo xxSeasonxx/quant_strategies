@@ -169,8 +169,10 @@ strategy_path, strategy_id            # top-level
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
 engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary`
-(compact). Only `full` is replayable from artifacts. Relative paths are
-repo-root-relative (or pass `--repo-root`).
+(compact). Only `full` is replayable from artifacts. `strategy_path` is
+resolved relative to the TOML file so candidate-local configs can use
+`strategy_path = "strategy.py"`. `output.results_dir` remains repo-root-relative
+and must live under ignored `results/`.
 
 `causality_check` defaults to `"strict"` for backward compatibility. New
 Train/autoresearch iteration should use `"micro"`: it runs a tiny bounded replay

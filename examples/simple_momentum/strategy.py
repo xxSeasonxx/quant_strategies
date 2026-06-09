@@ -1,7 +1,7 @@
 """Strategy: simple_momentum
 
 Source / provenance:
-internal_note: examples/strategies/simple_momentum.py documents this internal
+internal_note: examples/simple_momentum/strategy.py documents this internal
 quick-run diagnostic strategy. It is a deterministic test fixture, not an external
 paper or production alpha source.
 

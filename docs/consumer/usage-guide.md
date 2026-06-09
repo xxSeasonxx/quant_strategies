@@ -82,7 +82,7 @@ Open every strategy with a docstring covering, in plain prose:
 - **Assumptions** — proxy/data/fill assumptions that could break the result.
 - **Falsifier** — what observation would make you reject the idea.
 
-See [`untested/krohn_mueller_whelan_fix_reversal.py`](../../untested/krohn_mueller_whelan_fix_reversal.py)
+See [`candidates/krohn_mueller_whelan_fix_reversal/strategy.py`](../../candidates/krohn_mueller_whelan_fix_reversal/strategy.py)
 for a strong provenance example (a published *Journal of Finance* paper with DOI).
 
 ### 2. `generate_decisions(rows, params)` — purity rules
@@ -226,14 +226,14 @@ Generated output roots — `results/`, `validation_results/`, `evaluation_result
 for iteration. *Not* validation, ranking, or promotion.
 
 ```bash
-conda run -n quant quant-strategies run runs/simple_momentum_spy_daily.toml
+conda run -n quant quant-strategies run examples/simple_momentum/run.toml
 # add --events-jsonl to stream structured stage events to stderr
 ```
 
 ```python
 from quant_strategies.runner import run_config
 
-result = run_config("runs/simple_momentum_spy_daily.toml")  # repo_root=, event_sink= optional
+result = run_config("examples/simple_momentum/run.toml")  # repo_root=, event_sink= optional
 if not result.succeeded:
     raise SystemExit(result.message)
 
@@ -251,7 +251,13 @@ with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]
 with `results_dir`, `quick_checks`, `artifact_profile`, optional
 `causality_check`, and (for the diagnostic profile) `diagnostic_sample_trades`.
 Use `causality_check = "micro"` for Train/autoresearch iteration. See
-[`runs/simple_momentum_spy_daily.toml`](../../runs/simple_momentum_spy_daily.toml).
+[`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
+Research candidates live as candidate-local bundles:
+`candidates/<candidate_id>/strategy.py` plus `run.toml` and optional
+`validation.toml` / `evaluation.toml`. In quick-run configs, `strategy_path`
+resolves relative to the TOML file, so candidate configs should normally use
+`strategy_path = "strategy.py"`. Generated artifacts still go under ignored
+`results/`, not inside candidate folders.
 
 For Train iteration, `[data].start` / `[data].end` are the strategy-visible
 decision and scoring window. If exits need later bars, add `[data].load_end`
@@ -301,7 +307,7 @@ conda run -n quant quant-strategies validate path/to/candidate/validation.toml
 ```python
 from quant_strategies.validation import run_validation
 
-result = run_validation("path/to/candidate/validation.toml")
+result = run_validation("candidates/<candidate_id>/validation.toml")
 if not result.succeeded:                     # run integrity, not the verdict
     raise SystemExit(result.message)
 
@@ -315,7 +321,7 @@ print(result.result_dir)
 (`min_observations_per_decision`, `required_observation_fields`); `[output]`;
 `[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]` and
 `[agreement_oracle]`. See
-[`examples/strategies/simple_momentum_spy_daily_validation.toml`](../../examples/strategies/simple_momentum_spy_daily_validation.toml).
+[`examples/simple_momentum/validation.toml`](../../examples/simple_momentum/validation.toml).
 
 For `crypto_perp_funding`, `[readiness]` additionally requires `close`,
 `funding_timestamp`, `funding_rate`, and `has_funding_event` observations on every
@@ -338,14 +344,14 @@ assumptions. Requires `validate_params`. Runs strict row-contract, a decision-ro
 data audit, and a complete causal-replay preflight *before* any scenario expands.
 
 ```bash
-conda run -n quant quant-strategies evaluate candidate/evaluation.toml
+conda run -n quant quant-strategies evaluate candidates/<candidate_id>/evaluation.toml
 # --events-jsonl streams structured evaluation_stage events to stderr
 ```
 
 ```python
 from quant_strategies.evaluation import run_evaluation
 
-result = run_evaluation("candidate/evaluation.toml")  # event_sink= optional
+result = run_evaluation("candidates/<candidate_id>/evaluation.toml")  # event_sink= optional
 if not result.succeeded:
     raise SystemExit(f"{result.failure_stage}: {result.message}")
 
@@ -361,7 +367,7 @@ with `annualization_periods_per_year` (must match bar cadence) and optional
 `[benchmark]` (`symbol`, which must also appear in `data.symbols`), and optional
 `[[scenarios]]` (each with `id`, labels, `required`, and nested
 `[scenarios.cost_model]` / `[scenarios.fill_model]` overrides); `[output]`. See
-[`examples/strategies/simple_momentum_spy_daily_evaluation.toml`](../../examples/strategies/simple_momentum_spy_daily_evaluation.toml).
+[`examples/simple_momentum/evaluation.toml`](../../examples/simple_momentum/evaluation.toml).
 
 With no custom `[[scenarios]]`, evaluation fans out the default fixed six-scenario
 cost/fill matrix per window.

@@ -32,6 +32,11 @@ def _repo_root(info: ValidationInfo) -> Path:
     return Path(root).resolve() if root is not None else default_repo_root()
 
 
+def _config_base(info: ValidationInfo) -> Path:
+    base = info.context.get("base_dir") if info.context else None
+    return Path(base).resolve() if base is not None else _repo_root(info)
+
+
 def _resolve_inside_repo(value: Path, repo_root: Path, field_name: str) -> Path:
     resolved = value if value.is_absolute() else repo_root / value
     resolved = resolved.resolve()
@@ -39,6 +44,16 @@ def _resolve_inside_repo(value: Path, repo_root: Path, field_name: str) -> Path:
         resolved.relative_to(repo_root)
     except ValueError as exc:
         raise ValueError(f"{field_name} must resolve inside repository: {repo_root}") from exc
+    return resolved
+
+
+def _resolve_strategy_path(value: Path, base_dir: Path, repo_root: Path) -> Path:
+    resolved = value if value.is_absolute() else base_dir / value
+    resolved = resolved.resolve()
+    try:
+        resolved.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError(f"strategy_path must resolve inside repository: {repo_root}") from exc
     return resolved
 
 
@@ -101,7 +116,7 @@ class RunConfig(RunnerConfigModel):
     @field_validator("strategy_path")
     @classmethod
     def validate_strategy_path(cls, value: Path, info: ValidationInfo) -> Path:
-        return _resolve_inside_repo(value, _repo_root(info), "strategy_path")
+        return _resolve_strategy_path(value, _config_base(info), _repo_root(info))
 
     @field_validator("strategy_id")
     @classmethod
@@ -133,6 +148,9 @@ def load_config(path: str | Path, *, repo_root: Path | None = None) -> RunConfig
         raise ConfigError(f"invalid TOML in config: {exc}") from exc
 
     try:
-        return RunConfig.model_validate(payload, context={"repo_root": root})
+        return RunConfig.model_validate(
+            payload,
+            context={"repo_root": root, "base_dir": config_path.parent},
+        )
     except ValidationError as exc:
         raise ConfigError(str(exc)) from exc

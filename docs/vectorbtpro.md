@@ -141,7 +141,7 @@ frozen-candidate portfolio/economic/path evidence. It requires a candidate-local
 `evaluation.toml`, calls the data-kind-specific portfolio backend with explicit
 assumptions, and returns `EvaluationRunResult`.
 The checked-in example config is
-`examples/strategies/simple_momentum_spy_daily_evaluation.toml`.
+`examples/simple_momentum/evaluation.toml`.
 
 Detailed trace artifacts are Parquet only through `pyarrow`:
 

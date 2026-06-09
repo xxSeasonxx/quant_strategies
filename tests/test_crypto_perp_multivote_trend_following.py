@@ -4,18 +4,19 @@ import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from untested.crypto_perp_multivote_trend_following import (
-    _atr_bps,
-    _bollinger_width_percentile,
-    _dynamic_threshold_bps,
-    _ema,
-    _macd_histogram,
-    _rsi,
-    generate_decisions,
-    validate_params,
-)
+from tests.candidate_loader import load_candidate_strategy
 
 from quant_strategies.core.data_audit import audit_decision_rows
+
+strategy = load_candidate_strategy("crypto_perp_multivote_trend_following")
+_atr_bps = strategy._atr_bps
+_bollinger_width_percentile = strategy._bollinger_width_percentile
+_dynamic_threshold_bps = strategy._dynamic_threshold_bps
+_ema = strategy._ema
+_macd_histogram = strategy._macd_histogram
+_rsi = strategy._rsi
+generate_decisions = strategy.generate_decisions
+validate_params = strategy.validate_params
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
 
