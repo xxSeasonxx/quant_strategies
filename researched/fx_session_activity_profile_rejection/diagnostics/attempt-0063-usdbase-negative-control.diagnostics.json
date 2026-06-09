@@ -1,0 +1,385 @@
+{
+  "artifact_profile": "diagnostic",
+  "assessment_status": "quick_check_failed",
+  "by_direction": {
+    "long": {
+      "cost": 0.0,
+      "count": 64,
+      "funding": 0.0,
+      "gross": -0.0028460041015692158,
+      "net": -0.0028460041015692158
+    },
+    "short": {
+      "cost": 0.0,
+      "count": 65,
+      "funding": 0.0,
+      "gross": -0.005469232012776688,
+      "net": -0.005469232012776688
+    }
+  },
+  "by_exit_reason": {
+    "max_hold": {
+      "cost": 0.0,
+      "count": 50,
+      "funding": 0.0,
+      "gross": 0.0019665234447391188,
+      "net": 0.0019665234447391188
+    },
+    "stop_loss": {
+      "cost": 0.0,
+      "count": 63,
+      "funding": 0.0,
+      "gross": -0.016850903148693874,
+      "net": -0.016850903148693874
+    },
+    "take_profit": {
+      "cost": 0.0,
+      "count": 16,
+      "funding": 0.0,
+      "gross": 0.00656914358960885,
+      "net": 0.00656914358960885
+    }
+  },
+  "by_symbol": {
+    "USDCAD": {
+      "cost": 0.0,
+      "count": 71,
+      "funding": 0.0,
+      "gross": -0.004171497577743855,
+      "net": -0.004171497577743855
+    },
+    "USDJPY": {
+      "cost": 0.0,
+      "count": 58,
+      "funding": 0.0,
+      "gross": -0.004143738536602049,
+      "net": -0.004143738536602049
+    }
+  },
+  "concentration": {
+    "top_5_losers_net": -0.003257763097842685,
+    "top_5_winners_net": 0.003893533410513839,
+    "top_loser_net": -0.000824315614505224,
+    "top_winner_net": 0.0011272906334634574
+  },
+  "cost_funding_breakdown": {
+    "cost": 0.0,
+    "cost_fraction_of_abs_gross": 0.0,
+    "funding": 0.0,
+    "gross": -0.008315236114345904,
+    "net": -0.008315236114345904
+  },
+  "economic_slices": {
+    "basis": "engine_trade_ledger",
+    "by_direction": {
+      "long": {
+        "average_loss_net": -0.00021906546672339897,
+        "average_trade_net": -4.4468814087018997e-05,
+        "average_win_net": 0.000339643821713017,
+        "count": 64,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3125,
+        "losing_trade_count": 44,
+        "net_sum": -0.0028460041015692158,
+        "winning_trade_count": 20
+      },
+      "short": {
+        "average_loss_net": -0.00024478380789881034,
+        "average_trade_net": -8.414203096579519e-05,
+        "average_win_net": 0.00022983962394873436,
+        "count": 65,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3384615384615385,
+        "losing_trade_count": 43,
+        "net_sum": -0.005469232012776688,
+        "winning_trade_count": 22
+      }
+    },
+    "by_exit_reason": {
+      "max_hold": {
+        "average_loss_net": -0.0001380700469493553,
+        "average_trade_net": 3.9330468894782395e-05,
+        "average_win_net": 0.00020308479121244796,
+        "count": 50,
+        "flat_trade_count": 0,
+        "hit_rate": 0.52,
+        "losing_trade_count": 24,
+        "net_sum": 0.0019665234447391196,
+        "winning_trade_count": 26
+      },
+      "stop_loss": {
+        "average_loss_net": -0.000267474653153871,
+        "average_trade_net": -0.000267474653153871,
+        "average_win_net": null,
+        "count": 63,
+        "flat_trade_count": 0,
+        "hit_rate": 0.0,
+        "losing_trade_count": 63,
+        "net_sum": -0.016850903148693874,
+        "winning_trade_count": 0
+      },
+      "take_profit": {
+        "average_loss_net": null,
+        "average_trade_net": 0.00041057147435055307,
+        "average_win_net": 0.00041057147435055307,
+        "count": 16,
+        "flat_trade_count": 0,
+        "hit_rate": 1.0,
+        "losing_trade_count": 0,
+        "net_sum": 0.006569143589608849,
+        "winning_trade_count": 16
+      }
+    },
+    "by_symbol": {
+      "USDCAD": {
+        "average_loss_net": -0.0001649654017252327,
+        "average_trade_net": -5.875348701047682e-05,
+        "average_win_net": 0.0001778094139451158,
+        "count": 71,
+        "flat_trade_count": 0,
+        "hit_rate": 0.30985915492957744,
+        "losing_trade_count": 49,
+        "net_sum": -0.004171497577743854,
+        "winning_trade_count": 22
+      },
+      "USDJPY": {
+        "average_loss_net": -0.0003179284102879473,
+        "average_trade_net": -7.144376787244912e-05,
+        "average_win_net": 0.00039687705271699745,
+        "count": 58,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3448275862068966,
+        "losing_trade_count": 38,
+        "net_sum": -0.004143738536602049,
+        "winning_trade_count": 20
+      }
+    },
+    "schema_version": "quant_strategies.runner.economic_slices/v1",
+    "win_loss_distribution": {
+      "largest_loss_net": -0.000824315614505224,
+      "largest_win_net": 0.0011272906334634574,
+      "median_trade_net": -0.00012995180552790732,
+      "sum_negative_net": -0.0201645842754784,
+      "sum_positive_net": 0.011849348161132497
+    }
+  },
+  "evidence_quality": {
+    "availability_coverage": {
+      "field": "available_at",
+      "fraction": 1.0,
+      "present": 1543075,
+      "total": 1543075
+    },
+    "candidate_probe_count": null,
+    "causality_check": "off",
+    "causality_verified": false,
+    "data_availability_status": "complete",
+    "deterministic_replay_verified": false,
+    "elapsed_seconds": null,
+    "emitted_replay_verified": false,
+    "evidence_quality_warnings": [
+      "causality_replay_skipped",
+      "runner_causality_not_verified"
+    ],
+    "replay_scope": "off",
+    "replay_warning": null,
+    "row_contract": {
+      "data_kind": "forex_with_quotes",
+      "duplicate_key_count": 0,
+      "funding_event_missing_fields": {},
+      "issue_count": 0,
+      "issue_reasons": {},
+      "issue_sample_count": 0,
+      "issues": [],
+      "issues_truncated": false,
+      "missing_required_fields": {},
+      "quant_data_feedback": [],
+      "required_fields": [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "bid",
+        "ask",
+        "mid",
+        "available_at"
+      ],
+      "status": "passed",
+      "timestamp_status": "aware"
+    },
+    "selected_probe_count": null,
+    "skipped_probe_count": 0,
+    "skipped_probe_reasons": [],
+    "strict_no_emission_verified": false,
+    "strict_probe_count": null,
+    "strict_probe_limit": null,
+    "strict_replay_capped": false,
+    "timed_out": false,
+    "timeout_seconds": null
+  },
+  "holding_period": {
+    "average_seconds": 6765.581395348837,
+    "count": 129,
+    "max_seconds": 11040.0,
+    "median_seconds": 6960.0,
+    "min_seconds": 300.0
+  },
+  "quick_checks": true,
+  "replayable_from_artifacts": false,
+  "sample_trades": {
+    "largest_losers": [
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:24be176786b25172",
+        "decision_time": "2025-06-23T08:30:00Z",
+        "entry_time": "2025-06-23T08:31:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-06-23T09:20:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.000824315614505224,
+        "net_return": -0.000824315614505224,
+        "side": "short",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:51f96bff06428ae9",
+        "decision_time": "2025-04-10T07:48:00Z",
+        "entry_time": "2025-04-10T07:49:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-10T09:58:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.000786764605491283,
+        "net_return": -0.000786764605491283,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:cf43ff5b7710c669",
+        "decision_time": "2025-07-07T08:31:00Z",
+        "entry_time": "2025-07-07T08:32:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-07-07T10:10:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.0005718143738977453,
+        "net_return": -0.0005718143738977453,
+        "side": "short",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:775d7cc77a6e9fc3",
+        "decision_time": "2025-04-08T09:33:00Z",
+        "entry_time": "2025-04-08T09:34:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-08T10:17:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.0005409493576438153,
+        "net_return": -0.0005409493576438153,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:fd8a43778bf2057c",
+        "decision_time": "2025-04-11T07:47:00Z",
+        "entry_time": "2025-04-11T07:48:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-11T09:36:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.0005339191463046174,
+        "net_return": -0.0005339191463046174,
+        "side": "long",
+        "symbol": "USDCAD",
+        "weight": 0.25
+      }
+    ],
+    "largest_winners": [
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:71ccd39ae8208e96",
+        "decision_time": "2025-04-16T08:01:00Z",
+        "entry_time": "2025-04-16T08:02:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-04-16T08:27:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0011272906334634574,
+        "net_return": 0.0011272906334634574,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:43bb56aeb2e10fb9",
+        "decision_time": "2025-08-07T08:02:00Z",
+        "entry_time": "2025-08-07T08:03:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-08-07T10:00:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0007914139248003652,
+        "net_return": 0.0007914139248003652,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:b426bdcd5538df33",
+        "decision_time": "2025-03-03T09:56:00Z",
+        "entry_time": "2025-03-03T09:57:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-03-03T10:40:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.000686680721729722,
+        "net_return": 0.000686680721729722,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:00a45a522a33c747",
+        "decision_time": "2025-10-09T08:42:00Z",
+        "entry_time": "2025-10-09T08:43:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-10-09T09:04:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0006767403997672066,
+        "net_return": 0.0006767403997672066,
+        "side": "short",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:d664f9d479cacd93",
+        "decision_time": "2025-04-21T08:11:00Z",
+        "entry_time": "2025-04-21T08:12:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-04-21T11:12:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0006114077307530875,
+        "net_return": 0.0006114077307530875,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      }
+    ]
+  },
+  "strategy_id": "fx_session_activity_profile_rejection",
+  "trade_count": 129,
+  "trade_result": {
+    "sum_signed_trade_activity_cost": 0.0,
+    "sum_signed_trade_activity_funding": 0.0,
+    "sum_signed_trade_activity_gross": -0.008315236114345904,
+    "sum_signed_trade_activity_net": -0.008315236114345904
+  }
+}

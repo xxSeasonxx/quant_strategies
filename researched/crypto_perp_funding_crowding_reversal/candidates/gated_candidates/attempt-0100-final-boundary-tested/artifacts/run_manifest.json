@@ -1,0 +1,84 @@
+{
+  "artifact_profile": "diagnostic",
+  "artifacts": {
+    "config.toml": {
+      "sha256": "38b5643f2c43f1498d9c175265f15bdff7916f6208a2f59aef77acb371724d88"
+    },
+    "data_manifest.json": {
+      "sha256": "4d028b431b8c7f0fdae535c53568636df4ce54b8d4f8d6f183e1d87550ef56cb"
+    },
+    "diagnostics.json": {
+      "sha256": "d7241ba83930fa86c882be31757154a73ea757050de578fbdb01fb12d96d2d2a"
+    },
+    "notes.md": {
+      "sha256": "538d3be196550c985ce7a7d31d864b53c12b36c8ddc3e9b030df9f2edbd55941"
+    },
+    "strategy_snapshot.py": {
+      "sha256": "bcee9e3dcb85d691efac30ba3f52afdccf79be3ff9c8a7d66ac45b847ec422b1"
+    }
+  },
+  "engine": {
+    "evidence_schema": "quant_strategies.engine.evidence/v4"
+  },
+  "evidence": {
+    "evidence_class": "quick_run_diagnostic",
+    "funding_model": "linear_additive_adjustment",
+    "live_eligible": false,
+    "metric_semantics": {
+      "trade_result.sum_signed_trade_activity_cost": {
+        "aggregation": "sum over trades of target-weighted round-trip fee and slippage cost",
+        "asymmetry": "linear cost approximation; not venue-specific execution cost accounting",
+        "backend": "execution_kernel",
+        "base": "signed target-weighted trade activity; not portfolio NAV",
+        "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+        "name": "trade_result.sum_signed_trade_activity_cost",
+        "return_path_model": "linear_round_trip_bps_cost",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "trade_result.sum_signed_trade_activity_funding": {
+        "aggregation": "sum over engine-held intervals of supplied funding adjustments",
+        "asymmetry": "linear additive funding adjustment; not a cash ledger or portfolio funding accrual model",
+        "backend": "execution_kernel",
+        "base": "signed target-weighted trade activity; not portfolio NAV",
+        "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+        "name": "trade_result.sum_signed_trade_activity_funding",
+        "return_path_model": "linear_additive_adjustment",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "trade_result.sum_signed_trade_activity_gross": {
+        "aggregation": "sum over trades of signed target-weighted price return",
+        "asymmetry": "not comparable to NAV-path total return without an explicit backend agreement test",
+        "backend": "execution_kernel",
+        "base": "signed target-weighted trade activity; not portfolio NAV",
+        "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+        "name": "trade_result.sum_signed_trade_activity_gross",
+        "return_path_model": "linear_per_trade_price_return",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "trade_result.sum_signed_trade_activity_net": {
+        "aggregation": "gross plus funding minus cost, summed over trades",
+        "asymmetry": "not comparable to NAV-path total return without an explicit backend agreement test",
+        "backend": "execution_kernel",
+        "base": "signed target-weighted trade activity; not portfolio NAV",
+        "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+        "name": "trade_result.sum_signed_trade_activity_net",
+        "return_path_model": "linear_trade_activity_sum",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      }
+    },
+    "paper_trade_eligible": false,
+    "promotion_eligible": false,
+    "requires_manual_approval": true,
+    "return_model": "trade_result.sum_signed_trade_activity_net",
+    "strategy_contract": "decision"
+  },
+  "replayable_from_artifacts": false,
+  "repository": {
+    "commit": "f7a3702a89a4463107e90e98e2dce9a333d1a949",
+    "short_commit": "f7a3702"
+  }
+}

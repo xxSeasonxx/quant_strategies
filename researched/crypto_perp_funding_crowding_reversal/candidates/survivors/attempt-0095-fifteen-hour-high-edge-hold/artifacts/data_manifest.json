@@ -1,0 +1,201 @@
+{
+  "artifact_profile": "diagnostic",
+  "availability_coverage": {
+    "field": "available_at",
+    "fraction": 1.0,
+    "present": 2203108,
+    "total": 2203108
+  },
+  "candidate_probe_count": null,
+  "causality_check": "off",
+  "causality_verified": false,
+  "data": {
+    "dataset": null,
+    "end": "2025-12-31",
+    "kind": "crypto_perp_funding",
+    "load_end": "2026-01-07",
+    "load_start": "2025-03-01",
+    "start": "2025-03-01",
+    "symbols": [
+      "BTC-PERP",
+      "ETH-PERP",
+      "DOGE-PERP",
+      "ADA-PERP",
+      "LINK-PERP"
+    ]
+  },
+  "data_availability_status": "complete",
+  "deterministic_replay_verified": false,
+  "elapsed_seconds": null,
+  "emitted_replay_verified": false,
+  "evidence_quality_warnings": [
+    "causality_replay_skipped",
+    "runner_causality_not_verified"
+  ],
+  "execution_rows": {
+    "by_symbol": {
+      "ADA-PERP": {
+        "count": 450702,
+        "max_timestamp": "2026-01-07T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "BTC-PERP": {
+        "count": 450702,
+        "max_timestamp": "2026-01-07T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "DOGE-PERP": {
+        "count": 450701,
+        "max_timestamp": "2026-01-07T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "ETH-PERP": {
+        "count": 450702,
+        "max_timestamp": "2026-01-07T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "LINK-PERP": {
+        "count": 450701,
+        "max_timestamp": "2026-01-07T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      }
+    },
+    "normalized_rows_sha256": "e476d705c6ac644816a6ce4f7ad7644e7a76af14aa36b091e8d709778fafca0d",
+    "row_contract": {
+      "data_kind": "crypto_perp_funding",
+      "duplicate_key_count": 0,
+      "funding_event_missing_fields": {},
+      "issue_count": 0,
+      "issue_reasons": {},
+      "issues": [],
+      "missing_required_fields": {},
+      "quant_data_feedback": [],
+      "required_fields": [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "has_funding_event",
+        "available_at"
+      ],
+      "status": "passed",
+      "timestamp_status": "aware"
+    },
+    "total": 2253508
+  },
+  "metric_semantics": {
+    "trade_result.sum_signed_trade_activity_cost": {
+      "aggregation": "sum over trades of target-weighted round-trip fee and slippage cost",
+      "asymmetry": "linear cost approximation; not venue-specific execution cost accounting",
+      "backend": "execution_kernel",
+      "base": "signed target-weighted trade activity; not portfolio NAV",
+      "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+      "name": "trade_result.sum_signed_trade_activity_cost",
+      "return_path_model": "linear_round_trip_bps_cost",
+      "tolerance": null,
+      "unit": "decimal_fraction"
+    },
+    "trade_result.sum_signed_trade_activity_funding": {
+      "aggregation": "sum over engine-held intervals of supplied funding adjustments",
+      "asymmetry": "linear additive funding adjustment; not a cash ledger or portfolio funding accrual model",
+      "backend": "execution_kernel",
+      "base": "signed target-weighted trade activity; not portfolio NAV",
+      "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+      "name": "trade_result.sum_signed_trade_activity_funding",
+      "return_path_model": "linear_additive_adjustment",
+      "tolerance": null,
+      "unit": "decimal_fraction"
+    },
+    "trade_result.sum_signed_trade_activity_gross": {
+      "aggregation": "sum over trades of signed target-weighted price return",
+      "asymmetry": "not comparable to NAV-path total return without an explicit backend agreement test",
+      "backend": "execution_kernel",
+      "base": "signed target-weighted trade activity; not portfolio NAV",
+      "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+      "name": "trade_result.sum_signed_trade_activity_gross",
+      "return_path_model": "linear_per_trade_price_return",
+      "tolerance": null,
+      "unit": "decimal_fraction"
+    },
+    "trade_result.sum_signed_trade_activity_net": {
+      "aggregation": "gross plus funding minus cost, summed over trades",
+      "asymmetry": "not comparable to NAV-path total return without an explicit backend agreement test",
+      "backend": "execution_kernel",
+      "base": "signed target-weighted trade activity; not portfolio NAV",
+      "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+      "name": "trade_result.sum_signed_trade_activity_net",
+      "return_path_model": "linear_trade_activity_sum",
+      "tolerance": null,
+      "unit": "decimal_fraction"
+    }
+  },
+  "normalized_rows_sha256": "8bf876c1bfaba02a6e5233a3e007ab2c9992619afa582d6a0402fbd16a2a1a06",
+  "replay_scope": "off",
+  "replay_warning": null,
+  "replayable_from_artifacts": false,
+  "row_contract": {
+    "data_kind": "crypto_perp_funding",
+    "duplicate_key_count": 0,
+    "funding_event_missing_fields": {},
+    "issue_count": 0,
+    "issue_reasons": {},
+    "issue_sample_count": 0,
+    "issues": [],
+    "issues_truncated": false,
+    "missing_required_fields": {},
+    "quant_data_feedback": [],
+    "required_fields": [
+      "symbol",
+      "timestamp",
+      "open",
+      "high",
+      "low",
+      "close",
+      "has_funding_event",
+      "available_at"
+    ],
+    "status": "passed",
+    "timestamp_status": "aware"
+  },
+  "rows": {
+    "by_symbol": {
+      "ADA-PERP": {
+        "count": 440622,
+        "max_timestamp": "2025-12-31T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "BTC-PERP": {
+        "count": 440622,
+        "max_timestamp": "2025-12-31T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "DOGE-PERP": {
+        "count": 440621,
+        "max_timestamp": "2025-12-31T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "ETH-PERP": {
+        "count": 440622,
+        "max_timestamp": "2025-12-31T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      },
+      "LINK-PERP": {
+        "count": 440621,
+        "max_timestamp": "2025-12-31T23:59:00+00:00",
+        "min_timestamp": "2025-03-01T00:00:00+00:00"
+      }
+    },
+    "total": 2203108
+  },
+  "selected_probe_count": null,
+  "skipped_probe_count": 0,
+  "skipped_probe_reasons": [],
+  "strict_no_emission_verified": false,
+  "strict_probe_count": null,
+  "strict_probe_limit": null,
+  "strict_replay_capped": false,
+  "timed_out": false,
+  "timeout_seconds": null
+}

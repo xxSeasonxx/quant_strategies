@@ -1,0 +1,394 @@
+{
+  "artifact_profile": "diagnostic",
+  "assessment_status": "quick_check_unverified",
+  "by_direction": {
+    "long": {
+      "cost": 0.18671999999999822,
+      "count": 778,
+      "funding": 0.0017706119999999987,
+      "gross": 0.38658060528423105,
+      "net": 0.2016312172842309
+    }
+  },
+  "by_exit_reason": {
+    "max_hold": {
+      "cost": 0.045599999999999884,
+      "count": 190,
+      "funding": 0.001185555999999999,
+      "gross": -0.6801911183943183,
+      "net": -0.7246055623943188
+    },
+    "take_profit": {
+      "cost": 0.14112000000000008,
+      "count": 588,
+      "funding": 0.0005850559999999986,
+      "gross": 1.0667717236785492,
+      "net": 0.92623677967855
+    }
+  },
+  "by_symbol": {
+    "ADA-PERP": {
+      "cost": 0.09048000000000016,
+      "count": 377,
+      "funding": 0.001778625999999998,
+      "gross": 0.1643618043745134,
+      "net": 0.07566043037451334
+    },
+    "BTC-PERP": {
+      "cost": 0.01824000000000002,
+      "count": 76,
+      "funding": -4.227e-05,
+      "gross": 0.02788673688920141,
+      "net": 0.009604466889201406
+    },
+    "DOGE-PERP": {
+      "cost": 0.036959999999999986,
+      "count": 154,
+      "funding": 0.00018439199999999997,
+      "gross": 0.12996546638410364,
+      "net": 0.0931898583841036
+    },
+    "ETH-PERP": {
+      "cost": 0.005759999999999996,
+      "count": 24,
+      "funding": -0.000103372,
+      "gross": -0.009926955944505565,
+      "net": -0.015790327944505564
+    },
+    "LINK-PERP": {
+      "cost": 0.035280000000000006,
+      "count": 147,
+      "funding": -4.676400000000007e-05,
+      "gross": 0.07429355358091831,
+      "net": 0.03896678958091832
+    }
+  },
+  "concentration": {
+    "top_5_losers_net": -0.09613492070511563,
+    "top_5_winners_net": 0.02199927133642168,
+    "top_loser_net": -0.02383979963696896,
+    "top_winner_net": 0.008201439795359039
+  },
+  "cost_funding_breakdown": {
+    "cost": 0.18672,
+    "cost_fraction_of_abs_gross": 0.4830040551639036,
+    "funding": 0.001770612,
+    "gross": 0.3865806052842311,
+    "net": 0.2016312172842311
+  },
+  "economic_slices": {
+    "basis": "engine_trade_ledger",
+    "by_direction": {
+      "long": {
+        "average_loss_net": -0.004233056195080124,
+        "average_trade_net": 0.00025916608905428165,
+        "average_win_net": 0.001543718907492715,
+        "count": 778,
+        "flat_trade_count": 0,
+        "hit_rate": 0.7776349614395887,
+        "losing_trade_count": 173,
+        "net_sum": 0.2016312172842311,
+        "winning_trade_count": 605
+      }
+    },
+    "by_exit_reason": {
+      "max_hold": {
+        "average_loss_net": -0.004233056195080124,
+        "average_trade_net": -0.003813713486285887,
+        "average_win_net": 0.0004537152561495794,
+        "count": 190,
+        "flat_trade_count": 0,
+        "hit_rate": 0.08947368421052632,
+        "losing_trade_count": 173,
+        "net_sum": -0.7246055623943185,
+        "winning_trade_count": 17
+      },
+      "take_profit": {
+        "average_loss_net": null,
+        "average_trade_net": 0.001575232618500935,
+        "average_win_net": 0.001575232618500935,
+        "count": 588,
+        "flat_trade_count": 0,
+        "hit_rate": 1.0,
+        "losing_trade_count": 0,
+        "net_sum": 0.9262367796785497,
+        "winning_trade_count": 588
+      }
+    },
+    "by_symbol": {
+      "ADA-PERP": {
+        "average_loss_net": -0.005157170619255288,
+        "average_trade_net": 0.00020069079674937232,
+        "average_win_net": 0.001575875226857235,
+        "count": 377,
+        "flat_trade_count": 0,
+        "hit_rate": 0.7957559681697612,
+        "losing_trade_count": 77,
+        "net_sum": 0.07566043037451337,
+        "winning_trade_count": 300
+      },
+      "BTC-PERP": {
+        "average_loss_net": -0.0010710339836282248,
+        "average_trade_net": 0.00012637456433159746,
+        "average_win_net": 0.0012623775457293776,
+        "count": 76,
+        "flat_trade_count": 0,
+        "hit_rate": 0.5131578947368421,
+        "losing_trade_count": 37,
+        "net_sum": 0.009604466889201408,
+        "winning_trade_count": 39
+      },
+      "DOGE-PERP": {
+        "average_loss_net": -0.005047117630230676,
+        "average_trade_net": 0.0006051289505461272,
+        "average_win_net": 0.001547170047342261,
+        "count": 154,
+        "flat_trade_count": 0,
+        "hit_rate": 0.8571428571428571,
+        "losing_trade_count": 22,
+        "net_sum": 0.09318985838410358,
+        "winning_trade_count": 132
+      },
+      "ETH-PERP": {
+        "average_loss_net": -0.00440417750117026,
+        "average_trade_net": -0.0006579303310210653,
+        "average_win_net": 0.0015898179710684519,
+        "count": 24,
+        "flat_trade_count": 0,
+        "hit_rate": 0.625,
+        "losing_trade_count": 9,
+        "net_sum": -0.015790327944505567,
+        "winning_trade_count": 15
+      },
+      "LINK-PERP": {
+        "average_loss_net": -0.005175505046298311,
+        "average_trade_net": 0.00026508020123073683,
+        "average_win_net": 0.0015452179065316893,
+        "count": 147,
+        "flat_trade_count": 0,
+        "hit_rate": 0.8095238095238095,
+        "losing_trade_count": 28,
+        "net_sum": 0.038966789580918315,
+        "winning_trade_count": 119
+      }
+    },
+    "schema_version": "quant_strategies.runner.economic_slices/v1",
+    "win_loss_distribution": {
+      "largest_loss_net": -0.02383979963696896,
+      "largest_win_net": 0.008201439795359039,
+      "median_trade_net": 0.0014276067385018058,
+      "sum_negative_net": -0.7323187217488614,
+      "sum_positive_net": 0.9339499390330925
+    }
+  },
+  "evidence_quality": {
+    "availability_coverage": {
+      "field": "available_at",
+      "fraction": 1.0,
+      "present": 2203108,
+      "total": 2203108
+    },
+    "causality_check": "off",
+    "causality_verified": false,
+    "data_availability_status": "complete",
+    "deterministic_replay_verified": false,
+    "emitted_replay_verified": false,
+    "evidence_quality_warnings": [
+      "causality_replay_skipped",
+      "runner_causality_not_verified"
+    ],
+    "row_contract": {
+      "data_kind": "crypto_perp_funding",
+      "duplicate_key_count": 0,
+      "funding_event_missing_fields": {},
+      "issue_count": 0,
+      "issue_reasons": {},
+      "issue_sample_count": 0,
+      "issues": [],
+      "issues_truncated": false,
+      "missing_required_fields": {},
+      "quant_data_feedback": [],
+      "required_fields": [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "has_funding_event",
+        "available_at"
+      ],
+      "status": "passed",
+      "timestamp_status": "aware"
+    },
+    "skipped_probe_count": 0,
+    "skipped_probe_reasons": [],
+    "strict_no_emission_verified": false,
+    "strict_probe_count": null,
+    "strict_probe_limit": null,
+    "strict_replay_capped": false
+  },
+  "holding_period": {
+    "average_seconds": 18452.776349614396,
+    "count": 778,
+    "max_seconds": 43200.0,
+    "median_seconds": 10350.0,
+    "min_seconds": 60.0
+  },
+  "quick_checks": true,
+  "replayable_from_artifacts": false,
+  "sample_trades": {
+    "largest_losers": [
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:a827ab04f33592c0",
+        "decision_time": "2025-03-10T13:31:00Z",
+        "entry_time": "2025-03-10T13:32:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-03-11T01:32:00Z",
+        "funding_return": 9.5648e-05,
+        "gross_return": -0.023695447636968958,
+        "net_return": -0.02383979963696896,
+        "side": "long",
+        "symbol": "LINK-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:e42e1e738ec9cbc8",
+        "decision_time": "2025-10-13T22:31:00Z",
+        "entry_time": "2025-10-13T22:32:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-10-14T10:32:00Z",
+        "funding_return": -2.9766000000000006e-05,
+        "gross_return": -0.01893854748603352,
+        "net_return": -0.01920831348603352,
+        "side": "long",
+        "symbol": "DOGE-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:934980bbd7941a5b",
+        "decision_time": "2025-03-06T13:31:00Z",
+        "entry_time": "2025-03-06T13:32:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-03-07T01:32:00Z",
+        "funding_return": 7.3184e-05,
+        "gross_return": -0.018425281199785745,
+        "net_return": -0.018592097199785745,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:9317af1208f41e1b",
+        "decision_time": "2025-12-10T21:01:00Z",
+        "entry_time": "2025-12-10T21:02:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-12-11T09:02:00Z",
+        "funding_return": 1.4862000000000001e-05,
+        "gross_return": -0.017393180837289603,
+        "net_return": -0.017618318837289603,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:4b0bddd168d7e91b",
+        "decision_time": "2025-03-09T09:01:00Z",
+        "entry_time": "2025-03-09T09:02:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-03-09T21:02:00Z",
+        "funding_return": -8.96e-06,
+        "gross_return": -0.0166274315450378,
+        "net_return": -0.0168763915450378,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      }
+    ],
+    "largest_winners": [
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:c804bbccdaa7dd43",
+        "decision_time": "2025-04-07T13:31:00Z",
+        "entry_time": "2025-04-07T13:32:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-04-07T13:51:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.00844143979535904,
+        "net_return": 0.008201439795359039,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:50f7a88761ebc564",
+        "decision_time": "2025-04-07T04:31:00Z",
+        "entry_time": "2025-04-07T04:32:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-04-07T13:51:00Z",
+        "funding_return": -1.0774e-05,
+        "gross_return": 0.004224847833870403,
+        "net_return": 0.003974073833870403,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:0b3f93aa5c140b74",
+        "decision_time": "2025-04-07T06:01:00Z",
+        "entry_time": "2025-04-07T06:02:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-04-07T13:51:00Z",
+        "funding_return": -2e-05,
+        "gross_return": 0.003990929705215399,
+        "net_return": 0.003730929705215399,
+        "side": "long",
+        "symbol": "LINK-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:797b1b75494f8796",
+        "decision_time": "2025-03-02T09:01:00Z",
+        "entry_time": "2025-03-02T09:02:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-03-02T15:28:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0033540780019768453,
+        "net_return": 0.003114078001976845,
+        "side": "long",
+        "symbol": "BTC-PERP",
+        "weight": 0.2
+      },
+      {
+        "cost_return": 0.00023999999999999998,
+        "decision_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance:7198186cab927875",
+        "decision_time": "2025-10-12T13:31:00Z",
+        "entry_time": "2025-10-12T13:32:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-10-12T14:46:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0032187499999999925,
+        "net_return": 0.0029787499999999927,
+        "side": "long",
+        "symbol": "ADA-PERP",
+        "weight": 0.2
+      }
+    ]
+  },
+  "strategy_id": "crypto_perp_funding_crowding_reversal_stateful_rebalance",
+  "trade_count": 778,
+  "trade_result": {
+    "sum_signed_trade_activity_cost": 0.18672,
+    "sum_signed_trade_activity_funding": 0.001770612,
+    "sum_signed_trade_activity_gross": 0.3865806052842311,
+    "sum_signed_trade_activity_net": 0.2016312172842311
+  }
+}

@@ -1,0 +1,439 @@
+{
+  "artifact_profile": "diagnostic",
+  "assessment_status": "quick_check_unverified",
+  "by_direction": {
+    "long": {
+      "cost": 0.0,
+      "count": 64,
+      "funding": 0.0,
+      "gross": 0.001004258779287253,
+      "net": 0.001004258779287253
+    },
+    "short": {
+      "cost": 0.0,
+      "count": 55,
+      "funding": 0.0,
+      "gross": -0.0006661839087087615,
+      "net": -0.0006661839087087615
+    }
+  },
+  "by_exit_reason": {
+    "max_hold": {
+      "cost": 0.0,
+      "count": 9,
+      "funding": 0.0,
+      "gross": 0.0016233187683556555,
+      "net": 0.0016233187683556555
+    },
+    "stop_loss": {
+      "cost": 0.0,
+      "count": 73,
+      "funding": 0.0,
+      "gross": -0.009118176859287988,
+      "net": -0.009118176859287988
+    },
+    "take_profit": {
+      "cost": 0.0,
+      "count": 37,
+      "funding": 0.0,
+      "gross": 0.007832932961510828,
+      "net": 0.007832932961510828
+    }
+  },
+  "by_symbol": {
+    "AUDUSD": {
+      "cost": 0.0,
+      "count": 16,
+      "funding": 0.0,
+      "gross": 0.000621379614432949,
+      "net": 0.000621379614432949
+    },
+    "EURUSD": {
+      "cost": 0.0,
+      "count": 29,
+      "funding": 0.0,
+      "gross": 6.720126264829948e-06,
+      "net": 6.720126264829948e-06
+    },
+    "GBPUSD": {
+      "cost": 0.0,
+      "count": 34,
+      "funding": 0.0,
+      "gross": 0.00045063128612542023,
+      "net": 0.00045063128612542023
+    },
+    "USDCAD": {
+      "cost": 0.0,
+      "count": 18,
+      "funding": 0.0,
+      "gross": -0.0006086526840590142,
+      "net": -0.0006086526840590142
+    },
+    "USDJPY": {
+      "cost": 0.0,
+      "count": 22,
+      "funding": 0.0,
+      "gross": -0.00013200347218569268,
+      "net": -0.00013200347218569268
+    }
+  },
+  "concentration": {
+    "top_5_losers_net": -0.0017416434640483446,
+    "top_5_winners_net": 0.002134909250240136,
+    "top_loser_net": -0.00042433668541558224,
+    "top_winner_net": 0.000494012483886276
+  },
+  "cost_funding_breakdown": {
+    "cost": 0.0,
+    "cost_fraction_of_abs_gross": 0.0,
+    "funding": 0.0,
+    "gross": 0.00033807487057849184,
+    "net": 0.00033807487057849184
+  },
+  "economic_slices": {
+    "basis": "engine_trade_ledger",
+    "by_direction": {
+      "long": {
+        "average_loss_net": -0.00013457550112979243,
+        "average_trade_net": 1.5691543426363332e-05,
+        "average_win_net": 0.0002353126085468987,
+        "count": 64,
+        "flat_trade_count": 0,
+        "hit_rate": 0.40625,
+        "losing_trade_count": 38,
+        "net_sum": 0.0010042587792872533,
+        "winning_trade_count": 26
+      },
+      "short": {
+        "average_loss_net": -0.00011771449708687904,
+        "average_trade_net": -1.2112434703795665e-05,
+        "average_win_net": 0.00020495847130587577,
+        "count": 55,
+        "flat_trade_count": 0,
+        "hit_rate": 0.32727272727272727,
+        "losing_trade_count": 37,
+        "net_sum": -0.0006661839087087615,
+        "winning_trade_count": 18
+      }
+    },
+    "by_exit_reason": {
+      "max_hold": {
+        "average_loss_net": -0.0001755642879293224,
+        "average_trade_net": 0.00018036875203951725,
+        "average_win_net": 0.0002820639063163286,
+        "count": 9,
+        "flat_trade_count": 0,
+        "hit_rate": 0.7777777777777778,
+        "losing_trade_count": 2,
+        "net_sum": 0.0016233187683556553,
+        "winning_trade_count": 7
+      },
+      "stop_loss": {
+        "average_loss_net": -0.0001249065323190136,
+        "average_trade_net": -0.0001249065323190136,
+        "average_win_net": null,
+        "count": 73,
+        "flat_trade_count": 0,
+        "hit_rate": 0.0,
+        "losing_trade_count": 73,
+        "net_sum": -0.009118176859287992,
+        "winning_trade_count": 0
+      },
+      "take_profit": {
+        "average_loss_net": null,
+        "average_trade_net": 0.00021170089085164402,
+        "average_win_net": 0.00021170089085164402,
+        "count": 37,
+        "flat_trade_count": 0,
+        "hit_rate": 1.0,
+        "losing_trade_count": 0,
+        "net_sum": 0.007832932961510828,
+        "winning_trade_count": 37
+      }
+    },
+    "by_symbol": {
+      "AUDUSD": {
+        "average_loss_net": -0.0001532087834101351,
+        "average_trade_net": 3.883622590205931e-05,
+        "average_win_net": 0.0002857512378748807,
+        "count": 16,
+        "flat_trade_count": 0,
+        "hit_rate": 0.4375,
+        "losing_trade_count": 9,
+        "net_sum": 0.000621379614432949,
+        "winning_trade_count": 7
+      },
+      "EURUSD": {
+        "average_loss_net": -0.0001289961966497357,
+        "average_trade_net": 2.3172849189068085e-07,
+        "average_win_net": 0.0002457647862609808,
+        "count": 29,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3448275862068966,
+        "losing_trade_count": 19,
+        "net_sum": 6.720126264829745e-06,
+        "winning_trade_count": 10
+      },
+      "GBPUSD": {
+        "average_loss_net": -0.00011705343808884338,
+        "average_trade_net": 1.3253861356629999e-05,
+        "average_win_net": 0.0001994071462787348,
+        "count": 34,
+        "flat_trade_count": 0,
+        "hit_rate": 0.4117647058823529,
+        "losing_trade_count": 20,
+        "net_sum": 0.00045063128612541996,
+        "winning_trade_count": 14
+      },
+      "USDCAD": {
+        "average_loss_net": -0.0001274094427409089,
+        "average_trade_net": -3.381403800327857e-05,
+        "average_win_net": 0.00015337677147198202,
+        "count": 18,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3333333333333333,
+        "losing_trade_count": 12,
+        "net_sum": -0.0006086526840590143,
+        "winning_trade_count": 6
+      },
+      "USDJPY": {
+        "average_loss_net": -0.00011796777156284456,
+        "average_trade_net": -6.000157826622392e-06,
+        "average_win_net": 0.00023393044303671084,
+        "count": 22,
+        "flat_trade_count": 0,
+        "hit_rate": 0.3181818181818182,
+        "losing_trade_count": 15,
+        "net_sum": -0.00013200347218569262,
+        "winning_trade_count": 7
+      }
+    },
+    "schema_version": "quant_strategies.runner.economic_slices/v1",
+    "win_loss_distribution": {
+      "largest_loss_net": -0.00042433668541558224,
+      "largest_win_net": 0.000494012483886276,
+      "median_trade_net": -8.215635425822224e-05,
+      "sum_negative_net": -0.009469305435146637,
+      "sum_positive_net": 0.009807380305725128
+    }
+  },
+  "evidence_quality": {
+    "availability_coverage": {
+      "field": "available_at",
+      "fraction": 1.0,
+      "present": 1543075,
+      "total": 1543075
+    },
+    "candidate_probe_count": null,
+    "causality_check": "off",
+    "causality_verified": false,
+    "data_availability_status": "complete",
+    "deterministic_replay_verified": false,
+    "elapsed_seconds": null,
+    "emitted_replay_verified": false,
+    "evidence_quality_warnings": [
+      "causality_replay_skipped",
+      "runner_causality_not_verified"
+    ],
+    "replay_scope": "off",
+    "replay_warning": null,
+    "row_contract": {
+      "data_kind": "forex_with_quotes",
+      "duplicate_key_count": 0,
+      "funding_event_missing_fields": {},
+      "issue_count": 0,
+      "issue_reasons": {},
+      "issue_sample_count": 0,
+      "issues": [],
+      "issues_truncated": false,
+      "missing_required_fields": {},
+      "quant_data_feedback": [],
+      "required_fields": [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "bid",
+        "ask",
+        "mid",
+        "available_at"
+      ],
+      "status": "passed",
+      "timestamp_status": "aware"
+    },
+    "selected_probe_count": null,
+    "skipped_probe_count": 0,
+    "skipped_probe_reasons": [],
+    "strict_no_emission_verified": false,
+    "strict_probe_count": null,
+    "strict_probe_limit": null,
+    "strict_replay_capped": false,
+    "timed_out": false,
+    "timeout_seconds": null
+  },
+  "holding_period": {
+    "average_seconds": 2284.5378151260506,
+    "count": 119,
+    "max_seconds": 10800.0,
+    "median_seconds": 1020.0,
+    "min_seconds": 60.0
+  },
+  "quick_checks": true,
+  "replayable_from_artifacts": false,
+  "sample_trades": {
+    "largest_losers": [
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:f63cd041e3605109",
+        "decision_time": "2025-04-10T07:39:00Z",
+        "entry_time": "2025-04-10T07:40:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-10T07:54:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.00042433668541558224,
+        "net_return": -0.00042433668541558224,
+        "side": "long",
+        "symbol": "USDCAD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:32ba5b10dfeff71e",
+        "decision_time": "2025-04-01T09:04:00Z",
+        "entry_time": "2025-04-01T09:05:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-01T10:09:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.00037109193802763125,
+        "net_return": -0.00037109193802763125,
+        "side": "long",
+        "symbol": "GBPUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:3db1f83bb37fd8b2",
+        "decision_time": "2025-04-08T08:05:00Z",
+        "entry_time": "2025-04-08T08:06:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-08T08:27:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.00034274293454022786,
+        "net_return": -0.00034274293454022786,
+        "side": "short",
+        "symbol": "AUDUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:b0e66c2550d187da",
+        "decision_time": "2025-04-08T09:33:00Z",
+        "entry_time": "2025-04-08T09:34:00Z",
+        "exit_reason": "stop_loss",
+        "exit_time": "2025-04-08T09:51:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.00030693364806747654,
+        "net_return": -0.00030693364806747654,
+        "side": "long",
+        "symbol": "USDJPY",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:54361f12d15eae4e",
+        "decision_time": "2025-04-07T09:57:00Z",
+        "entry_time": "2025-04-07T09:58:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-04-07T12:58:00Z",
+        "funding_return": 0.0,
+        "gross_return": -0.0002965382579974267,
+        "net_return": -0.0002965382579974267,
+        "side": "short",
+        "symbol": "EURUSD",
+        "weight": 0.25
+      }
+    ],
+    "largest_winners": [
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:1586cde6bfc76cae",
+        "decision_time": "2025-07-01T08:34:00Z",
+        "entry_time": "2025-07-01T08:35:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-07-01T08:54:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.000494012483886276,
+        "net_return": 0.000494012483886276,
+        "side": "long",
+        "symbol": "EURUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:4cc3ef50a9595707",
+        "decision_time": "2025-05-12T07:48:00Z",
+        "entry_time": "2025-05-12T07:49:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-05-12T10:49:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0004807015898325569,
+        "net_return": 0.0004807015898325569,
+        "side": "short",
+        "symbol": "AUDUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:0b02d93deef2f1b3",
+        "decision_time": "2025-09-03T07:39:00Z",
+        "entry_time": "2025-09-03T07:40:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-09-03T08:02:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0003952356832588814,
+        "net_return": 0.0003952356832588814,
+        "side": "long",
+        "symbol": "AUDUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:936d6fff46072919",
+        "decision_time": "2025-09-03T08:36:00Z",
+        "entry_time": "2025-09-03T08:37:00Z",
+        "exit_reason": "take_profit",
+        "exit_time": "2025-09-03T08:55:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.0003848510663737638,
+        "net_return": 0.0003848510663737638,
+        "side": "long",
+        "symbol": "GBPUSD",
+        "weight": 0.25
+      },
+      {
+        "cost_return": 0.0,
+        "decision_id": "fx_session_activity_profile_rejection:cd1d227ef366e927",
+        "decision_time": "2025-06-10T09:00:00Z",
+        "entry_time": "2025-06-10T09:01:00Z",
+        "exit_reason": "max_hold",
+        "exit_time": "2025-06-10T12:01:00Z",
+        "funding_return": 0.0,
+        "gross_return": 0.00038010842688865755,
+        "net_return": 0.00038010842688865755,
+        "side": "long",
+        "symbol": "AUDUSD",
+        "weight": 0.25
+      }
+    ]
+  },
+  "strategy_id": "fx_session_activity_profile_rejection",
+  "trade_count": 119,
+  "trade_result": {
+    "sum_signed_trade_activity_cost": 0.0,
+    "sum_signed_trade_activity_funding": 0.0,
+    "sum_signed_trade_activity_gross": 0.00033807487057849184,
+    "sum_signed_trade_activity_net": 0.00033807487057849184
+  }
+}
