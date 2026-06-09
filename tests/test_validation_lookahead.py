@@ -403,7 +403,11 @@ def test_micro_causality_timeout_after_slow_planning(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         causality,
         "_micro_replay_plan_with_index",
-        lambda *_args, **_kwargs: (slow_plan(), causality._visible_row_index(source_rows)),
+        lambda *_args, **_kwargs: (
+            slow_plan(),
+            causality._visible_row_index(source_rows),
+            causality._ReplayDecisionIndex.from_decisions(as_of_strategy(source_rows, {})),
+        ),
     )
     monkeypatch.setattr(causality, "check_hidden_lookahead", should_not_replay)
 
@@ -463,6 +467,55 @@ def test_bounded_causality_detects_emitted_future_sensitive_strategy_with_low_ro
 
     assert result.passed is False
     assert result.violations == ("hidden_lookahead_detected",)
+    assert result.replay_scope == "bounded"
+
+
+def test_bounded_causality_uses_prepared_baseline_decision_index(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_rows = [
+        row(AS_OF, 100.0, available_at=AS_OF),
+        row(FUTURE, 101.0, available_at=FUTURE),
+    ]
+    baseline = [
+        StrategyDecision(
+            decision_id=f"demo:{index}",
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
+            decision_time=DECISION,
+            as_of_time=AS_OF,
+            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
+            exit_policy=ExitPolicy(max_hold_bars=1),
+        )
+        for index in range(50)
+    ]
+
+    monkeypatch.setattr(
+        causality,
+        "_expected_payloads_for_boundary",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("baseline payloads should come from the prepared decision index")
+        ),
+    )
+    monkeypatch.setattr(
+        causality,
+        "_allowed_decision_ids",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("allowed ids should come from the prepared decision index")
+        ),
+    )
+
+    result = causality.check_bounded_causality(
+        lambda _rows, _params: baseline,
+        rows=source_rows,
+        params={},
+        baseline_decisions=baseline,
+        strategy_id="demo",
+        max_probes=1,
+        timeout_seconds=60.0,
+    )
+
+    assert result.passed is True
     assert result.replay_scope == "bounded"
 
 

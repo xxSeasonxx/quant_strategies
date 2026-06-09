@@ -121,7 +121,61 @@ class _VisibleRowIndex:
     rows: tuple[_VisibleRow, ...]
     frozen_rows: tuple[Mapping[str, Any], ...]
     timestamps: tuple[datetime, ...]
+    timestamps_by_symbol: Mapping[str, tuple[datetime, ...]]
     has_delayed_availability: bool = False
+
+
+@dataclass(frozen=True)
+class _ReplayDecisionIndex:
+    baseline_payloads: tuple[dict[str, Any], ...]
+    by_decision_id: Mapping[str | None, tuple[tuple[int, StrategyDecision], ...]]
+    allowed_by_asof_symbol: Mapping[tuple[datetime, str], frozenset[str | None]]
+
+    @classmethod
+    def from_decisions(cls, decisions: Sequence[StrategyDecision]) -> _ReplayDecisionIndex:
+        by_decision_id: dict[str | None, list[tuple[int, StrategyDecision]]] = {}
+        allowed_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
+        for index, decision in enumerate(decisions):
+            by_decision_id.setdefault(decision.decision_id, []).append((index, decision))
+            allowed_by_asof_symbol.setdefault(
+                (decision.as_of_time, decision.instrument.symbol),
+                set(),
+            ).add(decision.decision_id)
+        return cls(
+            baseline_payloads=_decision_payloads(decisions),
+            by_decision_id={
+                decision_id: tuple(items) for decision_id, items in by_decision_id.items()
+            },
+            allowed_by_asof_symbol={
+                key: frozenset(value) for key, value in allowed_by_asof_symbol.items()
+            },
+        )
+
+    def allowed_decision_ids(
+        self,
+        *,
+        as_of_time: datetime,
+        symbols: frozenset[str],
+    ) -> frozenset[str | None]:
+        allowed: set[str | None] = set()
+        for symbol in symbols:
+            allowed.update(self.allowed_by_asof_symbol.get((as_of_time, symbol), frozenset()))
+        return frozenset(allowed)
+
+    def expected_payloads_for_boundary(
+        self,
+        boundary: ReplayBoundary,
+    ) -> tuple[dict[str, Any], ...]:
+        indexed_decisions: list[tuple[int, StrategyDecision]] = []
+        for decision_id in boundary.expected_decision_ids:
+            for index, decision in self.by_decision_id.get(decision_id, ()):
+                if (
+                    _decision_matches_boundary(decision, boundary)
+                    and decision.decision_time == boundary.decision_time
+                ):
+                    indexed_decisions.append((index, decision))
+        indexed_decisions.sort(key=lambda item: item[0])
+        return _decision_payloads([decision for _, decision in indexed_decisions])
 
 
 class _FocusedCausalityDeadline(BaseException):
@@ -167,7 +221,7 @@ def micro_replay_plan(
     *,
     max_probes: int = 5,
 ) -> FocusedReplayPlan:
-    plan, _ = _micro_replay_plan_with_index(
+    plan, _, _ = _micro_replay_plan_with_index(
         rows,
         baseline_decisions,
         max_probes=max_probes,
@@ -180,8 +234,9 @@ def _micro_replay_plan_with_index(
     baseline_decisions: Sequence[StrategyDecision],
     *,
     max_probes: int,
-) -> tuple[FocusedReplayPlan, _VisibleRowIndex]:
+) -> tuple[FocusedReplayPlan, _VisibleRowIndex, _ReplayDecisionIndex]:
     row_index = _visible_row_index(rows)
+    decision_index = _ReplayDecisionIndex.from_decisions(baseline_decisions)
     emitted = _emitted_boundaries(baseline_decisions)
     if max_probes <= 0:
         return (
@@ -191,10 +246,11 @@ def _micro_replay_plan_with_index(
                 selected_probe_count=0,
             ),
             row_index,
+            decision_index,
         )
     boundaries = _dedupe_boundaries(
         (
-            *_micro_row_anchor_boundaries(row_index, baseline_decisions),
+            *_micro_row_anchor_boundaries(row_index, decision_index),
             *emitted[: max(0, max_probes)],
         )
     )[:max_probes]
@@ -205,6 +261,7 @@ def _micro_replay_plan_with_index(
             selected_probe_count=len(boundaries),
         ),
         row_index,
+        decision_index,
     )
 
 
@@ -219,7 +276,7 @@ def check_micro_causality(
     timeout_seconds: float = 2.0,
 ) -> LookaheadCheckResult:
     started = time.perf_counter()
-    plan, row_index = _micro_replay_plan_with_index(
+    plan, row_index, decision_index = _micro_replay_plan_with_index(
         rows,
         baseline_decisions,
         max_probes=max_probes,
@@ -241,6 +298,7 @@ def check_micro_causality(
                 mode="strict",
                 boundaries=plan.boundaries,
                 _row_index=row_index,
+                _decision_index=decision_index,
             )
     except _FocusedCausalityDeadline:
         return _micro_timeout_result(started, timeout_seconds, plan)
@@ -274,7 +332,7 @@ def check_bounded_causality(
     timeout_seconds: float = 60.0,
 ) -> LookaheadCheckResult:
     started = time.perf_counter()
-    plan, row_index = _bounded_replay_plan_with_index(
+    plan, row_index, decision_index = _bounded_replay_plan_with_index(
         rows,
         baseline_decisions,
         max_row_probes=max_probes,
@@ -296,6 +354,7 @@ def check_bounded_causality(
                 mode="strict",
                 boundaries=plan.boundaries,
                 _row_index=row_index,
+                _decision_index=decision_index,
             )
     except _FocusedCausalityDeadline:
         return _bounded_timeout_result(started, timeout_seconds, plan)
@@ -324,7 +383,7 @@ def bounded_replay_plan(
     *,
     max_row_probes: int = 64,
 ) -> FocusedReplayPlan:
-    plan, _ = _bounded_replay_plan_with_index(
+    plan, _, _ = _bounded_replay_plan_with_index(
         rows,
         baseline_decisions,
         max_row_probes=max_row_probes,
@@ -337,10 +396,11 @@ def _bounded_replay_plan_with_index(
     baseline_decisions: Sequence[StrategyDecision],
     *,
     max_row_probes: int,
-) -> tuple[FocusedReplayPlan, _VisibleRowIndex]:
+) -> tuple[FocusedReplayPlan, _VisibleRowIndex, _ReplayDecisionIndex]:
     row_index = _visible_row_index(rows)
+    decision_index = _ReplayDecisionIndex.from_decisions(baseline_decisions)
     emitted = _emitted_boundaries(baseline_decisions)
-    row_boundaries = _micro_row_anchor_boundaries(row_index, baseline_decisions)
+    row_boundaries = _micro_row_anchor_boundaries(row_index, decision_index)
     selected = _dedupe_boundaries((*emitted, *row_boundaries[: max(0, max_row_probes)]))
     return (
         FocusedReplayPlan(
@@ -349,6 +409,7 @@ def _bounded_replay_plan_with_index(
             selected_probe_count=len(selected),
         ),
         row_index,
+        decision_index,
     )
 
 
@@ -435,6 +496,7 @@ def check_hidden_lookahead(
     mode: ReplayMode = "strict",
     boundaries: Sequence[ReplayBoundary] | None = None,
     _row_index: _VisibleRowIndex | None = None,
+    _decision_index: _ReplayDecisionIndex | None = None,
 ) -> LookaheadCheckResult:
     """Replay a strategy at point-in-time boundaries to detect hidden lookahead.
 
@@ -460,11 +522,13 @@ def check_hidden_lookahead(
         replay_boundaries = _emitted_boundaries(baseline_decisions)
 
     replay_params = frozen_params(params)
+    decision_index = _decision_index or _ReplayDecisionIndex.from_decisions(baseline_decisions)
     deterministic_failure = _deterministic_replay_failure(
         generate_decisions,
         rows=rows,
         params=replay_params,
         baseline_decisions=baseline_decisions,
+        baseline_payloads=decision_index.baseline_payloads,
         strategy_id=strategy_id,
         mode=mode,
     )
@@ -485,7 +549,11 @@ def check_hidden_lookahead(
     replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
     replay_decisions_cache: dict[tuple[datetime, datetime], tuple[StrategyDecision, ...]] = {}
     replay_payloads_cache: dict[tuple[datetime, datetime], tuple[dict[str, Any], ...]] = {}
-    expected_payloads_cache: dict[tuple[object, ...], tuple[dict[str, Any], ...]] = {}
+    expected_payloads_by_boundary = {
+        _boundary_identity(boundary): decision_index.expected_payloads_for_boundary(boundary)
+        for boundary in replay_boundaries
+        if boundary.expected_decision_ids
+    }
     skipped_probe_reasons: list[str] = []
     for boundary in replay_boundaries:
         cache_key = (boundary.as_of_time, boundary.decision_time)
@@ -558,14 +626,7 @@ def check_hidden_lookahead(
             if replay_payloads is None:
                 replay_payloads = _decision_payloads(replay_decisions)
                 replay_payloads_cache[cache_key] = replay_payloads
-            boundary_identity = _boundary_identity(boundary)
-            expected_payloads = expected_payloads_cache.get(boundary_identity)
-            if expected_payloads is None:
-                expected_payloads = _expected_payloads_for_boundary(
-                    baseline_decisions,
-                    boundary,
-                )
-                expected_payloads_cache[boundary_identity] = expected_payloads
+            expected_payloads = expected_payloads_by_boundary[_boundary_identity(boundary)]
             if not _payloads_contain_expected(replay_payloads, expected_payloads):
                 return LookaheadCheckResult(
                     passed=False,
@@ -611,6 +672,7 @@ def _deterministic_replay_failure(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
     baseline_decisions: Sequence[StrategyDecision],
+    baseline_payloads: tuple[dict[str, Any], ...] | None = None,
     strategy_id: str,
     mode: ReplayMode,
 ) -> LookaheadCheckResult | None:
@@ -640,7 +702,10 @@ def _deterministic_replay_failure(
             mode=mode,
             violations=(f"determinism_check_failed: {'; '.join(violations)}",),
         )
-    if _decision_payloads(replay_decisions) != _decision_payloads(baseline_decisions):
+    expected_payloads = (
+        _decision_payloads(baseline_decisions) if baseline_payloads is None else baseline_payloads
+    )
+    if _decision_payloads(replay_decisions) != expected_payloads:
         return LookaheadCheckResult(
             passed=False,
             mode=mode,
@@ -841,7 +906,7 @@ def _focused_candidate_boundaries(
 
 def _micro_row_anchor_boundaries(
     row_index: _VisibleRowIndex,
-    baseline_decisions: Sequence[StrategyDecision],
+    decision_index: _ReplayDecisionIndex,
 ) -> tuple[ReplayBoundary, ...]:
     if not row_index.rows:
         return ()
@@ -857,8 +922,7 @@ def _micro_row_anchor_boundaries(
             ReplayBoundary(
                 as_of_time=item.timestamp,
                 decision_time=_next_symbol_timestamp(row_index, symbol_value, item.timestamp),
-                allowed_decision_ids=_allowed_decision_ids(
-                    baseline_decisions,
+                allowed_decision_ids=decision_index.allowed_decision_ids(
                     as_of_time=item.timestamp,
                     symbols=symbols,
                 ),
@@ -873,12 +937,11 @@ def _next_symbol_timestamp(
     symbol: str,
     timestamp: datetime,
 ) -> datetime:
-    timestamps = _timestamps_by_symbol(row_index).get(symbol, [])
+    timestamps = row_index.timestamps_by_symbol.get(symbol, ())
     if not timestamps:
         return timestamp
-    ordered = sorted(dict.fromkeys(timestamps))
-    position = bisect_right(ordered, timestamp)
-    return ordered[position] if position < len(ordered) else timestamp
+    position = bisect_right(timestamps, timestamp)
+    return timestamps[position] if position < len(timestamps) else timestamp
 
 
 def _focused_row_grid_boundaries(
@@ -939,12 +1002,9 @@ def _row_grid_boundary_keys(
 
 
 def _timestamps_by_symbol(row_index: _VisibleRowIndex) -> dict[str, list[datetime]]:
-    timestamps_by_symbol: dict[str, list[datetime]] = {}
-    for item in row_index.rows:
-        symbol = item.row.get("symbol")
-        if isinstance(symbol, str) and item.timestamp is not None:
-            timestamps_by_symbol.setdefault(symbol, []).append(item.timestamp)
-    return timestamps_by_symbol
+    return {
+        symbol: list(timestamps) for symbol, timestamps in row_index.timestamps_by_symbol.items()
+    }
 
 
 def _allowed_decision_ids(
@@ -1189,6 +1249,7 @@ def _visible_row_index(rows: NormalizedRows | Sequence[Mapping[str, Any]]) -> _V
         rows=ordered_rows,
         frozen_rows=tuple(item.frozen_row for item in ordered_rows),
         timestamps=tuple(item.timestamp for item in ordered_rows if item.timestamp is not None),
+        timestamps_by_symbol=_timestamps_by_symbol_from_rows(ordered_rows),
         has_delayed_availability=_has_delayed_availability(ordered_rows),
     )
 
@@ -1213,6 +1274,7 @@ def _visible_row_index_from_normalized(rows: NormalizedRows) -> _VisibleRowIndex
         rows=ordered_rows,
         frozen_rows=tuple(item.frozen_row for item in ordered_rows),
         timestamps=tuple(item.timestamp for item in ordered_rows if item.timestamp is not None),
+        timestamps_by_symbol=_timestamps_by_symbol_from_rows(ordered_rows),
         has_delayed_availability=_has_delayed_availability(ordered_rows),
     )
 
@@ -1256,6 +1318,20 @@ def _has_delayed_availability(rows: Sequence[_VisibleRow]) -> bool:
         and row.available_at > row.timestamp
         for row in rows
     )
+
+
+def _timestamps_by_symbol_from_rows(
+    rows: Sequence[_VisibleRow],
+) -> Mapping[str, tuple[datetime, ...]]:
+    timestamps_by_symbol: dict[str, list[datetime]] = {}
+    for item in rows:
+        symbol = item.row.get("symbol")
+        if isinstance(symbol, str) and item.timestamp is not None:
+            timestamps_by_symbol.setdefault(symbol, []).append(item.timestamp)
+    return {
+        symbol: tuple(sorted(dict.fromkeys(timestamps)))
+        for symbol, timestamps in timestamps_by_symbol.items()
+    }
 
 
 def _row_available_for_boundary(row: _VisibleRow, boundary: ReplayBoundary) -> bool:
