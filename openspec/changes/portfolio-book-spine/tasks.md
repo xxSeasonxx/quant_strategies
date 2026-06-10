@@ -7,15 +7,15 @@
 
 ## 2. The unified causal portfolio book (the spine)
 
-- [ ] 2.1 Rebuild `core/portfolio_foundation.py` as one causal single-account walk keyed by **per-symbol running signed quantity**: apply decisions effective at `t`, size target quantity from weight × one pre-entry equity snapshot, trade only the delta, charge costs on the delta and funding on the net held position, mark-to-market to one NAV path. Apply frictions at **one localized call site** in the walk — do **not** introduce a `MarketModel` abstraction now (only perp funding exists; the interface is extracted at F4 against two real terms).
-- [ ] 2.2 Net same-symbol exposure by construction; emit a live mark-to-market gross/net exposure series and per-instrument concentration from the netted book. Size all same-bar entries against one equity snapshot taken before any of that bar's entries (fill-order-independent intended gross).
-- [ ] 2.3 Enforce declared `RiskRule`s causally on the net position (flatten at the bar the end-of-bar printed mark crosses the level) with the **re-entry latch**: a fired rule holds the instrument flat until the strategy emits a new, different target.
-- [ ] 2.4 Reconstruct the per-trade round-trip ledger as a derived attribution view of the same walk (no independent summation); reconcile with NAV realized PnL.
+- [x] 2.1 Rebuild `core/portfolio_foundation.py` as one causal single-account walk keyed by **per-symbol running signed quantity**: apply decisions effective at `t`, size target quantity from weight × one pre-entry equity snapshot, trade only the delta, charge costs on the delta and funding on the net held position, mark-to-market to one NAV path. Apply frictions at **one localized call site** in the walk — do **not** introduce a `MarketModel` abstraction now (only perp funding exists; the interface is extracted at F4 against two real terms).
+- [x] 2.2 Net same-symbol exposure by construction; emit a live mark-to-market gross/net exposure series and per-instrument concentration from the netted book. Size all same-bar entries against one equity snapshot taken before any of that bar's entries (fill-order-independent intended gross).
+- [x] 2.3 Enforce declared `RiskRule`s causally on the net position (flatten at the bar the end-of-bar printed mark crosses the level) with the **re-entry latch**: a fired rule holds the instrument flat until the strategy emits a new, different target.
+- [x] 2.4 Reconstruct the per-trade round-trip ledger as a derived attribution view of the same walk (no independent summation); reconcile with NAV realized PnL.
 
 ## 3. Scoring and the fail-closed feasibility verdict
 
-- [ ] 3.1 Derive all scored statistics (Sharpe/SE/effective-sample inputs, drawdown, total return) from the NAV path over **at-risk bars**, not a zero-padded calendar. Re-base `closed_trade_count` on netted-book round trips.
-- [ ] 3.2 Add a minimum at-risk-sample gate: below the floor, a subwindow/full-Train statistic is reported non-scoreable with a typed reason, not emitted from sample count alone.
+- [x] 3.1 Derive all scored statistics (Sharpe/SE/effective-sample inputs, drawdown, total return) from the NAV path over **at-risk bars**, not a zero-padded calendar. Re-base `closed_trade_count` on netted-book round trips.
+- [x] 3.2 Add a minimum at-risk-sample gate: below the floor, a subwindow/full-Train statistic is reported non-scoreable with a typed reason, not emitted from sample count alone.
 - [ ] 3.3 Add a typed feasibility verdict on the run: `leverage_budget_breach` (observed gross/net), `zero_cost`, `insufficient_samples`, and a **required** `unfinanced_leverage` for asset classes without a modeled financing term (crypto-perp exempt). Surface a `causality_admissible` dimension read from existing causality evidence. Never clamp/normalize; never collapse to `None`.
 - [ ] 3.4 Move the leverage budget out of agent-editable config: remove `foundation_max_gross_exposure` from `OutputConfig`/`[output]`; add a protocol-frozen budget covering **both gross and net** ceilings. A breach of intended exposure yields the verdict.
 

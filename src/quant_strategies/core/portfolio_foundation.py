@@ -8,18 +8,34 @@ from datetime import date, datetime
 from statistics import NormalDist
 from typing import Any, cast
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import CostModelConfig, DataConfig, DataKind, FillModelConfig
 from quant_strategies.core.serialization import json_safe_value
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import RiskRule, TargetDecision
 from quant_strategies.funding import funding_rates_match
 
-FOUNDATION_SCHEMA_VERSION = "quant_strategies.quick_run.portfolio_foundation/v1"
-FOUNDATION_BASIS = "quick_run_lightweight_portfolio_path"
+FOUNDATION_SCHEMA_VERSION = "quant_strategies.quick_run.portfolio_foundation/v2"
+FOUNDATION_BASIS = "quick_run_netted_portfolio_book"
 FOUNDATION_EVIDENCE_CLASS = "quick_run_portfolio_foundation_diagnostic"
 INITIAL_EQUITY = 100.0
 MAX_FOUNDATION_SUBWINDOWS = 64
+DEFAULT_MIN_RETURN_SAMPLE = 2
 EULER_MASCHERONI = 0.5772156649015329
 DSR_FORMULA = "bailey_lopez_de_prado_expected_max_sharpe"
+
+# Asset classes whose financing is modeled inside the book. Holding net leverage
+# above 1.0 is only honestly scoreable when the financing of that leverage is
+# priced; today only crypto-perp funding is modeled, so every other kind triggers
+# the ``unfinanced_leverage`` feasibility verdict above net 1.0.
+_FINANCED_DATA_KINDS: frozenset[DataKind] = frozenset({"crypto_perp_funding"})
+
+FeasibilityReason = str  # one of the constants below
+
+REASON_LEVERAGE_BUDGET_BREACH = "leverage_budget_breach"
+REASON_ZERO_COST = "zero_cost"
+REASON_INSUFFICIENT_SAMPLES = "insufficient_samples"
+REASON_UNFINANCED_LEVERAGE = "unfinanced_leverage"
+
+_EXPOSURE_TOLERANCE = 1e-9
 
 
 @dataclass(frozen=True)
@@ -30,6 +46,8 @@ class PortfolioFoundationConfig:
     benchmark_sharpe: float = 0.0
     cost_stress_multiplier: float = 2.0
     max_gross_exposure: float = 1.0
+    max_net_exposure: float = 1.0
+    min_return_sample: int = DEFAULT_MIN_RETURN_SAMPLE
 
     def __post_init__(self) -> None:
         if self.subwindows < 1:
@@ -44,6 +62,48 @@ class PortfolioFoundationConfig:
             raise ValueError("foundation_cost_stress_multiplier must be >= 1")
         if not math.isfinite(self.max_gross_exposure) or self.max_gross_exposure < 1.0:
             raise ValueError("foundation_max_gross_exposure must be >= 1")
+        if not math.isfinite(self.max_net_exposure) or self.max_net_exposure < 1.0:
+            raise ValueError("foundation_max_net_exposure must be >= 1")
+        if self.min_return_sample < 2:
+            raise ValueError("foundation_min_return_sample must be >= 2")
+
+
+@dataclass(frozen=True)
+class FeasibilityVerdict:
+    """Typed, fail-closed feasibility outcome for one book walk.
+
+    ``feasible`` gates whether the book is scoreable. A breach names the breached
+    dimension (``reason``) and the observed value; the book is never clamped,
+    normalized, or collapsed into an untyped ``None`` (design D5).
+    """
+
+    feasible: bool
+    reason: FeasibilityReason | None = None
+    observed_gross: float | None = None
+    observed_net: float | None = None
+    detail: str | None = None
+
+    def payload(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            json_safe_value(
+                {
+                    "feasible": self.feasible,
+                    "reason": self.reason,
+                    "observed_gross": self.observed_gross,
+                    "observed_net": self.observed_net,
+                    "detail": self.detail,
+                }
+            ),
+        )
+
+
+class FeasibilityError(ValueError):
+    """Raised by the book walk when the run is infeasible (fail-closed)."""
+
+    def __init__(self, verdict: FeasibilityVerdict) -> None:
+        self.verdict = verdict
+        super().__init__(verdict.reason or "infeasible")
 
 
 @dataclass(frozen=True)
@@ -97,16 +157,29 @@ class PortfolioPathPoint:
     timestamp: datetime
     portfolio_value: float
     period_return: float
+    at_risk: bool
     drawdown: float
+    gross_exposure: float
+    net_exposure: float
     concentration: float
 
 
 @dataclass(frozen=True)
-class FoundationTrade:
+class RoundTrip:
+    """A net position that opened (flat -> non-flat) and returned to flat.
+
+    ``realized_pnl`` is the cash attribution of the position lifecycle (proceeds
+    over cost basis, plus funding accrued while held, minus the traded costs). The
+    sum of closed round-trip ``realized_pnl`` reconciles with NAV realized PnL
+    (design D4); it is an attribution view of the same walk, never an independent
+    scored number.
+    """
+
     symbol: str
+    direction: str
     entry_time: datetime
     exit_time: datetime
-    net_pnl: float
+    realized_pnl: float
 
 
 @dataclass(frozen=True)
@@ -118,6 +191,10 @@ class FoundationMetric:
     max_drawdown: float | None
     closed_trade_count: int
     max_symbol_concentration: float
+    max_gross_utilization: float
+    mean_gross_utilization: float
+    max_net_utilization: float
+    mean_net_utilization: float
     statistics: ReturnStatistics
 
     def payload(self) -> dict[str, Any]:
@@ -129,18 +206,20 @@ class FoundationMetric:
             "max_drawdown": self.max_drawdown,
             "closed_trade_count": self.closed_trade_count,
             "max_symbol_concentration": self.max_symbol_concentration,
+            "max_gross_utilization": self.max_gross_utilization,
+            "mean_gross_utilization": self.mean_gross_utilization,
+            "max_net_utilization": self.max_net_utilization,
+            "mean_net_utilization": self.mean_net_utilization,
             **self.statistics.payload(),
         }
         return cast(dict[str, Any], json_safe_value(payload))
-
-
-FoundationSubwindowMetric = FoundationMetric
 
 
 @dataclass(frozen=True)
 class FoundationScenarioResult:
     scenario_id: str
     cost_multiplier: float
+    feasibility: FeasibilityVerdict
     full_train: FoundationMetric
     subwindows: tuple[FoundationMetric, ...]
 
@@ -155,6 +234,7 @@ class FoundationScenarioResult:
         payload = {
             "scenario_id": self.scenario_id,
             "cost_multiplier": self.cost_multiplier,
+            "feasibility": self.feasibility.payload(),
             "full_train": self.full_train.payload(),
             "subwindow_count": len(self.subwindows),
             "min_dsr": min(dsrs) if dsrs else None,
@@ -179,6 +259,10 @@ class RunPortfolioFoundation:
     basis: str
     evidence_class: str
     scenarios: tuple[FoundationScenarioResult, ...]
+
+    @property
+    def feasible(self) -> bool:
+        return all(scenario.feasibility.feasible for scenario in self.scenarios)
 
     def summary_payload(self) -> dict[str, Any]:
         return cast(
@@ -213,17 +297,669 @@ class RunPortfolioFoundation:
         )
 
 
+@dataclass(frozen=True)
+class BookWalkResult:
+    """The single causal walk's outputs over one cost scenario.
+
+    The NAV ``path`` is the authoritative scored object; ``round_trips`` is the
+    derived attribution ledger that reconciles with realized NAV PnL; ``feasibility``
+    is the typed fail-closed verdict.
+    """
+
+    path: tuple[PortfolioPathPoint, ...]
+    round_trips: tuple[RoundTrip, ...]
+    feasibility: FeasibilityVerdict
+    final_nav: float
+    realized_pnl: float
+
+
+def build_portfolio_foundation(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    decisions: Sequence[TargetDecision],
+    data: DataConfig,
+    fill_model: FillModelConfig,
+    cost_model: CostModelConfig,
+    config: PortfolioFoundationConfig,
+) -> RunPortfolioFoundation:
+    """Build the authoritative scored portfolio book over the two cost scenarios.
+
+    The book is one causal, single-account, per-symbol-netted walk that consumes the
+    standing ``TargetDecision`` stream and the execution ``rows``, applies frictions
+    at one localized step, and derives all scored statistics from the NAV path.
+    Infeasible scenarios raise :class:`FeasibilityError` carrying the typed verdict;
+    the caller (Phase 1b) gates ``RunResult.succeeded`` on it.
+    """
+    row_index = _RowIndex(rows)
+    decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    scenarios = (
+        _build_scenario(
+            "realistic_costs",
+            row_index=row_index,
+            decision_plan=decision_plan,
+            data=data,
+            cost_model=cost_model,
+            cost_multiplier=1.0,
+            config=config,
+        ),
+        _build_scenario(
+            "cost_stress",
+            row_index=row_index,
+            decision_plan=decision_plan,
+            data=data,
+            cost_model=cost_model,
+            cost_multiplier=config.cost_stress_multiplier,
+            config=config,
+        ),
+    )
+    return RunPortfolioFoundation(
+        schema_version=FOUNDATION_SCHEMA_VERSION,
+        basis=FOUNDATION_BASIS,
+        evidence_class=FOUNDATION_EVIDENCE_CLASS,
+        scenarios=scenarios,
+    )
+
+
+@dataclass
+class _NetPosition:
+    """Running signed quantity for one symbol on the shared account.
+
+    ``cost_basis`` is the signed cash committed to the currently-open leg
+    (Σ ``delta_qty * fill_price`` since it last opened from flat); ``entry_signed_qty``
+    is the signed quantity the leg opened at (for round-trip direction labelling).
+    ``target_weight`` is the standing signed weight last set by a decision and is the
+    intent the leverage-budget check measures.
+    """
+
+    symbol: str
+    signed_qty: float = 0.0
+    target_weight: float = 0.0
+    entry_signed_qty: float = 0.0
+    entry_time: datetime | None = None
+    entry_mark: float | None = None
+    peak_mark: float | None = None
+    trough_mark: float | None = None
+    risk_rule: RiskRule | None = None
+    cost_basis: float = 0.0
+    open_cost: float = 0.0  # costs charged while building the current open leg
+    funding_cashflow: float = 0.0
+
+    @property
+    def is_flat(self) -> bool:
+        return self.signed_qty == 0.0
+
+
+@dataclass(frozen=True)
+class _PlannedDecision:
+    symbol: str
+    signed_weight: float
+    risk_rule: RiskRule | None
+    fill_price: float
+    decision_time: datetime
+
+
+class _RowIndex:
+    def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
+        by_symbol: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+        by_key: dict[tuple[str, datetime], Mapping[str, Any]] = {}
+        funding_rates_by_key: dict[tuple[str, datetime], float] = {}
+        funding_events_by_apply_time: dict[datetime, list[tuple[str, datetime, float]]] = (
+            defaultdict(list)
+        )
+        for row in rows:
+            symbol = row.get("symbol")
+            timestamp = row.get("timestamp")
+            if not isinstance(symbol, str) or not isinstance(timestamp, datetime):
+                continue
+            by_symbol[symbol].append(row)
+            by_key[(symbol, timestamp)] = row
+            if row.get("has_funding_event") is True and isinstance(
+                row.get("funding_timestamp"), datetime
+            ):
+                funding_timestamp = row["funding_timestamp"]
+                funding_rate = _finite_float(row.get("funding_rate"), "invalid_funding_rate")
+                funding_key = (symbol, funding_timestamp)
+                existing = funding_rates_by_key.get(funding_key)
+                if existing is not None:
+                    if not funding_rates_match(existing, funding_rate):
+                        raise ValueError(
+                            f"conflicting_funding_rates:{symbol}:{funding_timestamp.isoformat()}"
+                        )
+                    continue
+                funding_rates_by_key[funding_key] = funding_rate
+                funding_events_by_apply_time[timestamp].append(
+                    (symbol, funding_timestamp, funding_rate)
+                )
+        self.by_symbol = {
+            symbol: tuple(sorted(items, key=lambda item: item["timestamp"]))
+            for symbol, items in by_symbol.items()
+        }
+        self.positions = {
+            symbol: {row["timestamp"]: index for index, row in enumerate(items)}
+            for symbol, items in self.by_symbol.items()
+        }
+        self.by_key = by_key
+        self.timestamps = tuple(sorted({row["timestamp"] for row in by_key.values()}))
+        self.funding_events_by_apply_time = {
+            timestamp: tuple(events)
+            for timestamp, events in sorted(funding_events_by_apply_time.items())
+        }
+
+    def row_at(self, symbol: str, timestamp: datetime) -> Mapping[str, Any]:
+        try:
+            return self.by_key[(symbol, timestamp)]
+        except KeyError as exc:
+            raise ValueError(f"missing_mark:{symbol}:{timestamp.isoformat()}") from exc
+
+    def mark_at(self, symbol: str, timestamp: datetime) -> float:
+        row = self.row_at(symbol, timestamp)
+        return _positive_float(row.get("close"), f"missing_mark:{symbol}:{timestamp.isoformat()}")
+
+
+class _DecisionPlan:
+    """Resolves each standing target to its effective fill bar (entry-lag honored).
+
+    A decision at ``decision_time`` becomes effective at the per-symbol bar
+    ``decision_index + entry_lag_bars`` (the engine fill convention), so the book is
+    lookahead-free and reuses the reference fill mechanics. Decisions are grouped by
+    their effective fill timestamp on the global bar grid.
+    """
+
+    def __init__(
+        self,
+        row_index: _RowIndex,
+        decisions: Sequence[TargetDecision],
+        *,
+        fill_model: FillModelConfig,
+    ) -> None:
+        by_time: dict[datetime, list[_PlannedDecision]] = defaultdict(list)
+        for item in decisions:
+            symbol = item.instrument.symbol
+            symbol_rows = row_index.by_symbol.get(symbol)
+            if not symbol_rows:
+                raise ValueError(f"missing_symbol:{symbol}")
+            position_by_time = row_index.positions[symbol]
+            if item.decision_time not in position_by_time:
+                raise ValueError(f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
+            decision_index = position_by_time[item.decision_time]
+            fill_index = decision_index + fill_model.entry_lag_bars
+            if fill_index >= len(symbol_rows):
+                raise ValueError(f"unfillable_decision:{symbol}:{item.decision_time.isoformat()}")
+            fill_row = symbol_rows[fill_index]
+            fill_price = _fill_price_for_weight(fill_row, fill_model.price, item.target)
+            by_time[fill_row["timestamp"]].append(
+                _PlannedDecision(
+                    symbol=symbol,
+                    signed_weight=float(item.target),
+                    risk_rule=item.risk_rule,
+                    fill_price=fill_price,
+                    decision_time=item.decision_time,
+                )
+            )
+        self.by_time = {timestamp: tuple(items) for timestamp, items in sorted(by_time.items())}
+        self.symbols = tuple(sorted({item.instrument.symbol for item in decisions}))
+
+
+def _build_scenario(
+    scenario_id: str,
+    *,
+    row_index: _RowIndex,
+    decision_plan: _DecisionPlan,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    cost_multiplier: float,
+    config: PortfolioFoundationConfig,
+) -> FoundationScenarioResult:
+    per_side_cost_fraction = _cost_fraction(
+        (cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side) * cost_multiplier
+    )
+    walk = _walk_book(
+        row_index,
+        decision_plan,
+        per_side_cost_fraction=per_side_cost_fraction,
+        data_kind=data.kind,
+        config=config,
+    )
+    full_train, subwindows = _scenario_metrics(
+        walk.path,
+        walk.round_trips,
+        subwindows=config.subwindows,
+        trial_count=config.trial_count,
+        benchmark_sharpe=config.benchmark_sharpe,
+        min_return_sample=config.min_return_sample,
+        data_start=data.start,
+        data_end=data.end,
+    )
+    verdict = _scenario_feasibility(
+        walk.feasibility,
+        full_train.statistics,
+        per_side_cost_fraction=per_side_cost_fraction,
+        min_return_sample=config.min_return_sample,
+    )
+    return FoundationScenarioResult(
+        scenario_id=scenario_id,
+        cost_multiplier=cost_multiplier,
+        feasibility=verdict,
+        full_train=full_train,
+        subwindows=tuple(subwindows),
+    )
+
+
+def _walk_book(
+    row_index: _RowIndex,
+    decision_plan: _DecisionPlan,
+    *,
+    per_side_cost_fraction: float,
+    data_kind: DataKind,
+    config: PortfolioFoundationConfig,
+) -> BookWalkResult:
+    cash = INITIAL_EQUITY
+    peak = INITIAL_EQUITY
+    previous_nav: float | None = None
+    previous_gross = 0.0
+    positions: dict[str, _NetPosition] = {}
+    latched: dict[str, float] = {}
+    path: list[PortfolioPathPoint] = []
+    round_trips: list[RoundTrip] = []
+    financed = data_kind in _FINANCED_DATA_KINDS
+
+    for timestamp in row_index.timestamps:
+        # 1. Funding/financing on the NET held position (single localized friction).
+        cash += _apply_funding(row_index, positions, timestamp)
+
+        # 2. RiskRule overlay on the printed mark BEFORE new entries this bar.
+        for symbol in tuple(positions):
+            position = positions[symbol]
+            if position.is_flat:
+                continue
+            mark = row_index.mark_at(symbol, timestamp)
+            _update_trailing(position, mark)
+            if _risk_rule_fired(position, mark):
+                cash += _flatten(position, mark, per_side_cost_fraction, timestamp, round_trips)
+                # Latch the symbol flat at the standing weight that fired, so a
+                # standing target does not re-enter until a different target arrives.
+                latched[symbol] = position.target_weight
+                position.signed_qty = 0.0
+                position.risk_rule = None
+
+        # 3. Apply decisions effective at t against one pre-entry equity snapshot.
+        planned = decision_plan.by_time.get(timestamp, ())
+        if planned:
+            equity = _equity_at_mark(row_index, positions, timestamp, cash)
+            if equity <= 0.0:
+                raise ValueError(f"nonpositive_equity_for_entry:{timestamp.isoformat()}:{equity}")
+            _check_intended_budget(
+                positions,
+                latched,
+                planned,
+                config=config,
+                financed=financed,
+                data_kind=data_kind,
+                timestamp=timestamp,
+            )
+            for decision in planned:
+                cash += _apply_decision(
+                    positions,
+                    latched,
+                    decision,
+                    equity=equity,
+                    per_side_cost_fraction=per_side_cost_fraction,
+                    timestamp=timestamp,
+                    round_trips=round_trips,
+                )
+
+        # 4. Mark-to-market on one account -> NAV[t]; exposure series. Live marked
+        # gross/net is a reported utilization series, never an infeasibility (D3):
+        # a winner drifting above the ceiling is a risk signal, not a breach. The
+        # fail-closed leverage/unfinanced verdicts are evaluated on intended exposure.
+        nav = _equity_at_mark(row_index, positions, timestamp, cash)
+        gross_exposure, net_exposure, concentration = _exposures(
+            row_index, positions, timestamp, nav
+        )
+        period_return = 0.0 if previous_nav is None else (nav / previous_nav) - 1.0
+        at_risk = previous_gross > _EXPOSURE_TOLERANCE
+        peak = max(peak, nav)
+        drawdown = 0.0 if peak == 0.0 else (nav / peak) - 1.0
+        path.append(
+            PortfolioPathPoint(
+                timestamp=timestamp,
+                portfolio_value=nav,
+                period_return=period_return,
+                at_risk=at_risk,
+                drawdown=drawdown,
+                gross_exposure=gross_exposure,
+                net_exposure=net_exposure,
+                concentration=concentration,
+            )
+        )
+        previous_nav = nav
+        previous_gross = gross_exposure
+
+    final_nav = previous_nav if previous_nav is not None else INITIAL_EQUITY
+    return BookWalkResult(
+        path=tuple(path),
+        round_trips=tuple(round_trips),
+        feasibility=FeasibilityVerdict(feasible=True),
+        final_nav=final_nav,
+        realized_pnl=_realized_so_far(round_trips),
+    )
+
+
+def _realized_so_far(round_trips: Sequence[RoundTrip]) -> float:
+    return sum(trip.realized_pnl for trip in round_trips)
+
+
+def _apply_decision(
+    positions: dict[str, _NetPosition],
+    latched: dict[str, float],
+    decision: _PlannedDecision,
+    *,
+    equity: float,
+    per_side_cost_fraction: float,
+    timestamp: datetime,
+    round_trips: list[RoundTrip],
+) -> float:
+    """Net one standing target into the book; return the cash delta.
+
+    Honors the re-entry latch: while a symbol is latched flat after a fired
+    ``RiskRule``, a re-applied identical target is suppressed; a new (different)
+    target clears the latch and trades.
+    """
+    symbol = decision.symbol
+    latched_value = latched.get(symbol)
+    if latched_value is not None:
+        if _weights_match(latched_value, decision.signed_weight):
+            return 0.0
+        del latched[symbol]
+
+    position = positions.setdefault(symbol, _NetPosition(symbol=symbol))
+    position.target_weight = decision.signed_weight
+    fill_price = decision.fill_price
+    target_qty = (decision.signed_weight * equity) / fill_price
+    delta = target_qty - position.signed_qty
+    if delta == 0.0:
+        # Idempotent re-emission of the current target: refresh the declared risk
+        # rule so a newly-declared overlay takes effect, but trade nothing.
+        position.risk_rule = decision.risk_rule
+        return 0.0
+
+    cost = abs(delta * fill_price) * per_side_cost_fraction
+    cash_delta = -cost
+    crosses_zero = (position.signed_qty > 0.0 > target_qty) or (
+        position.signed_qty < 0.0 < target_qty
+    )
+
+    if position.is_flat:
+        position.cost_basis = delta * fill_price
+        position.signed_qty = target_qty
+        _open_leg(position, fill_price, timestamp, decision.risk_rule)
+        position.open_cost = cost
+    elif target_qty == 0.0 or crosses_zero:
+        # Close (and possibly reverse) the current net leg: realize the closed leg,
+        # record the round-trip, then re-open any residual as a fresh leg. The
+        # closing leg bears the full traded cost; a reversal's re-open starts a new
+        # leg whose open cost is zero (the single trade's cost closed the old leg).
+        cash_delta += _close_leg(position, fill_price, timestamp, cost, round_trips)
+        if target_qty == 0.0:
+            position.signed_qty = 0.0
+            position.risk_rule = None
+        else:
+            position.cost_basis = target_qty * fill_price
+            position.signed_qty = target_qty
+            _open_leg(position, fill_price, timestamp, decision.risk_rule)
+            position.open_cost = 0.0
+    else:
+        # Add to / trim the same-sign leg without crossing zero.
+        position.cost_basis += delta * fill_price
+        position.signed_qty = target_qty
+        position.open_cost += cost
+        position.risk_rule = decision.risk_rule
+
+    return cash_delta
+
+
+def _open_leg(
+    position: _NetPosition,
+    fill_price: float,
+    timestamp: datetime,
+    risk_rule: RiskRule | None,
+) -> None:
+    position.entry_time = timestamp
+    position.entry_mark = fill_price
+    position.peak_mark = fill_price
+    position.trough_mark = fill_price
+    position.risk_rule = risk_rule
+    position.funding_cashflow = 0.0
+    position.entry_signed_qty = position.signed_qty
+
+
+def _close_leg(
+    position: _NetPosition,
+    exit_price: float,
+    timestamp: datetime,
+    close_cost: float,
+    round_trips: list[RoundTrip],
+) -> float:
+    """Realize the open leg at ``exit_price``, record the round-trip, return cash.
+
+    Returned cash is the price proceeds only (the caller charges ``close_cost``
+    separately). The round-trip ``realized_pnl`` is the full economic PnL of the
+    round trip - price proceeds + funding accrued while held - the leg's open cost -
+    the closing cost - so that, when the book ends flat, sum of realized PnL
+    reconciles exactly with realized NAV PnL (final NAV - initial equity) per D4.
+    """
+    proceeds = position.signed_qty * exit_price - position.cost_basis
+    round_trips.append(
+        RoundTrip(
+            symbol=position.symbol,
+            direction=_direction(position.entry_signed_qty),
+            entry_time=cast(datetime, position.entry_time),
+            exit_time=timestamp,
+            realized_pnl=proceeds + position.funding_cashflow - position.open_cost - close_cost,
+        )
+    )
+    return proceeds
+
+
+def _flatten(
+    position: _NetPosition,
+    mark: float,
+    per_side_cost_fraction: float,
+    timestamp: datetime,
+    round_trips: list[RoundTrip],
+) -> float:
+    """Flatten the net position at ``mark`` for a fired RiskRule; record round-trip."""
+    cost = abs(position.signed_qty * mark) * per_side_cost_fraction
+    return _close_leg(position, mark, timestamp, cost, round_trips) - cost
+
+
+def _apply_funding(
+    row_index: _RowIndex,
+    positions: Mapping[str, _NetPosition],
+    timestamp: datetime,
+) -> float:
+    """Charge funding on the live NET held quantity at each funding-apply time.
+
+    Reuses the shared funding invariants (dedup via ``funding_rates_match`` upstream
+    in ``_RowIndex``, window rule ``entry < funding_ts <= now`` on the held leg, sign
+    ``-signed_qty * mark * rate``). A long pays positive funding, a short receives.
+    """
+    cash_delta = 0.0
+    for symbol, funding_timestamp, funding_rate in row_index.funding_events_by_apply_time.get(
+        timestamp, ()
+    ):
+        position = positions.get(symbol)
+        if position is None or position.is_flat:
+            continue
+        if position.entry_time is None or not (
+            position.entry_time < funding_timestamp <= timestamp
+        ):
+            continue
+        mark = row_index.mark_at(symbol, timestamp)
+        cashflow = -position.signed_qty * mark * funding_rate
+        cash_delta += cashflow
+        position.funding_cashflow += cashflow
+    return cash_delta
+
+
+def _update_trailing(position: _NetPosition, mark: float) -> None:
+    if position.peak_mark is None or mark > position.peak_mark:
+        position.peak_mark = mark
+    if position.trough_mark is None or mark < position.trough_mark:
+        position.trough_mark = mark
+
+
+def _risk_rule_fired(position: _NetPosition, mark: float) -> bool:
+    rule = position.risk_rule
+    if rule is None or position.entry_mark is None:
+        return False
+    entry = position.entry_mark
+    is_long = position.signed_qty > 0.0
+    if rule.stop_loss is not None:
+        if is_long and mark <= entry * (1.0 - rule.stop_loss):
+            return True
+        if not is_long and mark >= entry * (1.0 + rule.stop_loss):
+            return True
+    if rule.take_profit is not None:
+        if is_long and mark >= entry * (1.0 + rule.take_profit):
+            return True
+        if not is_long and mark <= entry * (1.0 - rule.take_profit):
+            return True
+    if rule.trailing is not None:
+        if (
+            is_long
+            and position.peak_mark is not None
+            and mark <= position.peak_mark * (1.0 - rule.trailing)
+        ):
+            return True
+        if (
+            not is_long
+            and position.trough_mark is not None
+            and mark >= position.trough_mark * (1.0 + rule.trailing)
+        ):
+            return True
+    return False
+
+
+def _check_intended_budget(
+    positions: Mapping[str, _NetPosition],
+    latched: Mapping[str, float],
+    planned: Sequence[_PlannedDecision],
+    *,
+    config: PortfolioFoundationConfig,
+    financed: bool,
+    data_kind: DataKind,
+    timestamp: datetime,
+) -> None:
+    """Fail closed when the intended target book breaches gross or net budget.
+
+    Intended exposure is the declared standing book after applying this bar's
+    decisions: a signed weight per symbol. A latched symbol whose target is being
+    re-applied identically contributes nothing (it is suppressed). The check never
+    clamps; it raises a typed verdict. For an asset class without modeled financing,
+    an intended net above 1.0 that the operator budget permits is still infeasible
+    (``unfinanced_leverage``) — financing the leverage is unpriced.
+    """
+    intended: dict[str, float] = {}
+    for symbol, position in positions.items():
+        if not position.is_flat:
+            intended[symbol] = position.target_weight
+    for decision in planned:
+        latched_value = latched.get(decision.symbol)
+        if latched_value is not None and _weights_match(latched_value, decision.signed_weight):
+            continue
+        if decision.signed_weight == 0.0:
+            intended.pop(decision.symbol, None)
+        else:
+            intended[decision.symbol] = decision.signed_weight
+    gross = sum(abs(weight) for weight in intended.values())
+    net = abs(sum(intended.values()))
+    if gross > config.max_gross_exposure + _EXPOSURE_TOLERANCE:
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_LEVERAGE_BUDGET_BREACH,
+                observed_gross=gross,
+                observed_net=net,
+                detail=(
+                    f"intended gross {gross:.6g} > budget {config.max_gross_exposure:.6g} "
+                    f"at {timestamp.isoformat()}"
+                ),
+            )
+        )
+    if net > config.max_net_exposure + _EXPOSURE_TOLERANCE:
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_LEVERAGE_BUDGET_BREACH,
+                observed_gross=gross,
+                observed_net=net,
+                detail=(
+                    f"intended net {net:.6g} > budget {config.max_net_exposure:.6g} "
+                    f"at {timestamp.isoformat()}"
+                ),
+            )
+        )
+    if not financed and net > 1.0 + _EXPOSURE_TOLERANCE:
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_UNFINANCED_LEVERAGE,
+                observed_gross=gross,
+                observed_net=net,
+                detail=(
+                    f"intended net {net:.6g} > 1.0 with unmodeled financing for data "
+                    f"kind {data_kind} at {timestamp.isoformat()}"
+                ),
+            )
+        )
+
+
+def _scenario_feasibility(
+    walk_verdict: FeasibilityVerdict,
+    full_train_statistics: ReturnStatistics,
+    *,
+    per_side_cost_fraction: float,
+    min_return_sample: int,
+) -> FeasibilityVerdict:
+    """Combine the walk verdict with cost-floor and sample-gate verdicts.
+
+    Precedence (most fundamental first): leverage/unfinanced (raised mid-walk) >
+    zero-cost on a scoreable run > insufficient at-risk samples.
+    """
+    if not walk_verdict.feasible:
+        return walk_verdict
+    scoreable = full_train_statistics.return_sample_count >= min_return_sample
+    if scoreable and per_side_cost_fraction <= 0.0:
+        return FeasibilityVerdict(
+            feasible=False,
+            reason=REASON_ZERO_COST,
+            detail="zero cost on a scoreable run is below the operator cost floor",
+        )
+    if not scoreable:
+        return FeasibilityVerdict(
+            feasible=False,
+            reason=REASON_INSUFFICIENT_SAMPLES,
+            detail=(
+                f"at-risk return sample {full_train_statistics.return_sample_count} "
+                f"< minimum {min_return_sample}"
+            ),
+        )
+    return FeasibilityVerdict(feasible=True)
+
+
 def compute_return_statistics(
     returns: Iterable[float],
     *,
     trial_count: int | None,
     benchmark_sharpe: float,
+    min_return_sample: int = DEFAULT_MIN_RETURN_SAMPLE,
 ) -> ReturnStatistics:
     values = [float(value) for value in returns if math.isfinite(float(value))]
     warnings: list[str] = []
     sample_count = len(values)
     mean_return = (sum(values) / sample_count) if sample_count else None
-    if sample_count < 2:
+    if sample_count < max(2, min_return_sample):
         return _insufficient_return_statistics(
             sample_count=sample_count,
             mean_return=mean_return,
@@ -258,10 +994,11 @@ def _compute_return_statistics_from_chunks(
     *,
     trial_count: int | None,
     benchmark_sharpe: float,
+    min_return_sample: int,
 ) -> ReturnStatistics:
     sample_count, total = _return_count_and_sum(chunks)
     mean_return = (total / sample_count) if sample_count else None
-    if sample_count < 2:
+    if sample_count < max(2, min_return_sample):
         return _insufficient_return_statistics(
             sample_count=sample_count,
             mean_return=mean_return,
@@ -391,373 +1128,14 @@ def _return_statistics_with_dsr(
     )
 
 
-def build_portfolio_foundation(
-    *,
-    rows: Sequence[Mapping[str, Any]],
-    decisions: Sequence[StrategyDecision],
-    executed_trades: Sequence[Any] | None = None,
-    data: DataConfig,
-    fill_model: FillModelConfig,
-    cost_model: CostModelConfig,
-    config: PortfolioFoundationConfig,
-) -> RunPortfolioFoundation:
-    if executed_trades is None:
-        raise ValueError("executed_trades_required")
-    row_index = _RowIndex(rows)
-    scenarios = (
-        _build_scenario(
-            "realistic_costs",
-            row_index=row_index,
-            decisions=decisions,
-            executed_trades=executed_trades,
-            data=data,
-            fill_model=fill_model,
-            cost_model=cost_model,
-            cost_multiplier=1.0,
-            config=config,
-        ),
-        _build_scenario(
-            "cost_stress",
-            row_index=row_index,
-            decisions=decisions,
-            executed_trades=executed_trades,
-            data=data,
-            fill_model=fill_model,
-            cost_model=cost_model,
-            cost_multiplier=config.cost_stress_multiplier,
-            config=config,
-        ),
-    )
-    return RunPortfolioFoundation(
-        schema_version=FOUNDATION_SCHEMA_VERSION,
-        basis=FOUNDATION_BASIS,
-        evidence_class=FOUNDATION_EVIDENCE_CLASS,
-        scenarios=scenarios,
-    )
-
-
-@dataclass
-class _Position:
-    symbol: str
-    direction: str
-    target_weight: float
-    signed_units: float
-    entry_time: datetime
-    exit_time: datetime
-    entry_price: float
-    entry_fee: float
-    funding_cashflow: float = 0.0
-    applied_funding_timestamps: set[datetime] | None = None
-
-
-class _RowIndex:
-    def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
-        by_symbol: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
-        by_key: dict[tuple[str, datetime], Mapping[str, Any]] = {}
-        funding_rates_by_key: dict[tuple[str, datetime], float] = {}
-        funding_events_by_apply_time: dict[datetime, list[tuple[str, datetime, float]]] = (
-            defaultdict(list)
-        )
-        for row in rows:
-            symbol = row.get("symbol")
-            timestamp = row.get("timestamp")
-            if not isinstance(symbol, str) or not isinstance(timestamp, datetime):
-                continue
-            by_symbol[symbol].append(row)
-            by_key[(symbol, timestamp)] = row
-            if row.get("has_funding_event") is True and isinstance(
-                row.get("funding_timestamp"), datetime
-            ):
-                funding_timestamp = row["funding_timestamp"]
-                funding_rate = _finite_float(row.get("funding_rate"), "invalid_funding_rate")
-                funding_key = (symbol, funding_timestamp)
-                existing = funding_rates_by_key.get(funding_key)
-                if existing is not None:
-                    if not funding_rates_match(existing, funding_rate):
-                        raise ValueError(
-                            f"conflicting_funding_rates:{symbol}:{funding_timestamp.isoformat()}"
-                        )
-                    continue
-                funding_rates_by_key[funding_key] = funding_rate
-                funding_events_by_apply_time[timestamp].append(
-                    (symbol, funding_timestamp, funding_rate)
-                )
-        self.by_symbol = {
-            symbol: tuple(sorted(items, key=lambda item: item["timestamp"]))
-            for symbol, items in by_symbol.items()
-        }
-        self.positions = {
-            symbol: {row["timestamp"]: index for index, row in enumerate(items)}
-            for symbol, items in self.by_symbol.items()
-        }
-        self.by_key = by_key
-        self.timestamps = tuple(sorted({row["timestamp"] for row in by_key.values()}))
-        self.funding_events_by_apply_time = {
-            timestamp: tuple(events)
-            for timestamp, events in sorted(funding_events_by_apply_time.items())
-        }
-
-    def row_at(self, symbol: str, timestamp: datetime) -> Mapping[str, Any]:
-        try:
-            return self.by_key[(symbol, timestamp)]
-        except KeyError as exc:
-            raise ValueError(f"missing_mark:{symbol}:{timestamp.isoformat()}") from exc
-
-    def mark_at(self, symbol: str, timestamp: datetime) -> float:
-        row = self.row_at(symbol, timestamp)
-        return _positive_float(row.get("close"), f"missing_mark:{symbol}:{timestamp.isoformat()}")
-
-
-def _build_scenario(
-    scenario_id: str,
-    *,
-    row_index: _RowIndex,
-    decisions: Sequence[StrategyDecision],
-    executed_trades: Sequence[Any],
-    data: DataConfig,
-    fill_model: FillModelConfig,
-    cost_model: CostModelConfig,
-    cost_multiplier: float,
-    config: PortfolioFoundationConfig,
-) -> FoundationScenarioResult:
-    _ = decisions, fill_model
-    decision_windows = _trade_windows(row_index, executed_trades)
-    per_side_cost_fraction = _cost_fraction(
-        (cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side) * cost_multiplier
-    )
-    path, trades = _portfolio_path(
-        row_index,
-        decision_windows,
-        per_side_cost_fraction=per_side_cost_fraction,
-        max_gross_exposure=config.max_gross_exposure,
-    )
-    full_train, subwindows = _scenario_metrics(
-        path,
-        trades,
-        subwindows=config.subwindows,
-        trial_count=config.trial_count,
-        benchmark_sharpe=config.benchmark_sharpe,
-        data_start=data.start,
-        data_end=data.end,
-    )
-    return FoundationScenarioResult(
-        scenario_id=scenario_id,
-        cost_multiplier=cost_multiplier,
-        full_train=full_train,
-        subwindows=tuple(subwindows),
-    )
-
-
-def _decision_windows(
-    row_index: _RowIndex,
-    decisions: Sequence[StrategyDecision],
-    *,
-    fill_model: FillModelConfig,
-) -> list[dict[str, Any]]:
-    windows: list[dict[str, Any]] = []
-    for item in decisions:
-        symbol = item.instrument.symbol
-        symbol_rows = row_index.by_symbol.get(symbol)
-        if not symbol_rows:
-            raise ValueError(f"missing_symbol:{symbol}")
-        position_by_time = row_index.positions[symbol]
-        if item.decision_time not in position_by_time:
-            raise ValueError(f"missing_decision_bar:{symbol}:{item.decision_time.isoformat()}")
-        decision_index = position_by_time[item.decision_time]
-        entry_index = decision_index + fill_model.entry_lag_bars
-        exit_index = entry_index + item.exit_policy.max_hold_bars + fill_model.exit_lag_bars
-        if entry_index >= len(symbol_rows):
-            raise ValueError(f"unfillable_entry:{symbol}:{item.decision_time.isoformat()}")
-        if exit_index >= len(symbol_rows):
-            raise ValueError(f"unfillable_exit:{symbol}:{item.decision_time.isoformat()}")
-        entry_row = symbol_rows[entry_index]
-        exit_row = symbol_rows[exit_index]
-        windows.append(
-            {
-                "decision": item,
-                "symbol": symbol,
-                "direction": item.target.direction,
-                "weight": float(item.target.size),
-                "entry_time": entry_row["timestamp"],
-                "exit_time": exit_row["timestamp"],
-                "entry_price": _fill_price(
-                    entry_row,
-                    fill_model.price,
-                    item.target.direction,
-                    is_entry=True,
-                ),
-                "exit_price": _fill_price(
-                    exit_row,
-                    fill_model.price,
-                    item.target.direction,
-                    is_entry=False,
-                ),
-            }
-        )
-    return windows
-
-
-def _trade_windows(row_index: _RowIndex, trades: Sequence[Any]) -> list[dict[str, Any]]:
-    windows: list[dict[str, Any]] = []
-    for trade in trades:
-        symbol = _trade_field(trade, "symbol")
-        direction = _trade_field(trade, "side")
-        entry_time = _trade_datetime(trade, "entry_time")
-        exit_time = _trade_datetime(trade, "exit_time")
-        row_index.row_at(symbol, entry_time)
-        row_index.row_at(symbol, exit_time)
-        windows.append(
-            {
-                "symbol": symbol,
-                "direction": direction,
-                "weight": _trade_float(trade, "weight"),
-                "entry_time": entry_time,
-                "exit_time": exit_time,
-                "entry_price": _trade_float(trade, "entry_price"),
-                "exit_price": _trade_float(trade, "exit_price"),
-            }
-        )
-    return windows
-
-
-def _trade_field(trade: Any, field: str) -> str:
-    value = trade.get(field) if isinstance(trade, Mapping) else getattr(trade, field, None)
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"trade_{field}_missing")
-    return value
-
-
-def _trade_datetime(trade: Any, field: str) -> datetime:
-    value = trade.get(field) if isinstance(trade, Mapping) else getattr(trade, field, None)
-    if not isinstance(value, datetime):
-        raise ValueError(f"trade_{field}_missing")
-    return value
-
-
-def _trade_float(trade: Any, field: str) -> float:
-    value = trade.get(field) if isinstance(trade, Mapping) else getattr(trade, field, None)
-    return _finite_float(value, f"trade_{field}_invalid")
-
-
-def _portfolio_path(
-    row_index: _RowIndex,
-    windows: Sequence[Mapping[str, Any]],
-    *,
-    per_side_cost_fraction: float,
-    max_gross_exposure: float,
-) -> tuple[list[PortfolioPathPoint], list[FoundationTrade]]:
-    entries_by_time: dict[datetime, list[Mapping[str, Any]]] = defaultdict(list)
-    exits_by_time: dict[datetime, list[Mapping[str, Any]]] = defaultdict(list)
-    for window in windows:
-        entries_by_time[window["entry_time"]].append(window)
-        exits_by_time[window["exit_time"]].append(window)
-
-    cash = INITIAL_EQUITY
-    peak = INITIAL_EQUITY
-    previous_nav: float | None = None
-    active: dict[int, _Position] = {}
-    path: list[PortfolioPathPoint] = []
-    trades: list[FoundationTrade] = []
-    window_keys = {id(window): index for index, window in enumerate(windows)}
-
-    for timestamp in row_index.timestamps:
-        _apply_funding(row_index, active, timestamp, cash_ref := {"cash": cash})
-        cash = cash_ref["cash"]
-
-        for window in exits_by_time.get(timestamp, ()):
-            key = window_keys[id(window)]
-            position = active.pop(key)
-            exit_price = float(window["exit_price"])
-            realized_pnl = position.signed_units * (exit_price - position.entry_price)
-            exit_fee = abs(position.signed_units * exit_price) * per_side_cost_fraction
-            cash += realized_pnl - exit_fee
-            net_pnl = realized_pnl + position.funding_cashflow - position.entry_fee - exit_fee
-            trades.append(
-                FoundationTrade(
-                    symbol=position.symbol,
-                    entry_time=position.entry_time,
-                    exit_time=position.exit_time,
-                    net_pnl=net_pnl,
-                )
-            )
-
-        for window in entries_by_time.get(timestamp, ()):
-            equity = _equity_at_mark(row_index, active.values(), timestamp, cash)
-            if equity <= 0.0:
-                raise ValueError(f"nonpositive_equity_for_entry:{timestamp.isoformat()}:{equity}")
-            signed_weight = _signed_weight(window)
-            current_gross = sum(abs(position.target_weight) for position in active.values())
-            next_gross = current_gross + abs(signed_weight)
-            if next_gross > max_gross_exposure + 1e-12:
-                raise ValueError(
-                    f"portfolio_target_weight_exceeds_one:{timestamp.isoformat()}:{next_gross}"
-                )
-            entry_price = float(window["entry_price"])
-            signed_notional = signed_weight * equity
-            signed_units = signed_notional / entry_price
-            entry_fee = abs(signed_notional) * per_side_cost_fraction
-            cash -= entry_fee
-            active[window_keys[id(window)]] = _Position(
-                symbol=str(window["symbol"]),
-                direction=str(window["direction"]),
-                target_weight=signed_weight,
-                signed_units=signed_units,
-                entry_time=window["entry_time"],
-                exit_time=window["exit_time"],
-                entry_price=entry_price,
-                entry_fee=entry_fee,
-                applied_funding_timestamps=set(),
-            )
-
-        nav = _equity_at_mark(row_index, active.values(), timestamp, cash)
-        period_return = 0.0 if previous_nav is None else (nav / previous_nav) - 1.0
-        peak = max(peak, nav)
-        drawdown = 0.0 if peak == 0.0 else (nav / peak) - 1.0
-        path.append(
-            PortfolioPathPoint(
-                timestamp=timestamp,
-                portfolio_value=nav,
-                period_return=period_return,
-                drawdown=drawdown,
-                concentration=_concentration(active.values()),
-            )
-        )
-        previous_nav = nav
-    return path, trades
-
-
-def _apply_funding(
-    row_index: _RowIndex,
-    active: Mapping[int, _Position],
-    timestamp: datetime,
-    cash_ref: dict[str, float],
-) -> None:
-    for symbol, funding_timestamp, funding_rate in row_index.funding_events_by_apply_time.get(
-        timestamp, ()
-    ):
-        for position in active.values():
-            if position.symbol != symbol:
-                continue
-            if position.applied_funding_timestamps is None:
-                position.applied_funding_timestamps = set()
-            if funding_timestamp in position.applied_funding_timestamps:
-                continue
-            if not position.entry_time < funding_timestamp <= position.exit_time:
-                continue
-            mark = row_index.mark_at(position.symbol, timestamp)
-            cashflow = -position.signed_units * mark * funding_rate
-            cash_ref["cash"] += cashflow
-            position.funding_cashflow += cashflow
-            position.applied_funding_timestamps.add(funding_timestamp)
-
-
 def _scenario_metrics(
     path: Sequence[PortfolioPathPoint],
-    trades: Sequence[FoundationTrade],
+    round_trips: Sequence[RoundTrip],
     *,
     subwindows: int,
     trial_count: int | None,
     benchmark_sharpe: float,
+    min_return_sample: int,
     data_start: date,
     data_end: date,
 ) -> tuple[FoundationMetric, list[FoundationMetric]]:
@@ -768,6 +1146,7 @@ def _scenario_metrics(
             _MetricAccumulator(start_time=default_start, end_time=default_end),
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         )
         return full_train, []
     scoring_path = [point for point in path if data_start <= point.timestamp.date() <= data_end]
@@ -782,6 +1161,7 @@ def _scenario_metrics(
             _MetricAccumulator(start_time=start_time, end_time=end_time),
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         )
         return full_train, []
     bounds = _subwindow_bounds(scoring_path, subwindows=subwindows, start=data_start, end=data_end)
@@ -801,15 +1181,15 @@ def _scenario_metrics(
         accumulator = accumulators[assigned]
         _record_path_point(accumulator, point, include_return=path_index > 0)
 
-    for trade in trades:
+    for trip in round_trips:
         if _timestamp_in_window(
-            trade.exit_time,
+            trip.exit_time,
             full_train_accumulator.start_time,
             full_train_accumulator.end_time,
             is_last=True,
         ):
             full_train_accumulator.closed_trade_count += 1
-        bucket = _bucket_for_timestamp(trade.exit_time, bounds)
+        bucket = _bucket_for_timestamp(trip.exit_time, bounds)
         if bucket is not None:
             accumulators[bucket].closed_trade_count += 1
 
@@ -820,6 +1200,7 @@ def _scenario_metrics(
             return_chunks=tuple(accumulator.returns for accumulator in accumulators),
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         ),
         [
             _metric_from_accumulator(
@@ -827,6 +1208,7 @@ def _scenario_metrics(
                 accumulator,
                 trial_count=trial_count,
                 benchmark_sharpe=benchmark_sharpe,
+                min_return_sample=min_return_sample,
             )
             for index, accumulator in enumerate(accumulators)
         ],
@@ -840,6 +1222,8 @@ class _MetricAccumulator:
     returns: list[float] = field(default_factory=list)
     navs: list[float] = field(default_factory=list)
     max_concentration: float = 0.0
+    gross_samples: list[float] = field(default_factory=list)
+    net_samples: list[float] = field(default_factory=list)
     closed_trade_count: int = 0
 
 
@@ -852,6 +1236,8 @@ class _FullTrainAccumulator:
     peak_nav: float | None = None
     max_drawdown: float | None = None
     max_concentration: float = 0.0
+    gross_samples: list[float] = field(default_factory=list)
+    net_samples: list[float] = field(default_factory=list)
     closed_trade_count: int = 0
 
 
@@ -863,7 +1249,9 @@ def _record_path_point(
 ) -> None:
     accumulator.navs.append(point.portfolio_value)
     accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
-    if include_return:
+    accumulator.gross_samples.append(point.gross_exposure)
+    accumulator.net_samples.append(point.net_exposure)
+    if include_return and point.at_risk:
         accumulator.returns.append(point.period_return)
 
 
@@ -883,6 +1271,8 @@ def _record_full_train_path_point(
         drawdown if accumulator.max_drawdown is None else min(accumulator.max_drawdown, drawdown)
     )
     accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
+    accumulator.gross_samples.append(point.gross_exposure)
+    accumulator.net_samples.append(point.net_exposure)
 
 
 def _metric_from_accumulator(
@@ -893,12 +1283,14 @@ def _metric_from_accumulator(
     return_chunks: Sequence[Sequence[float]] | None = None,
     trial_count: int | None,
     benchmark_sharpe: float,
+    min_return_sample: int,
 ) -> FoundationMetric:
     if return_chunks is not None:
         statistics = _compute_return_statistics_from_chunks(
             return_chunks,
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         )
     elif returns is None:
         if not isinstance(accumulator, _MetricAccumulator):
@@ -907,12 +1299,14 @@ def _metric_from_accumulator(
             accumulator.returns,
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         )
     else:
         statistics = compute_return_statistics(
             returns,
             trial_count=trial_count,
             benchmark_sharpe=benchmark_sharpe,
+            min_return_sample=min_return_sample,
         )
     return FoundationMetric(
         window_id=window_id,
@@ -922,6 +1316,10 @@ def _metric_from_accumulator(
         max_drawdown=_accumulator_max_drawdown(accumulator),
         closed_trade_count=accumulator.closed_trade_count,
         max_symbol_concentration=accumulator.max_concentration,
+        max_gross_utilization=_max(accumulator.gross_samples),
+        mean_gross_utilization=_mean(accumulator.gross_samples),
+        max_net_utilization=_max(accumulator.net_samples),
+        mean_net_utilization=_mean(accumulator.net_samples),
         statistics=statistics,
     )
 
@@ -982,51 +1380,70 @@ def _timestamp_in_window(
     return start_time <= timestamp < end_time
 
 
-def _fill_price(
+def _fill_price_for_weight(
     row: Mapping[str, Any],
     field: str,
-    direction: str,
-    *,
-    is_entry: bool,
+    signed_weight: float,
 ) -> float:
+    """Direction-aware fill price for a signed target weight."""
+    direction = "long" if signed_weight >= 0.0 else "short"
     if field == "quote":
         if direction == "long":
-            base = row.get("ask") if is_entry else row.get("bid")
+            base = row.get("ask")
         else:
-            base = row.get("bid") if is_entry else row.get("ask")
+            base = row.get("bid")
         return _positive_float(base, "quote_fill_price")
-    base = _positive_float(row.get(field), f"fill_price:{field}")
-    if direction in {"long", "short"}:
-        return base
-    raise ValueError(f"unsupported_direction:{direction}")
+    return _positive_float(row.get(field), f"fill_price:{field}")
 
 
 def _equity_at_mark(
     row_index: _RowIndex,
-    positions: Sequence[_Position] | Any,
+    positions: Mapping[str, _NetPosition],
     timestamp: datetime,
     cash: float,
 ) -> float:
     equity = cash
-    for position in positions:
+    for position in positions.values():
+        if position.is_flat:
+            continue
         mark = row_index.mark_at(position.symbol, timestamp)
-        equity += position.signed_units * (mark - position.entry_price)
+        equity += position.signed_qty * mark - position.cost_basis
     return equity
 
 
-def _concentration(positions: Sequence[_Position] | Any) -> float:
-    by_symbol: dict[str, float] = defaultdict(float)
-    for position in positions:
-        by_symbol[position.symbol] += abs(position.target_weight)
-    total = sum(by_symbol.values())
-    if total == 0.0:
-        return 0.0
-    return max(by_symbol.values()) / total
+def _exposures(
+    row_index: _RowIndex,
+    positions: Mapping[str, _NetPosition],
+    timestamp: datetime,
+    nav: float,
+) -> tuple[float, float, float]:
+    """Marked-to-market gross, net, and per-symbol concentration on the netted book."""
+    signed_notional: dict[str, float] = {}
+    for symbol, position in positions.items():
+        if position.is_flat:
+            continue
+        mark = row_index.mark_at(symbol, timestamp)
+        signed_notional[symbol] = position.signed_qty * mark
+    if not signed_notional or nav <= 0.0:
+        return 0.0, 0.0, 0.0
+    gross_notional = sum(abs(value) for value in signed_notional.values())
+    net_notional = abs(sum(signed_notional.values()))
+    gross = gross_notional / nav
+    net = net_notional / nav
+    concentration = (
+        max(abs(value) for value in signed_notional.values()) / gross_notional
+        if gross_notional > 0.0
+        else 0.0
+    )
+    return gross, net, concentration
 
 
-def _signed_weight(window: Mapping[str, Any]) -> float:
-    weight = float(window["weight"])
-    return -weight if window["direction"] == "short" else weight
+def _direction(signed_qty: float) -> str:
+    return "long" if signed_qty >= 0.0 else "short"
+
+
+def _weights_match(first: float, second: float) -> bool:
+    return math.isclose(first, second, rel_tol=0.0, abs_tol=1e-12)
 
 
 def _local_max_drawdown(values: Sequence[float]) -> float | None:
@@ -1039,15 +1456,6 @@ def _local_max_drawdown(values: Sequence[float]) -> float | None:
         drawdown = 0.0 if peak == 0.0 else (value / peak) - 1.0
         worst = min(worst, drawdown)
     return worst
-
-
-def _total_return(values: Sequence[float]) -> float | None:
-    if not values:
-        return None
-    first = values[0]
-    if first == 0.0:
-        return None
-    return (values[-1] / first) - 1.0
 
 
 def _accumulator_total_return(
@@ -1079,6 +1487,14 @@ def _accumulator_max_drawdown(
     if isinstance(accumulator, _MetricAccumulator):
         return _local_max_drawdown(accumulator.navs) if accumulator.navs else None
     return accumulator.max_drawdown
+
+
+def _max(values: Sequence[float]) -> float:
+    return max(values) if values else 0.0
+
+
+def _mean(values: Sequence[float]) -> float:
+    return (sum(values) / len(values)) if values else 0.0
 
 
 def _sample_stdev(values: Sequence[float]) -> float:

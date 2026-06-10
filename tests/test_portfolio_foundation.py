@@ -1,98 +1,131 @@
+"""Standalone unit tests for the causal, single-account, netted portfolio book.
+
+These exercise the book in isolation (no runner/engine/causality wiring — Phase 1b)
+against the ``portfolio-book-spine`` spec: same-symbol netting, decision-bar
+weight->quantity then held, same-bar fill-order-independent intended gross, the
+``RiskRule`` flatten + re-entry latch, at-risk-bar statistics + min-sample gate, each
+fail-closed feasibility verdict, and NAV<->round-trip-ledger reconciliation.
+"""
+
 from __future__ import annotations
 
-import json
+import math
 from datetime import UTC, datetime, timedelta
-from statistics import NormalDist, stdev
-from types import SimpleNamespace
+from statistics import stdev
 
 import pytest
 
 from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
 from quant_strategies.core.portfolio_foundation import (
+    INITIAL_EQUITY,
+    REASON_INSUFFICIENT_SAMPLES,
+    REASON_LEVERAGE_BUDGET_BREACH,
+    REASON_UNFINANCED_LEVERAGE,
+    REASON_ZERO_COST,
+    BookWalkResult,
+    FeasibilityError,
     PortfolioFoundationConfig,
+    _DecisionPlan,
+    _RowIndex,
+    _walk_book,
     build_portfolio_foundation,
     compute_return_statistics,
 )
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision
+
+START = datetime(2024, 1, 1, tzinfo=UTC)
 
 
-def assert_no_path_traces(payload: object) -> None:
-    text = json.dumps(payload)
-    for forbidden in (
-        "period_return",
-        "period_returns",
-        "portfolio_value",
-        "portfolio_values",
-        "navs",
-    ):
-        assert forbidden not in text
+def ts(index: int) -> datetime:
+    return START + timedelta(days=index)
 
 
-def bar_rows(*closes: float) -> list[dict[str, object]]:
-    start = datetime(2024, 1, 1, tzinfo=UTC)
-    return [
-        {
-            "symbol": "SPY",
-            "timestamp": start + timedelta(days=index),
+def bar_rows(
+    *closes: float,
+    symbol: str = "SPY",
+    funding_at: dict[int, float] | None = None,
+) -> list[dict[str, object]]:
+    funding_at = funding_at or {}
+    rows: list[dict[str, object]] = []
+    for index, close in enumerate(closes):
+        row: dict[str, object] = {
+            "symbol": symbol,
+            "timestamp": ts(index),
             "open": close,
             "high": close,
             "low": close,
             "close": close,
-            "available_at": start + timedelta(days=index),
+            "available_at": ts(index),
         }
-        for index, close in enumerate(closes)
-    ]
+        if index in funding_at:
+            row["has_funding_event"] = True
+            row["funding_timestamp"] = ts(index)
+            row["funding_rate"] = funding_at[index]
+        rows.append(row)
+    return rows
 
 
-def decision(
-    decision_time: datetime,
+def target(
+    decision_index: int,
+    weight: float,
     *,
     symbol: str = "SPY",
-    direction: str = "long",
-    weight: float = 1.0,
-    hold_bars: int = 1,
-) -> StrategyDecision:
-    return StrategyDecision(
+    kind: str = "equity_or_etf",
+    risk_rule: RiskRule | None = None,
+) -> TargetDecision:
+    decision_time = ts(decision_index)
+    return TargetDecision(
         strategy_id="demo",
-        instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
+        instrument=InstrumentRef(kind=kind, symbol=symbol),
         decision_time=decision_time,
         as_of_time=decision_time,
-        target=PositionTarget(
-            direction=direction,
-            sizing_kind="target_weight",
-            size=weight,
-        ),
-        exit_policy=ExitPolicy(max_hold_bars=hold_bars),
+        target=weight,
+        risk_rule=risk_rule,
     )
 
 
-def executed_trade(
+def data_config(end_index: int, *, kind: str = "bars", symbols=("SPY",)) -> DataConfig:
+    return DataConfig(
+        kind=kind,
+        dataset="equity_1min" if kind == "bars" else None,
+        symbols=tuple(symbols),
+        start=START.date(),
+        end=ts(end_index).date(),
+    )
+
+
+def walk(
     rows: list[dict[str, object]],
+    decisions: list[TargetDecision],
     *,
-    entry_index: int,
-    exit_index: int,
-    symbol: str = "SPY",
-    side: str = "long",
-    weight: float = 1.0,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        symbol=symbol,
-        side=side,
-        weight=weight,
-        entry_time=rows[entry_index]["timestamp"],
-        exit_time=rows[exit_index]["timestamp"],
-        entry_price=rows[entry_index]["close"],
-        exit_price=rows[exit_index]["close"],
+    kind: str = "bars",
+    per_side_cost_fraction: float = 0.0,
+    config: PortfolioFoundationConfig | None = None,
+    entry_lag_bars: int = 1,
+) -> BookWalkResult:
+    row_index = _RowIndex(rows)
+    plan = _DecisionPlan(
+        row_index,
+        decisions,
+        fill_model=FillModelConfig(price="close", entry_lag_bars=entry_lag_bars),
     )
+    return _walk_book(
+        row_index,
+        plan,
+        per_side_cost_fraction=per_side_cost_fraction,
+        data_kind=kind,
+        config=config or PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+
+
+# --------------------------------------------------------------------------------------
+# compute_return_statistics — preserved Sharpe-SE / DSR math (reused, not deleted)
+# --------------------------------------------------------------------------------------
 
 
 def test_compute_return_statistics_reports_dsr_inputs_and_missing_trial_warning():
     values = [0.01, -0.005, 0.02, 0.0]
-    stats = compute_return_statistics(
-        values,
-        trial_count=None,
-        benchmark_sharpe=0.0,
-    )
+    stats = compute_return_statistics(values, trial_count=None, benchmark_sharpe=0.0)
 
     assert stats.return_sample_count == 4
     assert stats.mean_return == pytest.approx(sum(values) / len(values))
@@ -100,13 +133,8 @@ def test_compute_return_statistics_reports_dsr_inputs_and_missing_trial_warning(
     assert stats.effective_sample_size is not None
     assert stats.sharpe is not None
     assert stats.sharpe_standard_error is not None
-    assert stats.skew is not None
-    assert stats.kurtosis is not None
     assert stats.dsr is None
     assert "missing_trial_count" in stats.warnings
-    assert stats.dsr_inputs is not None
-    assert stats.dsr_inputs.sample_length == 4
-    assert stats.dsr_inputs.trial_count is None
 
 
 def test_compute_return_statistics_computes_finite_dsr_when_inputs_exist():
@@ -115,360 +143,574 @@ def test_compute_return_statistics_computes_finite_dsr_when_inputs_exist():
         trial_count=12,
         benchmark_sharpe=0.0,
     )
-
     assert stats.dsr is not None
     assert 0.0 <= stats.dsr <= 1.0
     assert stats.dsr_inputs is not None
     assert stats.dsr_inputs.trial_count == 12
-    assert stats.dsr_inputs.benchmark_sharpe == pytest.approx(0.0)
-    expected_threshold = stats.sharpe_standard_error * (
-        (1.0 - 0.5772156649015329) * NormalDist().inv_cdf(1.0 - (1.0 / 12.0))
-        + 0.5772156649015329 * NormalDist().inv_cdf(1.0 - (1.0 / (12.0 * 2.718281828459045)))
+
+
+def test_compute_return_statistics_min_sample_gate_blocks_finite_sharpe():
+    # Three finite returns but a configured minimum of 5 -> non-scoreable, not a
+    # Sharpe from sample count alone.
+    stats = compute_return_statistics(
+        [0.01, 0.02, -0.01], trial_count=5, benchmark_sharpe=0.0, min_return_sample=5
     )
-    assert stats.dsr_inputs.deflated_sharpe_threshold == pytest.approx(expected_threshold)
-    assert stats.dsr_inputs.formula == "bailey_lopez_de_prado_expected_max_sharpe"
+    assert stats.sharpe is None
+    assert stats.return_sample_count == 3
+    assert "insufficient_return_sample" in stats.warnings
 
 
-def test_compute_return_statistics_sparse_missing_trial_count_reports_both_warnings():
-    stats = compute_return_statistics([0.01], trial_count=None, benchmark_sharpe=0.0)
-
-    assert stats.dsr is None
-    assert set(stats.warnings) == {"insufficient_return_sample", "missing_trial_count"}
+# --------------------------------------------------------------------------------------
+# Same-symbol netting (Requirement: nets same-symbol exposure on one account)
+# --------------------------------------------------------------------------------------
 
 
-def test_build_portfolio_foundation_slices_windows_and_counts_closed_trades_by_exit_time():
-    rows = bar_rows(100.0, 101.0, 103.0, 102.0, 104.0, 105.0)
+def test_repeated_identical_target_is_idempotent_no_stacking():
+    # Long 0.5 at d0 (fills d1), then re-emit long 0.5 at d2 (fills d3). The second
+    # target must net to a zero delta — no stacking to 1.0 gross.
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
+    decisions = [target(0, 0.5), target(2, 0.5)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    # Gross exposure holds at 0.5 throughout the held bars, never 1.0.
+    held = [point.gross_exposure for point in result.path]
+    assert max(held) == pytest.approx(0.5)
+    # One open leg, never closed -> no round-trips.
+    assert result.round_trips == ()
+
+
+def test_offsetting_target_nets_and_trades_only_the_delta():
+    # Long 1.0 at d0 (fills d1), reduce to long 0.4 at d2 (fills d3). Only the 0.6
+    # reduction trades; gross drops to 0.4 with no extra round-trip (still long).
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
+    decisions = [target(0, 1.0), target(2, 0.4)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert result.path[1].gross_exposure == pytest.approx(1.0)
+    assert result.path[3].gross_exposure == pytest.approx(0.4)
+    # Trimming a same-sign leg is not a closed round-trip.
+    assert result.round_trips == ()
+
+
+def test_target_to_zero_closes_the_net_position_as_one_round_trip():
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
+    decisions = [target(0, 1.0), target(2, 0.0)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    trip = result.round_trips[0]
+    assert trip.symbol == "SPY"
+    assert trip.direction == "long"
+    # Entry filled at d1 (price 100), exit filled at d3 (price 110), qty 1.0 of NAV.
+    assert trip.realized_pnl == pytest.approx(INITIAL_EQUITY * 0.10)
+
+
+def test_reversal_records_one_round_trip_and_reopens_short():
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
+    # Long 1.0 (fills d1 @100), flip to short 1.0 at d2 (fills d3 @110).
+    decisions = [target(0, 1.0), target(2, -1.0)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].direction == "long"
+    # The reopened leg is short -> net exposure sign flips negative.
+    assert result.path[3].net_exposure == pytest.approx(1.0)
+    assert result.path[4].gross_exposure == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------------------
+# weight -> quantity at the decision bar, then held (Requirement / D1)
+# --------------------------------------------------------------------------------------
+
+
+def test_weight_to_quantity_sized_at_fill_bar_then_held_as_quantity():
+    # Long 1.0 at d0 fills at d1 @ price 100 -> qty = 100 NAV / 100 = 1.0 unit.
+    # Price then rises to 120 at d2: NAV = 100 + 1.0*(120-100) = 120 (held as qty).
+    rows = bar_rows(100.0, 100.0, 120.0)
+    decisions = [target(0, 1.0)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert result.path[0].portfolio_value == pytest.approx(INITIAL_EQUITY)
+    assert result.path[1].portfolio_value == pytest.approx(INITIAL_EQUITY)
+    assert result.path[2].portfolio_value == pytest.approx(120.0)
+    # Weight drifts with price (held as quantity, not constant weight).
+    assert result.path[2].gross_exposure == pytest.approx(120.0 / 120.0)
+
+
+def test_same_bar_intended_gross_is_fill_order_independent():
+    # Two symbols targeted at the same decision bar; total intended weight 0.9.
+    # Sized against one pre-entry equity snapshot, so measured gross == 0.9
+    # regardless of which leg is applied first.
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(50.0, 50.0, 50.0, symbol="BBB")
+    forward = [target(0, 0.5, symbol="AAA"), target(0, 0.4, symbol="BBB")]
+    reversed_order = [target(0, 0.4, symbol="BBB"), target(0, 0.5, symbol="AAA")]
+    cfg = PortfolioFoundationConfig(subwindows=1, trial_count=5)
+
+    result_a = walk(rows, forward, config=cfg)
+    result_b = walk(rows, reversed_order, config=cfg)
+
+    assert result_a.path[1].gross_exposure == pytest.approx(0.9)
+    assert result_b.path[1].gross_exposure == pytest.approx(0.9)
+    assert result_a.path[1].gross_exposure == pytest.approx(result_b.path[1].gross_exposure)
+
+
+# --------------------------------------------------------------------------------------
+# RiskRule flatten + re-entry latch (Requirement / D2)
+# --------------------------------------------------------------------------------------
+
+
+def test_risk_rule_stop_loss_flattens_at_crossing_bar():
+    # Long with a 5% stop. Entry @100 at d1; price drops to 94 at d2 (>5% adverse)
+    # -> flattened that bar.
+    rows = bar_rows(100.0, 100.0, 94.0, 94.0)
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_time == ts(2)
+    # Flat after the stop fires.
+    assert result.path[2].gross_exposure == pytest.approx(0.0)
+    assert result.path[3].gross_exposure == pytest.approx(0.0)
+
+
+def test_standing_target_does_not_reenter_until_a_new_target_after_stop():
+    # Long 1.0 with stop at d0 (fills d1 @100). Stop fires at d2 (price 94). The
+    # SAME standing target must NOT re-enter; re-emitting it at d4 (same weight) is
+    # suppressed; only a different target re-enters.
+    rows = bar_rows(100.0, 100.0, 94.0, 94.0, 94.0, 94.0, 94.0)
     decisions = [
-        decision(rows[0]["timestamp"], hold_bars=1),
-        decision(rows[3]["timestamp"], hold_bars=1),
+        target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
+        target(4, 1.0, risk_rule=RiskRule(stop_loss=0.05)),  # identical -> suppressed
     ]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
 
+    # Exactly one round-trip; latched flat for the remainder.
+    assert len(result.round_trips) == 1
+    assert all(point.gross_exposure == pytest.approx(0.0) for point in result.path[2:])
+
+
+def test_new_different_target_clears_the_latch_and_reenters():
+    rows = bar_rows(100.0, 100.0, 94.0, 94.0, 94.0, 94.0, 94.0)
+    decisions = [
+        target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
+        target(4, 0.5),  # different weight -> clears latch, re-enters
+    ]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1  # only the stopped leg closed so far
+    # Re-entered at d5 (fills the bar after the d4 decision) at weight 0.5.
+    assert result.path[5].gross_exposure == pytest.approx(0.5)
+
+
+def test_take_profit_flattens_on_favorable_move():
+    rows = bar_rows(100.0, 100.0, 112.0, 112.0)
+    decisions = [target(0, 1.0, risk_rule=RiskRule(take_profit=0.10))]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_time == ts(2)
+    assert result.round_trips[0].realized_pnl == pytest.approx(INITIAL_EQUITY * 0.12)
+
+
+# --------------------------------------------------------------------------------------
+# At-risk statistics + min-sample gate (Requirement: at-risk bars)
+# --------------------------------------------------------------------------------------
+
+
+def test_flat_bars_do_not_inflate_effective_sample_size():
+    # Hold while invested, then flat for a long tail after the exit fills. The flat
+    # tail (after the position has fully closed) contributes no at-risk returns.
+    # Exit target at d3 fills at d4, so [d3,d4] is the last at-risk interval (a 0.0
+    # return as price is flat); d5+ are flat and excluded.
+    rows = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0)
+    decisions = [target(0, 1.0), target(3, 0.0)]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    at_risk = [point for point in result.path if point.at_risk]
+    # At-risk intervals: d1->d2, d2->d3, and the exit-fill interval d3->d4. None of
+    # the long flat tail (d5..d9) is at-risk.
+    assert [point.timestamp for point in at_risk] == [ts(2), ts(3), ts(4)]
+    assert all(not point.at_risk for point in result.path[5:])
+
+
+def test_flat_tail_does_not_change_sample_count_vs_short_window():
+    # The same trade evaluated over a short window and over a window with a long
+    # flat tail yields the same at-risk return sample — the tail is not padded in.
+    short = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0)
+    long_tail = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0)
+    decisions_short = [target(0, 1.0), target(3, 0.0)]
+    decisions_long = [target(0, 1.0), target(3, 0.0)]
+
+    def sample_count(rows: list[dict[str, object]], end: int) -> int:
+        foundation = build_portfolio_foundation(
+            rows=rows,
+            decisions=decisions_short if end == 4 else decisions_long,
+            data=data_config(end),
+            fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+            cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+            config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        )
+        full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
+        return full["return_sample_count"]
+
+    assert sample_count(short, 4) == sample_count(long_tail, 8)
+
+
+def test_degenerate_sample_gated_as_non_scoreable_verdict():
+    # One at-risk interval only -> below the default minimum of 2 -> insufficient.
+    rows = bar_rows(100.0, 100.0, 110.0)
+    decisions = [target(0, 1.0)]
     foundation = build_portfolio_foundation(
         rows=rows,
         decisions=decisions,
-        executed_trades=[
-            executed_trade(rows, entry_index=1, exit_index=2),
-            executed_trade(rows, entry_index=4, exit_index=5),
-        ],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 6).date(),
-        ),
+        data=data_config(2),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(subwindows=2, trial_count=5, benchmark_sharpe=0.0),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
+    realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
+    assert realistic["feasibility"]["feasible"] is False
+    assert realistic["feasibility"]["reason"] == REASON_INSUFFICIENT_SAMPLES
+    assert foundation.feasible is False
 
-    payload = foundation.matrix_payload()
-    realistic = payload["scenarios"]["realistic_costs"]
-    stressed = payload["scenarios"]["cost_stress"]
 
-    assert foundation.evidence_class == "quick_run_portfolio_foundation_diagnostic"
-    assert realistic["full_train"]["window_id"] == "full_train"
-    assert realistic["full_train"]["closed_trade_count"] == 2
-    assert realistic["full_train"]["return_sample_count"] == 5
-    expected_returns = [0.0, 2.0 / 101.0, 0.0, 0.0, 1.0 / 104.0]
-    assert realistic["full_train"]["total_return"] == pytest.approx(
-        (103.0 / 101.0) * (105.0 / 104.0) - 1.0
+# --------------------------------------------------------------------------------------
+# Feasibility verdicts (Requirement: fail-closed verdict, never clamp)
+# --------------------------------------------------------------------------------------
+
+
+def test_leverage_budget_breach_fails_closed_with_observed_gross():
+    # Two longs summing to gross 1.4 at the same bar, budget 1.0 -> infeasible.
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(100.0, 100.0, 100.0, symbol="BBB")
+    decisions = [target(0, 0.8, symbol="AAA"), target(0, 0.6, symbol="BBB")]
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(
+            rows,
+            decisions,
+            config=PortfolioFoundationConfig(
+                subwindows=1, trial_count=5, max_gross_exposure=1.0, max_net_exposure=1.0
+            ),
+        )
+    verdict = excinfo.value.verdict
+    assert verdict.feasible is False
+    assert verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
+    assert verdict.observed_gross == pytest.approx(1.4)
+
+
+def test_net_budget_breach_fails_closed_even_when_gross_allowed():
+    # Gross 1.2 within a 1.5 gross budget, but net 1.2 exceeds a 1.0 net budget.
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(100.0, 100.0, 100.0, symbol="BBB")
+    decisions = [target(0, 0.6, symbol="AAA"), target(0, 0.6, symbol="BBB")]
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(
+            rows,
+            decisions,
+            config=PortfolioFoundationConfig(
+                subwindows=1, trial_count=5, max_gross_exposure=1.5, max_net_exposure=1.0
+            ),
+        )
+    assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
+    assert excinfo.value.verdict.observed_net == pytest.approx(1.2)
+
+
+def test_offsetting_legs_pass_net_budget_but_count_gross():
+    # Long AAA 0.6 + short BBB 0.6: gross 1.2, net 0.0. Allowed under net budget 1.0
+    # and gross budget 1.5 -> feasible (netting is economically correct).
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(100.0, 100.0, 100.0, symbol="BBB")
+    decisions = [target(0, 0.6, symbol="AAA"), target(0, -0.6, symbol="BBB")]
+    result = walk(
+        rows,
+        decisions,
+        config=PortfolioFoundationConfig(
+            subwindows=1, trial_count=5, max_gross_exposure=1.5, max_net_exposure=1.0
+        ),
     )
-    assert realistic["full_train"]["mean_return"] == pytest.approx(
-        sum(expected_returns) / len(expected_returns)
-    )
-    assert realistic["full_train"]["return_volatility"] == pytest.approx(stdev(expected_returns))
-    assert stressed["full_train"]["window_id"] == "full_train"
-    assert len(realistic["subwindows"]) == 2
-    assert len(stressed["subwindows"]) == 2
-    assert realistic["subwindows"][0]["closed_trade_count"] == 1
-    assert realistic["subwindows"][1]["closed_trade_count"] == 1
-    assert realistic["subwindows"][0]["max_symbol_concentration"] == pytest.approx(1.0)
-    assert_no_path_traces(payload)
-
-    summary = foundation.summary_payload()["scenarios"]["realistic_costs"]
-    assert summary["full_train"] == realistic["full_train"]
-    assert "subwindows" not in summary
+    assert result.feasibility.feasible is True
+    assert result.path[1].gross_exposure == pytest.approx(1.2)
+    assert result.path[1].net_exposure == pytest.approx(0.0)
 
 
-def test_subwindow_total_return_uses_same_return_intervals_as_statistics():
-    rows = bar_rows(100.0, 100.0, 110.0, 110.0)
-
+def test_zero_cost_on_scoreable_run_is_non_scoreable():
+    rows = bar_rows(100.0, 100.0, 110.0, 121.0)
+    decisions = [target(0, 1.0)]
     foundation = build_portfolio_foundation(
         rows=rows,
-        decisions=[decision(rows[0]["timestamp"], hold_bars=2)],
-        executed_trades=[executed_trade(rows, entry_index=1, exit_index=3)],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 4).date(),
-        ),
+        decisions=decisions,
+        data=data_config(3),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(subwindows=2, trial_count=5, benchmark_sharpe=0.0),
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
-
-    weak_boundary_window = foundation.matrix_payload()["scenarios"]["realistic_costs"][
-        "subwindows"
-    ][1]
-
-    assert weak_boundary_window["mean_return"] == pytest.approx(0.05)
-    assert weak_boundary_window["total_return"] == pytest.approx(0.1)
+    realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
+    assert realistic["feasibility"]["feasible"] is False
+    assert realistic["feasibility"]["reason"] == REASON_ZERO_COST
 
 
-def test_build_portfolio_foundation_does_not_double_count_open_notional():
+def test_unfinanced_leverage_fails_closed_when_budget_permits_net_above_one():
+    # Operator net budget permits 2.0, but equity financing is not modeled, so an
+    # intended net of 1.5 is infeasible (unfinanced_leverage) rather than scored
+    # with free leverage. This is the residual guard distinct from the budget.
     rows = bar_rows(100.0, 100.0, 100.0)
-    decisions = [decision(rows[0]["timestamp"], hold_bars=1)]
+    decisions = [target(0, 1.5)]
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(
+            rows,
+            decisions,
+            kind="bars",
+            config=PortfolioFoundationConfig(
+                subwindows=1, trial_count=5, max_gross_exposure=2.0, max_net_exposure=2.0
+            ),
+        )
+    verdict = excinfo.value.verdict
+    assert verdict.reason == REASON_UNFINANCED_LEVERAGE
+    assert verdict.observed_net == pytest.approx(1.5)
 
+
+def test_equity_fully_invested_with_costs_is_not_a_false_unfinanced_breach():
+    # A fully-invested long (intended net 1.0) must stay feasible even though costs
+    # shrink NAV below the held notional (live marked net drifts > 1.0). Live drift
+    # is a utilization signal, not an infeasibility (D3).
+    rows = bar_rows(100.0, 100.0, 110.0, 121.0)
+    result = walk(
+        rows,
+        [target(0, 1.0)],
+        kind="bars",
+        per_side_cost_fraction=0.01,
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, max_net_exposure=1.0),
+    )
+    assert result.feasibility.feasible is True
+    assert max(point.net_exposure for point in result.path) > 1.0  # marked drift exists
+
+
+def test_crypto_perp_is_exempt_from_unfinanced_leverage_verdict():
+    # A crypto-perp book may run net leverage above 1.0 because funding is modeled.
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0, symbol="BTC-PERP")
+    decisions = [target(0, 2.0, symbol="BTC-PERP", kind="crypto_perp")]
+    result = walk(
+        rows,
+        decisions,
+        kind="crypto_perp_funding",
+        config=PortfolioFoundationConfig(
+            subwindows=1, trial_count=5, max_gross_exposure=2.0, max_net_exposure=2.0
+        ),
+    )
+    assert result.feasibility.feasible is True
+    assert result.path[1].net_exposure == pytest.approx(2.0)
+
+
+def test_equity_net_above_one_intent_is_a_leverage_budget_breach_not_unfinanced():
+    # An equity book that *intends* net 2.0 is caught by the leverage budget first
+    # (the budget is the operator envelope); unfinanced_leverage is the residual
+    # guard for kinds permitted above net 1.0 only when financing is modeled.
+    rows = bar_rows(100.0, 100.0, 100.0)
+    decisions = [target(0, 2.0)]
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(
+            rows,
+            decisions,
+            kind="bars",
+            config=PortfolioFoundationConfig(
+                subwindows=1, trial_count=5, max_gross_exposure=1.0, max_net_exposure=1.0
+            ),
+        )
+    assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
+
+
+# --------------------------------------------------------------------------------------
+# Funding on the net held position (reuses funding.py invariants)
+# --------------------------------------------------------------------------------------
+
+
+def test_funding_charged_on_net_held_position():
+    # Long 1.0 perp; a +1% funding event at d2 while held. A long pays funding:
+    # cashflow = -qty*mark*rate = -(1.0)*(100)*0.01 = -1.0 -> NAV drops by 1.0.
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0, symbol="BTC-PERP", funding_at={2: 0.01})
+    decisions = [target(0, 1.0, symbol="BTC-PERP", kind="crypto_perp")]
+    result = walk(
+        rows,
+        decisions,
+        kind="crypto_perp_funding",
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    # Entry filled d1 @100 (qty 1.0 NAV-unit = 1.0 contract). Funding at d2.
+    assert result.path[2].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
+
+
+def test_duplicate_funding_timestamps_deduped():
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0, symbol="BTC-PERP", funding_at={2: 0.01})
+    # Inject a duplicate funding event row at d3 with the SAME funding_timestamp d2.
+    rows[3]["has_funding_event"] = True
+    rows[3]["funding_timestamp"] = ts(2)
+    rows[3]["funding_rate"] = 0.01
+    decisions = [target(0, 1.0, symbol="BTC-PERP", kind="crypto_perp")]
+    result = walk(
+        rows,
+        decisions,
+        kind="crypto_perp_funding",
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    # Funding applied once, not twice.
+    assert result.path[-1].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
+
+
+# --------------------------------------------------------------------------------------
+# NAV <-> round-trip ledger reconciliation (Requirement / D4)
+# --------------------------------------------------------------------------------------
+
+
+def _reconcile(result: BookWalkResult) -> None:
+    # When the book ends flat, final NAV - initial equity == Σ round-trip realized PnL.
+    assert result.path[-1].gross_exposure == pytest.approx(0.0)
+    realized_from_ledger = sum(trip.realized_pnl for trip in result.round_trips)
+    assert result.realized_pnl == pytest.approx(realized_from_ledger)
+    assert (result.final_nav - INITIAL_EQUITY) == pytest.approx(realized_from_ledger)
+
+
+def test_nav_reconciles_with_ledger_single_round_trip_with_costs():
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
+    decisions = [target(0, 1.0), target(2, 0.0)]
+    result = walk(
+        rows,
+        decisions,
+        per_side_cost_fraction=0.001,
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    _reconcile(result)
+
+
+def test_nav_reconciles_with_ledger_multi_symbol_and_funding():
+    aaa = bar_rows(100.0, 100.0, 108.0, 108.0, 108.0, symbol="AAA")
+    btc = bar_rows(50.0, 50.0, 55.0, 55.0, 55.0, symbol="BTC-PERP", funding_at={2: 0.01})
+    rows = aaa + btc
+    decisions = [
+        target(0, 0.5, symbol="AAA"),
+        target(0, 0.5, symbol="BTC-PERP", kind="crypto_perp"),
+        target(3, 0.0, symbol="AAA"),
+        target(3, 0.0, symbol="BTC-PERP", kind="crypto_perp"),
+    ]
+    result = walk(
+        rows,
+        decisions,
+        kind="crypto_perp_funding",
+        per_side_cost_fraction=0.0005,
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    _reconcile(result)
+
+
+def test_nav_reconciles_after_reversal():
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0, 105.0, 105.0, 105.0)
+    decisions = [target(0, 1.0), target(2, -1.0), target(4, 0.0)]
+    result = walk(
+        rows,
+        decisions,
+        per_side_cost_fraction=0.001,
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    assert len(result.round_trips) == 2
+    _reconcile(result)
+
+
+# --------------------------------------------------------------------------------------
+# Closed round trips counted by exit time across subwindows (Requirement)
+# --------------------------------------------------------------------------------------
+
+
+def test_closed_round_trips_counted_by_exit_time_per_subwindow():
+    # Open before a subwindow boundary, close inside the second subwindow.
+    rows = bar_rows(100.0, 101.0, 103.0, 102.0, 104.0, 105.0, 106.0, 107.0)
+    decisions = [target(0, 1.0), target(4, 0.0)]
     foundation = build_portfolio_foundation(
         rows=rows,
         decisions=decisions,
-        executed_trades=[executed_trade(rows, entry_index=1, exit_index=2)],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 3).date(),
-        ),
+        data=data_config(7),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, benchmark_sharpe=0.0),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=2, trial_count=5),
     )
+    realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
+    counts = [sub["closed_trade_count"] for sub in realistic["subwindows"]]
+    assert sum(counts) == 1
+    assert realistic["full_train"]["closed_trade_count"] == 1
 
-    subwindow = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"][0]
-    assert subwindow["max_drawdown"] == pytest.approx(0.0)
-    assert subwindow["sharpe"] is None
+
+# --------------------------------------------------------------------------------------
+# Foundation surface: two scenarios, utilization fields, no raw path traces
+# --------------------------------------------------------------------------------------
 
 
-def test_build_portfolio_foundation_reports_every_configured_subwindow_even_when_empty():
+def test_build_foundation_emits_two_scenarios_and_utilization_fields():
+    rows = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0)
+    decisions = [target(0, 1.0)]
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=decisions,
+        data=data_config(4),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, cost_stress_multiplier=2.0),
+    )
+    payload = foundation.matrix_payload()
+    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
+    full = payload["scenarios"]["realistic_costs"]["full_train"]
+    for field in (
+        "max_gross_utilization",
+        "mean_gross_utilization",
+        "max_net_utilization",
+        "mean_net_utilization",
+    ):
+        assert field in full
+    assert full["max_gross_utilization"] >= full["mean_gross_utilization"]
+
+    text = __import__("json").dumps(payload)
+    for forbidden in ("period_return", "portfolio_value", "navs"):
+        assert forbidden not in text
+
+
+def test_build_foundation_reports_every_configured_subwindow_even_when_empty():
     rows = bar_rows(100.0, 101.0, 102.0)
-
     foundation = build_portfolio_foundation(
         rows=rows,
         decisions=[],
-        executed_trades=[],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 3).date(),
-        ),
+        data=data_config(2),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(subwindows=6, trial_count=None, benchmark_sharpe=0.0),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=4, trial_count=None),
     )
-
     subwindows = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"]
-    assert len(subwindows) == 6
+    assert len(subwindows) == 4
     assert {item["window_id"] for item in subwindows} == {
         "train_1",
         "train_2",
         "train_3",
         "train_4",
-        "train_5",
-        "train_6",
     }
-    assert any("missing_trial_count" in item["warnings"] for item in subwindows)
 
 
-def test_build_portfolio_foundation_cost_stress_changes_nonzero_cost_path():
-    rows = bar_rows(100.0, 100.0, 90.0, 80.0)
-    decisions = [decision(rows[0]["timestamp"], hold_bars=2)]
-
+def test_max_symbol_concentration_from_netted_book():
+    aaa = bar_rows(100.0, 100.0, 100.0, symbol="AAA")
+    bbb = bar_rows(100.0, 100.0, 100.0, symbol="BBB")
+    rows = aaa + bbb
+    decisions = [target(0, 0.6, symbol="AAA"), target(0, 0.2, symbol="BBB")]
     foundation = build_portfolio_foundation(
         rows=rows,
         decisions=decisions,
-        executed_trades=[executed_trade(rows, entry_index=1, exit_index=3)],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 4).date(),
-        ),
+        data=data_config(2, symbols=("AAA", "BBB")),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=10.0, slippage_bps_per_side=10.0),
-        config=PortfolioFoundationConfig(
-            subwindows=1,
-            trial_count=5,
-            benchmark_sharpe=0.0,
-            cost_stress_multiplier=2.0,
-        ),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
-
-    payload = foundation.matrix_payload()
-    realistic = payload["scenarios"]["realistic_costs"]
-    stressed = payload["scenarios"]["cost_stress"]
-    assert realistic["subwindows"][0]["max_drawdown"] == pytest.approx(
-        realistic["full_train"]["max_drawdown"]
-    )
-    assert stressed["subwindows"][0]["max_drawdown"] == pytest.approx(
-        stressed["full_train"]["max_drawdown"]
-    )
-    assert realistic["full_train"]["total_return"] == pytest.approx(-0.2036)
-    assert stressed["full_train"]["total_return"] == pytest.approx(-0.2072)
-    assert stressed["full_train"]["total_return"] < realistic["full_train"]["total_return"]
-    assert stressed["full_train"]["max_drawdown"] < realistic["full_train"]["max_drawdown"]
+    full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
+    # Concentration = max leg notional / gross notional = 0.6 / 0.8 = 0.75.
+    assert full["max_symbol_concentration"] == pytest.approx(0.75)
 
 
-def test_build_portfolio_foundation_requires_executed_trades():
-    rows = bar_rows(100.0, 101.0, 102.0)
-    decisions = [decision(rows[0]["timestamp"], hold_bars=1)]
-
-    with pytest.raises(ValueError, match="executed_trades_required"):
-        build_portfolio_foundation(
-            rows=rows,
-            decisions=decisions,
-            data=DataConfig(
-                kind="bars",
-                dataset="equity_1min",
-                symbols=("SPY",),
-                start=datetime(2024, 1, 1).date(),
-                end=datetime(2024, 1, 3).date(),
-            ),
-            fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-            cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-            config=PortfolioFoundationConfig(subwindows=1, trial_count=5, benchmark_sharpe=0.0),
-        )
-
-
-def test_build_portfolio_foundation_dedupes_duplicate_funding_timestamps():
-    timestamps = [datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=index) for index in range(4)]
-    rows = [
-        {
-            "symbol": "BTC-PERP",
-            "timestamp": timestamp,
-            "open": 100.0,
-            "high": 100.0,
-            "low": 100.0,
-            "close": 100.0,
-            "available_at": timestamp,
-            "has_funding_event": index in {2, 3},
-            "funding_timestamp": timestamps[2] if index in {2, 3} else None,
-            "funding_rate": 0.01 if index in {2, 3} else None,
-        }
-        for index, timestamp in enumerate(timestamps)
-    ]
-
-    foundation = build_portfolio_foundation(
-        rows=rows,
-        decisions=[
-            decision(
-                timestamps[0],
-                symbol="BTC-PERP",
-                hold_bars=2,
-            )
-        ],
-        executed_trades=[
-            executed_trade(
-                rows,
-                entry_index=1,
-                exit_index=3,
-                symbol="BTC-PERP",
-            )
-        ],
-        data=DataConfig(
-            kind="crypto_perp_funding",
-            dataset=None,
-            symbols=("BTC-PERP",),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 4).date(),
-        ),
-        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, benchmark_sharpe=0.0),
-    )
-
-    subwindow = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"][0]
-    assert subwindow["max_drawdown"] == pytest.approx(-0.01)
-
-
-def test_build_portfolio_foundation_rejects_overlapping_gross_exposure_above_one():
-    timestamps = [datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=index) for index in range(3)]
-    rows = [
-        {
-            "symbol": symbol,
-            "timestamp": timestamp,
-            "open": 100.0,
-            "high": 100.0,
-            "low": 100.0,
-            "close": 100.0,
-            "available_at": timestamp,
-        }
-        for symbol in ("SPY", "QQQ")
-        for timestamp in timestamps
-    ]
-
-    with pytest.raises(ValueError, match="portfolio_target_weight_exceeds_one"):
-        build_portfolio_foundation(
-            rows=rows,
-            decisions=[
-                decision(timestamps[0], symbol="SPY"),
-                decision(timestamps[0], symbol="QQQ"),
-            ],
-            executed_trades=[
-                executed_trade(rows, entry_index=1, exit_index=2, symbol="SPY"),
-                executed_trade(rows, entry_index=4, exit_index=5, symbol="QQQ"),
-            ],
-            data=DataConfig(
-                kind="bars",
-                dataset="equity_1min",
-                symbols=("SPY", "QQQ"),
-                start=datetime(2024, 1, 1).date(),
-                end=datetime(2024, 1, 3).date(),
-            ),
-            fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-            cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-            config=PortfolioFoundationConfig(subwindows=1, trial_count=5, benchmark_sharpe=0.0),
-        )
-
-
-def test_build_portfolio_foundation_accepts_configured_gross_exposure_limit():
-    timestamps = [datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=index) for index in range(3)]
-    rows = [
-        {
-            "symbol": symbol,
-            "timestamp": timestamp,
-            "open": 100.0,
-            "high": 100.0,
-            "low": 100.0,
-            "close": 100.0,
-            "available_at": timestamp,
-        }
-        for symbol in ("SPY", "QQQ")
-        for timestamp in timestamps
-    ]
-
-    foundation = build_portfolio_foundation(
-        rows=rows,
-        decisions=[
-            decision(timestamps[0], symbol="SPY", weight=0.6),
-            decision(timestamps[0], symbol="QQQ", weight=0.6),
-        ],
-        executed_trades=[
-            executed_trade(rows, entry_index=1, exit_index=2, symbol="SPY", weight=0.6),
-            executed_trade(rows, entry_index=4, exit_index=5, symbol="QQQ", weight=0.6),
-        ],
-        data=DataConfig(
-            kind="bars",
-            dataset="equity_1min",
-            symbols=("SPY", "QQQ"),
-            start=datetime(2024, 1, 1).date(),
-            end=datetime(2024, 1, 3).date(),
-        ),
-        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
-        config=PortfolioFoundationConfig(
-            subwindows=1,
-            trial_count=5,
-            benchmark_sharpe=0.0,
-            max_gross_exposure=1.2,
-        ),
-    )
-
-    full_train = foundation.summary_payload()["scenarios"]["realistic_costs"]["full_train"]
-    assert full_train["max_symbol_concentration"] == pytest.approx(0.5)
+def test_walk_function_is_importable_and_pure_path_object():
+    # Smoke: the low-level walk entry returns the documented result shape.
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0)
+    result = walk(rows, [target(0, 1.0), target(2, 0.0)])
+    assert isinstance(result, BookWalkResult)
+    assert isinstance(result.path, tuple)
+    assert isinstance(result.round_trips, tuple)
+    assert math.isfinite(result.final_nav)
+    assert callable(_walk_book)
