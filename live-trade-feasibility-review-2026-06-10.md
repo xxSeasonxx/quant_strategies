@@ -5,6 +5,43 @@
 **Method:** Source code as primary evidence; docs treated as claims to verify. Lens subagents were forbidden from reading `TODOS.md` and `docs/reviews/*` to stay independent; the main reviewer read those *after* forming the code-based view, to label findings new-vs-known.
 **Focus:** The quick-run portfolio foundation as the surface the downstream auto-research loop (`quant_autoresearch`) climbs, and whether a strategy that "passes" research here is realistic and feasible to trade live.
 
+> ## ⚠️ STATUS — 2026-06-10: SHIPPED (read this first)
+>
+> **The root fix in this review has been implemented and archived** as the
+> `portfolio-book-spine` OpenSpec change (branch `portfolio-book-spine`, commits
+> `a53a1ad`…`968300d`; spec deltas applied to `openspec/specs/`; change archived at
+> `openspec/changes/archive/2026-06-10-portfolio-book-spine/` with its proposal,
+> design, and four review artifacts). The engine is now **one causal single-account
+> netted NAV book**: strategies declare an idempotent **target book** (`TargetDecision`,
+> signed weight-of-NAV; stacking inexpressible), the **NAV path is the single scored
+> object**, an envelope breach is a typed **fail-closed `FeasibilityVerdict`**,
+> statistics use **at-risk bars** (the F2 fix), and the trade-unit scorer + VBT + the
+> perp-ledger are deleted (net ≈ −5,700 lines). Three independent reviews
+> (code / quant-math / performance) validated the core and caught + fixed one
+> validation-gate blocker (realized-Σ vs marked-NAV). Engine suite green; the enforced
+> gate is `ruff` + `pytest`.
+>
+> **§1–§13 below are the ORIGINAL pre-refactor analysis, preserved as provenance —
+> they describe the state *before* the refactor and must NOT be read as current.** The
+> accurate, re-statused picture and all remaining work live in **§14**.
+>
+> **Remaining work for the next session (from §14):**
+> - 🔴 **Open** — No. 11 (PIT `available_at ≥ timestamp` guard), No. 17 (relocate the
+>   stale `researched/` artifacts), No. 18 (`foundation_enabled=False`→infeasible:
+>   remove the dead knob or add a causality-only non-scored mode), No. 19 (purge the
+>   stale VBT build refs in `pyproject`/`Makefile`), No. 20 (**rebuild the four
+>   candidate strategies on the target-book contract** — clears the last deferred test).
+> - ⏳ **Deferred follow-ons** (plug into the spine's market-model interface; several
+>   need new `quant_data` fields) — No. 3 capacity/ADV (a `volume` field), No. 6
+>   (tighten `off`/`micro` causality → non-scoreable), No. 7 (asset-class
+>   financing/borrow/carry — guarded meanwhile by the `unfinanced_leverage` verdict),
+>   No. 8 (intrabar OHLC stop fills + fill-price stress).
+> - ✅ Everything else is **Done** (the §1A root + most P0/P1).
+>
+> Two decisions are Season's: No. 18 (the `foundation_enabled` knob) and No. 19 (keep
+> VBT scaffolding for the deferred cross-check, or purge). Cross-repo `quant_autoresearch`
+> edits are written up in `docs/consumer/MIGRATION-portfolio-book-spine.md`.
+
 ---
 
 ## 0. UPDATE (2026-06-10, post-review) — reconciled with the live score contract
@@ -345,25 +382,25 @@ This makes a capped, financed, netted >1-gross book *admissible and honestly sco
 
 | No. | Status | Priority | Action class | Finding | Recommendation |
 |---|---|---|---|---|---|
-| 0a | Open | P0 | Refactor | **ROOT-1 / accounting (§1A): scored statistic isn't a portfolio** | Promote the existing NAV book (generalized perp ledger, or the foundation path) to the **single scored object**; **net same-symbol inside it**; **delete/demote the linear per-trade sum** (`engine/evaluation.py:108-111`); make a gross/leverage breach a **typed fail-closed verdict**, not `None`. **Surgical — no decision-contract or strategy changes.** Absorbs No. 1/5/16 and the F7 cluster; closes fail-open. §0 concedes NAV is already authoritative downstream → mostly deletion + typing. |
-| 0b | Open | P0 | Add | **Portfolio-construction layer + leverage budget (§1A, §9)** | Insert an explicit, swappable construction layer (targets→netted book, sizing, leverage/concentration policy) between alpha and the accounting spine; operator-frozen gross/net budget; breach → 0a's verdict. |
-| 0c | Open | P1 | Refactor | **ROOT-2 / ontology cutover (§1A): decision = declared target book** | Migrate the emitted unit from `open`-tickets to a declared **(quantity, unit)** target book (open/close/rebalance fall out); resolve the per-asset denominator in the ADR. **Repo-wide blast radius** (every strategy/config/test). Do **after** 0a so the P0 score fix isn't blocked. Dissolves stacking at the contract. |
-| 1 | Open | P0 | Refactor | Fail-open foundation (§7, §6.1; test-locked) | Split failure taxonomy: gross/leverage breach → first-class **infeasible verdict** on `RunResult` (not `None`); narrow `except Exception` to benign data-contract errors with a *distinct* typed warning; let internal bugs surface. Update the contract test deliberately. |
-| 2 | Open | P0 | Refactor | F2 flat-bar Sharpe/DSR distortion | Compute return stats over **active (capital-at-risk) bars**, or expose `active_fraction`; add a **min-return-sample / min-trade gate** per subwindow before a statistic is scoreable; record cadence/annualization metadata. |
-| 3 | Open | P0 | Add | F1 zero-cost default + no capacity | **Mandatory non-zero cost floor** (per `DataKind`) for any scoreable run; plumb a `volume`/ADV field and emit turnover + notional/ADV diagnostics, **or** contract the absence of capacity modeling explicitly on `RunResult`. |
-| 4 | Open | P0 | Add | F3 leverage gate off the scored path; `size` unbounded | Run `core/exposure.py` admissibility on the **quick-run** path as a hard gate (or cap `PositionTarget.size`); make gross-budget breach the infeasible verdict from No. 1. |
-| 5 | Open | P0 | Refactor | §6.2 two PnL paths | Make the **NAV path the single scored unit**; engine ledger becomes attribution; add a reconciliation invariant test (unit weight, non-overlapping, zero funding ⇒ equal within tolerance). Confirm with `quant_autoresearch` which number it climbs. |
-| 6 | Open | P1 | Add | F6 causality can be off / weak micro | Make `off`/`micro` runs **structurally non-scoreable** (stamp `assessment_status`/`param_contract`); the objective must gate on `evidence.causality`. |
-| 7 | Open | P1 | Add | F4 asset-class friction asymmetry | Add financing-on-leverage, equity borrow + dividends, FX rollover — mirror `funding.py`, gated by `DataKind`; or contract coverage per kind on `RunResult` so unfinanced P&L isn't scored net-of-cost. |
-| 8 | Open | P1 | Refactor | F5 intrabar stop optimism / frictionless exits | Evaluate stop/TP against intrabar low/high and fill at the level (or next-bar open); add a **fill-price stress** scenario (today `cost_stress` only scales bps). |
-| 9 | Open | P1 | Add | §9 capital model | Move `foundation_max_gross_exposure` into operator-frozen protocol; allow gross>1 to cap; define gross **and net** budget; net same-symbol before cap/cost (F7). |
-| 10 | Open | P1 | Add | §7 observability | Add typed `foundation_status`/`foundation_feasibility` to `RunResult`; promote warnings to a closed enum with detail in a separate field; count/warn on dropped malformed rows. Consider the enumerated `score_admissibility` shape from the Codex review (§17): `run_completed / causality_admissible / portfolio_foundation_admissible / cost_stress_admissible / score_allowed`. |
-| 11 | Open | P1 | Add | F8 PIT | Add cheap `available_at ≥ timestamp` row-contract assertion; require survivorship/corporate-action certification in the data manifest. |
-| 12 | Open | P2 | Retire | §6.3 dead code | Delete `_decision_windows`/`_fill_price`; drop discarded `decisions`/`fill_model` params; delete `FoundationSubwindowMetric` alias and dead `promotion_eligible`; document that the foundation inherits engine fills. |
-| 13 | Open | P2 | Refactor | §6.4 duplication/structure | Reuse `funding.py` window/dedup in the foundation; add the engine's funding-timestamp alignment check; extract causality-cache + evidence-DTO mapping out of `runner/__init__.py`. |
-| 14 | Open | P2 | Refactor | M2 type boundary | Type `executed_trades` as `Sequence[RunTrade]` (or a shared Protocol); drop the mapping/`getattr` fallback. |
-| 15 | Open | P2 | Add | §13 docs/ADRs | Write four ADRs (scored unit, capital model, scoreable-contract, open-ticket→target-state/rebalance ontology); fix usage-guide single-PnL claim and `succeeded` semantics. |
-| 16 | Open | P1 | Add | Risk-budget utilization not reported (Codex F3, §17) | Emit `max_gross_exposure`, `mean_gross_exposure`, a gross-exposure time-integral, and `return_per_unit_gross` on full_train + subwindow records. The climbed Sharpe/PSR is leverage-invariant, but the `total_return` and `max_drawdown` **gates** are leverage-sensitive yet gross-blind, and capital efficiency can't be assessed without gross. |
+| 0a | ✅ Done | P0 | Refactor | **ROOT-1 / accounting (§1A): scored statistic isn't a portfolio** | Promote the existing NAV book (generalized perp ledger, or the foundation path) to the **single scored object**; **net same-symbol inside it**; **delete/demote the linear per-trade sum** (`engine/evaluation.py:108-111`); make a gross/leverage breach a **typed fail-closed verdict**, not `None`. **Surgical — no decision-contract or strategy changes.** Absorbs No. 1/5/16 and the F7 cluster; closes fail-open. §0 concedes NAV is already authoritative downstream → mostly deletion + typing. |
+| 0b | ✅ Done | P0 | Add | **Portfolio-construction layer + leverage budget (§1A, §9)** | Insert an explicit, swappable construction layer (targets→netted book, sizing, leverage/concentration policy) between alpha and the accounting spine; operator-frozen gross/net budget; breach → 0a's verdict. |
+| 0c | ✅ Done | P1 | Refactor | **ROOT-2 / ontology cutover (§1A): decision = declared target book** | Migrate the emitted unit from `open`-tickets to a declared **(quantity, unit)** target book (open/close/rebalance fall out); resolve the per-asset denominator in the ADR. **Repo-wide blast radius** (every strategy/config/test). Do **after** 0a so the P0 score fix isn't blocked. Dissolves stacking at the contract. |
+| 1 | ✅ Done | P0 | Refactor | Fail-open foundation (§7, §6.1; test-locked) | Split failure taxonomy: gross/leverage breach → first-class **infeasible verdict** on `RunResult` (not `None`); narrow `except Exception` to benign data-contract errors with a *distinct* typed warning; let internal bugs surface. Update the contract test deliberately. |
+| 2 | ✅ Done | P0 | Refactor | F2 flat-bar Sharpe/DSR distortion | Compute return stats over **active (capital-at-risk) bars**, or expose `active_fraction`; add a **min-return-sample / min-trade gate** per subwindow before a statistic is scoreable; record cadence/annualization metadata. |
+| 3 | 🟡 Partial | P0 | Add | F1 zero-cost default + no capacity | **Mandatory non-zero cost floor** (per `DataKind`) for any scoreable run; plumb a `volume`/ADV field and emit turnover + notional/ADV diagnostics, **or** contract the absence of capacity modeling explicitly on `RunResult`. |
+| 4 | ✅ Done | P0 | Add | F3 leverage gate off the scored path; `size` unbounded | Run `core/exposure.py` admissibility on the **quick-run** path as a hard gate (or cap `PositionTarget.size`); make gross-budget breach the infeasible verdict from No. 1. |
+| 5 | ✅ Done | P0 | Refactor | §6.2 two PnL paths | Make the **NAV path the single scored unit**; engine ledger becomes attribution; add a reconciliation invariant test (unit weight, non-overlapping, zero funding ⇒ equal within tolerance). Confirm with `quant_autoresearch` which number it climbs. |
+| 6 | ⏳ Deferred | P1 | Add | F6 causality can be off / weak micro | Make `off`/`micro` runs **structurally non-scoreable** (stamp `assessment_status`/`param_contract`); the objective must gate on `evidence.causality`. |
+| 7 | ⏳ Deferred | P1 | Add | F4 asset-class friction asymmetry | Add financing-on-leverage, equity borrow + dividends, FX rollover — mirror `funding.py`, gated by `DataKind`; or contract coverage per kind on `RunResult` so unfinanced P&L isn't scored net-of-cost. |
+| 8 | ⏳ Deferred | P1 | Refactor | F5 intrabar stop optimism / frictionless exits | Evaluate stop/TP against intrabar low/high and fill at the level (or next-bar open); add a **fill-price stress** scenario (today `cost_stress` only scales bps). |
+| 9 | ✅ Done | P1 | Add | §9 capital model | Move `foundation_max_gross_exposure` into operator-frozen protocol; allow gross>1 to cap; define gross **and net** budget; net same-symbol before cap/cost (F7). |
+| 10 | ✅ Done | P1 | Add | §7 observability | Add typed `foundation_status`/`foundation_feasibility` to `RunResult`; promote warnings to a closed enum with detail in a separate field; count/warn on dropped malformed rows. Consider the enumerated `score_admissibility` shape from the Codex review (§17): `run_completed / causality_admissible / portfolio_foundation_admissible / cost_stress_admissible / score_allowed`. |
+| 11 | 🔴 Open | P1 | Add | F8 PIT | Add cheap `available_at ≥ timestamp` row-contract assertion; require survivorship/corporate-action certification in the data manifest. |
+| 12 | ✅ Done | P2 | Retire | §6.3 dead code | Delete `_decision_windows`/`_fill_price`; drop discarded `decisions`/`fill_model` params; delete `FoundationSubwindowMetric` alias and dead `promotion_eligible`; document that the foundation inherits engine fills. |
+| 13 | ✅ Done | P2 | Refactor | §6.4 duplication/structure | Reuse `funding.py` window/dedup in the foundation; add the engine's funding-timestamp alignment check; extract causality-cache + evidence-DTO mapping out of `runner/__init__.py`. |
+| 14 | ✅ Done | P2 | Refactor | M2 type boundary | Type `executed_trades` as `Sequence[RunTrade]` (or a shared Protocol); drop the mapping/`getattr` fallback. |
+| 15 | ✅ Done | P2 | Add | §13 docs/ADRs | Write four ADRs (scored unit, capital model, scoreable-contract, open-ticket→target-state/rebalance ontology); fix usage-guide single-PnL claim and `succeeded` semantics. |
+| 16 | ✅ Done | P1 | Add | Risk-budget utilization not reported (Codex F3, §17) | Emit `max_gross_exposure`, `mean_gross_exposure`, a gross-exposure time-integral, and `return_per_unit_gross` on full_train + subwindow records. The climbed Sharpe/PSR is leverage-invariant, but the `total_return` and `max_drawdown` **gates** are leverage-sensitive yet gross-blind, and capital efficiency can't be assessed without gross. |
 | 17 | 🔴 Open | P1 | Retire | Stale research artifacts in the active repo (Codex F7, §17) | Move generated `researched/`/`candidates/` artifacts (`summary.json`/`diagnostics.json`/`artifacts/`) out of the active tree, or mark `researched/` frozen-and-excluded from agent context; add a repo-boundary test. Prevents an autonomous agent reading passed/causality-off stale artifacts as current evidence. (The repo-boundary test exists and currently fails on the untracked `researched/` dirs.) |
 | 18 | 🔴 Open | P1 | Refactor | **`foundation_enabled=False` → infeasible** (surfaced by the build) | The portfolio book is now the authoritative scored object, so `output.foundation_enabled=False` makes every run an `infeasible` verdict (nothing to score). Decide: **remove** the now-dead knob (the book is mandatory), or add a **causality-only, non-scored** mode that is not a failure. |
 | 19 | 🔴 Open | P2 | Retire | **Stale VBT build references** (surfaced by the build) | VBT is fully retired (both backends + the perp ledger deleted), but `pyproject.toml [vectorbtpro]`/`[evaluation]` extras, the `evaluation/dependencies.py` VBT optional-import, and the `Makefile check-vectorbtpro-smoke` target (whose test is deleted) remain. Purge them, **or** keep deliberately as scaffolding for the deferred independent netted-book cross-check (§1A Audit) — decide and document. |
