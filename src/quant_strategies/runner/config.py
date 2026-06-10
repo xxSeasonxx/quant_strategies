@@ -11,6 +11,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    LeverageBudgetConfig,
     SharedConfigModel,
     StrategyExecutionSpec,
     default_repo_root,
@@ -131,6 +132,7 @@ class RunConfig(RunnerConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     output: OutputConfig
 
     @field_validator("strategy_path")
@@ -154,6 +156,7 @@ class RunConfig(RunnerConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            leverage_budget=self.leverage_budget,
         )
 
 

@@ -193,6 +193,7 @@ def write_config(
     foundation_cost_stress_multiplier: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
+    leverage_budget_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -274,7 +275,7 @@ entry_lag_bars = {entry_lag_bars}
 [cost_model]
 fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
-
+{leverage_budget_extra}
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
@@ -1968,6 +1969,113 @@ def test_run_config_leverage_breach_fails_closed_with_typed_verdict(
     assert summary["failure_stage"] == "feasibility"
 
 
+def write_perp_target_strategy(repo_root: Path, *, target: float) -> None:
+    """A crypto-perp standing target of ``target`` (financing is modeled, so net>1 is
+    governed by the operator leverage budget, not the unfinanced-leverage guard)."""
+    strategy = repo_root / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 1:\n"
+        "        return []\n"
+        "    return [TargetDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol=rows[0]['symbol']),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        f"        target={target},\n"
+        "    )]\n"
+    )
+
+
+def _perp_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    perp_rows = rows(100.0, 101.0, 103.0, 102.0)
+    for row in perp_rows:
+        row["symbol"] = "BTC-PERP"
+        row["has_funding_event"] = False
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=perp_rows)
+    )
+
+
+def test_operator_leverage_budget_above_one_admits_within_budget_book(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The leverage budget is operator-frozen in the protocol set (peer to
+    # [cost_model]/[fill_model]). Raising it to 2.0 admits a perp book intending net
+    # 1.5 that the conservative default 1.0 would reject -- proving the operator knob
+    # threads into the book (design D6).
+    write_perp_target_strategy(tmp_path, target=1.5)
+    config_path = write_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbol="BTC-PERP",
+        dataset=None,
+        artifact_profile="summary",
+        leverage_budget_extra="[leverage_budget]\nmax_gross_exposure = 2.0\nmax_net_exposure = 2.0\n",
+    )
+    _perp_rows(monkeypatch)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is True
+    assert result.feasibility is not None
+    assert result.feasibility.feasible is True
+
+
+def test_operator_leverage_budget_above_one_still_fails_closed_above_ceiling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The raised ceiling is itself a hard envelope: an intended gross above the
+    # operator-frozen 2.0 fails closed with the typed verdict and observed gross.
+    write_perp_target_strategy(tmp_path, target=2.5)
+    config_path = write_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbol="BTC-PERP",
+        dataset=None,
+        artifact_profile="summary",
+        leverage_budget_extra="[leverage_budget]\nmax_gross_exposure = 2.0\nmax_net_exposure = 2.0\n",
+    )
+    _perp_rows(monkeypatch)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.feasibility is not None
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "leverage_budget_breach"
+    assert result.feasibility.observed_gross == pytest.approx(2.5)
+
+
+def test_default_operator_leverage_budget_is_conservative_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # With no [leverage_budget] section the operator default is the conservative
+    # fully-invested 1.0/1.0, so the same net-1.5 perp book is rejected.
+    write_perp_target_strategy(tmp_path, target=1.5)
+    config_path = write_config(
+        tmp_path,
+        kind="crypto_perp_funding",
+        symbol="BTC-PERP",
+        dataset=None,
+        artifact_profile="summary",
+    )
+    _perp_rows(monkeypatch)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is False
+    assert result.feasibility is not None
+    assert result.feasibility.reason == "leverage_budget_breach"
+    assert result.feasibility.observed_gross == pytest.approx(1.5)
+
+
 def test_run_config_foundation_build_error_is_structured_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2044,9 +2152,12 @@ def test_run_config_reference_target_book_with_risk_rule_e2e(
     trade = result.economics.trades[0]
     assert trade.exit_reason == "stop_loss"
     assert trade.side == "long"
-    # The ledger reconciles with the book's realized NAV PnL (one model of money).
-    ledger_net = sum(item.net_return for item in result.economics.trades)
-    assert result.economics.sum_net_return == pytest.approx(ledger_net)
+    # The derived ledger reconciles with the authoritative NAV path (one model of
+    # money). The stop flattens the book, so the realized round-trip sum equals the
+    # marked NAV fold return (final_nav - initial) / initial -- a genuine NAV<->ledger
+    # cross-check, not a ledger sum==sum tautology.
+    marked_nav_return = (result.foundation.ledger.final_nav - 100.0) / 100.0
+    assert result.economics.sum_net_return == pytest.approx(marked_nav_return)
 
 
 def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):

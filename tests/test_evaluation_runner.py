@@ -190,6 +190,7 @@ class FakeBackend:
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         frame = pd.DataFrame(
             {
@@ -241,6 +242,7 @@ class CadenceFakeBackend(FakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         frame = pd.DataFrame(
             {
@@ -291,6 +293,7 @@ class MixedCadenceFakeBackend(CadenceFakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         spacing = (
             timedelta(minutes=1)
@@ -315,6 +318,7 @@ class MixedSparseCadenceFakeBackend(FakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         if scenario.scenario_id.endswith("/sparse"):
             return FakeBackend.run(
@@ -338,6 +342,7 @@ class MixedMismatchAndSparseCadenceFakeBackend(FakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         if scenario.scenario_id.endswith("/sparse"):
             return FakeBackend.run(
@@ -379,7 +384,12 @@ class PreparedFakeBackend(FakeBackend):
         self.run_prepared_scenario_ids: list[str] = []
 
     def prepare_inputs(
-        self, *, decisions: Sequence[Any], rows: Sequence[dict[str, Any]], data_kind: str = "bars"
+        self,
+        *,
+        decisions: Sequence[Any],
+        rows: Sequence[dict[str, Any]],
+        data_kind: str = "bars",
+        leverage_budget: Any = None,
     ) -> dict[str, Any]:
         self.prepare_calls.append((decisions, rows))
         return {"decisions": decisions, "rows": rows}
@@ -710,6 +720,7 @@ def test_run_evaluation_keeps_optional_custom_scenario_failures_non_blocking(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             if scenario.scenario_id.endswith("/optional_stress"):
                 return PortfolioEvaluationResult(
@@ -781,6 +792,7 @@ def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expect
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             swapped_id = (
@@ -1428,6 +1440,7 @@ def test_run_evaluation_fails_on_backend_unsupported(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
@@ -1482,6 +1495,7 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
@@ -1527,6 +1541,7 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise EvaluationDependencyError("vectorbtpro import failed")
@@ -1582,6 +1597,7 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise exception
@@ -1678,6 +1694,7 @@ def test_run_evaluation_fails_on_completed_scenario_coverage_mismatch(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"scenario_id": "duplicate_scenario"})
@@ -1721,6 +1738,7 @@ def test_run_evaluation_fails_when_completed_backend_emits_no_trace_tables(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
@@ -1768,6 +1786,7 @@ def test_run_evaluation_fails_when_completed_backend_metrics_are_incomplete(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             return result.model_copy(update={"metrics": {"total_return": 0.01, "trade_count": 1}})
@@ -1810,6 +1829,7 @@ def test_run_evaluation_fails_when_completed_backend_omits_funding_metrics(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             result = super().run(decisions=decisions, rows=rows, scenario=scenario, metrics=metrics)
             metrics_without_funding = {
@@ -1857,6 +1877,7 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after row contract failure")
@@ -1869,6 +1890,7 @@ def test_run_evaluation_fails_before_portfolio_on_failed_row_contract(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.run_calls += 1
             raise AssertionError("run should not be called after row contract failure")
@@ -1920,6 +1942,7 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
@@ -1932,6 +1955,7 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
@@ -2013,6 +2037,7 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after data audit failure")
@@ -2025,6 +2050,7 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.run_calls += 1
             raise AssertionError("run should not be called after data audit failure")
@@ -2094,6 +2120,7 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError("prepare_inputs should not be called after readiness failure")
@@ -2106,6 +2133,7 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.run_calls += 1
             raise AssertionError("run should not be called after readiness failure")
@@ -2167,6 +2195,7 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             raise AssertionError(
@@ -2181,6 +2210,7 @@ def test_run_evaluation_fails_on_incomplete_strict_causality_evidence(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.run_calls += 1
             raise AssertionError("run should not be called after causality preflight failure")
@@ -2252,6 +2282,7 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             raise AssertionError("prepare_inputs should not be called after empty row contract")
 
@@ -2263,6 +2294,7 @@ def test_run_evaluation_fails_before_strategy_on_empty_row_contract(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             raise AssertionError("run should not be called after empty row contract")
 
@@ -2304,6 +2336,7 @@ def test_run_evaluation_does_not_publish_partial_tables_when_a_late_scenario_fai
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.calls += 1
             if self.calls == 6:
@@ -2428,6 +2461,7 @@ def test_run_evaluation_reports_failure_artifact_write_failure(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,

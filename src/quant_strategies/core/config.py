@@ -88,6 +88,26 @@ class CostModelConfig(SharedConfigModel):
         return 2.0 * (self.fee_bps_per_side + self.slippage_bps_per_side)
 
 
+class LeverageBudgetConfig(SharedConfigModel):
+    """Operator-frozen leverage envelope (gross + net), part of the protocol set.
+
+    Owned by the operator alongside ``[cost_model]``/``[fill_model]`` — never an
+    agent-editable ``[output]`` field. The book measures the strategy's *intended*
+    standing exposure against this ceiling and fails closed on a breach (it is never
+    clamped). Default is the conservative fully-invested ``1.0/1.0``; a perp program
+    that prices its financing can freeze a higher ceiling here.
+    """
+
+    max_gross_exposure: float = Field(default=1.0, ge=1.0)
+    max_net_exposure: float = Field(default=1.0, ge=1.0)
+
+    @model_validator(mode="after")
+    def validate_finite(self) -> LeverageBudgetConfig:
+        if not math.isfinite(self.max_gross_exposure) or not math.isfinite(self.max_net_exposure):
+            raise ValueError("leverage_budget values must be finite")
+        return self
+
+
 class CausalityReplayConfig(SharedConfigModel):
     scope: CausalityReplayScope = "complete"
     probe_limit: int = Field(default=64, ge=1)
@@ -117,6 +137,7 @@ class StrategyExecutionSpec:
     params: dict[str, Any] = field(default_factory=dict)
     fill_model: FillModelConfig = field(default_factory=FillModelConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)
+    leverage_budget: LeverageBudgetConfig = field(default_factory=LeverageBudgetConfig)
     # The validation run sets this so a missing `validate_params` is a hard error
     # (no mechanical-threshold verdict on unvalidated params); the runner quick-run
     # leaves it False and instead flags schema-less runs as exploratory.

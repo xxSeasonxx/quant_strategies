@@ -300,6 +300,7 @@ class FakeEvaluationBackend:
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ):
         pd = pytest.importorskip("pandas")
         from quant_strategies.evaluation.results import (
@@ -401,6 +402,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
             return {"decisions": decisions, "rows": rows}
@@ -413,6 +415,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            leverage_budget: Any = None,
         ):
             self.backend_calls += 1
             self.row_ids.append(id(rows))

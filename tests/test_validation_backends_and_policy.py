@@ -77,8 +77,10 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
     }
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
+    # net_return is the marked NAV fold return (the one scored object), so a fold that
+    # ends with an open position is scored at its marked return, not a realized-only 0.
     assert net_return["base"] == (
-        "netted single-account portfolio book round-trip realized PnL, funding-inclusive"
+        "netted single-account portfolio book marked NAV path, funding-inclusive"
     )
     assert net_return["backend"] == "engine"
     assert net_return["tolerance"] is None

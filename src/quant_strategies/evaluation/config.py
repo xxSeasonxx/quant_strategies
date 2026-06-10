@@ -21,6 +21,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    LeverageBudgetConfig,
     StrategyExecutionSpec,
     WindowedDataConfig,
 )
@@ -128,6 +129,7 @@ class EvaluationConfig(EvaluationConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     metrics: EvaluationMetricsConfig
     causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
     readiness: DecisionReadinessConfig = Field(default_factory=DecisionReadinessConfig)
@@ -183,6 +185,7 @@ class EvaluationConfig(EvaluationConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            leverage_budget=self.leverage_budget,
             require_param_validator=True,
         )
 

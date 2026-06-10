@@ -606,6 +606,7 @@ def _prepare_portfolio_inputs(
                     decisions=execution.decisions,
                     rows=projection_rows,
                     data_kind=context.config.data.kind,
+                    leverage_budget=context.config.leverage_budget,
                 )
                 if isinstance(context.selected_backend, PreparedEvaluationBackend)
                 else None
@@ -669,6 +670,7 @@ def _run_portfolio_scenario(
                 scenario=scenario,
                 metrics=context.config.metrics,
                 data_kind=context.config.data.kind,
+                leverage_budget=context.config.leverage_budget,
             )
         )
         if scenario_result.status == "completed":

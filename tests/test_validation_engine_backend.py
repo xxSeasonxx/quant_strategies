@@ -155,6 +155,27 @@ def test_spine_backend_funding_can_flip_gated_net_negative():
     assert m["net_return"] < 0.0  # but the funding-inclusive gated number is a loss
 
 
+def test_spine_backend_net_return_is_marked_nav_for_held_open_fold():
+    # A winner held open at the fold boundary has zero *closed* round-trips, so a
+    # realized-only net_return would gate it as 0% / zero-trade and reject a real
+    # open winner. The gated net_return must be the marked NAV fold return instead.
+    held_open_long = [target(0, 1.0)]  # open long bar0 (fills bar1 @101); never closed
+    result = SpineBackend().run(decisions=held_open_long, rows=rows(), config=scenario_config())
+
+    assert result.status == "completed"
+    # No closed round-trip: the realized-ledger sum is exactly 0.
+    assert result.round_trips == ()
+    assert result.metrics["gross_return"] == pytest.approx(0.0)
+    # But the book ends with an open winner: qty = 1.0*100/101 entered @101 (paying
+    # a 1bps entry cost), marked at the last close 103. The marked NAV return is
+    # positive -- not the realized-only 0.
+    qty = 1.0 * 100.0 / 101.0
+    entry_cost = qty * 101.0 * (1.0 / 10_000.0)
+    expected_marked = (qty * (103.0 - 101.0) - entry_cost) / 100.0
+    assert result.metrics["net_return"] == pytest.approx(expected_marked)
+    assert result.metrics["net_return"] > 0.0
+
+
 def test_spine_backend_metrics_feed_backend_metrics_contract():
     result = SpineBackend().run(decisions=long_round_trip(), rows=rows(), config=scenario_config())
     metrics = BackendMetrics.from_mapping(result.metrics)

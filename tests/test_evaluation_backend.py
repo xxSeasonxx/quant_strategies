@@ -345,6 +345,59 @@ def test_spine_metric_payload_nulls_annualized_family_when_sample_is_too_short()
     assert "annualized_metrics_insufficient_samples:2:min_required=4" in payload.warnings
 
 
+def _walk_with_at_risk_flags(
+    period_returns: list[float], at_risk_flags: list[bool]
+) -> BookWalkResult:
+    values = [100.0]
+    for ret in period_returns[1:]:
+        values.append(values[-1] * (1.0 + ret))
+    path = tuple(
+        PortfolioPathPoint(
+            timestamp=AS_OF,
+            portfolio_value=value,
+            period_return=ret,
+            at_risk=flag,
+            drawdown=0.0,
+            gross_exposure=1.0 if flag else 0.0,
+            net_exposure=1.0 if flag else 0.0,
+            concentration=1.0 if flag else 0.0,
+        )
+        for value, ret, flag in zip(values, period_returns, at_risk_flags, strict=True)
+    )
+    return BookWalkResult(
+        path=path,
+        round_trips=(),
+        feasibility=FeasibilityVerdict(feasible=True),
+        final_nav=values[-1],
+        realized_pnl=0.0,
+    )
+
+
+def test_spine_metric_payload_scores_at_risk_bars_only_like_quick_run():
+    # Flat (non-at-risk) 0.0 bars must NOT enter the return sample: they would dilute
+    # stdev and pad the annualization exponent, making the evaluation sharpe/volatility
+    # diverge from the at-risk quick-run statistic on the same NAV path (quant #2).
+    period_returns = [0.0, 0.02, 0.0, -0.01, 0.0]
+    at_risk_flags = [False, True, False, True, False]  # 2 at-risk bars; 2 flat post-first
+    walk = _walk_with_at_risk_flags(period_returns, at_risk_flags)
+
+    payload = spine_metric_payload(
+        walk, annualization_periods_per_year=12, min_annualized_samples=2
+    )
+    metrics = payload.metrics
+
+    # Only the 2 at-risk returns are observed -- not "all 4 bars after the first".
+    assert metrics["return_total_count_excluding_initial"] == 2
+    assert metrics["return_sample_count"] == 2
+    observed = [0.02, -0.01]
+    assert metrics["worst_period_return"] == pytest.approx(min(observed))
+    mean_return = sum(observed) / len(observed)
+    sample_variance = sum((v - mean_return) ** 2 for v in observed) / (len(observed) - 1)
+    volatility = math.sqrt(sample_variance) * math.sqrt(12)
+    assert metrics["volatility"] == pytest.approx(volatility)
+    assert metrics["sharpe"] == pytest.approx((mean_return * 12) / volatility)
+
+
 def test_spine_metric_payload_fails_when_no_nav_path():
     walk = BookWalkResult(
         path=(),

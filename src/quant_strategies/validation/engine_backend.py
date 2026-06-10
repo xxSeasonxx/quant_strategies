@@ -22,12 +22,12 @@ class SpineBackend:
     Validation scores exactly the object the quick-run path scores: the spine's
     single causal walk (`core.portfolio_foundation`). For a validation scenario the
     book is walked at that scenario's frozen costs/fills; the realistic-cost walk's
-    NAV-path round-trip ledger is the gated evidence. ``net_return`` is the sum of
-    the netted-book round-trip realized PnL as a fraction of the standing NAV base,
-    and ``gross``/``funding``/``cost`` are its cash split, so
-    ``net == gross + funding - cost`` and the artifacted ledger reconciles with the
-    NAV path's realized PnL (design D4/D9) — one model of money, never an
-    independent summation.
+    **marked NAV path** is the gated evidence. ``net_return`` is the marked fold
+    return ``(final_nav - INITIAL_EQUITY) / INITIAL_EQUITY`` of that one scored object,
+    so a fold ending with an open position is scored at its true marked return rather
+    than a realized-only zero. ``gross``/``funding``/``cost`` are the realized
+    round-trip cash attribution, reconciling with ``net_return`` exactly when the book
+    ends flat (design D4/D9) — one model of money, never an independent summation.
 
     A fail-closed **leverage** breach (intended gross/net over the budget, or
     unfinanced leverage for an unmodelled asset class) raises mid-walk and surfaces
@@ -55,7 +55,11 @@ class SpineBackend:
                 data=config.data,
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
-                config=PortfolioFoundationConfig(subwindows=1),
+                config=PortfolioFoundationConfig(
+                    subwindows=1,
+                    max_gross_exposure=config.leverage_budget.max_gross_exposure,
+                    max_net_exposure=config.leverage_budget.max_net_exposure,
+                ),
             )
         except FeasibilityError as exc:
             # Fail-closed leverage / unfinanced-leverage breach: a typed infeasibility.
@@ -82,19 +86,28 @@ class SpineBackend:
 EngineBackend = SpineBackend
 
 
-def _ledger_metrics(ledger: BookWalkResult) -> dict[str, float | int]:
-    """Scalar backend metrics derived from the single walk's round-trip ledger.
+def _ledger_metrics(walk: BookWalkResult) -> dict[str, float | int]:
+    """Scalar backend metrics from the single walk's authoritative NAV path.
 
-    The cash attribution of the netted-book round-trips, expressed as NAV fractions,
-    reconciles by construction: ``net == gross + funding - cost``.
+    ``net_return`` is the **marked** fold return of the one scored object — the book's
+    NAV path: ``(final_nav - INITIAL_EQUITY) / INITIAL_EQUITY``. It is gated, not the
+    realized round-trip sum, so a fold that ends with an open position (a winner held
+    across the window boundary) is scored at its true marked return rather than the
+    realized-only 0% it would show with no closed round-trip (design D4/D9).
+
+    ``gross``/``funding``/``cost`` remain the realized round-trip cash attribution
+    view. They reconcile with ``net_return`` (``net == gross + funding - cost``) only
+    when the book ends flat; on a non-flat fold the open leg's unrealized PnL and
+    accrued funding are in NAV but in no closed round-trip, so the attribution split
+    sums to less than the marked ``net_return`` by exactly that open exposure.
     """
-    gross = sum(trip.gross_cash for trip in ledger.round_trips) / INITIAL_EQUITY
-    funding = sum(trip.funding_cash for trip in ledger.round_trips) / INITIAL_EQUITY
-    cost = sum(trip.cost_cash for trip in ledger.round_trips) / INITIAL_EQUITY
-    net = sum(trip.realized_pnl for trip in ledger.round_trips) / INITIAL_EQUITY
+    gross = sum(trip.gross_cash for trip in walk.round_trips) / INITIAL_EQUITY
+    funding = sum(trip.funding_cash for trip in walk.round_trips) / INITIAL_EQUITY
+    cost = sum(trip.cost_cash for trip in walk.round_trips) / INITIAL_EQUITY
+    net = (walk.final_nav - INITIAL_EQUITY) / INITIAL_EQUITY
     return {
         "net_return": net,
-        "trade_count": len(ledger.round_trips),
+        "trade_count": len(walk.round_trips),
         "gross_return": gross,
         "funding_return": funding,
         "cost_return": cost,

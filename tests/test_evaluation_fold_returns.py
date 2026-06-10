@@ -53,6 +53,7 @@ class MultiBarFakeBackend(FakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        leverage_budget: Any = None,
     ) -> PortfolioEvaluationResult:
         timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
         period_returns = [0.0, 0.01, -0.02, 0.03]

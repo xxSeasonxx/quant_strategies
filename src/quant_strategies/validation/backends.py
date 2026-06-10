@@ -67,18 +67,18 @@ class BackendMetrics(BaseModel):
 
 def backend_metric_semantics() -> dict[str, dict[str, object]]:
     # The netted-book spine is the single verdict source, so these semantics describe
-    # the book's NAV-path round-trip ledger -- the number a human audits IS the gated
-    # number, recomputable from the artifacted ledger as ``sum(round_trip.net)``.
+    # the book's marked NAV path -- the number a human audits IS the gated number,
+    # recomputable from the artifacted NAV path as ``(final_nav - initial)/initial``.
     semantics = (
         BackendMetricSemantics(
             name="net_return",
             unit="decimal_fraction",
-            base="netted single-account portfolio book round-trip realized PnL, funding-inclusive",
-            aggregation="sum of round-trip realized PnL as a fraction of the standing NAV base",
+            base="netted single-account portfolio book marked NAV path, funding-inclusive",
+            aggregation="marked fold return (final_nav - initial_equity) / initial_equity",
             backend="engine",
             comparability=(
-                "the audited netted-book ledger; recomputable from the artifacted "
-                "round-trip ledger and reconciling with the NAV path realized PnL"
+                "the audited netted-book NAV path; recomputable from the artifacted "
+                "portfolio path and equal to the realized round-trip sum when flat"
             ),
             tolerance=None,
             asymmetry="funding-inclusive net of costs; the single model of money",

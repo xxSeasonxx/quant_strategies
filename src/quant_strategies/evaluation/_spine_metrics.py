@@ -170,9 +170,21 @@ class _ReturnCoverage:
 
 
 def _return_coverage(walk: BookWalkResult) -> _ReturnCoverage:
-    """Observed-return semantics: drop the synthetic first period return, exclude
-    non-finite. This is the same sample the typed series and the Parquet trace use."""
-    returns = [point.period_return for point in walk.path][1:]
+    """At-risk return sample for the annualized risk family, exclude non-finite.
+
+    A return is counted only on a bar that opened with capital deployed
+    (``point.at_risk`` == ``previous_gross > 0``) — the exact sample the quick-run
+    foundation scores. Filtering on ``at_risk`` rather than "all bars after the first"
+    keeps the annualized ``sharpe``/``volatility``/``sortino``/``worst_period_return``
+    defined identically on the evaluation and quick-run surfaces; flat 0.0-return bars
+    no longer dilute the evaluation statistic (quant review #2).
+
+    This is intentionally NOT the sample of the typed ``FoldReturnSeries`` / on-disk
+    Parquet ``period_return`` trace, which keep the prior *calendar* observable (drop
+    the synthetic first return only) for downstream significance testing. The two
+    observables are distinct by design: the annualized risk scalars are at-risk; the
+    fold-return series is calendar."""
+    returns = [point.period_return for point in walk.path if point.at_risk]
     observed = tuple(value for value in returns if math.isfinite(value))
     return _ReturnCoverage(
         observed=observed,

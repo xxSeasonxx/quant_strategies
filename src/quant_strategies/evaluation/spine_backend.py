@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from quant_strategies.core.config import DataConfig
+from quant_strategies.core.config import DataConfig, LeverageBudgetConfig
 from quant_strategies.core.portfolio_foundation import (
     BookWalkResult,
     FeasibilityError,
@@ -43,6 +43,8 @@ from quant_strategies.evaluation.scenarios import EvaluationScenario
 # valid without coupling the evaluation fold to a scoring window.
 _PLACEHOLDER_DATE = date(2000, 1, 1)
 _BARS_DATASET = "evaluation_book"
+# Shared immutable default operator budget (frozen model -> safe as an arg default).
+_DEFAULT_LEVERAGE_BUDGET = LeverageBudgetConfig()
 
 
 class SpineEvaluationBackend:
@@ -54,11 +56,13 @@ class SpineEvaluationBackend:
         decisions: Sequence[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
         data_kind: str = "bars",
+        leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PreparedPortfolioInputs:
         return PreparedPortfolioInputs(
             decisions=tuple(decisions),
             rows=tuple(dict(row) for row in rows),
             data_kind=data_kind,
+            leverage_budget=leverage_budget,
         )
 
     def run(
@@ -69,8 +73,14 @@ class SpineEvaluationBackend:
         scenario: EvaluationScenario,
         metrics: EvaluationMetricsConfig,
         data_kind: str = "bars",
+        leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PortfolioEvaluationResult:
-        prepared = self.prepare_inputs(decisions=decisions, rows=rows, data_kind=data_kind)
+        prepared = self.prepare_inputs(
+            decisions=decisions,
+            rows=rows,
+            data_kind=data_kind,
+            leverage_budget=leverage_budget,
+        )
         return self.run_prepared(prepared=prepared, scenario=scenario, metrics=metrics)
 
     def run_prepared(
@@ -140,7 +150,10 @@ def _walk_for_scenario(
         data=_data_config(prepared.data_kind, prepared.rows),
         fill_model=scenario.fill_model,
         cost_model=scenario.cost_model,
-        config=PortfolioFoundationConfig(),
+        config=PortfolioFoundationConfig(
+            max_gross_exposure=prepared.leverage_budget.max_gross_exposure,
+            max_net_exposure=prepared.leverage_budget.max_net_exposure,
+        ),
     )
 
 

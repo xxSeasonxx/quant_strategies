@@ -205,6 +205,88 @@ def test_target_to_zero_closes_the_net_position_as_one_round_trip():
     assert trip.realized_pnl == pytest.approx(INITIAL_EQUITY * 0.10)
 
 
+def quote_bar_rows(
+    *bars: tuple[float, float, float],
+    symbol: str = "EURUSD",
+) -> list[dict[str, object]]:
+    """Quote bars as (close, bid, ask); ``mid`` is set to ``close`` for the reference."""
+    rows: list[dict[str, object]] = []
+    for index, (close, bid, ask) in enumerate(bars):
+        rows.append(
+            {
+                "symbol": symbol,
+                "timestamp": ts(index),
+                "open": close,
+                "high": max(close, ask),
+                "low": min(close, bid),
+                "close": close,
+                "bid": bid,
+                "ask": ask,
+                "mid": close,
+                "available_at": ts(index),
+            }
+        )
+    return rows
+
+
+def quote_walk(
+    rows: list[dict[str, object]],
+    decisions: list[TargetDecision],
+) -> BookWalkResult:
+    row_index = _RowIndex(rows)
+    plan = _DecisionPlan(
+        row_index,
+        decisions,
+        fill_model=FillModelConfig(price="quote", entry_lag_bars=1),
+    )
+    return _walk_book(
+        row_index,
+        plan,
+        per_side_cost_fraction=0.0,
+        data_kind="forex_with_quotes",
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+
+
+def test_quote_fill_close_of_long_crosses_bid_not_ask():
+    # price="quote": opening a long lifts the ASK; closing that long SELLS, so it must
+    # cross the BID -- not the ask (which would hand a free favorable half-spread on
+    # every exit). Keyed on sign(delta), the traded direction (quant review #3).
+    rows = quote_bar_rows(
+        (100.0, 99.0, 101.0),  # d0
+        (100.0, 99.0, 101.0),  # d1 entry fill bar: ask 101
+        (110.0, 109.0, 111.0),  # d2
+        (110.0, 109.0, 111.0),  # d3 exit fill bar: bid 109
+    )
+    decisions = [target(0, 1.0, symbol="EURUSD", kind="fx_pair"), target(2, 0.0, symbol="EURUSD")]
+    result = quote_walk(rows, decisions)
+
+    assert len(result.round_trips) == 1
+    trip = result.round_trips[0]
+    # Entry crossed the ask (101); exit crossed the bid (109) -- not 111.
+    assert trip.entry_mark == pytest.approx(101.0)
+    assert trip.exit_mark == pytest.approx(109.0)
+
+
+def test_quote_fill_reversal_short_leg_crosses_bid():
+    # Reversing long -> short SELLS through zero, so the crossing trade hits the BID.
+    rows = quote_bar_rows(
+        (100.0, 99.0, 101.0),
+        (100.0, 99.0, 101.0),  # d1 entry (long) fills at ask 101
+        (110.0, 109.0, 111.0),
+        (110.0, 109.0, 111.0),  # d3 reversal fills at bid 109 (selling to flip short)
+    )
+    decisions = [
+        target(0, 1.0, symbol="EURUSD", kind="fx_pair"),
+        target(2, -1.0, symbol="EURUSD", kind="fx_pair"),
+    ]
+    result = quote_walk(rows, decisions)
+
+    assert len(result.round_trips) == 1
+    # The closed long leg exits by crossing the bid (the reversal sells).
+    assert result.round_trips[0].exit_mark == pytest.approx(109.0)
+
+
 def test_reversal_records_one_round_trip_and_reopens_short():
     rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
     # Long 1.0 (fills d1 @100), flip to short 1.0 at d2 (fills d3 @110).
@@ -609,6 +691,31 @@ def test_nav_reconciles_after_reversal():
     )
     assert len(result.round_trips) == 2
     _reconcile(result)
+
+
+def test_non_flat_ending_book_marks_open_winner_into_nav_not_into_ledger():
+    # A long held open at the window boundary: the open winner is in the NAV path
+    # but in no closed round-trip. The realized-ledger sum diverges *below* the
+    # marked NAV change by exactly the open leg's unrealized PnL, which is why the
+    # gated number must be the marked NAV return, not the realized sum (blocker #1).
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0)
+    result = walk(
+        rows,
+        [target(0, 1.0)],  # opens long (fills @100), never closed
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+    # Not flat at the boundary, and no closed round-trip.
+    assert result.path[-1].gross_exposure > 0.0
+    assert result.round_trips == ()
+    realized_from_ledger = sum(trip.realized_pnl for trip in result.round_trips)
+    assert realized_from_ledger == pytest.approx(0.0)
+    # qty = 100 NAV / 100 fill = 1.0 unit, marked at last close 110 -> NAV 110.
+    assert result.final_nav == pytest.approx(110.0)
+    marked_return = (result.final_nav - INITIAL_EQUITY) / INITIAL_EQUITY
+    assert marked_return == pytest.approx(0.10)
+    # The realized sum (0) is strictly below the marked return (the divergence the
+    # gated metric must not collapse to zero).
+    assert realized_from_ledger < marked_return * INITIAL_EQUITY
 
 
 # --------------------------------------------------------------------------------------

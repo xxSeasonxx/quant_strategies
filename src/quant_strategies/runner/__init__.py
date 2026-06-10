@@ -805,6 +805,8 @@ def _build_portfolio_foundation(
                     trial_count=config.output.foundation_trial_count,
                     benchmark_sharpe=config.output.foundation_benchmark_sharpe,
                     cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
+                    max_gross_exposure=config.leverage_budget.max_gross_exposure,
+                    max_net_exposure=config.leverage_budget.max_net_exposure,
                 ),
             )
     except FeasibilityError as exc:

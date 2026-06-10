@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from quant_strategies.core.config import LeverageBudgetConfig
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.results import (
@@ -10,6 +11,10 @@ from quant_strategies.evaluation.results import (
     PreparedPortfolioInputs,
 )
 from quant_strategies.evaluation.scenarios import EvaluationScenario
+
+# Shared immutable default: the conservative operator budget when a caller does not
+# pass one (a frozen model, so a module-level singleton is safe as an arg default).
+_DEFAULT_LEVERAGE_BUDGET = LeverageBudgetConfig()
 
 
 @runtime_checkable
@@ -31,6 +36,7 @@ class EvaluationBackend(Protocol):
         scenario: EvaluationScenario,
         metrics: EvaluationMetricsConfig,
         data_kind: str = "bars",
+        leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PortfolioEvaluationResult: ...
 
 
@@ -44,6 +50,7 @@ class PreparedEvaluationBackend(EvaluationBackend, Protocol):
         decisions: Sequence[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
         data_kind: str = "bars",
+        leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PreparedPortfolioInputs: ...
 
     def run_prepared(

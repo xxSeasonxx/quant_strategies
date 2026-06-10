@@ -21,6 +21,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    LeverageBudgetConfig,
     StrategyExecutionSpec,
     WindowedDataConfig,
 )
@@ -188,6 +189,7 @@ class ScenarioRunConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     data: DataConfig
+    leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
 
 
 class ValidationConfig(ValidationConfigModel):
@@ -201,6 +203,7 @@ class ValidationConfig(ValidationConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
     output: ValidationOutputConfig
     readiness: ValidationReadinessConfig
@@ -262,6 +265,7 @@ class ValidationConfig(ValidationConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            leverage_budget=self.leverage_budget,
             require_param_validator=True,
         )
 

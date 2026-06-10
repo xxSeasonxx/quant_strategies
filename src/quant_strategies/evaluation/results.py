@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from quant_strategies.core.config import LeverageBudgetConfig
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.metrics import MetricValue
@@ -42,6 +43,7 @@ class PreparedPortfolioInputs:
     decisions: tuple[TargetDecision, ...]
     rows: tuple[Mapping[str, Any], ...]
     data_kind: str = "bars"
+    leverage_budget: LeverageBudgetConfig = field(default_factory=LeverageBudgetConfig)
 
 
 class PortfolioEvaluationResult(BaseModel):

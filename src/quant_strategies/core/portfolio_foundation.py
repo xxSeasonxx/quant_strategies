@@ -176,7 +176,10 @@ class RoundTrip:
     accrued funding, ``cost_cash`` traded cost) lets the derived per-trade ledger
     expose ``gross/funding/cost`` returns that sum to ``net`` without an independent
     summation. ``entry_weight`` is the signed weight-of-NAV the leg opened at;
-    ``entry_mark``/``exit_mark`` are the leg's entry/exit fill marks.
+    ``entry_mark``/``exit_mark`` are the leg's entry/exit fill marks. Per-trip
+    ``cost_cash`` is approximate on a reversal (the crossing trade books the whole
+    reversal-bar cost on the closing trip; see ``_close_leg``); the total and NAV stay
+    exact.
     """
 
     symbol: str
@@ -481,7 +484,8 @@ class _PlannedDecision:
     symbol: str
     signed_weight: float
     risk_rule: RiskRule | None
-    fill_price: float
+    fill_row: Mapping[str, Any]
+    fill_field: str
     decision_time: datetime
     decision_id: str | None
 
@@ -541,7 +545,15 @@ class _RowIndex:
 
     def mark_at(self, symbol: str, timestamp: datetime) -> float:
         row = self.row_at(symbol, timestamp)
-        return _positive_float(row.get("close"), f"missing_mark:{symbol}:{timestamp.isoformat()}")
+        close = row.get("close")
+        # Happy path runs once per open position per bar; keep it allocation-free.
+        # The error string (with isoformat) is built only on the failure branch, so a
+        # successful lookup never pays for ``timestamp.isoformat()`` (perf review Major).
+        if isinstance(close, (int, float)) and not isinstance(close, bool):
+            value = float(close)
+            if value > 0.0 and math.isfinite(value):
+                return value
+        return _positive_float(close, f"missing_mark:{symbol}:{timestamp.isoformat()}")
 
 
 class _DecisionPlan:
@@ -574,13 +586,13 @@ class _DecisionPlan:
             if fill_index >= len(symbol_rows):
                 raise ValueError(f"unfillable_decision:{symbol}:{item.decision_time.isoformat()}")
             fill_row = symbol_rows[fill_index]
-            fill_price = _fill_price_for_weight(fill_row, fill_model.price, item.target)
             by_time[fill_row["timestamp"]].append(
                 _PlannedDecision(
                     symbol=symbol,
                     signed_weight=float(item.target),
                     risk_rule=item.risk_rule,
-                    fill_price=fill_price,
+                    fill_row=fill_row,
+                    fill_field=fill_model.price,
                     decision_time=item.decision_time,
                     decision_id=item.decision_id,
                 )
@@ -713,6 +725,13 @@ def _walk_book(
             row_index, positions, timestamp, nav
         )
         period_return = 0.0 if previous_nav is None else (nav / previous_nav) - 1.0
+        # "Return on capital deployed at the interval start": a bar is at-risk iff the
+        # book held gross exposure entering it. This deliberately excludes the entry
+        # (flat->position) bar's return — capital was flat at its start — but includes
+        # the exit bar (capital was deployed at its start). The entry-cost and exit-cost
+        # bars are therefore treated asymmetrically in the Sharpe *sample* (one
+        # cost-sized return per episode); total-return/NAV capture both costs exactly,
+        # so this is an accepted, internally consistent convention, not a leak (quant #4).
         at_risk = previous_gross > _EXPOSURE_TOLERANCE
         peak = max(peak, nav)
         drawdown = 0.0 if peak == 0.0 else (nav / peak) - 1.0
@@ -746,6 +765,32 @@ def _realized_so_far(round_trips: Sequence[RoundTrip]) -> float:
     return sum(trip.realized_pnl for trip in round_trips)
 
 
+def _resolve_fill(
+    decision: _PlannedDecision,
+    *,
+    equity: float,
+    current_signed_qty: float,
+) -> tuple[float, float]:
+    """Resolve the executed fill price and target quantity for one decision.
+
+    For ``close``/``open`` fills the price is direction-independent, so the target
+    quantity follows directly. For the ``quote`` model the executed side depends on
+    the **traded direction**: the target is first sized against the mid to decide buy
+    (delta>0 → lift the ask) vs sell (delta<0 → hit the bid), then the quantity is
+    re-sized at the crossed side. This makes a close-of-long or a reversal cross the
+    correct side instead of taking a free favorable half-spread (quant review #3).
+    """
+    if decision.fill_field != "quote":
+        fill_price = _fill_price_for_trade(decision.fill_row, decision.fill_field, buying=True)
+        return fill_price, (decision.signed_weight * equity) / fill_price
+
+    reference = _quote_reference_price(decision.fill_row)
+    reference_qty = (decision.signed_weight * equity) / reference
+    buying = (reference_qty - current_signed_qty) > 0.0
+    fill_price = _fill_price_for_trade(decision.fill_row, "quote", buying=buying)
+    return fill_price, (decision.signed_weight * equity) / fill_price
+
+
 def _apply_decision(
     positions: dict[str, _NetPosition],
     latched: dict[str, float],
@@ -771,8 +816,9 @@ def _apply_decision(
 
     position = positions.setdefault(symbol, _NetPosition(symbol=symbol))
     position.target_weight = decision.signed_weight
-    fill_price = decision.fill_price
-    target_qty = (decision.signed_weight * equity) / fill_price
+    fill_price, target_qty = _resolve_fill(
+        decision, equity=equity, current_signed_qty=position.signed_qty
+    )
     delta = target_qty - position.signed_qty
     if delta == 0.0:
         # Idempotent re-emission of the current target: refresh the declared risk
@@ -845,12 +891,20 @@ def _close_leg(
 
     Returned cash is the price proceeds only (the caller charges ``close_cost``
     separately). The round-trip ``realized_pnl`` is the full economic PnL of the
-    round trip - price proceeds + funding accrued while held - the leg's open cost -
-    the closing cost - so that, when the book ends flat, sum of realized PnL
-    reconciles exactly with realized NAV PnL (final NAV - initial equity) per D4. The
-    cash split (price proceeds, funding, total traded cost across open and close) is
-    recorded so the derived per-trade ledger can expose reconciling gross/funding/cost
-    returns.
+    round trip - price proceeds + funding accrued while held - ``open_cost`` -
+    ``close_cost`` - so that, when the book ends flat, sum of realized PnL
+    reconciles exactly with realized NAV PnL (final NAV - initial equity) per D4.
+
+    Cost attribution caveat (reversals): on a cross-zero reversal the caller passes
+    the *whole* reversal-bar cost (close-of-old + open-of-new) as ``close_cost`` and
+    re-opens the residual leg with ``open_cost = 0``. So the closing trip's
+    ``cost_cash`` carries the entire reversal-bar cost and the reversed leg's eventual
+    trip carries none of its own entry cost. The total cost across the two trips, and
+    therefore NAV, is exact; only the per-trip split is approximate. ``cost_cash`` is
+    a derived diagnostic (D4), not a scored number, so this attribution skew never
+    affects the authoritative NAV. The cash split (price proceeds, funding, total
+    traded cost across open and close) is recorded so the derived per-trade ledger can
+    expose reconciling gross/funding/cost returns.
     """
     proceeds = position.signed_qty * exit_price - position.cost_basis
     total_cost = position.open_cost + close_cost
@@ -1509,20 +1563,32 @@ def _timestamp_in_window(
     return start_time <= timestamp < end_time
 
 
-def _fill_price_for_weight(
+def _fill_price_for_trade(
     row: Mapping[str, Any],
     field: str,
-    signed_weight: float,
+    *,
+    buying: bool,
 ) -> float:
-    """Direction-aware fill price for a signed target weight."""
-    direction = "long" if signed_weight >= 0.0 else "short"
+    """Fill price for a trade, keyed on the executed direction (``buying``).
+
+    For the ``quote`` model the executed side crosses the spread: a buy (``delta>0``)
+    lifts the **ask**, a sell (``delta<0``) hits the **bid**. ``close``/``open`` fills
+    are direction-independent. The traded direction is ``sign(delta)`` from netting —
+    a close-of-long or a reversal sells, so it must cross the bid, not the ask.
+    """
     if field == "quote":
-        if direction == "long":
-            base = row.get("ask")
-        else:
-            base = row.get("bid")
+        base = row.get("ask") if buying else row.get("bid")
         return _positive_float(base, "quote_fill_price")
     return _positive_float(row.get(field), f"fill_price:{field}")
+
+
+def _quote_reference_price(row: Mapping[str, Any]) -> float:
+    """Mid reference used only to determine the traded direction for a quote fill.
+
+    The quote data contract guarantees ``mid`` on a quote-fill row; sizing the target
+    against the mid decides buy vs sell, then the executed side (bid/ask) is crossed.
+    """
+    return _positive_float(row.get("mid"), "quote_reference_price")
 
 
 def _equity_at_mark(
@@ -1590,6 +1656,12 @@ def _local_max_drawdown(values: Sequence[float]) -> float | None:
 def _accumulator_total_return(
     accumulator: _MetricAccumulator | _FullTrainAccumulator,
 ) -> float | None:
+    # Per-subwindow total_return compounds the bucket's at-risk returns, so (like the
+    # at-risk Sharpe sample) it omits the excluded entry-cost bar; full_train uses NAV
+    # endpoints (first/last NAV). The two definitions therefore differ by ~one entry
+    # cost on a window that opens a position. Both are non-scored diagnostics (D4) and
+    # the divergence is cost-sized; kept as-is so the praised half-open subwindow
+    # return bucketing is not perturbed (quant #5, accepted approximation).
     if isinstance(accumulator, _MetricAccumulator):
         return _compound_return(accumulator.returns)
     if (
@@ -1708,6 +1780,13 @@ def _effective_sample_size(values: Sequence[float]) -> float | None:
 
 
 def _lag_one_autocorrelation(values: Sequence[float]) -> float | None:
+    # ``values`` is the at-risk return series, which is non-contiguous when the book
+    # goes flat between episodes. The lag-1 estimator treats it as contiguous, so the
+    # (last-of-episode-A, first-of-episode-B) pair enters the autocorrelation though
+    # the bars are not time-adjacent. The AR(1) effective-N formula is exact; only rho
+    # picks up (#episodes - 1) seam pairs, and effective-N is clamped to [1, n], so it
+    # cannot degenerate. Accepted approximation (quant #6); the chunked variant below
+    # has the same seam behavior.
     if len(values) < 3:
         return None
     mean = sum(values) / len(values)
