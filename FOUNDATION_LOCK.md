@@ -4,12 +4,44 @@ This file records the locked foundation contracts for `quant_strategies`. Use it
 as the disposition anchor for future reviews: raise regressions and new issues,
 but do not reopen accepted tradeoffs unless a documented trigger occurs.
 
+## Foundation Contract (north star)
+
+The unit of simulation is **one causal, single-account portfolio**, not an
+isolated trade. A strategy declares a **target book** — standing, signed
+weight-of-NAV `TargetDecision`s per instrument (`0` = flat/close), idempotent so
+same-symbol exposure nets and cannot stack, with optional declared price-path
+`RiskRule`s. The engine folds that book into **one netted, financed, marked book**
+on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**: the
+netted single-account portfolio NAV path is the single authoritative scored unit,
+and the per-trade ledger is a derived attribution view of the same walk. An
+envelope breach (over the operator-frozen leverage budget, zero-cost on a
+scoreable run, unfinanced leverage, or a degenerate sample) is a typed
+**fail-closed** feasibility verdict that makes `succeeded=False` — never clamped,
+never a silent `None`. See `PRD.md` G8 and `AGENTS.md`.
+
 ## Locked Contracts
 
 - **Implemented public surfaces:** the project currently exposes quick run,
 validation run, and evaluation run. Quick run is diagnostic; validation run is
 mechanical evidence validation; evaluation run is stateless frozen-candidate
 portfolio, path, and economic evidence.
+- **Target-book decision contract:** strategies emit `TargetDecision`s — per
+instrument and as of a causal time, a standing **signed weight of NAV** (`0` =
+flat/close) that holds until the next decision for that symbol changes it.
+Targets are **idempotent** (re-emitting the current target trades nothing), so
+signal-stacking is structurally inexpressible. Data/time-derivable exits are
+explicit `target=0` decisions; price-path exits are a declared `RiskRule`
+(stop-loss / take-profit / trailing) enforced by the engine on the net position,
+which latches the instrument flat until the strategy emits a new (different)
+target.
+- **One netted-book accounting spine:** all three surfaces use one shared
+decision/spec kernel **and one shared causal netted portfolio book**
+(`netted_portfolio_book_v1`). A single bar-by-bar walk nets same-symbol exposure
+to a running per-symbol quantity, trades only the delta against one shared
+cash/margin account through a market model (costs/fills/funding), and marks to
+market to produce one NAV path. There is no separate price-evidence fork by
+surface or data kind; evaluation adds only Parquet trace serialization around the
+same pure book.
 - **Internal engine boundary:** `quant_strategies.engine` is an internal
 execution kernel for quick-run and validation internals/tests, not a fourth
 public user surface.
@@ -20,8 +52,9 @@ observables, rule, assumptions, provenance, and falsifier.
 evidence. It is not validation.
 - **Validation run:** validation requires `validate_params` and returns advisory
 retained-candidate mechanical evidence. It is not quant strategy evaluation.
-The production verdict backend is the internal engine only; VectorBT Pro
-validation support is limited to the explicit opt-in agreement oracle.
+The verdict backend is the single netted-book spine (`verdict_source = "engine"`
+only); there is no VectorBT Pro validation backend and no opt-in agreement
+oracle.
 - **Evaluation run:** evaluation uses
 `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
 `quant_strategies.evaluation.run_evaluation` and returns
@@ -43,17 +76,39 @@ stays with the consumer (`quant_autoresearch`). Quick run may emit diagnostic
 Train portfolio-foundation DSR inputs/values, but they are not survivor-grade
 evaluation or promotion evidence. The fields are additive and default empty/None;
 `succeeded` is unchanged.
-- **Decision/spec kernel:** the public surfaces use one shared decision/spec
-kernel plus separate price-evidence paths: internal engine trade-activity
-evidence for quick run and validation, and portfolio/NAV evidence for
-evaluation.
+- **Decision/spec kernel and shared accounting:** the public surfaces use one
+shared decision/spec kernel and one shared accounting book — the single causal
+netted portfolio book (`netted_portfolio_book_v1`) on quick run, validation, and
+evaluation. There are no separate per-surface price-evidence paths.
+- **Scored unit:** the netted single-account portfolio NAV path is the single
+authoritative scored unit; the per-trade ledger is a derived attribution view of
+the same book walk, kept first-class for alpha / information-coefficient research
+but never an independent scored number. (This reverses the prior lock that engine
+metrics were linear signed per-trade results scored independently of NAV.)
+- **Feasibility verdict:** an envelope breach is a typed, **fail-closed**
+feasibility verdict, not a clamp and not a silent `None`. Intended gross/net over
+the operator-frozen leverage budget, a zero-cost scoreable run, unfinanced
+leverage on an unmodeled asset class, or a statistically degenerate sample makes
+the run infeasible / non-scoreable with an actionable typed reason
+(`leverage_budget_breach` + observed gross, `zero_cost`, `unfinanced_leverage`,
+`insufficient_samples`); a benign data gap and an internal error remain
+distinguishable verdicts. `RunResult.succeeded` is gated on the verdict, and a
+breach sets `failure_stage`.
+- **At-risk-bar statistics:** foundation return statistics are computed over the
+bars on which capital is actually deployed (at-risk bars), not a zero-padded
+union-of-timestamps calendar; flat bars do not inflate the effective sample. A
+subwindow or full-Train statistic is scoreable only when its at-risk return
+sample meets the configured minimum; below it the statistic is reported
+non-scoreable with a typed reason rather than emitted as a finite number from
+sample count alone.
 - **Strategy readiness:** a strategy may be quick-run-only. A strategy is not
 validation/evaluation-ready until it has `validate_params`, passes the relevant
 row-contract and causality checks, and does not depend on future rows during
 signal generation.
 - **Result success:** programmatic consumers should prefer `result.succeeded`.
-It is derived from `completed` / `run_completed` being true and
-`failure_stage is None`; the underlying fields remain the audit detail.
+It is derived from `completed` / `run_completed` being true, `failure_stage is
+None`, and a feasible book (no fail-closed envelope breach); the underlying
+fields remain the audit detail.
 - **Promotion boundary:** validation does not authorize paper trading, live
 trading, or promotion. Promotion remains outside this foundation.
 - **Evaluation boundary:** evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only and do not authorize ranking or promotion.
@@ -88,11 +143,13 @@ unconditional hard requirement on every row in quick run, validation, and
 evaluation; causal replay gates valid rows strictly on `available_at <= decision_time`,
 and a missing/invalid `available_at` fails the row contract rather than the
 lookahead guard.
-- **Funding basis:** Engine funding is linear trade-activity funding folded into
-validation `net_return`; evaluation funding is NAV-ledger cashflow through the
-project perp ledger. Fillable crypto perp windows with no funding events in
-the open interval accrue zero funding; flagged funding rows still fail when
-malformed, conflicting, or mark-misaligned.
+- **Funding basis:** funding is computed once, in the single shared netted
+portfolio book, as a NAV cashflow on the net held position — there is one funding
+implementation across quick run, validation, and evaluation, not a separate
+engine vs evaluation basis and no `project_perp_ledger` money-model. Fillable
+crypto perp windows with no funding events in the open interval accrue zero
+funding; flagged funding rows still fail when malformed, conflicting, or
+mark-misaligned.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
 quick-run artifacts are intentionally not full replay chains.
 
@@ -114,17 +171,18 @@ infinite final value fails the scenario.
 `candidates/` expose `validate_params` and have targeted validator plus
 causality/data-audit tests. Candidate folders remain research candidates until
 Season explicitly promotes or renames them.
-- **Evaluation evidence contract:** evaluation backend injection is typed by an
-explicit protocol, configs may opt into custom `[[scenarios]]`, and optional
+- **Evaluation evidence contract:** evaluation runs the single shared netted
+portfolio book, configs may opt into custom `[[scenarios]]`, and optional
 `[benchmark]` metrics add passive benchmark and excess return evidence only.
 - **Annualized/risk metric guards:** completed evaluation artifacts keep the
 annualized/risk metrics family null unless cadence matches and
 `return_sample_count` meets the configured minimum return-sample floor,
 `[metrics].min_annualized_samples`.
 - **Default verification:** `make check` refreshes the editable install, checks
-the installed CLI, runs the full pytest suite, and runs the real VectorBT Pro
-evaluation smoke. The smoke fails loudly for missing `pandas`, `pyarrow`, or
-`vectorbtpro` when enabled.
+the installed CLI, and runs the full pytest suite. Evaluation needs only
+`pandas` and `pyarrow` (the `[evaluation]` extra) for Parquet trace
+serialization; the accounting path is the pure-Python spine book and no longer
+imports `vectorbtpro`.
 - **Quick-run failure semantics:** runner-stage failures return
 `RunOutcome.completed=False`, set `failure_stage`, and write `summary.json`
 with `run_completed=false`.
@@ -141,10 +199,17 @@ not run another broad blind foundation review unless Season asks for one.
 ## Accepted Debt
 
 - Large facade modules are not immediate foundation blockers.
-- Full NAV and portfolio accounting belong to the evaluation surface; they are
-not quick-run or validation metrics.
-- The VectorBT Pro agreement check is optional and single-trade only; it should
-  not be treated as multi-trade validation confidence.
+- No independent cross-check of the spine's accounting exists today. The
+  single-trade VectorBT Pro agreement oracle is retired (it was single-trade-only
+  and gave no multi-trade verification); a netted-book agreement oracle is a named
+  follow-on. The spine's correctness is guarded instead by the NAV↔ledger
+  reconciliation test and the at-risk-bar / feasibility-verdict test suite.
+- Asset-class financing realism beyond crypto-perp funding (equity
+  short-borrow/dividends, FX rollover/carry, margin financing on gross > 1),
+  capacity/ADV/market-impact, and intrabar OHLC stop-fill realism are named
+  follow-ons that plug into the book's localized friction step; an
+  `unfinanced_leverage` fail-closed verdict keeps unpriced-leverage books
+  non-scoreable until they land.
 - Runtime sandboxing is deferred unless strategy code becomes untrusted.
 
 ## Approved Next Direction
@@ -169,9 +234,12 @@ decision/trade-ledger records, and data manifests written while a validation
 run is progressing still raise to direct API callers. Revisit if these writes
 become a practical reliability issue or if validation artifact durability
 requirements tighten.
-- **VectorBT Pro agreement scope:** rebuild around trade-ledger or path-level
-comparison before treating agreement evidence as multi-trade validation
-confidence.
+- **Independent netted-book cross-check:** the spine has no independent
+accounting cross-check today. Generalize the agreement oracle from single-trade
+to the full netted book (a second implementation that must agree with the spine)
+before any cross-check evidence is treated as multi-trade verification. VectorBT
+Pro could only return in that role, never as a divergent money-model routed by
+data kind.
 - **Validation/evaluation source output paths:** validation and evaluation
 configs still anchor `output.results_dir` beside the config so candidate-local
 workspaces keep working. Revisit source-directory rejection only if config path

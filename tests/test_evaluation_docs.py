@@ -14,11 +14,12 @@ def compact(text: str) -> str:
 
 
 def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
+    # docs/vectorbtpro.md is now a retirement note, not a current-surface
+    # reference, so it no longer carries the full evaluate-surface contract.
     for path in [
         "README.md",
         "FOUNDATION_LOCK.md",
         "docs/foundation-surfaces.md",
-        "docs/vectorbtpro.md",
     ]:
         text = read(path)
         assert "quant-strategies evaluate candidates/<candidate_id>/evaluation.toml" in text, path
@@ -34,10 +35,9 @@ def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
 def test_docs_describe_evaluation_example_and_path_anchoring():
     foundation = read("docs/foundation-surfaces.md")
     readme = read("README.md")
-    vectorbt = read("docs/vectorbtpro.md")
 
-    for text in (foundation, vectorbt):
-        assert "examples/simple_momentum/evaluation.toml" in text
+    # The retired docs/vectorbtpro.md no longer anchors the evaluation example.
+    assert "examples/simple_momentum/evaluation.toml" in foundation
 
     assert "candidate-local" in foundation
     assert "candidate-local" in readme
@@ -59,24 +59,32 @@ def test_validation_and_evaluation_examples_keep_window_dates_out_of_data_sectio
         assert "end =" not in data_section, path
 
 
-def test_docs_include_installed_cli_refresh_smoke():
+def test_docs_include_installed_cli_refresh():
+    # The VectorBT Pro evaluation backend is retired (portfolio-book-spine), so
+    # the docs no longer instruct users to invoke the backend smoke: neither the
+    # `make check-vectorbtpro-smoke` target nor the RUN_VECTORBTPRO_SMOKE pytest
+    # command appears. (A non-prescriptive note that the Makefile/pyproject still
+    # carry leftover `check-vectorbtpro-smoke`/`vectorbtpro` build artifacts,
+    # pending build-file cleanup, is allowed.)
     for path in ["README.md", "docs/foundation-surfaces.md"]:
         text = read(path)
         assert "make check" in text, path
-        assert "make check-vectorbtpro-smoke" in text, path
         assert "conda run -n quant python -m pip install -e ." in text, path
         assert "conda run -n quant quant-strategies --help" in text, path
-        assert (
-            "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
-            "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
-        ) in text, path
+        assert "make check-vectorbtpro-smoke" not in text, path
+        assert "RUN_VECTORBTPRO_SMOKE" not in text, path
 
 
-def test_docs_describe_full_grid_returns_and_annualization_cadence_warnings():
-    for path in ["README.md", "docs/foundation-surfaces.md", "docs/vectorbtpro.md"]:
-        text = read(path)
-        assert "full-grid portfolio returns" in text, path
-        assert "flat/no-position bars" in text, path
+def test_docs_describe_at_risk_bar_returns_and_annualization_cadence_warnings():
+    # Annualized metrics now derive from at-risk (capital-deployed) bars, not the
+    # retired full-grid / flat-bar union calendar (portfolio-book-spine). VBT is
+    # retired, so docs/vectorbtpro.md no longer describes the evaluation metric.
+    for path in ["README.md", "docs/foundation-surfaces.md"]:
+        text = compact(read(path))
+        assert "at-risk bars" in text, path
+        assert "capital-deployed period returns" in text, path
+        assert "flat/no-position bars do not inflate" in text, path
+        assert "full-grid portfolio returns" not in text, path
         assert "annualization cadence" in text, path
         assert "annualization_cadence" in text, path
         assert "min_annualized_samples" in text, path
@@ -92,7 +100,7 @@ def test_docs_lock_row_order_policy_and_shared_kernel_boundaries():
         )
     ).replace("`", "")
 
-    assert "one shared decision/spec kernel plus separate price-evidence paths" in docs
+    assert "one shared decision/spec kernel and one shared accounting book" in docs
     assert "quant_data owns stable row ordering for supplied rows" in docs
     assert (
         "quant_strategies preserves supplied row order for strategy input, hashing, and execution"
@@ -116,11 +124,16 @@ def test_docs_lock_sortino_funding_and_no_lookahead_semantics():
 
     assert "Sortino uses downside semivariance over the full return sample" in docs
     assert "returns `None`, not infinity, when undefined" in docs
+    # One funding model on every surface (portfolio-book-spine): the prior
+    # two-funding-model language (linear engine funding vs evaluation NAV-ledger
+    # cashflow) is retired.
     assert (
-        "Engine funding is linear trade-activity funding folded into validation `net_return`"
-        in docs
+        "Funding is computed once, in the shared book, as a NAV cashflow on the "
+        "net held position" in docs
     )
-    assert "evaluation funding is NAV-ledger cashflow" in docs
+    assert "there is one funding implementation across all surfaces" in docs
+    assert "Engine funding is linear trade-activity funding" not in docs
+    assert "evaluation funding is NAV-ledger cashflow" not in docs
     assert "no funding events in the open interval accrue zero funding" in docs
     assert "flagged funding rows still fail when malformed, conflicting, or mark-misaligned" in docs
     assert "hidden-lookahead replay proves point-in-time causal replay" in docs

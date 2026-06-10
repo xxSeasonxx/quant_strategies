@@ -309,8 +309,9 @@ validation; funding lives in one place. For `crypto_perp_funding`, the book's NA
 path includes price PnL, configured fees/slippage, and funding cashflows. The
 metric payload reports the single shared accounting model (`netted_portfolio_book_v1`);
 the per-asset-class perp-ledger model name is retired.
-Annualized metrics use full-grid portfolio returns from the `portfolio_path`
-trace, including flat/no-position bars. The configured
+Annualized metrics are computed over **at-risk bars** — the capital-deployed
+period returns from the `portfolio_path` trace, not a zero-padded calendar — so
+flat/no-position bars do not inflate the effective sample. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
 an advisory `annualization_cadence` summary with warnings for cadence mismatches
 or insufficient observed spacing.
@@ -338,11 +339,12 @@ configured, evaluation reports `benchmark_symbol`, `benchmark_total_return`,
 and `excess_total_return` for each scenario without ranking or promotion
 authority.
 
-Primary config file: candidate-local `evaluation.toml`.
+Primary config file: candidate-local `evaluation.toml`; see
+`examples/simple_momentum/evaluation.toml` for the config schema.
 (The checked-in `examples/` and `candidates/` bundles are mid-migration to the
 target-book contract — their `strategy.py` files still import the retired
 `StrategyDecision` shapes and are being redeveloped, so they are not yet runnable
-end-to-end against this surface.)
+end-to-end against this surface, but the config schema is current.)
 
 Important sections:
 
