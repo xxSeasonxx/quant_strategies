@@ -2,7 +2,7 @@
 
 **Status:** Draft v1
 **Owner:** Season Yang
-**Last updated:** 2026-06-02
+**Last updated:** 2026-06-10
 **Companion documents:** `README.md` (short current-state orientation),
 `FOUNDATION_LOCK.md` (locked contracts and review disposition),
 `docs/foundation-surfaces.md` (current command/API/artifact reference),
@@ -28,6 +28,17 @@ evaluation for supplied frozen candidates. Research
 evaluation means stateless candidate evidence, not the stateful auto-research
 loop.
 
+**Foundational principle (north star).** The unit of simulation is **one causal,
+single-account portfolio, not an isolated trade.** A strategy declares a complete
+portfolio — a *target book* — and the foundation simulates it as one stateful book
+under explicit frictions, treating that NAV path as the authoritative unit of
+return. The foundation's contract with its consumer is two-sided: **enable** any
+complete, tradeable portfolio strategy to be expressed in `strategy.py`, and
+**guarantee** that a strategy which passes Train evidence is genuinely feasible to
+trade — measuring it on one honest book and refusing to score what is not
+tradeable. A kept result must mean a tradeable candidate, or the downstream loop is
+optimizing fiction.
+
 ---
 
 ## 2. Background and Problem Statement
@@ -36,9 +47,13 @@ loop.
 
 A disciplined Python library and CLI that:
 
-1. Defines a **declarative strategy contract** (pure function -> typed decisions).
-2. Provides a **mathematically explicit execution kernel** that turns decisions into
-  trade-level PnL with declared assumptions.
+1. Defines a **declarative strategy contract**: a pure function emitting a
+  **target book** — a standing, signed target position per instrument over causal
+  time, with optional declared price-path risk rules.
+2. Provides a **mathematically explicit execution kernel** that simulates the
+  target book as **one causal, single-account portfolio** (same-symbol netting,
+  financing, mark-to-market) and treats that NAV path as the authoritative unit of
+  return, with declared assumptions.
 3. Provides a **diagnostic quick-run harness** that computes quick-run evidence,
   causality hygiene, and bounded behavior diagnostics for one strategy version.
 4. Provides a **mechanical evidence validation harness** that runs a retained
@@ -117,23 +132,31 @@ not optimized for ad-hoc exploration; that is outside this foundation.
 ### 4.1 Strategic goals
 
 **G1. Default-narrow strategy expression with explicit extended ontology.**
-The default strategy contract MUST express the executable v1 path clearly:
+The default strategy contract MUST express the executable v1 path clearly as a
+**target book**:
 
-- **Direction / state**: long, short, flat.
-- **Action / intent**: open.
+- **Target**: a signed weight of NAV per instrument (long `+`, short `-`,
+  `0` = flat/close), **standing** until changed. Open, close, adjust, and rebalance
+  are all expressed as *setting a target*; targets are **idempotent**, so
+  same-symbol exposure nets and repeated signals cannot stack into hidden leverage.
 - **Instrument**: equity / ETF, FX pair, crypto perp.
-- **Sizing**: target weight.
-- **Exit**: time-based plus declared optional threshold controls.
+- **Risk rules**: optional declared price-path exits (stop-loss, take-profit,
+  trailing) the engine enforces causally on the net position. Data- or time-based
+  exits (signal reversal, fixed hold horizon) are expressed as explicit target
+  changes, not risk rules.
 
-Extended vocabulary for futures, options, multi-leg structures, buy/sell book side,
-close/adjust/roll actions, target notional, target contracts, and vol-targeted sizing
-MUST live behind explicit opt-in imports. A strategy that needs those axes must be able
+Extended vocabulary for futures, options, multi-leg structures, target notional,
+target contracts, and vol-targeted sizing MUST live behind explicit opt-in imports. A strategy that needs those axes must be able
 to express them without monkey-patching the foundation, but the default import path must
 not imply that unsupported execution semantics are executable.
 
 **G2. Math correctness adequate for advisory research evidence.**
 Every numeric quantity emitted by the foundation MUST:
 
+- Derive the **scored statistics from the single portfolio NAV path**, which is the
+one authoritative unit of return. The per-trade ledger is a *derived attribution
+view* of that same book (for alpha / information-coefficient analysis), never an
+independent scored quantity. There are not two models of money.
 - Carry a declared **unit** and **base** (e.g., "fraction of entry notional",
 "percentage points of signed per-trade result", "NAV-path total return").
 - Declare whether the reported metric is replayable from artifacts alone. Compact
@@ -150,9 +173,11 @@ sum of per-trade results).
 representation in the math layer.
 - A single shared strategy execution kernel for import, params, data loading,
 row normalization, decision generation, and causal-invariant replay checks.
-- Separate explicit evidence-model contracts for linear engine trade-activity
-PnL and portfolio/NAV evaluation. Do not force validation engine evidence and
-evaluation portfolio evidence behind one interchangeable PnL backend protocol.
+- One causal single-account portfolio book is the authoritative model of money
+and the source of NAV truth; the per-trade ledger is a derived attribution view of
+it, not a parallel computation. A second backend (an independent re-implementation)
+is permitted only as a cross-check that must agree, never as a divergent
+money-model.
 - A single declared freezing idiom for `params` / `rows` / `metadata`.
 - Each module has one main reason to change. Orchestrator god-functions are forbidden.
 
@@ -258,9 +283,24 @@ Research evaluation evidence does not authorize promotion, paper trading, or
 live trading. Benchmark-relative metrics, when configured, are advisory
 evidence only and do not rank candidates.
 
-A portfolio/NAV-specific backend is appropriate when portfolio/NAV semantics
-are the deliverable. That backend remains out of the quick-run hot path and does
-not grant promotion authority.
+A portfolio/NAV-specific **heavy** backend is appropriate when portfolio/NAV
+semantics are the deliverable. That heavy backend remains out of the quick-run hot
+path — the quick-run path computes its own dependency-light portfolio book (G8) —
+and does not grant promotion authority.
+
+**G8. Feasibility is a first-class, enforced contract ("passes ⟹ tradeable").**
+A strategy that passes Train evidence MUST be genuinely feasible to trade. The
+foundation scores it on one netted, financed, marked portfolio book under
+operator-frozen frictions (costs, fills, the leverage ceiling, asset universe, and
+window — the strategy author cannot relax these). A breach of the feasibility
+envelope — intended gross/net over the frozen leverage budget, a zero-cost
+scoreable run, or a statistically degenerate sample — MUST produce a typed,
+actionable **fail-closed** verdict that makes the run non-scoreable. The foundation
+MUST NOT clamp or normalize an infeasible book to fit the budget, and MUST NOT
+collapse a breach into a silent absence of evidence. "Leverage allowed but capped"
+means leverage *priced and bounded*, never free. The strategy owns the portfolio
+(allocation, sizing, netting intent, rebalancing, exits, declared risk); the
+foundation owns the accounting, the market model, and the frozen envelope.
 
 ### 4.2 Non-goals (explicit, durable)
 
@@ -279,9 +319,13 @@ otherwise consumes its public loader API.
 **NG3.** Owning the research loop. `quant_autoresearch` owns iteration. `quant_strategies`
 provides primitives, not a search driver.
 
-**NG4.** Trading system features: order routing, execution, position keeping, risk limits,
-margin, broker integration, real-time market data, alerts, dashboards. None of these belong
-here.
+**NG4.** Live trading-system features: order routing, execution, working-order
+lifecycle, position keeping against a broker, broker integration, real-time market
+data, alerts, dashboards. None of these belong here. Modeling financing, margin, a
+leverage budget, and netting *inside the backtest book* is in scope as simulation
+realism (see G8) and is distinct from operating live risk limits or an
+order-management system: the book is evaluated end-of-bar on printed marks, not as
+a working-order lifecycle.
 
 **NG5.** Legacy-compatibility code paths. When the contract changes, strategies and configs
 are updated and re-run. The foundation does not carry shims for old shapes.

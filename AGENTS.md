@@ -8,6 +8,25 @@ Act as a senior quantitative researcher and pragmatic coding agent.
 Maintain candidate folders with pure strategy files, local configs, focused
 tests, and the explicit runner package for configured experiments.
 
+## Foundation Principle (north star)
+
+The unit of simulation is **one causal, single-account portfolio, not an isolated
+trade.** A `strategy.py` declares a *complete portfolio* — a **target book**: a
+standing, signed target weight of NAV per instrument (`0` = flat/close), idempotent
+so same-symbol exposure nets and cannot stack, with optional declared price-path
+risk rules (stop/take-profit/trailing) the engine enforces on the net position. The
+engine folds that book into one netted, financed, marked book and scores its NAV
+path; the per-trade ledger is a derived attribution view, not an independent scored
+number.
+
+The contract is two-sided: **enable** any complete, tradeable portfolio to be
+expressed in `strategy.py`, and **guarantee** that whatever passes Train evidence is
+genuinely feasible to trade. The strategy owns the portfolio (allocation, sizing,
+netting intent, rebalancing, exits, declared risk); the engine owns the accounting,
+the market model, and the operator-frozen envelope (leverage ceiling, cost floor,
+costs/fills, universe, window, objective). An envelope breach is a typed,
+**fail-closed** verdict — never clamped, never a silent `None`. See `PRD.md` G8.
+
 ## Rules
 
 - Keep each candidate in one folder under `candidates/<candidate_id>/` with one
@@ -45,6 +64,12 @@ enough.
 - When implementing review feedback or fixing bugs, fix the root cause. Do not
 add another layer, wrapper, guard, or adapter when a focused refactor is the
 cleaner fix.
+- No legacy-compatibility or fallback code. When a contract changes, delete the old
+shape and cut over cleanly — no shims, no dual code paths, no `getattr`/optional
+old-field tolerance, no "default to `None`" that hides a missing contract. Old
+strategies, configs, and artifacts are regenerated and rerun, not back-compat'd
+(`PRD.md` NG5 / C-5 / NFR-NO-LEGACY). Removing the old path is part of the change,
+not a follow-up.
 - Prefer clean, simple, maintainable code over accumulating patchy or redundant
 code. Delete or replace bad local code when that is safer than building around
 it.
