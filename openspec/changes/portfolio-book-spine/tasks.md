@@ -1,9 +1,9 @@
 ## 1. Decision contract (the spine's input)
 
-- [ ] 1.1 In `decisions/models.py`, define `RiskRule` (frozen, strict): optional `stop_loss`, `take_profit`, `trailing` thresholds; validation that present thresholds are finite and positive.
-- [ ] 1.2 Replace the `open`-only `StrategyDecision` with `TargetDecision`: instrument, `as_of_time <= decision_time`, signed weight-of-NAV `target` (long `+`, short `-`, `0` = flat), optional `RiskRule`, observations, metadata, deterministic `decision_id`. Remove `DecisionAction`, `SizingKind`, the welded `ExitPolicy`, and the unbounded `PositionTarget.size`.
-- [ ] 1.3 Remove the open-ticket translation layer: `engine/executable.py` (`executable_decision`, `base_unsupported_semantics`) and `engine_runner.py` `assert_supported_decisions` — including the `flat_target` / `leveraged_target_weight>1.0` rejections and the `direction → Side` mapping. The book consumes the target contract directly; flat and leveraged-intent targets are valid inputs governed by the feasibility verdict.
-- [ ] 1.4 Keep the contract pure and causal: enforce `as_of_time <= decision_time` and JSON-safe metadata; no realized fills/NAV/book state exposed to strategies (v1). Update the purity lint (`decisions/purity.py`) expectations if the surface name/shape changed.
+- [x] 1.1 In `decisions/models.py`, define `RiskRule` (frozen, strict): optional `stop_loss`, `take_profit`, `trailing` thresholds; validation that present thresholds are finite and positive.
+- [x] 1.2 Replace the `open`-only `StrategyDecision` with `TargetDecision`: instrument, `as_of_time <= decision_time`, signed weight-of-NAV `target` (long `+`, short `-`, `0` = flat), optional `RiskRule`, observations, metadata, deterministic `decision_id`. Remove `DecisionAction`, `SizingKind`, the welded `ExitPolicy`, and the unbounded `PositionTarget.size`.
+- [x] 1.3 Remove the open-ticket translation layer: `engine/executable.py` (`executable_decision`, `base_unsupported_semantics`) and `engine_runner.py` `assert_supported_decisions` — including the `flat_target` / `leveraged_target_weight>1.0` rejections and the `direction → Side` mapping. The book consumes the target contract directly; flat and leveraged-intent targets are valid inputs governed by the feasibility verdict.
+- [x] 1.4 Keep the contract pure and causal: enforce `as_of_time <= decision_time` and JSON-safe metadata; no realized fills/NAV/book state exposed to strategies (v1). Update the purity lint (`decisions/purity.py`) expectations if the surface name/shape changed.
 
 ## 2. The unified causal portfolio book (the spine)
 

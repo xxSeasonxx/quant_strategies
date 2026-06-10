@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
-from quant_strategies.decisions.models import StrategyDecision
+from quant_strategies.decisions.models import TargetDecision
 from quant_strategies.decisions.purity import strategy_purity_violations
 
 
@@ -15,7 +15,7 @@ class StrategyGenerator(Protocol):
         self,
         rows: Sequence[Mapping[str, object]],
         params: Mapping[str, object],
-    ) -> Sequence[StrategyDecision]: ...
+    ) -> Sequence[TargetDecision]: ...
 
 
 DecisionStrategyCallable = StrategyGenerator

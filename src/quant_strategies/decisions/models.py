@@ -18,9 +18,6 @@ from pydantic import (
 )
 
 InstrumentKind = Literal["equity_or_etf", "fx_pair", "crypto_perp"]
-Direction = Literal["long", "short", "flat"]
-DecisionAction = Literal["open"]
-SizingKind = Literal["target_weight"]
 
 
 class DecisionModel(BaseModel):
@@ -80,10 +77,6 @@ class InstrumentRef(DecisionModel):
 DecisionInstrument = InstrumentRef
 
 
-class DecisionIntent(DecisionModel):
-    action: DecisionAction = "open"
-
-
 class ObservationRef(DecisionModel):
     symbol: str
     timestamp: datetime
@@ -108,54 +101,50 @@ class ObservationRef(DecisionModel):
         return _stripped_non_empty(value, info.field_name)
 
 
-class PositionTarget(DecisionModel):
-    direction: Direction
-    sizing_kind: SizingKind = "target_weight"
-    size: float = Field(ge=0)
+class RiskRule(DecisionModel):
+    """Declared price-path exit thresholds enforced by the engine on the net position.
 
-    @model_validator(mode="after")
-    def validate_size(self) -> PositionTarget:
-        if not math.isfinite(self.size):
-            raise ValueError("target size must be finite")
-        if self.direction == "flat" and self.size != 0.0:
-            raise ValueError("flat target size must be 0")
-        if self.direction in {"long", "short"} and self.size <= 0.0:
-            raise ValueError("long and short target size must be positive")
-        return self
-
-
-class ExitPolicy(DecisionModel):
-    """Bar-sampled exit thresholds for the internal engine.
-
-    Stop, take-profit, and trailing values are evaluated against the configured
-    fill-price sample at each bar timestamp. They are not intrabar OHLC barrier
-    orders.
+    Each threshold is an optional positive fraction of the position's entry mark
+    (for example ``stop_loss=0.05`` flattens after a 5% adverse move). The engine
+    evaluates them causally against the end-of-bar printed mark and flattens the
+    instrument at the bar a threshold is crossed; intrabar OHLC barrier fills are
+    deferred fill realism, not part of this contract. Exits derivable from data or
+    time (signal reversal, fixed hold horizon) are expressed as explicit target
+    decisions, not as ``RiskRule`` thresholds.
     """
 
-    max_hold_bars: int = Field(ge=1)
-    stop_loss_bps: float | None = None
-    take_profit_bps: float | None = None
-    trailing_stop_bps: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    trailing: float | None = None
 
     @model_validator(mode="after")
-    def validate_exit_thresholds(self) -> ExitPolicy:
-        values = (self.stop_loss_bps, self.take_profit_bps, self.trailing_stop_bps)
-        if any(
-            value is not None and (not math.isfinite(value) or value <= 0.0) for value in values
-        ):
-            raise ValueError("exit bps values must be finite and positive")
+    def validate_thresholds(self) -> RiskRule:
+        for field_name in ("stop_loss", "take_profit", "trailing"):
+            value = getattr(self, field_name)
+            if value is not None:
+                _finite_positive(value, field_name)
         return self
 
 
-class StrategyDecision(DecisionModel):
+class TargetDecision(DecisionModel):
+    """A standing, signed weight-of-NAV target for one instrument as of a causal time.
+
+    The strategy owns the complete portfolio: ``target`` is a signed weight of NAV
+    (positive long, negative short, ``0`` = flat/close) that stands until the next
+    decision for the instrument changes it. A single signed target per instrument
+    makes same-symbol exposure net by construction and additive stacking structurally
+    inexpressible. Flat and leveraged-intent targets are valid contract inputs;
+    intended exposure beyond the operator leverage budget is handled by the engine's
+    feasibility verdict, never by rejecting the decision shape.
+    """
+
     decision_id: str | None = None
     strategy_id: str
     instrument: DecisionInstrument
-    intent: DecisionIntent = Field(default_factory=DecisionIntent)
     decision_time: datetime
     as_of_time: datetime
-    target: PositionTarget
-    exit_policy: ExitPolicy
+    target: float
+    risk_rule: RiskRule | None = None
     observations: tuple[ObservationRef, ...] = ()
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
@@ -171,8 +160,15 @@ class StrategyDecision(DecisionModel):
     def validate_times(cls, value: datetime, info) -> datetime:
         return _timezone_aware(value, info.field_name)
 
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("target must be finite")
+        return value
+
     @model_validator(mode="after")
-    def validate_decision(self) -> StrategyDecision:
+    def validate_decision(self) -> TargetDecision:
         if self.as_of_time > self.decision_time:
             raise ValueError("as_of_time must be on or before decision_time")
         try:
@@ -190,15 +186,16 @@ class StrategyDecision(DecisionModel):
         return _jsonable_metadata_value(value)
 
 
-def _generated_decision_id(decision: StrategyDecision, frozen_metadata: Mapping[str, Any]) -> str:
+def _generated_decision_id(decision: TargetDecision, frozen_metadata: Mapping[str, Any]) -> str:
     payload = {
         "strategy_id": decision.strategy_id,
         "instrument": decision.instrument.model_dump(mode="json"),
-        "intent": decision.intent.model_dump(mode="json"),
         "decision_time": decision.decision_time.isoformat(),
         "as_of_time": decision.as_of_time.isoformat(),
-        "target": decision.target.model_dump(mode="json"),
-        "exit_policy": decision.exit_policy.model_dump(mode="json"),
+        "target": decision.target,
+        "risk_rule": (
+            decision.risk_rule.model_dump(mode="json") if decision.risk_rule is not None else None
+        ),
         "observations": [item.model_dump(mode="json") for item in decision.observations],
         "metadata": _jsonable_metadata_value(frozen_metadata),
     }

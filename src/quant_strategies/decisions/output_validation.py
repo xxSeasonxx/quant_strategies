@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from quant_strategies.decisions.models import StrategyDecision
+from quant_strategies.decisions.models import TargetDecision
 
 
 def validate_decision_output(
     output: object,
     *,
     strategy_id: str,
-) -> tuple[list[StrategyDecision], tuple[str, ...]]:
+) -> tuple[list[TargetDecision], tuple[str, ...]]:
     if (
         isinstance(output, str | bytes | bytearray)
         or isinstance(output, Mapping)
@@ -17,12 +17,12 @@ def validate_decision_output(
     ):
         return [], ("invalid_decision_output",)
 
-    decisions: list[StrategyDecision] = []
+    decisions: list[TargetDecision] = []
     violations: list[str] = []
     seen_decision_ids: set[str] = set()
     seen_execution_keys: set[tuple[str, object]] = set()
     for index, item in enumerate(output):
-        if not isinstance(item, StrategyDecision):
+        if not isinstance(item, TargetDecision):
             violations.append(f"invalid_decision_output[{index}]")
             continue
         if item.strategy_id != strategy_id:

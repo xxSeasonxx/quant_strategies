@@ -7,7 +7,7 @@ import pytest
 
 from quant_strategies.decisions import (
     DecisionStrategyLoadError,
-    StrategyDecision,
+    TargetDecision,
     load_decision_strategy,
 )
 
@@ -16,15 +16,14 @@ def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Pa
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol='SPY'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.2,\n"
         "    )]\n"
     )
 
@@ -34,7 +33,7 @@ def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Pa
     decisions = generate_decisions(rows, {})
 
     assert callable(generate_decisions)
-    assert isinstance(decisions[0], StrategyDecision)
+    assert isinstance(decisions[0], TargetDecision)
     assert decisions[0].instrument.symbol == "SPY"
 
 

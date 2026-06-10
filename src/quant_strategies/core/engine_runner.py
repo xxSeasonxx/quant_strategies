@@ -58,11 +58,6 @@ def build_request(
     return request
 
 
-def assert_supported_decisions(decisions: list[StrategyDecision]) -> None:
-    for decision in decisions:
-        _decision_symbol(decision)
-
-
 def evaluate_request(
     request: EvaluationRequest,
     *,

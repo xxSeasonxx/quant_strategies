@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 from quant_strategies.decisions.models import (
-    DecisionAction,
     DecisionInstrument,
-    DecisionIntent,
     DecisionModel,
-    Direction,
-    ExitPolicy,
     InstrumentKind,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    SizingKind,
-    StrategyDecision,
+    RiskRule,
+    TargetDecision,
 )
 from quant_strategies.decisions.output_validation import validate_decision_output
 from quant_strategies.decisions.params import validate_strategy_params
@@ -25,21 +20,16 @@ from quant_strategies.decisions.strategy_loader import (
 )
 
 __all__ = [
-    "DecisionAction",
     "DecisionInstrument",
-    "DecisionIntent",
     "DecisionModel",
     "DecisionStrategyCallable",
     "DecisionStrategyLoadError",
-    "Direction",
-    "ExitPolicy",
     "InstrumentKind",
     "InstrumentRef",
     "ObservationRef",
-    "PositionTarget",
-    "SizingKind",
-    "StrategyDecision",
+    "RiskRule",
     "StrategyGenerator",
+    "TargetDecision",
     "load_decision_strategy",
     "strategy_purity_violations",
     "validate_decision_output",
