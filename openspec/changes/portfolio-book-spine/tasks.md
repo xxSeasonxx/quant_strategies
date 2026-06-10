@@ -53,12 +53,12 @@
 
 ## 8. Docs
 
-- [ ] 8.1 Update `docs/consumer/*`, `docs/foundation-surfaces.md`, and `TODOS.md` (§2.3 O14–O23, R-residuals) to the target-book contract, the authoritative NAV book, and the fail-closed verdict. (`PRD.md` G1/G2/G3/G8/NG4 and `AGENTS.md` already updated.)
-- [ ] 8.2 Update the consumer contract notes in `quant_autoresearch/program.md` / `score_research.md` describing the scored unit, the frozen leverage budget, and feasibility (coordinate with Season — cross-repo).
+- [x] 8.1 Update `docs/consumer/*`, `docs/foundation-surfaces.md`, and `TODOS.md` (§2.3 O14–O23, R-residuals) to the target-book contract, the authoritative NAV book, and the fail-closed verdict. (`PRD.md` G1/G2/G3/G8/NG4 and `AGENTS.md` already updated.)
+- [x] 8.2 Update the consumer contract notes in `quant_autoresearch/program.md` / `score_research.md` describing the scored unit, the frozen leverage budget, and feasibility (coordinate with Season — cross-repo).
 - [ ] 8.3 Update `live-trade-feasibility-review-2026-06-10.md` §14 action-map statuses for the items this change closes (0a/0b/0c collapsed; No.1/5/16; F2; F3; F7).
 
 ## 9. Verification
 
-- [ ] 9.1 `conda run -n quant make check` (or the nearest format/lint/type target) passes; run `make fix` for formatting rather than hand-formatting.
-- [ ] 9.2 `conda run -n quant pytest -q` passes on the updated suite.
-- [ ] 9.3 Grep the tree for surviving legacy: no references to `project_perp_ledger`, `_REQUIRED_COMPLETED_FUNDING_MODELS`, `assert_supported_decisions`, `promotion_eligible`, `FoundationSubwindowMetric`, `_select_exit`, `DecisionAction`/`ExitPolicy`, or open-ticket shapes. Report changed-line counts (source / tests / docs separated).
+- [x] 9.1 `conda run -n quant make check` (or the nearest format/lint/type target) passes; run `make fix` for formatting rather than hand-formatting.
+- [x] 9.2 `conda run -n quant pytest -q` passes on the updated suite.
+- [x] 9.3 Grep the tree for surviving legacy: no references to `project_perp_ledger`, `_REQUIRED_COMPLETED_FUNDING_MODELS`, `assert_supported_decisions`, `promotion_eligible`, `FoundationSubwindowMetric`, `_select_exit`, `DecisionAction`/`ExitPolicy`, or open-ticket shapes. Report changed-line counts (source / tests / docs separated).
