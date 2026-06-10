@@ -12,6 +12,15 @@ evidence*. It is **not** a trading system: nothing here authorizes paper trading
 live trading, ranking, or promotion. Its one job is to make sure no number with
 unclear semantics ever drives a conclusion.
 
+The unit of simulation is **one causal, single-account portfolio, not an isolated
+trade.** Your strategy declares a *complete portfolio* — a **target book** — and
+the foundation folds it into one netted, financed, marked book and scores that
+**NAV path**. The contract is two-sided: you can express any complete, tradeable
+portfolio in `strategy.py`, and a strategy that passes Train evidence is genuinely
+feasible to trade — an envelope breach (over the frozen leverage budget, zero-cost,
+unfinanced leverage, degenerate sample) is a typed **fail-closed** verdict that
+makes the run non-scoreable, never a clamp and never a silent `None`.
+
 ---
 
 ## For AI agents (read this first)
@@ -19,30 +28,46 @@ unclear semantics ever drives a conclusion.
 If you are an LLM writing or running strategy code against this package, follow
 these rules. They are the difference between evidence and noise.
 
-1. **A strategy is a pure function.** You write one file that exposes
-   `generate_decisions(rows, params) -> list[StrategyDecision]`. Inspect only the
-   `rows` and `params` you are handed. Do **not** load data, call engines, write
-   files, open the network, read clocks, use RNG, or run background loops. Purity
-   is checked by a best-effort static lint (`decisions/purity.py`) — treat the
-   contract as the real guarantee, not the lint.
+1. **A strategy is a pure function declaring a target book.** You write one file
+   that exposes `generate_decisions(rows, params) -> Sequence[TargetDecision]`. Each
+   `TargetDecision` is a **standing, signed weight-of-NAV target** for one
+   instrument (`+` long, `−` short, `0` = flat/close) that holds until your next
+   decision for that symbol changes it. Targets are **idempotent** — re-emitting the
+   current target trades nothing — so same-symbol exposure nets and repeated signals
+   cannot stack into hidden leverage. Inspect only the `rows` and `params` you are
+   handed. Do **not** load data, call engines, write files, open the network, read
+   clocks, use RNG, or run background loops. Purity is checked by a best-effort
+   static lint (`decisions/purity.py`) — treat the contract as the real guarantee,
+   not the lint.
 2. **You do not load data.** The run surfaces load rows through `quant_data`'s
    strict contract loaders, normalize them, and pass them to you as plain mapping
    rows. Choosing which loader runs is a config decision (`[data].kind`), not
    something you call. See [usage-guide.md](usage-guide.md#choose-your-data-kind).
 3. **Respect causal time.** Gate every signal on each row's **`available_at`**,
    never its `timestamp`. Causal replay enforces `available_at <= decision_time`
-   on valid rows, and every `StrategyDecision` requires `as_of_time <= decision_time`.
+   on valid rows, and every `TargetDecision` requires `as_of_time <= decision_time`.
    A missing or invalid `available_at` fails the row contract — it is never a
    tolerated warning.
 4. **`validate_params` is required for validation and evaluation**, optional for
    quick runs. Make invalid params raise.
-5. **Use `result.succeeded` as the success check** on all three surfaces.
-   Validation's advisory `decision` label — including `mechanical_fail` — is
-   evidence, not promotion logic.
-6. **Artifacts are evidence, not truth.** Do not treat a generated `summary.json`
+5. **Use `result.succeeded` as the success check** on all three surfaces. For a
+   quick run, `succeeded` now means **feasible and completed**: the portfolio book
+   was built and passed the feasibility envelope. A breach of that envelope is a
+   typed, fail-closed verdict on `RunResult.feasibility` (reason + observed
+   exposure) that sets `succeeded = False` — read the verdict reason
+   (`leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
+   `insufficient_samples`) to learn what to fix; it is not a clamp and not a silent
+   absence of evidence. Validation's advisory `decision` label — including
+   `mechanical_fail` — is evidence, not promotion logic.
+6. **Build within the frozen envelope.** Costs, fills, the leverage ceiling (gross
+   and net), asset universe, and window are operator-frozen — your strategy cannot
+   relax them. Intended gross/net over the budget is non-scoreable, not silently
+   scaled down; a scoreable run with zero costs is non-scoreable. Express your
+   chosen exposure inside the budget. That *is* part of being tradeable.
+7. **Artifacts are evidence, not truth.** Do not treat a generated `summary.json`
    or metric as a proven result. Nothing in this repo proves out-of-sample
    validity, freedom from in-sample fitting, or trading readiness.
-7. **Cite real provenance.** Every strategy docstring must name a specific source
+8. **Cite real provenance.** Every strategy docstring must name a specific source
    (paper + DOI/SSRN/URL, a web/repository URL, or an internal note path plus the
    upstream source it cites). "Literature" or "outside-view note" is not enough.
 
@@ -66,9 +91,15 @@ in consumer code.
 
 ## Golden path (copy-paste)
 
-Write one pure strategy file and a small config, then run it. A complete working
-example ships in the repo: [`examples/simple_momentum/strategy.py`](../../examples/simple_momentum/strategy.py)
-and [`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
+Write one pure strategy file declaring a **target book** and a small config, then
+run it. The strategy below sets a signed weight-of-NAV target per instrument and
+closes by setting the target back to `0`.
+
+> The checked-in `examples/` and `candidates/` strategies are mid-migration to this
+> target-book contract — they still import the retired `StrategyDecision` /
+> `PositionTarget` / `ExitPolicy` shapes and are being redeveloped (no
+> compatibility shim). Until they are rewritten, use the inline example below as the
+> authoritative shape, not those files.
 
 ```python
 # my_strategy.py — a pure strategy file
@@ -77,39 +108,43 @@ and [`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.tom
 Source / provenance: internal_note docs/notes/my_strategy.md citing <paper/url>.
 Market rationale: <why an edge could exist>.
 Required observables: symbol, timestamp, close.
-Decision rule: go long for one bar after an up close.
+Decision rule: hold a long 25%-of-NAV target while the close rises; flatten otherwise.
 Assumptions: fills occur after the decision bar (entry_lag_bars=1).
 Falsifier: if the rule has no positive gross edge, reject before tuning.
 """
 from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from quant_strategies.decisions import (
-    ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision,
+    InstrumentRef, ObservationRef, RiskRule, TargetDecision,
 )
 
 def validate_params(params: Mapping[str, object]) -> dict[str, object]:
-    weight = float(params.get("weight", 1.0))
-    if weight <= 0.0:
-        raise ValueError("weight must be positive")
+    weight = float(params.get("weight", 0.25))
+    if not 0.0 < weight <= 1.0:
+        raise ValueError("weight must be in (0, 1]")
     return {"weight": weight}
 
 def generate_decisions(
     rows: Sequence[Mapping[str, object]], params: Mapping[str, object],
-) -> list[StrategyDecision]:
+) -> list[TargetDecision]:
     weight = float(validate_params(params)["weight"])
-    out: list[StrategyDecision] = []
+    out: list[TargetDecision] = []
+    current: float | None = None
     for i in range(1, len(rows)):
-        if float(rows[i]["close"]) > float(rows[i - 1]["close"]):
-            ts, symbol = rows[i]["timestamp"], str(rows[i]["symbol"])
-            out.append(StrategyDecision(
-                strategy_id="my_strategy",
-                instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
-                decision_time=ts, as_of_time=ts,
-                target=PositionTarget(direction="long", size=weight),
-                exit_policy=ExitPolicy(max_hold_bars=1),
-                observations=(ObservationRef(symbol=symbol, timestamp=ts, field="close"),),
-            ))
-            break
+        ts, symbol = rows[i]["timestamp"], str(rows[i]["symbol"])
+        up = float(rows[i]["close"]) > float(rows[i - 1]["close"])
+        target = weight if up else 0.0
+        if target == current:        # idempotent: re-emitting the standing target is a no-op
+            continue
+        current = target
+        out.append(TargetDecision(
+            strategy_id="my_strategy",
+            instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
+            decision_time=ts, as_of_time=ts,
+            target=target,            # signed weight of NAV; 0 = flat/close
+            risk_rule=RiskRule(stop_loss=0.05) if target else None,  # optional engine-enforced stop
+            observations=(ObservationRef(symbol=symbol, timestamp=ts, field="close"),),
+        ))
     return out
 ```
 
@@ -126,16 +161,16 @@ start = "2024-01-01"
 end   = "2024-01-31"
 
 [params]
-weight = 1.0
+weight = 0.25
 
 [fill_model]
 price = "close"
 entry_lag_bars = 1
 exit_lag_bars  = 0
 
-[cost_model]
-fee_bps_per_side = 0.0
-slippage_bps_per_side = 0.0
+[cost_model]                          # a scoreable run needs non-zero costs;
+fee_bps_per_side = 1.0                # zero costs are a fail-closed `zero_cost` verdict
+slippage_bps_per_side = 0.5
 
 [output]
 results_dir = "results"
@@ -151,9 +186,12 @@ conda run -n quant quant-strategies run experiment.toml
 from quant_strategies.runner import run_config
 
 result = run_config("experiment.toml")
-assert result.succeeded, result.message
+if not result.succeeded:
+    # an infeasible book sets result.feasibility (reason + observed exposure)
+    raise SystemExit(f"{result.message} :: {result.feasibility}")
 print(result.result_dir)        # where artifacts landed
 print(result.outcome.assessment_status)
+print(result.foundation.feasible)   # authoritative scored NAV book; True on a feasible run
 ```
 
 > **No data lives in this repo.** Rows are loaded on demand through `quant_data`
@@ -166,7 +204,7 @@ print(result.outcome.assessment_status)
 **Then go where your question points:**
 
 - *How do I write a strategy and run all three surfaces?* → [usage-guide.md](usage-guide.md)
-- *How do I read quick-run `portfolio_foundation` output for Train scoring?* →
+- *How do I read the quick-run `portfolio_foundation` NAV book for Train scoring?* →
   [usage-guide.md#quick-run-portfolio-foundation-output](usage-guide.md#quick-run-portfolio-foundation-output)
   and [reference.md#runportfoliofoundation](reference.md#runportfoliofoundation)
 - *What is the exact signature / field / config key / exit code?* → [reference.md](reference.md)
@@ -180,16 +218,20 @@ print(result.outcome.assessment_status)
 boundaries are deliberate.
 
 **The strategy author owns** the pure `generate_decisions` / `validate_params`
-file: the thesis, the rule, the params contract, the declared `observations`, and
-a specific provenance docstring. The strategy must not load data or cause side
-effects.
+file: the thesis, the rule, the params contract, the declared `observations`, a
+specific provenance docstring, and the **complete portfolio** the target book
+expresses — allocation, sizing, netting intent, rebalancing, explicit exits, and
+declared `RiskRule`s. The strategy must not load data or cause side effects, and
+cannot relax the frozen envelope (costs, fills, leverage budget, universe, window).
 
 **`quant_strategies` owns** loading rows through public `quant_data` APIs,
 row-contract validation, the execution kernel (freeze inputs → typed decisions →
-strict causal replay), fills, costs, the per-trade PnL contract, validation
-policy, evaluation portfolio/NAV/path evidence, and all artifacts. It **preserves**
-the upstream row order and never sorts, de-duplicates, joins, or repairs rows
-locally.
+strict causal replay), the **single causal netted portfolio book** (same-symbol
+netting, financing/funding, mark-to-market) whose NAV path is the authoritative
+scored object, the fail-closed feasibility envelope, the derived per-trade
+attribution ledger, validation policy, evaluation portfolio/NAV/path evidence, and
+all artifacts. It **preserves** the upstream row order and never sorts,
+de-duplicates, joins, or repairs rows locally.
 
 **`quant_data` owns** the data product: acquisition, refresh, repair, backfill,
 source joining, adjustment/survivorship policy, deterministic row ordering, and
@@ -210,6 +252,7 @@ trading. Those live in `quant_autoresearch` and human review — never here.
 | **[README.md](README.md)** (this) | *Where do I start? What are the rules and boundaries?* | everyone, first |
 | **[usage-guide.md](usage-guide.md)** | *How do I write a strategy and run quick-run / validation / evaluation?* | strategy authors, agents |
 | **[reference.md](reference.md)** | *What is the exact API, decision schema, config key, result field, exit code?* | lookups |
+| **[MIGRATION-portfolio-book-spine.md](MIGRATION-portfolio-book-spine.md)** | *What changed to the target-book contract / NAV-scored unit / fail-closed feasibility, and what must `quant_autoresearch` update?* | consumers migrating off the retired open-ticket contract |
 
 Deeper internal contracts (for maintainers, not consumers) live in
 [`docs/foundation-surfaces.md`](../foundation-surfaces.md), [`FOUNDATION_LOCK.md`](../../FOUNDATION_LOCK.md),

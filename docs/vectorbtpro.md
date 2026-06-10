@@ -1,8 +1,20 @@
 # VectorBT Pro
 
-This note records the package facts that matter to `quant_strategies` and the
-project boundary implied by those facts. It is not an official VectorBT Pro
-guide.
+> **Status (portfolio-book-spine, 2026-06-10): VectorBT Pro is retired from
+> `quant_strategies`.** It is no longer an evaluation backend, a validation
+> backend, or an agreement-oracle cross-check. Every surface — quick run,
+> validation, and evaluation — now runs the **single pure-Python causal netted
+> portfolio book** (`netted_portfolio_book_v1`); evaluation adds only `pandas` /
+> `pyarrow` Parquet trace serialization around that book. VBT cannot model
+> crypto-perp funding, so it could not honestly evaluate the asset class, and the
+> single-trade agreement oracle provided no multi-trade verification — both were
+> removed (design D9). This note is retained as a **factual library reference** (and
+> for the named follow-on: a future independent cross-check that must agree with the
+> spine, generalized from single-trade to the netted book). The sections below
+> marked *(retired)* describe surfaces that no longer exist.
+
+This note records the package facts that matter if VectorBT Pro is reintroduced as
+an independent cross-check. It is not an official VectorBT Pro guide.
 
 ## Package Facts
 
@@ -15,7 +27,7 @@ Local package inspection in Season's `quant` environment on 2026-06-01:
 | Package root | `/opt/anaconda3/envs/quant/lib/python3.12/site-packages/vectorbtpro/` |
 | `Portfolio` module | `vectorbtpro/portfolio/base.py` |
 | Project optional extra | `pip install -e '.[vectorbtpro]'` installs `pandas>=2.2` and `vectorbtpro` |
-| Evaluation extra | `pip install -e '.[evaluation]'` installs `pandas>=2.2`, `pyarrow>=16`, and `vectorbtpro`; controlled evaluation runs should use `constraints/evaluation.txt` |
+| Evaluation extra | `pip install -e '.[evaluation]'` installs `pandas>=2.2`, `pyarrow>=16`, and (still, pending build-file cleanup) `vectorbtpro`. The evaluation **accounting path no longer needs `vectorbtpro`** — only `pandas`/`pyarrow` for Parquet traces; the lingering `vectorbtpro` entry in the extra is a residual to trim with the code/test cutover. |
 
 Verify the local install with:
 
@@ -66,170 +78,52 @@ Portfolio defaults observed in `vbt.settings["portfolio"]` include
 `cash_sharing = False`. A project adapter should still set every semantic field
 it depends on explicitly.
 
-## What It Is Most Helpful For
+## What It Could Be Helpful For (if reintroduced as a cross-check)
 
-VectorBT Pro is most helpful as a fast vectorized research and portfolio
-simulation workbench:
+VectorBT Pro is a fast vectorized portfolio-simulation workbench (signal matrices
+across assets/windows/grids; cost/slippage/sizing sensitivity; NAV-path, drawdown,
+order, and trade distributions). It is **not currently used by `quant_strategies`**.
+The only place it could return is as an *independent cross-check* that must agree
+with the spine's netted book — and only after the agreement oracle is generalized
+from single-trade to the full netted book (a named follow-on). It would never be a
+divergent money-model routed by data kind, and it cannot model crypto-perp funding.
 
-- testing signal matrices across assets, windows, and parameter grids;
-- running cost, slippage, sizing, and cash-sharing sensitivity checks;
-- studying portfolio NAV-path behavior, drawdowns, order records, and trade
-  distributions;
-- building research evaluation artifacts after a candidate has a stable
-  signal definition;
-- independently sanity-checking simple engine cases.
+## Project Boundary (current)
 
-This makes it valuable for the implemented research evaluation layer. Evaluation
-uses `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
-`quant_strategies.evaluation.run_evaluation` and writes detailed trace artifacts
-as Parquet through `pyarrow`. It does not by itself prove alpha, statistical
-significance, economic durability, data quality, or paper-trading or
-live-trading authorization.
-
-## Project Boundary
-
-`quant_strategies` does not use VectorBT Pro as a quick-run or validation
-backend.
+There is **one accounting model on every surface** — the pure-Python causal netted
+portfolio book. No surface uses VectorBT Pro.
 
 | Surface | Backend |
 | --- | --- |
-| Quick run | Internal `quant_strategies.engine` path through `core.engine_runner` |
-| Validation verdict | Internal `EngineBackend`, using the same engine path |
-| Evaluation run | VectorBT Pro for non-funding data; `project_perp_ledger_v1` for `crypto_perp_funding` |
-| VectorBT Pro agreement oracle | Optional single-trade validation agreement check |
+| Quick run | Single causal netted portfolio book (`core.portfolio_foundation`) |
+| Validation verdict | The same spine book (`SpineBackend`); `verdict_source = "engine"` only |
+| Evaluation run | The same spine book + `pandas`/`pyarrow` Parquet trace serialization |
 
-`quant_strategies.engine` is internal to the quick-run and validation paths in
-this table. It is not a separate public user surface.
+The scored object is the book's **NAV path** on every surface; the per-trade ledger
+is a derived attribution view of the same walk (one model of money). Funding is
+computed once, in the book, as a NAV cashflow on the net held position — there is no
+separate engine-vs-evaluation funding basis. Strategy purity forbids calling any
+backtest library inside strategy files. hidden-lookahead replay proves point-in-time
+causal replay; it does not prove out-of-sample validity or freedom from in-sample
+fitting.
 
-The reason is semantic, not just implementation preference:
+## Retired surfaces
 
-- The project engine reports linear signed per-trade activity sums.
-- VectorBT Pro portfolio returns are NAV-path portfolio returns.
-- Evaluation annualized metrics use full-grid portfolio returns from
-  `portfolio_path`, including flat/no-position bars, and completed runs emit an
-  `annualization_cadence` warning on configured-cadence mismatches or
-  insufficient observed spacing.
-- Annualized/risk metrics (`annualized_return`, `volatility`, `sharpe`,
-  `sortino`, and `calmar`) are emitted only when `annualization_cadence.status`
-  is `ok` and `return_sample_count` meets the minimum return-sample floor,
-  `[metrics].min_annualized_samples` (default `20`). Any non-ok cadence status or
-  insufficient samples null that annualized/risk metrics family without nulling
-  core economics such as `total_return`, `ending_value`, `max_drawdown`,
-  `return_sample_count`, or `worst_period_return`. Sortino uses downside
-  semivariance over the full return sample and returns `None`, not infinity,
-  when undefined.
-- Those objects only match in narrow cases.
-- Funding-aware evaluation semantics belong to the project perp ledger, not to
-  VectorBT Pro.
-- Engine funding is linear trade-activity funding folded into validation
-  `net_return`; evaluation funding is NAV-ledger cashflow through
-  `project_perp_ledger_v1`. Fillable crypto perp windows with no funding events
-  in the open interval accrue zero funding; flagged funding rows still fail
-  when malformed, conflicting, or mark-misaligned.
-- hidden-lookahead replay proves point-in-time causal replay; it does not prove
-  out-of-sample validity and it does not prove freedom from in-sample fitting.
-- Strategy purity still forbids calling VectorBT Pro inside strategy files.
+The following described surfaces **no longer exist** and are recorded here only so
+older references resolve:
 
-VectorBT Pro evaluation output is named as portfolio/path evidence, not as a
-project engine validation decision. Evaluation is not validation and does not authorize promotion, paper trading, or live trading. Benchmark-relative metrics are evidence only; configured benchmarks add passive and excess return evidence
-without ranking or promotion authority.
+- *(retired)* **VectorBT Pro evaluation backend** — evaluation no longer routes
+  non-funding data to VBT; it runs the spine book. `evaluation/vectorbtpro_backend.py`
+  is deleted.
+- *(retired)* **`project_perp_ledger_v1`** — the hand-rolled perp-ledger money-model
+  is gone; crypto-perp funding lives in the one shared book and the metric payload
+  reports `netted_portfolio_book_v1`. `evaluation/project_perp_ledger.py` is deleted.
+- *(retired)* **Single-trade agreement oracle** — `validation/agreement.py` and
+  `validation/vectorbtpro_backend.py` are deleted; the `[agreement_oracle]` config
+  section is rejected. It compared engine `gross_return` against a VBT zero-cost
+  total return and was sound only for a single-trade, close-fill, threshold-free
+  scenario, so it gave no multi-trade verification.
 
-## Evaluation Surface
-
-The evaluation surface is an implemented stateless surface for
-frozen-candidate portfolio/economic/path evidence. It requires a candidate-local
-`evaluation.toml`, calls the data-kind-specific portfolio backend with explicit
-assumptions, and returns `EvaluationRunResult`.
-The checked-in example config is
-`examples/simple_momentum/evaluation.toml`.
-
-Detailed trace artifacts are Parquet only through `pyarrow`:
-
-| Artifact | Contents |
-| --- | --- |
-| `tables/portfolio_path.parquet` | portfolio value, period return, and drawdown traces by scenario |
-| `tables/trades.parquet` | trade traces by scenario |
-| `tables/target_positions.parquet` | target-position entry/exit events by scenario; this is target schedule evidence, not realized broker position state |
-| `tables/target_exposure_summary.parquet` | target exposure decision counts and target round-trip turnover by scenario and asset |
-| `tables/funding_cashflows.parquet` | funding cashflow trace rows by scenario; empty but schema-valid for non-funding evaluations |
-
-The companion JSON artifacts include `evaluation_metrics.json`,
-`scenario_summary.json`, `data_manifest.json`, `evaluation_manifest.json`,
-`environment.json`, and `notes.md`. There is no JSONL fallback path for
-evaluation row snapshots or traces. Evaluation also writes
-`audit/input_rows/{safe_window}-{hash}.parquet` normalized row snapshots and
-`audit/decision_records/{safe_window}-{hash}.jsonl` decision records so
-completed metrics can be traced through the artifact package.
-`evaluation_metrics.json` and `evaluation_manifest.json` include the advisory
-annualization cadence summary.
-
-## Agreement Oracle
-
-The project adapter lives at:
-
-```text
-src/quant_strategies/validation/vectorbtpro_backend.py
-```
-
-It builds `Portfolio.from_signals(...)` with close prices, long/short signal
-frames, `fees`, `slippage`, `size_type = "valuepercent"`, `cash_sharing = True`,
-`group_by = True`, and `init_cash = 100.0`.
-
-The agreement logic lives at:
-
-```text
-src/quant_strategies/validation/agreement.py
-```
-
-The oracle:
-
-- runs only when `[agreement_oracle] enabled = true`;
-- reuses the engine verdict run rather than re-screening with VectorBT Pro;
-- zeroes costs for the VectorBT Pro comparison;
-- compares engine `gross_return` against VectorBT Pro zero-cost total return;
-- is sound only for a single-trade, close-fill, threshold-free scenario;
-- reports `skipped` when the scenario is outside that regime;
-- reports `unavailable` when VectorBT Pro cannot be imported;
-- fails validation only when an applicable comparison diverges beyond tolerance.
-
-The adapter rejects unsupported semantics such as non-`open` intent, non-project
-instrument ontology, `flat` target, non-`target_weight` sizing, leveraged target
-weight above `1.0`, non-close fills, and threshold exit policies.
-
-The research evaluation surface supports `crypto_perp_funding` through the
-project-owned `project_perp_ledger_v1` ledger. Funding-aware scenarios do not
-use VectorBT Pro `cash_dividends`; that contract was rejected because perp
-funding is a position cashflow over `entry_time < funding_timestamp <= exit_time`,
-not an asset dividend stream. VectorBT Pro remains the evaluation backend for
-non-funding scenarios.
-
-## Correct Use
-
-Within `quant_strategies`, use VectorBT Pro through the evaluation surface when
-the question is portfolio or research evaluation:
-
-- "How sensitive is the strategy to fee/slippage assumptions?"
-- "What does the NAV path, drawdown, and trade distribution look like?"
-- "Does a simple one-trade price-path case agree with the project engine?"
-
-For project artifacts, preserve the boundary:
-
-- keep quick run and validation verdicts on the project engine;
-- keep strategy files pure and free of VectorBT Pro calls;
-- record data, config, signal arrays, sizing, costs, and portfolio settings;
-- label VectorBT Pro metrics as NAV/portfolio metrics;
-- do not compare VectorBT Pro total return to engine `net_return` unless the
-  metric semantics have been made equivalent.
-
-## Incorrect Use
-
-Do not use VectorBT Pro as:
-
-- a proof that a strategy has alpha;
-- a replacement for data provenance and anti-lookahead checks;
-- the validation verdict source;
-- a candidate generation, parameter search, ranking, or stopping-rule engine;
-- multi-trade confidence for the project engine's linear activity sums;
-- a hidden dependency required for quick runs;
-- an excuse to put data loading, simulation, or artifact writing inside
-  strategy files.
+Evaluation trace artifacts (still produced, now from the spine book) are documented
+in [`docs/foundation-surfaces.md`](foundation-surfaces.md) and
+[`docs/consumer/reference.md`](consumer/reference.md).

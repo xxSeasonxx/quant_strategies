@@ -18,12 +18,22 @@ S2 mechanical evidence validation -> audit retained-candidate evidence integrity
 S3 research evaluation            -> stateless frozen-candidate portfolio/economic/path evidence
 ```
 
+Foundation contract (portfolio-book-spine, 2026-06-10): the strategy declares a
+**target book** (`generate_decisions -> Sequence[TargetDecision]`: standing, signed
+weight-of-NAV targets, idempotent, optional declared `RiskRule`). The engine folds
+it into **one causal single-account netted portfolio book** on every surface
+(`netted_portfolio_book_v1`); the **NAV path is the single scored object**; an
+envelope breach is a typed **fail-closed** `FeasibilityVerdict` (`succeeded` = feasible
+and completed). The per-trade ledger is a derived attribution view. VBT +
+`project_perp_ledger` + the single-trade agreement oracle are retired.
+
 Current quick-run state:
 
 - **S4** `quant-strategies run config.toml` and `quant_strategies.runner.run_config`
   return `RunResult`.
-- **S5** Completed quick runs expose typed `RunResult.economics` for trade-level
-  after-cost evidence.
+- **S5** Completed, feasible quick runs expose `RunResult.foundation` (authoritative
+  scored NAV book) and the derived `RunResult.economics` attribution ledger; a
+  fail-closed breach is on `RunResult.feasibility` with `failure_stage="feasibility"`.
 - **S6** Quick-run configs support explicit causality policy:
   `off`, `emitted`, `strict`, `focused`, or `micro`.
 - **S7** Committed candidate quick-run configs declare an explicit causality policy;
@@ -108,47 +118,41 @@ Keep these facts current:
 - **O13** Evaluation evidence does not authorize promotion, paper trading, or live
   trading.
 
-### 2.3 Live Portfolio Feasibility Issues
+### 2.3 Live Portfolio Feasibility Issues — RESOLVED by portfolio-book-spine
 
-Recent quick-run usage exposed a gap between trade-ticket Train diagnostics and
-live-shaped portfolio evidence. These are active issues to keep visible; this
-section records the problems only, not a proposed design.
+These issues recorded the gap between trade-ticket Train diagnostics and
+live-shaped portfolio evidence. The **portfolio-book-spine** change (2026-06-10)
+resolves the cluster at the root — the atomic unit is now one causal netted
+portfolio book, not an isolated trade:
 
-Observed issues:
+- **Signal-stacking / implicit leverage (O14, O17, O20, O22)** — RESOLVED. Targets
+  are idempotent signed weights of NAV; re-emitting the current target trades
+  nothing and same-symbol targets net to the latest value, so additive stacking is
+  **structurally inexpressible**. Returns can no longer come from stacked gross.
+- **Un-netted / per-ticket exposure (O18)** — RESOLVED. The book keys a running
+  signed quantity per symbol on one account; gross/net are measured on the netted,
+  marked book, so portfolio-level exposure is bounded by construction, not by
+  per-ticket suppression.
+- **Two evidence classes / missing portfolio path (O15, O16, O19)** — RESOLVED. The
+  NAV book is the single authoritative scored object; there is no separate
+  trade-ticket evidence class. A breach is a typed fail-closed verdict
+  (`failure_stage="feasibility"`, `succeeded=False`), not a completed run with a
+  silently-missing foundation, so a quick run can no longer be misread as
+  live-shaped when it is not.
+- **Leverage budget fail-open (O15 root) / comparability (O21)** — RESOLVED. The
+  gross+net leverage budget is operator-frozen and **fails closed** with an observed
+  exposure; the book is never clamped, so a levered intent is non-scoreable rather
+  than silently rescaled, and the leverage contract is explicit in the verdict.
 
-- **O14** A strategy can emit overlapping target-weight tickets whose active gross
-  exposure materially exceeds the apparent per-ticket size.
-- **O15** Trade-ledger quick-run economics can complete and look stable while the
-  portfolio-foundation NAV path is unavailable because active gross exposure
-  exceeds the configured foundation limit.
-- **O16** This creates two different evidence classes for the same candidate:
-  completed trade-ticket evidence and missing portfolio-path evidence. A human or
-  downstream loop can misread the completed quick run as live-shaped evidence if
-  the foundation blocker is not surfaced prominently.
-- **O17** Repeated signals can stack exposure when the strategy emits another
-  ticket instead of expressing a total intended portfolio allocation. This can
-  turn a signal-strength finding into unintended leverage.
-- **O18** Per-symbol or per-ticket suppression does not necessarily bound total
-  portfolio exposure. Portfolio-level gross exposure can still exceed the live
-  risk budget even when individual ticket sizes are small and individually
-  valid.
-- **O19** A candidate can pass Train-style trade-count, profitability, and
-  cost-stress diagnostics while remaining inadmissible for live portfolio
-  consideration because portfolio exposure, NAV-path drawdown, and leverage
-  utilization are not yet valid evidence.
+Residual (named follow-ons, plug into the spine's market-model interface; tracked
+in the change's Impact §, several need `quant-data` upstream work):
 
-Leverage-specific issues:
-
-- **O20** Leverage is currently easy to introduce implicitly through stacked
-  tickets, not only through an explicit leverage parameter. This makes the actual
-  risk contract hard to read from strategy params alone.
-- **O21** A levered candidate is not directly comparable to an unlevered candidate
-  unless the evidence records the leverage contract and observed exposure path.
-- **O22** Without explicit leverage semantics, increased returns can reflect
-  increased gross exposure rather than better signal quality.
-- **O23** Missing or implicit margin, liquidation-buffer, funding-stress, and
-  drawdown-under-leverage evidence blocks live-trading interpretation even when
-  the Train trade ledger completes.
+- **O23** Asset-class financing realism beyond crypto-perp funding (equity
+  short-borrow + dividends, FX rollover/carry, margin financing on gross > 1) is
+  still upstream. The spine guards against minting free leverage in the meantime: a
+  net exposure > 1.0 for an asset class **without** modeled financing is a
+  fail-closed `unfinanced_leverage` verdict (crypto-perp funding is modeled, so it
+  is exempt). Capacity/ADV/impact and intrabar OHLC stop fills remain follow-ons.
 
 ## 3. Locked Direction
 
@@ -162,7 +166,9 @@ Current locked direction:
 - **L3** Validation is mechanical evidence validation, advisory, and never promotion
   authority.
 - **L4** Evaluation is stateless frozen-candidate portfolio/economic/path evidence.
-- **L5** Engine metrics are linear signed per-trade results, not NAV.
+- **L5** *(superseded by portfolio-book-spine, 2026-06-10)* The scored object is the
+  single netted-book **NAV path**, not a linear per-trade sum. The per-trade ledger
+  is a derived attribution view of that one book walk.
 - **L6** Generated artifacts are evidence, not truth.
 - **L7** `quant_autoresearch` owns generation, search memory, variant ranking,
   stopping rules, and iteration decisions.
@@ -173,7 +179,10 @@ Current locked direction:
 
 Preserve these contained residuals unless they become active work:
 
-- **R1** `net_return` dual semantics
+- **R1** *(resolved by portfolio-book-spine, 2026-06-10)* `net_return` dual semantics
+  — there is now one model of money; the per-trade `net_return` is the book walk's
+  realized after-cost attribution (`gross + funding − cost`) and reconciles with the
+  NAV path. The retired VBT/perp-ledger second basis is gone.
 - **R2** `_is_true_flag` coercion
 - **R3** `not_evaluated` soft-stop
 - **R4** causality's missing-`available_at` fallback
@@ -187,9 +196,11 @@ Preserve these contained residuals unless they become active work:
   trade-ledger JSONL. The CLI backstops escaped filesystem errors as clean exit
   `1`. Result-directory/static artifact creation, final artifact writes, and
   `_failure_result` paths are routed to structured `failure_stage` results.
-- **D2 VectorBT Pro agreement residual (low priority):** the optional agreement
-  check is single-trade only. It should not be treated as multi-trade validation
-  confidence unless rebuilt around trade-ledger or path-level comparison.
+- **D2 *(resolved by portfolio-book-spine, 2026-06-10)* VectorBT Pro agreement
+  residual:** the single-trade agreement oracle and the VBT cross-check are retired;
+  the netted-book spine is the single accounting model on every surface. An
+  independent cross-check (a second re-implementation that must agree, generalized
+  from single-trade to the netted book) is a named follow-on, not a current surface.
 - **D3 Candidate-local output residual (low priority):** validation and evaluation
   configs still anchor `output.results_dir` beside the config so
   candidate-local workspaces keep working. Revisit rejecting outputs under

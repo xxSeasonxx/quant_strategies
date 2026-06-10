@@ -20,17 +20,18 @@ Import only these. Everything else (including `quant_strategies.engine` and any
 |---|---|---|
 | `quant_strategies.runner.run_config` | function | Run the quick-run surface |
 | `quant_strategies.runner.RunResult` / `RunOutcome` / `RunEvidence` / `RunCausalityEvidence` | dataclass | Quick-run result types |
-| `quant_strategies.runner.RunEconomics` / `RunTrade` | dataclass | Typed quick-run trade ledger + summary/slice economics |
+| `quant_strategies.runner.RunEconomics` / `RunTrade` | dataclass | Typed per-trade attribution ledger (derived from the book) + summary/slice economics |
 | `quant_strategies.validation.run_validation` | function | Run the validation surface |
 | `quant_strategies.validation.ValidationRunResult` | dataclass | Validation result type |
 | `quant_strategies.evaluation.run_evaluation` | function | Run the evaluation surface |
 | `quant_strategies.evaluation.EvaluationRunResult` | dataclass | Evaluation result type |
 | `quant_strategies.evaluation.FoldReturnSeries` / `FoldScenarioMetrics` | dataclass | Typed per-fold OOS return series + summary scalars on the evaluation result |
 | `quant_strategies.evaluation.EvaluationConfig` / `EvaluationScenarioConfig` / `BenchmarkConfig` | model | Evaluation config models (for typed construction) |
-| `quant_strategies.decisions.StrategyDecision` | model | The decision your strategy returns |
+| `quant_strategies.decisions.TargetDecision` | model | The target-book decision your strategy returns |
+| `quant_strategies.decisions.RiskRule` | model | Optional declared engine-enforced price-path exit |
 | `quant_strategies.decisions.InstrumentRef` (alias `DecisionInstrument`) | model | Instrument reference |
-| `quant_strategies.decisions.PositionTarget` / `ExitPolicy` / `ObservationRef` / `DecisionIntent` | model | Decision components |
-| `quant_strategies.decisions.{InstrumentKind,Direction,DecisionAction,SizingKind}` | literal type | Allowed enum values |
+| `quant_strategies.decisions.ObservationRef` | model | Declared observation evidence |
+| `quant_strategies.decisions.InstrumentKind` | literal type | Allowed instrument-kind enum values |
 | `quant_strategies.decisions.strategy_purity_violations` | function | Static purity self-check (returns a tuple of violations; `()` is clean) |
 | `quant_strategies.decisions.validate_strategy_params` | function | Helper to apply a strategy's `validate_params` contract |
 | `quant_strategies.decisions.validate_decision_output` | function | Helper to validate a list of decisions |
@@ -58,7 +59,7 @@ A strategy file must expose:
 
 | Callable | Required by | Signature | Contract |
 |---|---|---|---|
-| `generate_decisions` | all surfaces | `(rows: Sequence[Mapping], params: Mapping) -> list[StrategyDecision]` | Pure; reads only `rows`/`params`; no I/O, engines, clocks, RNG, or loops with side effects |
+| `generate_decisions` | all surfaces | `(rows: Sequence[Mapping], params: Mapping) -> Sequence[TargetDecision]` | Pure; reads only `rows`/`params`; emits the full target-book timeline up front; no I/O, engines, clocks, RNG, or loops with side effects |
 | `validate_params` | validation, evaluation (optional for quick run) | `(params: Mapping) -> Mapping` | Returns normalized params or raises on invalid input |
 
 Plus a module docstring with: **Source / provenance** (specific), **Market
@@ -69,30 +70,37 @@ rationale**, **Required observables**, **Decision rule**, **Assumptions**,
 
 ## Decision schema
 
-`StrategyDecision` and its components are frozen, strict Pydantic models with
-`extra="forbid"`. Enum (Literal) values:
+`TargetDecision` and its components are frozen, strict Pydantic models with
+`extra="forbid"`. The decision is a **standing, signed weight-of-NAV target** per
+instrument; there is no `open`/`close`/`direction` enum, no sizing-kind, and no
+welded exit policy. Enum (Literal) values:
 
 | Type | Allowed values |
 |---|---|
 | `InstrumentKind` | `equity_or_etf`, `fx_pair`, `crypto_perp` |
-| `Direction` | `long`, `short`, `flat` |
-| `SizingKind` | `target_weight` |
-| `DecisionAction` | `open` |
 
-### `StrategyDecision`
+### `TargetDecision`
 
 | Field | Type | Default | Rule |
 |---|---|---|---|
 | `strategy_id` | `str` | — | non-empty |
 | `instrument` | `InstrumentRef` | — | — |
-| `decision_time` | `datetime` | — | timezone-aware |
+| `decision_time` | `datetime` | — | timezone-aware; the bar the target becomes effective |
 | `as_of_time` | `datetime` | — | timezone-aware; **`as_of_time <= decision_time`** |
-| `target` | `PositionTarget` | — | — |
-| `exit_policy` | `ExitPolicy` | — | — |
+| `target` | `float` | — | finite signed weight of NAV: `+` long, `−` short, `0` = flat/close; standing + idempotent |
+| `risk_rule` | `RiskRule \| None` | `None` | optional engine-enforced price-path exit on the net position |
 | `observations` | `tuple[ObservationRef, ...]` | `()` | declare the rows the rule used |
-| `intent` | `DecisionIntent` | `action="open"` | — |
 | `metadata` | `Mapping[str, Any]` | `{}` | must be JSON-compatible; frozen on construction |
 | `decision_id` | `str \| None` | auto | derived deterministically from content if `None` |
+
+A target is **standing** (holds until the next decision for that instrument), sizes
+to a held **quantity** at its decision bar (weight drifts with the mark between
+decisions — hold a constant weight by emitting explicit rebalancing decisions), and
+is **idempotent** (re-emitting the current target trades nothing). Same-symbol
+targets net to the latest value; additive stacking is structurally inexpressible.
+A `target` whose intended gross/net exceeds the operator-frozen leverage budget is a
+valid decision — it is handled by the fail-closed feasibility verdict, not rejected
+as an unsupported shape.
 
 ### `InstrumentRef`
 
@@ -101,25 +109,21 @@ rationale**, **Required observables**, **Decision rule**, **Assumptions**,
 | `kind` | `InstrumentKind` | one of the enum values |
 | `symbol` | `str` | non-empty |
 
-### `PositionTarget`
+### `RiskRule`
+
+An optional declared price-path exit the engine enforces causally on the net
+position, flattening the instrument at the bar a threshold is crossed and **latching
+it flat** until the strategy emits a new (different) target. Thresholds are
+**fractions of the position's entry mark** (e.g. `stop_loss=0.05` = 5% adverse), not
+bps, and are evaluated against the configured end-of-bar fill price (`close` or
+`quote`), not as intrabar OHLC barrier orders. Data/time exits (signal reversal,
+fixed hold horizon) are expressed as explicit `target=0` decisions, not `RiskRule`s.
 
 | Field | Type | Default | Rule |
 |---|---|---|---|
-| `direction` | `Direction` | — | — |
-| `sizing_kind` | `SizingKind` | `target_weight` | — |
-| `size` | `float` | — | finite, `>= 0`; `flat` ⇒ `0`; `long`/`short` ⇒ `> 0` |
-
-### `ExitPolicy`
-
-Stop / take-profit / trailing values are **bar-sampled against the configured fill
-price**, not intrabar OHLC barrier orders.
-
-| Field | Type | Default | Rule |
-|---|---|---|---|
-| `max_hold_bars` | `int` | — | `>= 1` |
-| `stop_loss_bps` | `float \| None` | `None` | if set: finite, `> 0` |
-| `take_profit_bps` | `float \| None` | `None` | if set: finite, `> 0` |
-| `trailing_stop_bps` | `float \| None` | `None` | if set: finite, `> 0` |
+| `stop_loss` | `float \| None` | `None` | if set: finite, `> 0` (fraction of entry mark) |
+| `take_profit` | `float \| None` | `None` | if set: finite, `> 0` (fraction of entry mark) |
+| `trailing` | `float \| None` | `None` | if set: finite, `> 0` (fraction of entry mark) |
 
 ### `ObservationRef`
 
@@ -166,16 +170,16 @@ strategy_path, strategy_id            # top-level
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
          foundation_enabled, foundation_subwindows, foundation_trial_count,
-         foundation_benchmark_sharpe, foundation_cost_stress_multiplier,
-         foundation_max_gross_exposure
+         foundation_benchmark_sharpe, foundation_cost_stress_multiplier
 ```
 
 `foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
 when omitted, foundation subwindow `dsr` values are null with a
 `missing_trial_count` warning.
-`foundation_max_gross_exposure` defaults to `1.0` and is bounded to values
-`>= 1.0`; it controls only the quick-run portfolio foundation's active gross
-target exposure limit.
+The portfolio **leverage budget (gross and net) is operator-frozen**, not an
+agent-editable `[output]` key — there is no `foundation_max_gross_exposure` field.
+Intended exposure beyond the budget is non-scoreable via the feasibility verdict
+(`leverage_budget_breach`), never clamped to fit.
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
 engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary`
@@ -211,8 +215,12 @@ strategy_path, strategy_id, verdict_source?   # top-level
 [output] results_dir
 [search_pressure] prior_search                # e.g. "none"
 [mechanical_thresholds]?                       # optional
-[agreement_oracle]?                            # optional opt-in VBT single-trade check
 ```
+
+`verdict_source` accepts only `"engine"` (the netted-book spine). The
+`[agreement_oracle]` section is **removed** — the VectorBT Pro cross-check and the
+single-trade agreement oracle are retired, and a config that still sets it is
+rejected.
 
 `crypto_perp_funding` additionally requires `close`, `funding_timestamp`,
 `funding_rate`, `has_funding_event` observations per decision. `strategy_path` and
@@ -262,19 +270,27 @@ the run completed and `failure_stage is None`.
 | `message` | `str` | human-readable summary |
 | `outcome` | `RunOutcome` | terminal status (below) |
 | `evidence` | `RunEvidence` | evidence quality (below) |
-| `economics` | `RunEconomics \| None` | per-trade after-cost economics, populated on completed engine runs even under compact artifact profiles |
-| `foundation` | `RunPortfolioFoundation \| None` | diagnostic Train portfolio-return foundation metrics, populated on completed engine runs when enabled |
-| `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` |
+| `economics` | `RunEconomics \| None` | per-trade attribution ledger **derived from the book walk**, populated on completed engine runs even under compact artifact profiles |
+| `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics); populated on a completed, feasible run when `foundation_enabled` |
+| `feasibility` | `FeasibilityVerdict \| None` | typed fail-closed verdict; `None` when the run failed before the book was built; on a breach carries `reason` + observed exposure and maps to a `feasibility` `failure_stage` |
+| `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` — i.e. **feasible and completed**; a feasibility breach sets `failure_stage="feasibility"` |
 
 **`RunOutcome`**: `completed` (bool), `failure_stage` (str|None), `assessment_status`
 (str; diagnostic, e.g. `runner_failed` on failure), `promotion_eligible` (bool;
 always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 `unknown`).
 
+**`FeasibilityVerdict`**: `feasible` (bool), `reason` (str|None — one of
+`leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
+`insufficient_samples`), `observed_gross` (float|None), `observed_net` (float|None),
+`detail` (str|None). `.payload()` returns the JSON-safe dict. The book is never
+clamped, normalized, or collapsed into an untyped `None` on a breach.
+
 **`RunEvidence`**: `replayable_from_artifacts` (bool|None), `data_availability_status`
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
 `causality` (`RunCausalityEvidence`), `focused_causality`
-(`RunFocusedCausalityEvidence`), `warnings` (tuple[str, …]).
+(`RunFocusedCausalityEvidence`), `causality_admissible` (bool; reads existing
+causality evidence — surfaced, not yet a scoreability gate), `warnings` (tuple[str, …]).
 **`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict` / `focused` / `micro`),
 `verified`, `deterministic_replay_verified`, `emitted_replay_verified`,
 `strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
@@ -295,19 +311,24 @@ Train/autoresearch quick runs, prefer micro replay fields on
 
 #### `RunEconomics` / `RunTrade`
 
-`RunEconomics` is the in-process quick-run economics accessor. It is populated after
-completed engine evaluation, independent of `artifact_profile`, and mirrors the same
-trade-unit sample written to `summary.json` / `diagnostics.json`. It does **not** expose a
-per-period return series, NAV path, or significance statistics.
+`RunEconomics` is the in-process quick-run per-trade ledger accessor. It is a
+**derived attribution view** of the single portfolio book walk (each record is a
+completed netted-book round-trip), populated after completed engine evaluation,
+independent of `artifact_profile`, and mirrors the same sample written to
+`summary.json` / `diagnostics.json`. It is **not** an independent scored number —
+the foundation NAV path is the scored object; this ledger is for alpha attribution /
+information-coefficient analysis. It does not expose a per-period return series, NAV
+path, or significance statistics.
 
 | Field | Type | Notes |
 |---|---|---|
-| `schema_version` / `basis` | `str` | Same schema/basis markers as `summary.json["economic_metrics"]` |
-| `trades` | `tuple[RunTrade, ...]` | Engine trade ledger in engine order |
+| `schema_version` / `basis` | `str` | Same schema/basis markers as `summary.json["economic_metrics"]`; `basis` is `portfolio_book_round_trip_attribution` |
+| `trades` | `tuple[RunTrade, ...]` | Per-trade attribution ledger (one record per netted-book round-trip) |
 | `trade_count`, win/loss/flat counts | `int` | Summary scalar counts |
-| `hit_rate`, `average_trade_net`, `average_win_net`, `average_loss_net`, `profit_factor` | `float \| None` | Undeflated trade-unit scalars |
-| `cost_share_of_abs_gross`, `funding_share_of_abs_gross` | `float \| None` | Cost/funding shares of absolute gross trade activity |
-| `by_symbol`, `by_direction`, `by_exit_reason` | `dict[str, dict]` | Same economic slice groupings as diagnostics |
+| `hit_rate`, `average_trade_net`, `average_win_net`, `average_loss_net`, `profit_factor` | `float \| None` | Undeflated per-trade scalars |
+| `cost_share_of_abs_gross`, `funding_share_of_abs_gross` | `float \| None` | Cost/funding shares of absolute gross attribution |
+| `sum_gross_return`, `sum_funding_return`, `sum_cost_return`, `sum_net_return` | `float` | Ledger totals; reconcile with the NAV path's realized PnL |
+| `by_symbol`, `by_direction`, `by_exit_reason` | `dict[str, dict]` | Economic slice groupings |
 | `win_loss_distribution` | `dict[str, object]` | Largest/median/sum win-loss slice payload |
 | `summary_payload()` | `dict[str, object]` | Dict equal to `summary.json["economic_metrics"]` |
 | `slices_payload()` | `dict[str, object]` | Dict equal to diagnostic `economic_slices` |
@@ -315,26 +336,29 @@ per-period return series, NAV path, or significance statistics.
 `RunTrade` fields: `symbol`, `side`, `weight`, tz-aware `decision_time` /
 `entry_time` / `exit_time`, `entry_price`, `exit_price`, `exit_reason`,
 `gross_return`, `funding_return`, `cost_return`, `net_return`, and `decision_id`.
-`net_return` is the engine after-cost value (`gross_return + funding_return -
-cost_return`) for that trade.
+Each is the realized after-cost attribution of one round-trip on the netted single
+account, so `net_return = gross_return + funding_return − cost_return` and the
+ledger reconciles with the NAV path — one model of money, not two.
 
 #### `RunPortfolioFoundation`
 
-`RunPortfolioFoundation` is the in-process quick-run portfolio-return foundation
-accessor. It is diagnostic Train evidence only. It is separate from
-`RunEconomics`: the latter remains a trade-unit engine ledger, while the
-foundation carries compact full-Train and per-subwindow portfolio-return
-metrics for downstream scoring. The default scenarios are `realistic_costs` and
-`cost_stress`; full per-period return traces are not included in default
-artifacts.
+`RunPortfolioFoundation` is the in-process **authoritative scored portfolio book**.
+Its NAV path is the single object Train scoring statistics derive from; it is not a
+diagnostic side-channel. It is populated only on a completed, **feasible** run when
+`foundation_enabled`. It carries compact full-Train and per-subwindow metrics (over
+**at-risk bars**) plus the book walk (`ledger`) the derived per-trade attribution is
+reconstructed from. The default scenarios are `realistic_costs` and `cost_stress`;
+full per-period return traces are not included in default artifacts.
 
-Important payload fields include `schema_version`, `basis`, `evidence_class`,
-and `scenarios`. Each scenario reports a compact `full_train` metric record and
-subwindow metrics such as `return_sample_count`, `mean_return`,
-`return_volatility`, `effective_sample_size`, `sharpe`,
-`sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, `dsr`,
-`total_return`, `max_drawdown`, `closed_trade_count`, and
-`max_symbol_concentration`.
+Top-level payload fields are `schema_version`
+(`quant_strategies.quick_run.portfolio_foundation/v2`), `basis`
+(`quick_run_netted_portfolio_book`), `evidence_class`, and `scenarios`. Each scenario
+reports a typed `feasibility` payload, a compact `full_train` metric record, and
+subwindow metrics such as `return_sample_count`, `mean_return`, `return_volatility`,
+`effective_sample_size`, `sharpe`, `sharpe_standard_error`, `skew`, `kurtosis`,
+`dsr_inputs`, `dsr`, `total_return`, `max_drawdown`, `closed_trade_count`,
+`max_symbol_concentration`, and the live `max/mean_gross_utilization` /
+`max/mean_net_utilization` exposure series.
 When trial-count metadata is missing, `dsr` is `None` and the subwindow warning
 list includes `missing_trial_count`. `dsr_inputs` includes a `formula` field so
 consumers can pin the DSR threshold convention.
@@ -345,6 +369,7 @@ Scenario payload fields:
 |---|---|---|
 | `scenario_id` | `str` | `realistic_costs` or `cost_stress` |
 | `cost_multiplier` | `float` | multiplier applied to configured fee + slippage bps |
+| `feasibility` | `dict` | typed verdict payload: `feasible`, `reason`, `observed_gross`, `observed_net`, `detail` |
 | `full_train` | `dict` | compact metric record for the full Train scoring path |
 | `subwindow_count` | `int` | configured `foundation_subwindows` |
 | `min_dsr` / `median_dsr` | `float \| None` | subwindow DSR aggregates; not the keep-rule score |
@@ -362,9 +387,11 @@ Metric record fields (`full_train` and each subwindow):
 | `start_time` / `end_time` | ISO datetime | metric window bounds |
 | `total_return` | `float \| None` | full Train: ending NAV / starting NAV - 1; subwindow: compounded endpoint-assigned period returns |
 | `max_drawdown` | `float \| None` | local peak-to-trough drawdown, negative or zero |
-| `closed_trade_count` | `int` | trades counted by exit time |
-| `max_symbol_concentration` | `float` | max active gross target-weight concentration by symbol |
-| `return_sample_count` | `int` | finite fixed-frequency portfolio period returns |
+| `closed_trade_count` | `int` | netted-book round trips (a net position returning to flat), counted by exit time |
+| `max_symbol_concentration` | `float` | max symbol concentration on the netted, marked book |
+| `max_gross_utilization` / `mean_gross_utilization` | `float` | live mark-to-market gross-exposure series (reported risk signal, not the fail-closed check) |
+| `max_net_utilization` / `mean_net_utilization` | `float` | live mark-to-market net-exposure series |
+| `return_sample_count` | `int` | finite period returns over **at-risk** (capital-deployed) bars, not a zero-padded calendar |
 | `mean_return` | `float \| None` | arithmetic mean of the period-return sample |
 | `return_volatility` | `float \| None` | sample standard deviation of period returns |
 | `effective_sample_size` | `float \| None` | lag-one autocorrelation adjustment, capped to `[1, sample_count]` |
@@ -392,13 +419,20 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
 
 ```json
 {
-  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v1",
-  "basis": "quick_run_lightweight_portfolio_path",
+  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
+  "basis": "quick_run_netted_portfolio_book",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
   "scenarios": {
     "realistic_costs": {
       "scenario_id": "realistic_costs",
       "cost_multiplier": 1.0,
+      "feasibility": {
+        "feasible": true,
+        "reason": null,
+        "observed_gross": 0.25,
+        "observed_net": 0.25,
+        "detail": null
+      },
       "full_train": {
         "window_id": "full_train",
         "start_time": "2024-01-01T00:00:00Z",
@@ -407,6 +441,10 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
         "max_drawdown": -0.01,
         "closed_trade_count": 12,
         "max_symbol_concentration": 1.0,
+        "max_gross_utilization": 0.27,
+        "mean_gross_utilization": 0.21,
+        "max_net_utilization": 0.27,
+        "mean_net_utilization": 0.21,
         "return_sample_count": 1440,
         "mean_return": 0.00002,
         "return_volatility": 0.001,
@@ -450,13 +488,20 @@ each scenario:
 
 ```json
 {
-  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v1",
-  "basis": "quick_run_lightweight_portfolio_path",
+  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
+  "basis": "quick_run_netted_portfolio_book",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
   "scenarios": {
     "realistic_costs": {
       "scenario_id": "realistic_costs",
       "cost_multiplier": 1.0,
+      "feasibility": {
+        "feasible": true,
+        "reason": null,
+        "observed_gross": 0.25,
+        "observed_net": 0.25,
+        "detail": null
+      },
       "full_train": {
         "...": "same metric shape as summary"
       },
@@ -477,6 +522,10 @@ each scenario:
           "max_drawdown": -0.01,
           "closed_trade_count": 3,
           "max_symbol_concentration": 1.0,
+          "max_gross_utilization": 0.27,
+          "mean_gross_utilization": 0.21,
+          "max_net_utilization": 0.27,
+          "mean_net_utilization": 0.21,
           "return_sample_count": 240,
           "mean_return": 0.00002,
           "return_volatility": 0.001,
@@ -559,7 +608,7 @@ so they match the on-disk `period_return` trace.
 | `timestamps` | `np.ndarray` | `datetime64[ns]` (naive UTC), strictly increasing, aligned to `values` |
 | `values` | `np.ndarray` | `float64` per-period returns (net of costs) |
 | `periods_per_year` | `float` | the config's `metrics.annualization_periods_per_year` |
-| `per_symbol` | `Mapping[str, FoldReturnSeries] \| None` | `None` for the current grouped cash-shared backends (no per-symbol return path is computed) |
+| `per_symbol` | `Mapping[str, FoldReturnSeries] \| None` | `None`: the single shared book is one cash-shared account (no independent per-symbol return path is computed) |
 
 #### `FoldScenarioMetrics`
 
@@ -591,7 +640,8 @@ Stages treated as **data failures** (CLI exit `3`): `data_load`, `data_readiness
 
 Other quick-run stages you may see in `failure_stage`: `config_load`,
 `artifact_initialization`, `strategy_execution` (sub-stage `decision_generation`),
-`causality`, `request_build`, `engine_evaluation`, `artifact_write`.
+`causality`, `request_build`, `engine_evaluation`, `feasibility` (a fail-closed
+envelope breach; read `RunResult.feasibility`), `artifact_write`.
 
 ---
 
@@ -603,7 +653,7 @@ Artifacts are evidence to inspect, not truth by construction. Generated roots
 | Surface | Always written | Notable extras |
 |---|---|---|
 | Quick run | `config.toml`, `strategy_snapshot.py`, `run_manifest.json`, `summary.json` (with `economic_metrics` and optional compact `portfolio_foundation`), `notes.md`, `environment.json`, `data_manifest.json` (when data loads) | `diagnostics.json` (`diagnostic`, includes `economic_slices` and portfolio-foundation matrix); decision records + evidence + engine request + strategy input rows (`full`) |
-| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | per-scenario `agreement_oracle` status; raw `agreement` only when the opt-in oracle ran |
+| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | one verdict backend (the netted-book spine); the retired agreement-oracle `agreement` payload is no longer written |
 | Evaluation | `evaluation_config.toml`, `strategy_snapshot.py`, `data_manifest.json`, `evaluation_metrics.json`, `scenario_summary.json`, `evaluation_manifest.json`, `environment.json`, `notes.md` | Parquet traces under `tables/` (requires `pyarrow`); `audit/` input rows + decision records; `evaluation_failure.json` on failure |
 
 The exhaustive artifact inventory (per-window/per-scenario tables and their

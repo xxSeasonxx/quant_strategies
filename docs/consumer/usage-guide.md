@@ -12,7 +12,8 @@ signatures, schema, and config keys see [reference.md](reference.md).
 
 ## Mental model
 
-One strategy contract, one execution kernel, three evidence surfaces:
+One strategy contract, one execution kernel, **one accounting book**, three
+evidence surfaces:
 
 ```text
 pure strategy.py                 config.toml (run / validation / evaluation)
@@ -21,22 +22,30 @@ generate_decisions(rows, params)        │
         └───────────►  one execution kernel  ◄───────────┐
                        load rows via quant_data (strict)  │
                        → freeze inputs                     │
-                       → typed StrategyDecision[]           │
+                       → typed TargetDecision[] (book)      │
                        → strict causal replay               │
                               │                             │
-              ┌───────────────┼─────────────────┐          │
-              ▼               ▼                  ▼          │
-         quick run        validation         evaluation ────┘
-       trade-activity    windows × stress    portfolio / NAV / path
-       diagnostics       advisory decision   (VectorBT Pro · perp ledger)
+                       one causal netted portfolio book ────┘
+                       (same-symbol netting · financing ·
+                        mark-to-market) → NAV path = the
+                        single scored object; per-trade
+                        ledger is a derived attribution view
+                              │
+              ┌───────────────┼─────────────────┐
+              ▼               ▼                  ▼
+         quick run        validation         evaluation
+       NAV-book Train    windows × stress    portfolio / NAV / path
+       diagnostics       advisory decision   (+ Parquet trace serialization)
 ```
 
-- **Quick run and validation** share the internal engine's trade-activity PnL
-  path — *the number a human audits is the number the validation decision is
-  computed from.*
-- **Evaluation** branches from the same frozen rows and decisions into
-  portfolio/NAV evidence: VectorBT Pro for non-funding data, a project-owned perp
-  ledger for `crypto_perp_funding`.
+- **All three surfaces** consume the same target-book contract and the **same
+  single causal netted portfolio book** (`netted_portfolio_book_v1`). The NAV path
+  is the authoritative scored object; the per-trade ledger is a derived attribution
+  view of that same walk, never an independent scored number — there is one model
+  of money, not two.
+- **Evaluation** runs that same pure book and adds only artifact serialization
+  (pandas/pyarrow Parquet traces) around it. The VectorBT Pro and project
+  perp-ledger backends are **retired**.
 
 You pick the surface by intent. You never wire them together yourself — each reads
 one config and returns one typed result.
@@ -47,27 +56,34 @@ All Python runs in the conda environment `quant`.
 
 ```bash
 conda run -n quant python -m pip install -e .                                  # core
-conda run -n quant python -m pip install -e '.[evaluation]' -c constraints/evaluation.txt  # + evaluation backends
+conda run -n quant python -m pip install -e '.[evaluation]' -c constraints/evaluation.txt  # + evaluation trace serialization
 conda run -n quant quant-strategies --help
 ```
 
-Evaluation writes Parquet traces and runs VectorBT Pro, so it needs the
-`[evaluation]` extra (`pandas`, `pyarrow`, `vectorbtpro`). Quick run and validation
-do not. To verify the whole foundation locally, run `make check` (refreshes the
-editable install, checks the CLI, runs pytest, and runs the real VectorBT Pro
-evaluation smoke).
+Evaluation runs the same pure portfolio book as quick run and validation, and adds
+**Parquet trace serialization**, so it needs the `[evaluation]` extra for `pandas`
+and `pyarrow`. Quick run and validation do not. To verify the foundation locally,
+run `make check` (refreshes the editable install, checks the CLI, runs pytest).
 
 ---
 
 ## The strategy contract
 
-A strategy is **flat, single-file, and pure**. It exposes one required callable
-and one near-required one:
+A strategy is **flat, single-file, and pure**. It declares a **target book** and
+exposes one required callable and one near-required one:
 
 ```python
-generate_decisions(rows, params) -> list[StrategyDecision]   # required
-validate_params(params) -> Mapping                            # required for validate/evaluate
+generate_decisions(rows, params) -> Sequence[TargetDecision]   # required
+validate_params(params) -> Mapping                             # required for validate/evaluate
 ```
+
+A `TargetDecision` is a **standing, signed weight-of-NAV target** for one
+instrument (`+` long, `−` short, `0` = flat/close) that holds until your next
+decision for that symbol changes it. Targets are **idempotent** (re-emitting the
+current target is a no-op), so same-symbol exposure nets by construction and
+repeated signals cannot stack into hidden leverage. You own the whole portfolio:
+allocation, sizing, netting intent, rebalancing, explicit exits, and optional
+declared price-path risk.
 
 ### 1. The module docstring (required)
 
@@ -88,7 +104,7 @@ for a strong provenance example (a published *Journal of Finance* paper with DOI
 ### 2. `generate_decisions(rows, params)` — purity rules
 
 You receive `rows` (an ordered sequence of plain mapping rows, already loaded and
-normalized) and `params` (a mapping). You return a list of `StrategyDecision`.
+normalized) and `params` (a mapping). You return a sequence of `TargetDecision`.
 
 **Allowed:** reading `rows`/`params`, arithmetic, pandas/numpy math over the given
 rows, building decisions.
@@ -114,32 +130,27 @@ Return a normalized mapping or raise on invalid input. Optional for quick runs
 (an absent validator is a passthrough); **required** for validation and
 evaluation. Keep it strict — reject non-finite, out-of-range, or unknown values.
 
-### 4. Authoring a `StrategyDecision`
+### 4. Authoring a `TargetDecision`
 
-`StrategyDecision` is a frozen, strict Pydantic model (`extra="forbid"`). Build it
+`TargetDecision` is a frozen, strict Pydantic model (`extra="forbid"`). Build it
 with the public types from `quant_strategies.decisions`:
 
 ```python
 from quant_strategies.decisions import (
-    StrategyDecision, InstrumentRef, PositionTarget, ExitPolicy, ObservationRef,
+    TargetDecision, InstrumentRef, RiskRule, ObservationRef,
 )
 
-StrategyDecision(
+TargetDecision(
     strategy_id="my_strategy",
     instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
     #   kind ∈ {"equity_or_etf", "fx_pair", "crypto_perp"}
-    decision_time=ts,          # tz-aware datetime; when the decision is made
+    decision_time=ts,          # tz-aware datetime; when the decision is effective
     as_of_time=ts,             # tz-aware; data cutoff. MUST be <= decision_time
-    target=PositionTarget(
-        direction="long",      # "long" | "short" | "flat"
-        sizing_kind="target_weight",   # only target_weight today
-        size=0.25,             # >= 0; long/short require > 0; flat must be 0
-    ),
-    exit_policy=ExitPolicy(
-        max_hold_bars=10,      # >= 1
-        stop_loss_bps=None,    # optional, bar-sampled (see caveat)
-        take_profit_bps=None,
-        trailing_stop_bps=None,
+    target=0.25,               # signed weight of NAV: + long, - short, 0 = flat/close
+    risk_rule=RiskRule(        # optional; engine-enforced price-path exits on the net position
+        stop_loss=0.05,        # fraction of entry mark (5% adverse) — not bps
+        take_profit=None,
+        trailing=None,
     ),
     observations=(             # the rows your rule actually read
         ObservationRef(symbol="SPY", timestamp=prev_ts, field="close", source="strategy_input"),
@@ -150,19 +161,35 @@ StrategyDecision(
 
 Notes that matter:
 
+- **The target is a standing signed weight, not a one-shot ticket.** It holds until
+  your next decision for that instrument changes it. To close, emit `target=0`. To
+  rebalance to a constant weight, emit explicit periodic decisions — weight drifts
+  with the mark between decisions (the engine fixes the held *quantity* at the
+  decision bar, it does not continuously rebalance).
+- **Targets net, they never stack.** Emitting `+0.20` then `+0.30` for one symbol
+  resolves to `+0.30`, not `+0.50`. Re-emitting the standing target trades nothing.
+- **Two kinds of exit.** Anything derivable from **data or time** (signal reversal,
+  fixed hold horizon) is an explicit `target=0` (or new) decision — pure, because
+  you know your own decision times. Anything derivable only from the **realized
+  price path** (stop / take-profit / trailing) is a declared `RiskRule` the engine
+  enforces causally; a strategy may not read future rows to place its own stop.
+- **A fired `RiskRule` latches the instrument flat** until you emit a new (different)
+  target for it — otherwise a standing target would immediately re-enter and the
+  stop would be useless.
+- **Exit thresholds are bar-sampled, not intrabar barriers.** `RiskRule` thresholds
+  are evaluated against the configured end-of-bar fill price (`close` or `quote`),
+  not as intrabar high/low barrier orders. Intrabar OHLC barrier fills are deferred
+  fill realism, not part of this contract.
 - **`observations` are evidence, not decoration.** Validation and evaluation audit
   that every declared observation is causally available (observation `timestamp`
   must be observable by `decision_time`). They default to requiring at least one
   observation and one observed symbol per decision; validation configs can require
   specific fields. Declare the rows your rule depended on.
-- **Exit thresholds are bar-sampled, not intrabar barriers.** `stop_loss_bps`,
-  `take_profit_bps`, and `trailing_stop_bps` are evaluated against the configured
-  fill price (`close` or `quote`) at bar timestamps — not as intrabar high/low
-  barrier orders. Size your `max_hold_bars` and thresholds accordingly.
 - **`decision_id` is auto-derived** from the decision content if you leave it
   `None`. Equal decisions get equal ids.
-- **Keep signal logic free of execution feasibility.** Fillability and hold-window
-  feasibility belong in execution/evaluation, not in `generate_decisions`.
+- **Keep signal logic free of execution feasibility.** The engine owns fills,
+  costs, netting, financing, and the leverage budget; `generate_decisions` declares
+  the intended book, not the accounting.
 
 ---
 
@@ -240,11 +267,12 @@ if not result.succeeded:
 
 print(result.result_dir)
 print(result.outcome.assessment_status)      # diagnostic status, not a verdict
+print(result.feasibility)                     # None on a feasible run; typed verdict on a breach
 print(result.evidence.causality.replay_scope)
 print(result.evidence.causality.verified)    # false for micro failures/timeouts
 print(result.evidence.causality.replay_warning)
 print(result.evidence.row_contract)          # row-contract summary
-print(result.economics.trade_count)          # after-cost trade ledger summary
+print(result.foundation.feasible)            # authoritative scored NAV book on a completed run
 ```
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
@@ -252,16 +280,15 @@ with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]
 with `results_dir`, `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
 (`foundation_enabled`, `foundation_subwindows`, `foundation_trial_count`,
-`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`,
-`foundation_max_gross_exposure`), and (for the diagnostic profile)
-`diagnostic_sample_trades`.
+`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for the
+diagnostic profile) `diagnostic_sample_trades`.
 `foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
 you want DSR to stay null with an explicit missing-trial warning.
-`foundation_max_gross_exposure` defaults to `1.0`; raise it only when the
-downstream portfolio contract explicitly allows levered gross exposure in the
-quick-run foundation path.
-Use `causality_check = "micro"` for Train/autoresearch iteration. See
-[`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
+The **leverage budget (gross and net) is operator-frozen** — it is not an
+agent-editable `[output]` key. Intended exposure beyond the budget makes the run
+non-scoreable through the feasibility verdict (`leverage_budget_breach`), it is
+never clamped to fit.
+Use `causality_check = "micro"` for Train/autoresearch iteration.
 Research candidates live as candidate-local bundles:
 `candidates/<candidate_id>/strategy.py` plus `run.toml` and optional
 `validation.toml` / `evaluation.toml`. In quick-run configs, `strategy_path`
@@ -283,22 +310,31 @@ portfolio-foundation matrix. Completed runs always write `summary.json` (with
 available), `run_manifest.json`, `notes.md`, `config.toml`,
 `strategy_snapshot.py`, and `environment.json`.
 
-Programmatic consumers can read quick-run after-cost economics from
-`result.economics` on completed engine runs. The object carries the raw per-trade
-ledger plus the same summary scalars/slices written to artifacts, even under
-`artifact_profile = "summary"`; no `summary.json` scraping is required.
-Completed quick runs also expose diagnostic Train portfolio-return foundation
-metrics on `result.foundation`. Use that object for full-Train and subwindow
-return statistics, DSR inputs, drawdown, trade-count, concentration, total
-return, and cost-stressed foundation metrics. It remains quick-run diagnostic
-evidence, not evaluation evidence, and default artifacts write compact metrics
-rather than full per-period traces.
+Programmatic consumers can read the quick-run per-trade ledger from
+`result.economics` on completed engine runs. This ledger is a **derived attribution
+view** of the one portfolio book walk — each record is a completed netted-book
+round-trip whose `net_return = gross_return + funding_return − cost_return`
+reconciles with the NAV path. It is first-class for *alpha* attribution and
+information-coefficient analysis, but it is **not** an independent scored number;
+the NAV path is the scored object. The object carries the same summary
+scalars/slices written to artifacts, even under `artifact_profile = "summary"`; no
+`summary.json` scraping is required.
+Completed, feasible quick runs expose the **authoritative scored portfolio book**
+on `result.foundation`. Its NAV path is the single object Train scoring statistics
+derive from; use it for full-Train and subwindow return statistics (computed over
+**at-risk bars**, with a minimum-sample gate), DSR inputs, drawdown, closed
+round-trip counts, concentration, gross/net utilization, total return, and
+cost-stressed foundation metrics. It remains quick-run diagnostic evidence, not
+promotion authority, and default artifacts write compact metrics rather than full
+per-period traces.
 
 ### Quick-run portfolio foundation output
 
-Use `portfolio_foundation` when a downstream loop needs portfolio-path foundation
-metrics without rebuilding NAV from trade bags. The foundation is emitted only
-after completed engine evaluation and only when `foundation_enabled` is true.
+`portfolio_foundation` is the **authoritative scored NAV book** — the single object
+Train scoring derives from, not a side-channel over a trade bag. It is populated
+only on a completed, **feasible** engine evaluation when `foundation_enabled` is
+true; an envelope breach makes the run non-scoreable (see the feasibility verdict
+below), so a populated foundation already means the book passed the envelope.
 
 Where to read it:
 
@@ -314,6 +350,7 @@ Every scenario has this shape:
 ```text
 scenario_id                 # "realistic_costs" or "cost_stress"
 cost_multiplier             # 1.0 or foundation_cost_stress_multiplier
+feasibility                 # typed verdict payload (feasible, reason, observed_gross/net, detail)
 full_train                  # one compact metric record for the full Train path
 subwindow_count             # configured foundation_subwindows
 min_dsr / median_dsr        # DSR aggregates across subwindows only
@@ -332,9 +369,13 @@ window_id
 start_time / end_time
 total_return
 max_drawdown
-closed_trade_count
+closed_trade_count          # netted-book round trips (a net position returning to flat)
 max_symbol_concentration
-return_sample_count
+max_gross_utilization       # live mark-to-market gross/net utilization series
+mean_gross_utilization      #   (a winner drifting above the ceiling is a risk
+max_net_utilization         #    signal, reported — not an infeasibility; only the
+mean_net_utilization        #    intended target gross fails closed)
+return_sample_count         # at-risk (capital-deployed) period returns, not zero-padded
 mean_return
 return_volatility
 effective_sample_size
@@ -351,15 +392,20 @@ Important semantics for agents:
 
 - `realistic_costs` is the base execution-cost scenario; `cost_stress` recomputes
   the same foundation under `foundation_cost_stress_multiplier`.
-- `foundation_max_gross_exposure` controls the maximum active gross target
-  exposure accepted by the quick-run foundation. It does not change engine
-  trade-ledger economics.
+- The **leverage budget is the frozen envelope, not a tunable.** The *intended
+  target gross/net* at a decision is the hard, fail-closed check; exceeding it
+  makes the run non-scoreable (`feasibility.reason = "leverage_budget_breach"` with
+  the observed exposure). The book is never clamped to fit. The `*_utilization`
+  fields are the separate *live* mark-to-market exposure series — reported as a risk
+  signal, not enforced intrabar.
 - `full_train` exists so downstream can calculate full-window evidence exactly;
   do not reconstruct full-window Sharpe, PSR, or total return from subwindow
   summaries.
 - `mean_return`, `return_volatility`, `sharpe`, `sharpe_standard_error`, `skew`,
-  and `kurtosis` are computed from fixed-frequency portfolio period returns, not
-  completed-trade returns.
+  and `kurtosis` are computed from the NAV path's fixed-frequency period returns
+  over **at-risk bars** (flat bars do not inflate the sample), not completed-trade
+  returns. A subwindow below the minimum at-risk sample is reported non-scoreable
+  with a typed warning rather than a finite Sharpe from sample count alone.
 - Subwindow `total_return` compounds the same endpoint-assigned return intervals
   used for that subwindow's return statistics.
 - DSR is an audit statistic that depends on `foundation_trial_count`. If that
@@ -382,9 +428,9 @@ from quant_strategies.runner import run_config
 
 result = run_config("candidates/my_candidate/run.toml")
 if not result.succeeded:
-    raise SystemExit(result.message)
-if result.foundation is None:
-    raise SystemExit("portfolio foundation unavailable")
+    # an infeasible book sets result.feasibility (reason + observed exposure);
+    # a feasible completed run always populates result.foundation.
+    raise SystemExit(f"{result.message} :: {result.feasibility}")
 
 scenario = result.foundation.summary_payload()["scenarios"]["realistic_costs"]
 matrix = result.foundation.matrix_payload()["scenarios"]["realistic_costs"]
@@ -427,8 +473,10 @@ anything.
 
 **Purpose:** audit retained-candidate evidence integrity across windows and a fixed
 stress matrix; emit an **advisory** validation decision. Requires `validate_params`.
-Runs strict row-contract, observation, and hidden-lookahead checks, and rejects
-levered or aggregate-overexposed target-weight evidence before backend scenarios.
+Runs strict row-contract, observation, and hidden-lookahead checks, and runs the
+candidate through the same single causal netted portfolio book — an intended-gross
+or unfinanced-leverage breach surfaces as the fail-closed feasibility verdict, not a
+translation layer that rejects flat or leveraged targets.
 
 ```bash
 conda run -n quant quant-strategies validate candidates/<candidate_id>/validation.toml
@@ -446,12 +494,12 @@ print(result.result_dir)
 ```
 
 **Config** (`validation.toml`): top-level `strategy_path`, `strategy_id`, optional
-`verdict_source`; one or more `[[windows]]` (each with a unique `id` + `start`/`end`);
-`[data]`, `[params]`, `[fill_model]`, `[cost_model]`; `[readiness]`
-(`min_observations_per_decision`, `required_observation_fields`); `[output]`;
-`[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]` and
-`[agreement_oracle]`. See
-[`examples/simple_momentum/validation.toml`](../../examples/simple_momentum/validation.toml).
+`verdict_source` (`"engine"` only); one or more `[[windows]]` (each with a unique
+`id` + `start`/`end`); `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
+`[readiness]` (`min_observations_per_decision`, `required_observation_fields`);
+`[output]`; `[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]`.
+The `[agreement_oracle]` section is **removed** — a config that still sets it is
+rejected.
 
 For `crypto_perp_funding`, `[readiness]` additionally requires `close`,
 `funding_timestamp`, `funding_rate`, and `has_funding_event` observations on every
@@ -460,9 +508,10 @@ sanitization.
 
 **Reading it:** `result.succeeded` means the run completed with no failure stage.
 The advisory `result.decision.decision` (including `mechanical_fail`) is *evidence*
-— it never authorizes promotion, paper trading, or live trading. The production
-verdict backend is the internal engine; VectorBT Pro participates only as an
-opt-in single-trade agreement oracle (not multi-trade confidence).
+— it never authorizes promotion, paper trading, or live trading. The single verdict
+backend is the netted portfolio book spine; the VectorBT Pro cross-check and the
+single-trade agreement oracle are retired (an independent netted-book cross-check is
+a planned follow-on, not a current surface).
 
 ---
 
@@ -511,11 +560,15 @@ nulling core economics (`total_return`, `ending_value`, `max_drawdown`,
 infinity, when undefined. `[benchmark]` adds passive `benchmark_total_return` and
 `excess_total_return` evidence only — no ranking or promotion.
 
-**Funding.** For `crypto_perp_funding`, evaluation uses a project-owned perpetual
-futures ledger whose NAV path includes price PnL, configured fees/slippage, and
-funding cashflows (VectorBT Pro `cash_dividends` is not used for funding). Fillable
-perp windows with no funding events in the open interval accrue zero funding;
-malformed/conflicting/mark-misaligned funding rows still fail.
+**Accounting and funding.** Evaluation runs the **same single causal netted
+portfolio book** as quick run and validation (`netted_portfolio_book_v1`); it adds
+only Parquet trace serialization around that pure book. There is one funding home:
+for `crypto_perp_funding` the book's NAV path includes price PnL, configured
+fees/slippage, and funding cashflows. Fillable perp windows with no funding events
+in the open interval accrue zero funding; malformed/conflicting/mark-misaligned
+funding rows still fail. The VectorBT Pro and project perp-ledger backends, and the
+per-asset-class funding-model name, are retired — the metric payload reports the
+single shared accounting model.
 
 Evaluation writes Parquet-only traces (`tables/portfolio_path.parquet`,
 `trades`, `target_positions`, `target_exposure_summary`, `funding_cashflows`) and
@@ -547,9 +600,10 @@ sharpe = metrics.sharpe            # undeflated; None under a cadence/sample gua
 
 The series `values` use the same observed-return definition as the summary metrics
 (drop the synthetic first return, exclude non-finite), so they match the
-`period_return` rows in the Parquet trace. `series.per_symbol` is `None` for the
-current grouped cash-shared backends. No significance statistics (PSR/DSR/PBO) are
-provided — significance is the consumer's job.
+`period_return` rows in the Parquet trace. `series.per_symbol` is `None` because the
+single shared book is one cash-shared account (no independent per-symbol NAV path is
+computed). No significance statistics (PSR/DSR/PBO) are provided — significance is
+the consumer's job.
 
 ---
 
@@ -585,9 +639,10 @@ from quant_strategies.evaluation import run_evaluation  # -> EvaluationRunResult
 Each accepts `(config_path, *, repo_root=None, event_sink=None)`. Pass an
 `event_sink` for structured stage observability.
 
-For quick-run search loops, use `RunResult.economics.trades` as the in-process
-after-cost trade sample for trade-unit slicing by time or symbol, and use
-`RunResult.foundation` for diagnostic Train portfolio-return foundation metrics.
+For quick-run search loops, score on `RunResult.foundation` — the authoritative
+NAV book — and check `RunResult.feasibility` to interpret a non-scoreable run.
+`RunResult.economics.trades` is the derived per-trade attribution view of that same
+book (for alpha / IC slicing by time or symbol), not an independent scored number.
 Use `run_evaluation` for OOS portfolio/NAV evidence and survivor-grade trace
 artifacts.
 
@@ -621,8 +676,14 @@ rules, and promotion. Do not import `quant_strategies.engine` or any
 - **Do not import the engine or internals** (`quant_strategies.engine`, `_`-modules)
   in consumer code. Use the three public surfaces.
 - **Do not key signals off `timestamp`.** Use `available_at` for observability.
-- **Do not put execution feasibility in signal logic.** Fillability and hold
-  windows belong to execution/evaluation.
+- **Do not put accounting in signal logic.** Fills, costs, netting, financing, and
+  the leverage budget belong to the engine; declare the intended target book.
+- **Do not emit a fresh target to add exposure.** Targets net to the latest value,
+  not a stack — express your total intended weight, not an increment.
+- **Do not read future rows to place a stop.** Use a declared `RiskRule`; a
+  data/time exit is an explicit `target=0` decision.
+- **Do not expect an over-budget book to be scaled down.** Intended gross/net over
+  the frozen leverage budget is non-scoreable (fail-closed), never clamped to fit.
 - **Do not treat a metric or artifact as proof.** They are evidence; nothing here
   proves out-of-sample validity or trading readiness.
 - **Do not read `mechanical_fail` as a crash**, or `result.succeeded` as a positive

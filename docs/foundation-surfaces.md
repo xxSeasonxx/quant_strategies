@@ -4,6 +4,15 @@ This is the compact current-state map for what `quant_strategies` accepts and
 what it returns. Product intent and ownership boundaries live in `PRD.md`;
 agent operating rules live in `AGENTS.md`.
 
+The unit of simulation is **one causal, single-account portfolio**. A strategy
+declares a **target book** (standing, signed weight-of-NAV `TargetDecision`s per
+instrument); the engine folds it into one netted, financed, marked book on every
+surface (`netted_portfolio_book_v1`) and scores its **NAV path**. The per-trade
+ledger is a derived attribution view of that same walk. An envelope breach (over
+the operator-frozen leverage budget, zero-cost on a scoreable run, unfinanced
+leverage, degenerate sample) is a typed **fail-closed** feasibility verdict that
+makes `succeeded=False` — never clamped, never a silent `None`. See `PRD.md` G8.
+
 ```text
 quick run      input: strategy.py + experiment.toml
                output: RunResult + quick-run artifacts
@@ -24,7 +33,7 @@ fourth public API.
 Every surface imports one pure strategy file:
 
 ```python
-generate_decisions(rows, params) -> list[StrategyDecision]
+generate_decisions(rows, params) -> Sequence[TargetDecision]
 ```
 
 `validate_params(params) -> Mapping` is optional for quick runs and required for
@@ -48,10 +57,12 @@ hard requirement on every row; causal replay gates valid rows strictly on
 `available_at <= decision_time`, and a missing/invalid `available_at` fails the
 row contract rather than the lookahead guard.
 
-All three surfaces use one shared decision/spec kernel plus separate
-price-evidence paths: quick run and validation use the engine trade-activity
-path, while evaluation uses portfolio/NAV evidence through VectorBT Pro for
-non-funding data or the project perp ledger for `crypto_perp_funding`.
+All three surfaces use one shared decision/spec kernel **and one shared accounting
+book** — the single causal netted portfolio book (`netted_portfolio_book_v1`). The
+NAV path is the authoritative scored object on every surface; evaluation adds only
+Parquet trace serialization around that same pure book. There is no separate
+price-evidence fork: the VectorBT Pro and project perp-ledger backends and the
+single-trade agreement oracle are retired.
 
 Path anchoring:
 
@@ -68,25 +79,25 @@ Foundation pre-run verification:
 
 ```bash
 make check
-make check-vectorbtpro-smoke
 
 conda run -n quant python -m pip install -e .
 conda run -n quant python -m pip install -e '.[evaluation]' -c constraints/evaluation.txt
 conda run -n quant quant-strategies --help
 conda run -n quant pytest
-conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed
 ```
 
 Run `make check` when the local `quant` environment may have stale
-console-script metadata. It refreshes the editable install, checks the CLI,
-runs the full pytest suite, and runs the real VectorBT Pro evaluation smoke.
-The smoke is skipped by default only when the test is invoked without
-`RUN_VECTORBTPRO_SMOKE=1`; when enabled, missing `pandas`, `pyarrow`, or
-`vectorbtpro` fails the check. Run `make check-vectorbtpro-smoke` directly when
-only the real backend smoke matters.
-Controlled evaluation runs should install the optional evaluation stack with
-`constraints/evaluation.txt`; `pyproject.toml` keeps broad optional dependency
-ranges for installability.
+console-script metadata. It refreshes the editable install, checks the CLI, and
+runs the full pytest suite. The accounting model is the pure-Python spine book on
+every surface; evaluation needs only `pandas` and `pyarrow` (the `[evaluation]`
+extra) for Parquet trace serialization. Controlled evaluation runs should install
+that stack with `constraints/evaluation.txt`.
+
+> Residual (build-file cleanup, not docs): the `Makefile` still defines a
+> `check-vectorbtpro-smoke` target and the `[evaluation]`/`vectorbtpro` extras in
+> `pyproject.toml` still list `vectorbtpro`, left over from the retired VBT backend.
+> The evaluation accounting path no longer imports `vectorbtpro`; these build
+> artifacts should be trimmed when the code/test cutover (Phase 2c) lands.
 
 ## Status And Result Interpretation
 
@@ -96,7 +107,7 @@ details, not promotion language.
 
 | Surface | Python status fields | Success condition | Failure interpretation |
 | --- | --- | --- | --- |
-| Quick run | `RunResult.succeeded`, `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status` | `result.succeeded` | `outcome.completed` is false, `outcome.failure_stage` names the failed stage, and `outcome.assessment_status` stays diagnostic-only |
+| Quick run | `RunResult.succeeded`, `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status`, `RunResult.feasibility` | `result.succeeded` (**feasible and completed**) | `outcome.completed` is false or the book is infeasible; `outcome.failure_stage` names the failed stage (`feasibility` on an envelope breach), `RunResult.feasibility` carries the typed reason + observed exposure, and `outcome.assessment_status` stays diagnostic-only |
 | Validation run | `ValidationRunResult.succeeded`, `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `result.succeeded`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
 | Evaluation run | `EvaluationRunResult.succeeded`, `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `result.succeeded` | stateless frozen-candidate evidence only |
 
@@ -139,8 +150,9 @@ result = run_config("path/to/experiment.toml")
 Purpose:
 
 - diagnose one strategy version quickly;
-- produce trade-level diagnostic evidence from the internal engine;
-- produce diagnostic portfolio-return foundation metrics for Train scoring;
+- score the authoritative portfolio book (NAV path) for Train, with a fail-closed
+  feasibility verdict;
+- expose the derived per-trade attribution ledger for alpha / IC analysis;
 - support iteration feedback, not retained-candidate review, variant ranking, or
 promotion.
 
@@ -161,21 +173,27 @@ callers read terminal status from `result.outcome` and evidence quality from
 Common artifacts include `config.toml`, `strategy_snapshot.py`,
 `run_manifest.json`, `summary.json`, `environment.json`, `notes.md`,
 `data_manifest.json` when data loading is reached, and optional diagnostic or
-full-profile artifacts. Completed quick-run `summary.json` files include
-`economic_metrics`, a compact summary derived from the engine trade ledger, and
-`portfolio_foundation`, a compact diagnostic summary for Train scoring.
-Diagnostic-profile runs additionally write `diagnostics.json` with
-`economic_slices` and the portfolio-foundation matrix. Each portfolio-foundation
-scenario includes a compact `full_train` metric record plus configured subwindow
-records so downstream scoring can combine full-window and weakest-window
-evidence without raw period-return traces. Full per-period return traces are not
-written by default.
-Failed quick-run `summary.json` files set `run_completed` to `false` and
-`failure_stage` to the failed runner stage.
+full-profile artifacts. Completed, feasible quick-run `summary.json` files include
+`economic_metrics`, a compact summary of the per-trade attribution ledger derived
+from the book walk, and `portfolio_foundation`, the compact summary of the
+authoritative scored NAV book (schema `v2`, basis `quick_run_netted_portfolio_book`)
+for Train scoring. Diagnostic-profile runs additionally write `diagnostics.json`
+with `economic_slices` and the portfolio-foundation matrix. Each
+portfolio-foundation scenario carries a typed `feasibility` payload plus a compact
+`full_train` metric record and configured subwindow records — computed over at-risk
+bars — so downstream scoring can combine full-window and weakest-window evidence
+without raw period-return traces. Full per-period return traces are not written by
+default.
+Failed or infeasible quick-run `summary.json` files set `run_completed` to `false`
+and `failure_stage` to the failed runner stage (`feasibility` on an envelope
+breach).
 
-Engine stop-loss, take-profit, and trailing thresholds are sampled threshold
-exits: they are evaluated on the configured bar fill price (`close` or `quote`)
-at bar timestamps, not as intrabar high/low barrier orders.
+`RiskRule` stop-loss, take-profit, and trailing thresholds are declared as
+**fractions of the position's entry mark** and enforced by the engine on the net
+position: they are evaluated on the configured end-of-bar fill price (`close` or
+`quote`), not as intrabar high/low barrier orders, and a fired rule latches the
+instrument flat until the strategy emits a new (different) target. Data/time exits
+are explicit `target=0` decisions, not `RiskRule`s.
 
 ## Validation Run
 
@@ -199,21 +217,23 @@ Purpose:
 scenarios;
 - require `validate_params`;
 - run strict row-contract, observation, and hidden-lookahead checks;
-- reject levered or aggregate-overexposed target-weight evidence before backend
-  scenarios;
+- run the candidate through the single causal netted portfolio book; an
+  intended-gross or unfinanced-leverage breach is the fail-closed feasibility
+  verdict, not a translation-layer rejection of flat/leveraged targets;
 - emit an advisory validation decision from the validation policy.
 
 Primary config file: candidate-local `validation.toml`.
 
 Important sections:
 
-- top-level `strategy_path`, `strategy_id`, optional `verdict_source`;
+- top-level `strategy_path`, `strategy_id`, optional `verdict_source` (`"engine"`
+  only — the netted-book spine);
 - `[[windows]]`;
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[readiness]`;
 - `[output]`;
-- `[search_pressure]`, plus optional `[mechanical_thresholds]` and
-`[agreement_oracle]`.
+- `[search_pressure]`, plus optional `[mechanical_thresholds]`. The
+  `[agreement_oracle]` section is removed; a config that still sets it is rejected.
 
 Validation window IDs must be unique and must not collide after artifact-path
 sanitization. `[readiness]` requires at least one observation and one observed
@@ -231,9 +251,8 @@ Common artifacts include `validation_config.toml`, `strategy_snapshot.py`,
 `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`,
 trade-ledger JSONL files, `cost_fill_sensitivity.json`,
 `validation_decision.json`, `validation_manifest.json`, `environment.json`, and
-`validation_report.md`. Per-scenario backend summaries always include an
-`agreement_oracle` status; the raw `agreement` payload appears only when the
-opt-in oracle actually ran.
+`validation_report.md`. There is one verdict backend (the netted-book spine); the
+retired agreement-oracle `agreement` payload is no longer written.
 
 CLI exit codes:
 
@@ -274,8 +293,9 @@ Purpose:
   preflight;
 - fan out configured `[[scenarios]]` per window, or the default fixed
   six-scenario cost/fill matrix when no custom scenarios are configured;
-- produce portfolio, economic, and path evidence through VectorBT Pro for
-  non-funding data and `project_perp_ledger_v1` for `crypto_perp_funding`.
+- produce portfolio, economic, and path evidence from the single shared netted
+  portfolio book (`netted_portfolio_book_v1`), serialized to Parquet traces. The
+  VectorBT Pro and `project_perp_ledger_v1` backends are retired.
 
 Evaluation fails before scenario expansion when the decision-row/observation
 dependency audit fails or when deterministic, emitted, or strict suppression
@@ -284,10 +304,11 @@ replay proof is incomplete. Data-audit failures return
 `failure_stage="preflight"`. Both use
 `assessment_status="evaluation_preflight_failed"`.
 
-For `crypto_perp_funding`, evaluation uses a project-owned perpetual futures
-ledger. Its NAV path includes price PnL, configured fees/slippage, and funding
-cashflows. VectorBT Pro `cash_dividends` is not used for funding because its
-contract does not match perp funding cashflows.
+Evaluation runs the same single causal netted portfolio book as quick run and
+validation; funding lives in one place. For `crypto_perp_funding`, the book's NAV
+path includes price PnL, configured fees/slippage, and funding cashflows. The
+metric payload reports the single shared accounting model (`netted_portfolio_book_v1`);
+the per-asset-class perp-ledger model name is retired.
 Annualized metrics use full-grid portfolio returns from the `portfolio_path`
 trace, including flat/no-position bars. The configured
 `annualization_periods_per_year` must match the bar cadence; completed runs emit
@@ -303,13 +324,13 @@ core economics such as `total_return`, `ending_value`, `max_drawdown`,
 Sortino uses downside semivariance over the full return sample and returns
 `None`, not infinity, when undefined.
 
-Engine funding is linear trade-activity funding folded into validation
-`net_return`; evaluation funding is NAV-ledger cashflow through the project
-perp ledger. Fillable crypto perp windows with no funding events in the open
-interval accrue zero funding; flagged funding rows still fail when malformed,
-conflicting, or mark-misaligned. hidden-lookahead replay proves point-in-time
-causal replay; it does not prove out-of-sample validity and it does not prove
-freedom from in-sample fitting.
+Funding is computed once, in the shared book, as a NAV cashflow on the net held
+position — there is one funding implementation across all surfaces, not a separate
+engine vs evaluation basis. Fillable crypto perp windows with no funding events in
+the open interval accrue zero funding; flagged funding rows still fail when
+malformed, conflicting, or mark-misaligned. hidden-lookahead replay proves
+point-in-time causal replay; it does not prove out-of-sample validity and it does
+not prove freedom from in-sample fitting.
 
 Evaluation is not validation and does not authorize promotion, paper trading, or live trading.
 Benchmark-relative metrics are evidence only: when optional `[benchmark]` is
@@ -318,8 +339,10 @@ and `excess_total_return` for each scenario without ranking or promotion
 authority.
 
 Primary config file: candidate-local `evaluation.toml`.
-The checked-in minimal example is
-`examples/simple_momentum/evaluation.toml`.
+(The checked-in `examples/` and `candidates/` bundles are mid-migration to the
+target-book contract — their `strategy.py` files still import the retired
+`StrategyDecision` shapes and are being redeveloped, so they are not yet runnable
+end-to-end against this surface.)
 
 Important sections:
 
@@ -358,7 +381,7 @@ Control artifacts:
 | `audit/input_rows/{safe_window}-{hash}.parquet` | normalized strategy input rows for each evaluation window that reaches strategy execution          |
 | `audit/decision_records/{safe_window}-{hash}.jsonl` | typed strategy decisions for each evaluation window that reaches strategy execution             |
 | `evaluation_failure.json`  | failure stage, status, message, warnings, unsupported semantics, data windows reached with any data-audit payload, and scenario coverage when failed |
-| `environment.json`         | runtime and package environment, including `pandas`, `pyarrow`, and `vectorbtpro` when present                             |
+| `environment.json`         | runtime and package environment, including `pandas` and `pyarrow` when present (used for Parquet trace serialization)       |
 | `notes.md`                 | human-readable evaluation notes                                                                                            |
 
 
