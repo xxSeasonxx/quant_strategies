@@ -9,7 +9,7 @@ from quant_strategies.provenance import (
     file_sha256,
     source_identity,
 )
-from quant_strategies.validation.artifacts import agreement_payload, write_json_artifact
+from quant_strategies.validation.artifacts import write_json_artifact
 from quant_strategies.validation.backends import ScenarioBackendRunResult
 
 
@@ -33,9 +33,10 @@ def write_validation_manifest(
             "config_path": _relative_path(config_path, path_base),
             "config_sha256": _optional_hash(config_path),
             # True only when every required completed verdict scenario emitted a
-            # per-trade ledger; one ledger must not make mixed evidence look replayable.
+            # netted-book round-trip ledger; one ledger must not make mixed evidence
+            # look replayable.
             "verdict_replayable": _verdict_replayable(backend_results),
-            "verdict_replay_basis": "engine_trade_ledger",
+            "verdict_replay_basis": "netted_book_round_trip_ledger",
         },
         "strategy": {
             "path": _relative_path(Path(config.strategy_path), path_base),
@@ -62,7 +63,7 @@ def _write_environment(result_dir: Path, *, repo_root: Path) -> Path:
         "environment.json",
         environment_identity(
             repo_root,
-            package_names=["quant-strategies", "quant-data", "pydantic", "pandas", "vectorbtpro"],
+            package_names=["quant-strategies", "quant-data", "pydantic", "pandas"],
             exclude_paths=(result_dir,),
         ),
     )
@@ -96,7 +97,6 @@ def _backend_summary(
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),
-                **agreement_payload(item),
             }
         )
     return {

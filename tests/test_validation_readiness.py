@@ -3,11 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 from quant_strategies.validation.config import ValidationReadinessConfig
 from quant_strategies.validation.readiness import check_validation_readiness
@@ -15,14 +13,13 @@ from quant_strategies.validation.readiness import check_validation_readiness
 AS_OF = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def decision(*, observations: tuple[ObservationRef, ...]) -> StrategyDecision:
-    return StrategyDecision(
+def decision(*, observations: tuple[ObservationRef, ...]) -> TargetDecision:
+    return TargetDecision(
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
         decision_time=AS_OF,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
-        exit_policy=ExitPolicy(max_hold_bars=1),
+        target=-1.0,
         observations=observations,
     )
 

@@ -22,10 +22,8 @@ from quant_strategies.causality import (
 )
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
@@ -68,15 +66,14 @@ def ohlc_row(
     return payload
 
 
-def decision(size: float = 1.0) -> StrategyDecision:
-    return StrategyDecision(
+def decision(size: float = 1.0) -> TargetDecision:
+    return TargetDecision(
         decision_id=f"demo:{size}",
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
         decision_time=DECISION,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="long", sizing_kind="target_weight", size=size),
-        exit_policy=ExitPolicy(max_hold_bars=1),
+        target=size,
     )
 
 
@@ -340,14 +337,13 @@ def test_micro_replay_plan_does_not_enumerate_full_row_grid(monkeypatch: pytest.
         for index in range(100)
     ]
     baseline = [
-        StrategyDecision(
+        TargetDecision(
             decision_id="demo:emitted",
             strategy_id="demo",
             instrument=InstrumentRef(kind="crypto_perp", symbol="SYM1"),
             decision_time=source_rows[10]["timestamp"],
             as_of_time=source_rows[10]["timestamp"],
-            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-            exit_policy=ExitPolicy(max_hold_bars=1),
+            target=1.0,
         )
     ]
 
@@ -431,14 +427,13 @@ def test_bounded_replay_plan_always_includes_emitted_boundaries():
         row(FUTURE, 101.0, available_at=FUTURE),
     ]
     baseline = [
-        StrategyDecision(
+        TargetDecision(
             decision_id="demo:emitted",
             strategy_id="demo",
             instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
             decision_time=DECISION,
             as_of_time=AS_OF,
-            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-            exit_policy=ExitPolicy(max_hold_bars=1),
+            target=1.0,
         )
     ]
 
@@ -478,14 +473,13 @@ def test_bounded_causality_uses_prepared_baseline_decision_index(
         row(FUTURE, 101.0, available_at=FUTURE),
     ]
     baseline = [
-        StrategyDecision(
+        TargetDecision(
             decision_id=f"demo:{index}",
             strategy_id="demo",
             instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
             decision_time=DECISION,
             as_of_time=AS_OF,
-            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-            exit_policy=ExitPolicy(max_hold_bars=1),
+            target=1.0,
         )
         for index in range(50)
     ]
@@ -592,14 +586,13 @@ def test_hidden_lookahead_parses_row_visibility_once_per_check(monkeypatch):
 
     def multi_decision_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
         return [
-            StrategyDecision(
+            TargetDecision(
                 decision_id=f"demo:{index}",
                 strategy_id="demo",
                 instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
                 decision_time=DECISION,
                 as_of_time=AS_OF,
-                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-                exit_policy=ExitPolicy(max_hold_bars=1),
+                target=1.0,
             )
             for index in range(5)
         ]
@@ -665,14 +658,13 @@ def test_strict_hidden_lookahead_detects_suppressed_replay_emission():
         if any(item.get("timestamp") == FUTURE for item in rows):
             return []
         return [
-            StrategyDecision(
+            TargetDecision(
                 decision_id="demo:suppressed",
                 strategy_id="demo",
                 instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
                 decision_time=DECISION,
                 as_of_time=AS_OF,
-                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-                exit_policy=ExitPolicy(max_hold_bars=1),
+                target=1.0,
             )
         ]
 
@@ -759,14 +751,13 @@ def test_strict_hidden_lookahead_detects_same_bar_replay_emission_for_boundary()
         if any(item.get("timestamp") == FUTURE for item in rows):
             return []
         return [
-            StrategyDecision(
+            TargetDecision(
                 decision_id="demo:same-bar",
                 strategy_id="demo",
                 instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
                 decision_time=AS_OF,
                 as_of_time=AS_OF,
-                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-                exit_policy=ExitPolicy(max_hold_bars=1),
+                target=1.0,
             )
         ]
 
@@ -974,14 +965,13 @@ def test_hidden_lookahead_reuses_visible_rows_for_shared_decision_boundary():
     def recording_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
         replay_row_ids.append(id(rows))
         return [
-            StrategyDecision(
+            TargetDecision(
                 decision_id=f"demo:{index}",
                 strategy_id="demo",
                 instrument=InstrumentRef(kind="crypto_perp", symbol=f"BTC-PERP-{index}"),
                 decision_time=DECISION,
                 as_of_time=AS_OF,
-                target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-                exit_policy=ExitPolicy(max_hold_bars=1),
+                target=1.0,
             )
             for index in range(3)
         ]
@@ -1017,28 +1007,26 @@ def test_hidden_lookahead_does_not_share_visible_rows_across_decision_times():
             decisions.append(decision())
         if 101.0 in closes:
             decisions.append(
-                StrategyDecision(
+                TargetDecision(
                     decision_id="demo:late",
                     strategy_id="demo",
                     instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
                     decision_time=LATE_DECISION,
                     as_of_time=AS_OF,
-                    target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-                    exit_policy=ExitPolicy(max_hold_bars=1),
+                    target=1.0,
                 )
             )
         return decisions
 
     baseline = [
         decision(),
-        StrategyDecision(
+        TargetDecision(
             decision_id="demo:late",
             strategy_id="demo",
             instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
             decision_time=LATE_DECISION,
             as_of_time=AS_OF,
-            target=PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-            exit_policy=ExitPolicy(max_hold_bars=1),
+            target=1.0,
         ),
     ]
 

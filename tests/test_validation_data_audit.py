@@ -3,20 +3,19 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from quant_strategies.core.data_audit import audit_decision_rows
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import InstrumentRef, TargetDecision
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 
-def decision(symbol: str = "BTC-PERP") -> StrategyDecision:
-    return StrategyDecision(
+def decision(symbol: str = "BTC-PERP") -> TargetDecision:
+    return TargetDecision(
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
         decision_time=DECISION,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
-        exit_policy=ExitPolicy(max_hold_bars=2),
+        target=-1.0,
     )
 
 

@@ -27,25 +27,15 @@ from quant_strategies.core.config import (
 from quant_strategies.validation.artifact_names import validation_artifact_path_collisions
 from quant_strategies.validation.errors import ValidationConfigError
 
-# The execution kernel is the single verdict PnL source. VectorBT Pro is no
-# longer a co-equal verdict backend; it is only available as an opt-in agreement
-# oracle (see AgreementOracleConfig).
+# The netted single-account portfolio book (the spine) is the single verdict PnL
+# source on every surface (design D9). The VectorBT Pro backend and the
+# single-trade agreement oracle are retired; ``engine`` selects the spine book.
 VerdictSource = Literal["engine"]
 PriorSearch = Literal["none", "known", "unknown"]
 
 
 class ValidationConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-class AgreementOracleConfig(ValidationConfigModel):
-    """Opt-in cross-check against VectorBT Pro that fails the run on divergence
-    from the engine verdict. Off by default; sound only on single-trade close-fill
-    scenarios (otherwise it reports ``skipped``)."""
-
-    enabled: bool = False
-    tolerance_abs: float = Field(default=1e-6, ge=0.0)
-    tolerance_rel: float = Field(default=1e-3, ge=0.0)
 
 
 def _path_anchor(path: str | Path, *, repo_root: Path | None = None) -> Path:
@@ -206,7 +196,6 @@ class ValidationConfig(ValidationConfigModel):
     strategy_path: Path
     strategy_id: str = Field(min_length=1)
     verdict_source: VerdictSource = "engine"
-    agreement_oracle: AgreementOracleConfig = Field(default_factory=AgreementOracleConfig)
     windows: tuple[ValidationWindow, ...] = Field(min_length=1)
     data: WindowedDataConfig
     params: dict[str, Any] = Field(default_factory=dict)
@@ -301,10 +290,15 @@ def load_validation_config(path: str | Path, *, repo_root: Path | None = None) -
 
     if isinstance(payload, dict) and "backend" in payload:
         raise ValidationConfigError(
-            "validation config field 'backend' has been removed: the execution kernel "
-            "kernel is now the sole verdict PnL source, so the verdict number is the "
-            "audited number. To cross-check the verdict against VectorBT Pro, add an "
-            "[agreement_oracle] section with enabled = true. Remove the 'backend' key."
+            "validation config field 'backend' has been removed: the netted "
+            "single-account portfolio book is now the sole verdict PnL source on every "
+            "surface, so the verdict number is the audited number. Remove the 'backend' key."
+        )
+    if isinstance(payload, dict) and "agreement_oracle" in payload:
+        raise ValidationConfigError(
+            "validation config section '[agreement_oracle]' has been removed: the "
+            "VectorBT Pro cross-check and the single-trade agreement oracle are retired "
+            "(the spine book is the single model of money). Remove the section."
         )
     if isinstance(payload, dict) and "search_pressure" not in payload:
         raise ValidationConfigError(

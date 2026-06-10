@@ -3,17 +3,13 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.engine.models import Trade
+from quant_strategies.core.portfolio_foundation import RoundTrip
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.validation.config import ScenarioRunConfig
-
-if TYPE_CHECKING:
-    from quant_strategies.validation.agreement import AgreementOracleStatus, AgreementResult
-
 
 BackendStatus = Literal["completed", "failed", "unsupported", "unavailable"]
 MetricValue = float | int | str | bool | None
@@ -70,67 +66,62 @@ class BackendMetrics(BaseModel):
 
 
 def backend_metric_semantics() -> dict[str, dict[str, object]]:
-    # The execution kernel is the verdict source, so these semantics describe
-    # the engine's emitted metrics -- the number a human audits IS the gated number.
+    # The netted-book spine is the single verdict source, so these semantics describe
+    # the book's NAV-path round-trip ledger -- the number a human audits IS the gated
+    # number, recomputable from the artifacted ledger as ``sum(round_trip.net)``.
     semantics = (
         BackendMetricSemantics(
             name="net_return",
             unit="decimal_fraction",
-            base="engine linear signed trade-activity sum, funding-inclusive",
-            aggregation="scenario total over engine-screened per-trade net returns",
+            base="netted single-account portfolio book round-trip realized PnL, funding-inclusive",
+            aggregation="sum of round-trip realized PnL as a fraction of the standing NAV base",
             backend="engine",
             comparability=(
-                "the audited trade-result net; cross-checked against VectorBT Pro on the "
-                "price path by the opt-in agreement oracle"
+                "the audited netted-book ledger; recomputable from the artifacted "
+                "round-trip ledger and reconciling with the NAV path realized PnL"
             ),
             tolerance=None,
-            asymmetry=(
-                "a linear per-trade sum, not a NAV path; differs from a compounded "
-                "portfolio return for multi-trade scenarios"
-            ),
+            asymmetry="funding-inclusive net of costs; the single model of money",
         ),
         BackendMetricSemantics(
             name="trade_count",
             unit="count",
-            base="engine-screened closed trades",
+            base="netted-book round trips (flat -> non-flat -> flat)",
             aggregation="scenario total",
             backend="engine",
             comparability="exact integer agreement expected for equivalent execution assumptions",
             tolerance=0.0,
-            asymmetry="trade grouping may differ when execution semantics are not equivalent",
+            asymmetry="netted round trips, not isolated per-decision tickets",
         ),
         BackendMetricSemantics(
             name="gross_return",
             unit="decimal_fraction",
-            base="engine price path, funding- and cost-exclusive",
-            aggregation="scenario total over engine-screened trades",
+            base="netted-book price proceeds, funding- and cost-exclusive",
+            aggregation="sum of round-trip price proceeds as a fraction of NAV base",
             backend="engine",
-            comparability=(
-                "the price path the agreement oracle cross-checks against VectorBT Pro "
-                "(single-trade scenarios only)"
-            ),
+            comparability="the price-path component of the gated net_return",
             tolerance=None,
             asymmetry="excludes funding and cost; not the gated number (net_return is)",
         ),
         BackendMetricSemantics(
             name="funding_return",
             unit="decimal_fraction",
-            base="engine funding cashflow component included in net_return",
-            aggregation="scenario total over engine-screened decision windows",
+            base="netted-book funding cashflow accrued on the held net position",
+            aggregation="sum of round-trip funding as a fraction of NAV base",
             backend="engine",
-            comparability="single shared funding-window function; no second implementation to reconcile",
+            comparability="single shared funding-window function; no second implementation",
             tolerance=1e-9,
-            asymmetry="linear funding accrual folded into net_return",
+            asymmetry="funding accrual folded into net_return",
         ),
         BackendMetricSemantics(
             name="cost_return",
             unit="decimal_fraction",
-            base="engine round-trip cost deduction folded into net_return",
-            aggregation="scenario total over engine-screened trades",
+            base="netted-book traded cost on the |delta notional| of each fill",
+            aggregation="sum of round-trip cost as a fraction of NAV base",
             backend="engine",
-            comparability="flat 2*(fee+slippage) bps per trade; deterministic from the cost model",
+            comparability="flat per-side bps on traded notional; deterministic from the cost model",
             tolerance=0.0,
-            asymmetry="linear cost deduction; excluded from the agreement cross-check",
+            asymmetry="cost deduction folded into net_return as net = gross + funding - cost",
         ),
     )
     return {item.name: item.model_dump(mode="json") for item in semantics}
@@ -156,11 +147,10 @@ class BackendRunResult(BaseModel):
     metrics: dict[str, MetricValue]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
-    # Per-trade ledger backing the scalar metrics. Excluded from model_dump so the
-    # backend_runs summary stays scalar; it is written to its own JSONL artifact
-    # (the verdict net_return is recomputable as sum(trade.net_return)). Only the
-    # engine verdict backend populates it; the agreement-oracle vbt leaves it empty.
-    trades: tuple[Trade, ...] = Field(default=(), exclude=True)
+    # Netted-book round-trip ledger backing the scalar metrics. Excluded from
+    # model_dump so the backend_runs summary stays scalar; it is written to its own
+    # JSONL artifact (the gated net_return is recomputable as sum(round_trip.net)).
+    round_trips: tuple[RoundTrip, ...] = Field(default=(), exclude=True)
 
 
 @dataclass(frozen=True)
@@ -174,16 +164,10 @@ class ScenarioBackendRunResult:
     decision_count: int = 0
     decision_records_path: str | None = None
     decision_records_sha256: str | None = None
-    # Per-trade ledger for the engine verdict backend; net_return is recomputable
-    # as sum(trade.net_return). None when the backend emitted no trades.
+    # Per-scenario netted-book round-trip ledger; net_return is recomputable as
+    # sum(round_trip.net). None when the walk produced no closed round trips.
     trade_ledger_path: str | None = None
     trade_ledger_sha256: str | None = None
-    # Raw agreement is set only when the opt-in oracle actually ran. The explicit
-    # status is always present so uncorroborated evidence cannot be mistaken for
-    # agreement evidence.
-    agreement: AgreementResult | None = None
-    agreement_oracle_status: AgreementOracleStatus = "disabled"
-    agreement_oracle_note: str = ""
 
 
 class ValidationBackend(Protocol):
@@ -192,7 +176,7 @@ class ValidationBackend(Protocol):
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
         config: ScenarioRunConfig,
     ) -> BackendRunResult:
@@ -201,7 +185,7 @@ class ValidationBackend(Protocol):
 
 def get_backend(name: str) -> ValidationBackend:
     if name == "engine":
-        from quant_strategies.validation.engine_backend import EngineBackend
+        from quant_strategies.validation.engine_backend import SpineBackend
 
-        return EngineBackend()
+        return SpineBackend()
     raise ValueError(f"unsupported validation backend: {name}")

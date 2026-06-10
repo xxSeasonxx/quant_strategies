@@ -13,16 +13,6 @@ from pydantic import BaseModel
 from quant_strategies.validation.backends import ScenarioBackendRunResult, backend_metric_semantics
 from quant_strategies.validation.policy import ValidationPolicyDecision
 
-_AGREEMENT_ORACLE_STATUSES = {
-    "disabled",
-    "not_run",
-    "skipped",
-    "pass",
-    "fail",
-    "unavailable",
-    "inconclusive",
-}
-
 
 def create_validation_result_dir(results_root: Path, strategy_id: str) -> Path:
     timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%SZ")
@@ -105,24 +95,6 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def agreement_payload(item: ScenarioBackendRunResult) -> dict[str, Any]:
-    if item.agreement_oracle_status not in _AGREEMENT_ORACLE_STATUSES:
-        raise ValueError(f"unsupported agreement_oracle status: {item.agreement_oracle_status}")
-    payload = {
-        "agreement_oracle": {
-            "status": item.agreement_oracle_status,
-            "enabled": item.agreement_oracle_status != "disabled",
-            "ran": item.agreement is not None,
-            "note": item.agreement.note
-            if item.agreement is not None
-            else item.agreement_oracle_note,
-        }
-    }
-    if item.agreement is not None:
-        payload["agreement"] = item.agreement.as_dict()
-    return payload
-
-
 def scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str, ...]:
     result = item.result
     if result.status == "failed":
@@ -150,7 +122,6 @@ def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dic
                 "trade_ledger_path": item.trade_ledger_path,
                 "trade_ledger_sha256": item.trade_ledger_sha256,
                 "result": item.result.model_dump(mode="json"),
-                **agreement_payload(item),
             }
             for item in backend_results
         ],
@@ -183,7 +154,6 @@ def cost_fill_sensitivity_payload(
                 "warnings": item.result.warnings,
                 "unsupported_semantics": item.result.unsupported_semantics,
                 "classification_reasons": scenario_classification_reasons(item),
-                **agreement_payload(item),
             }
             for item in backend_results
         ],

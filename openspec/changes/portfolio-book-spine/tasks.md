@@ -31,15 +31,15 @@
 
 - [x] 5.1 Delete the per-trade linear-sum scorer in `engine/evaluation.py` (`net_total = sum(...)`); make screening a derived view over the book walk.
 - [x] 5.2 Delete the isolated `_select_exit` exit engine and the window-replay `_portfolio_path` / `_decision_windows` / dead `_fill_price` and the per-window position model.
-- [ ] 5.3 Delete `evaluation/project_perp_ledger.py`, the perp-ledger routing and model-name in `evaluation/vectorbtpro_backend.py` and `evaluation/metrics.py`, and the `_REQUIRED_COMPLETED_FUNDING_MODELS` gate in `validation/_pipeline.py`. Route all NAV through the shared spine book.
-- [ ] 5.4 Collapse funding to one implementation in `funding.py`; remove the foundation `_apply_funding` and the perp-ledger funding copies.
-- [ ] 5.5 Retire the single-trade-only agreement oracle in `validation/agreement.py` (per the D9 retire-VBT decision); keep DSR as a **diagnostic** recomputed on the at-risk statistics — re-home it, do not delete it.
+- [x] 5.3 Delete `evaluation/project_perp_ledger.py`, the perp-ledger routing and model-name in `evaluation/vectorbtpro_backend.py` and `evaluation/metrics.py`, and the `_REQUIRED_COMPLETED_FUNDING_MODELS` gate in `validation/_pipeline.py`. Route all NAV through the shared spine book.
+- [x] 5.4 Collapse funding to one implementation in `funding.py`; remove the foundation `_apply_funding` and the perp-ledger funding copies.
+- [x] 5.5 Retire the single-trade-only agreement oracle in `validation/agreement.py` (per the D9 retire-VBT decision); keep DSR as a **diagnostic** recomputed on the at-risk statistics — re-home it, do not delete it.
 
 ## 6. Validation and evaluation surfaces consume the contract
 
-- [ ] 6.1 Make the pure-Python spine the single book for validation and evaluation; evaluation adds pandas/pyarrow artifact serialization *around* the pure book at its own layer (quick-run import wall preserved).
-- [ ] 6.2 Retire the VectorBT Pro and perp-ledger evaluation backends (D9, confirmed); remove the public `funding_model` perp-ledger name from the evaluate metric payload and any data-kind backend routing.
-- [ ] 6.3 Confirm the preserved `evaluation-fold-returns` observable behavior (typed fold returns net of costs, causal-integrity flag, `succeeded`) still holds on the spine.
+- [x] 6.1 Make the pure-Python spine the single book for validation and evaluation; evaluation adds pandas/pyarrow artifact serialization *around* the pure book at its own layer (quick-run import wall preserved).
+- [x] 6.2 Retire the VectorBT Pro and perp-ledger evaluation backends (D9, confirmed); remove the public `funding_model` perp-ledger name from the evaluate metric payload and any data-kind backend routing.
+- [x] 6.3 Confirm the preserved `evaluation-fold-returns` observable behavior (typed fold returns net of costs, causal-integrity flag, `succeeded`) still holds on the spine.
 
 ## 7. Tests
 

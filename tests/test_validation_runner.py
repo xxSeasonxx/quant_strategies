@@ -15,11 +15,9 @@ from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.errors import DataLoadError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 from quant_strategies.validation._pipeline import _run_validation as run_validation
 from quant_strategies.validation.backends import BackendRunResult
@@ -61,20 +59,19 @@ def write_candidate(
     candidate = tmp_path / "candidate"
     candidate.mkdir(parents=True)
     strategy_text = (
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-float(params.get('weight', 1.0)),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
-    ).replace("size=1.0", "size=float(params.get('weight', 1.0))")
+    )
     (candidate / "strategy.py").write_text(strategy_text)
     window_blocks = "\n".join(
         f"""
@@ -126,14 +123,13 @@ results_dir = "validation_results/demo"
     return candidate
 
 
-def decision(strategy_id: str = "demo") -> StrategyDecision:
-    return StrategyDecision(
+def decision(strategy_id: str = "demo") -> TargetDecision:
+    return TargetDecision(
         strategy_id=strategy_id,
         instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
         decision_time=DECISION,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
-        exit_policy=ExitPolicy(max_hold_bars=1),
+        target=-1.0,
         observations=(
             ObservationRef(
                 symbol="BTC-PERP", timestamp=AS_OF, field="close", source="strategy_input"
@@ -296,12 +292,6 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         "decision_records_sha256": file_sha256(base_decision_file),
         "trade_ledger_path": None,
         "trade_ledger_sha256": None,
-        "agreement_oracle": {
-            "enabled": False,
-            "ran": False,
-            "status": "disabled",
-            "note": "agreement_oracle_disabled",
-        },
         "result": {
             "backend": "fake",
             "status": "completed",
@@ -314,7 +304,7 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
     assert base_decision_line.startswith('{"as_of_time":')
     assert ',"decision_time":' in base_decision_line
     assert '": ' not in base_decision_line
-    assert read_jsonl(base_decision_file)[0]["target"]["size"] == 1.0
+    assert read_jsonl(base_decision_file)[0]["target"] == -1.0
     main_decision_file = result.result_dir / "decision_records.jsonl"
     main_decision_line = main_decision_file.read_text().splitlines()[0]
     assert main_decision_line.startswith('{"as_of_time":')
@@ -434,20 +424,19 @@ def test_retained_validation_strict_replay_detects_suppressed_same_bar_decision(
 ):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        decision_id='demo:suppressed',\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -507,7 +496,7 @@ def test_validation_rejects_nondeterministic_strategy_generation(
 ):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "CALLS = 0\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
@@ -515,14 +504,13 @@ def test_validation_rejects_nondeterministic_strategy_generation(
         "    global CALLS\n"
         "    CALLS += 1\n"
         "    size = 1.0 if CALLS % 2 else 0.5\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        decision_id='demo:stable-id',\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=size),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(size),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -558,20 +546,19 @@ def test_validation_strict_replay_detects_suppression_even_with_mechanical_thres
         (candidate / "validation.toml").read_text() + "\n[mechanical_thresholds]\nenabled = false\n"
     )
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        decision_id='demo:suppressed',\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -593,17 +580,16 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
 ):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[-1]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -625,20 +611,19 @@ def test_validation_event_sink_marks_semantic_audit_and_causality_failures(
 
     suppressed = write_candidate(tmp_path / "suppressed")
     (suppressed / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat() == '2026-01-01T00:02:00+00:00' for row in rows):\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        decision_id='demo:suppressed',\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -1118,17 +1103,16 @@ def test_run_validation_requires_readiness_at_config_load(tmp_path: Path):
 def test_run_validation_blocks_missing_required_observations(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "    )]\n"
     )
     monkeypatch.setattr(
@@ -1184,19 +1168,18 @@ def test_run_validation_applies_crypto_perp_funding_readiness_defaults(
 def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    future_rows = [row for row in rows if row['timestamp'] > rows[0]['timestamp']]\n"
         "    size = 2.0 if len(future_rows) > 1 else 1.0\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=size),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(size),\n"
         "    )]\n"
     )
     monkeypatch.setattr(
@@ -1219,19 +1202,18 @@ def test_run_validation_blocks_hidden_lookahead_strategy(tmp_path: Path, monkeyp
 def test_run_validation_records_hidden_lookahead_replay_failure(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 3:\n"
         "        raise RuntimeError('need future row')\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "    )]\n"
     )
     monkeypatch.setattr(
@@ -1329,16 +1311,26 @@ def test_run_validation_default_engine_backend_fails_closed_on_unfillable_window
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
+    # The fill_lag_plus_1 scenario (entry_lag_bars=2) pushes the bar-1 decision's fill
+    # past the 3 available bars, so the spine raises a structured unfillable decision and
+    # the engine backend reports a failed run for that required scenario.
     assert result.decision.decision == "mechanical_fail"
     assert result.decision.reasons == ("engine_failed",)
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    base_result = backend_summary["results"][0]
-    assert base_result["result"]["backend"] == "engine"
-    assert base_result["result"]["status"] == "failed"
-    assert base_result["result"]["metrics"] == {}
-    assert base_result["result"]["unsupported_semantics"] == []
-    assert base_result["result"]["warnings"] == ["exit fill is outside available bars: BTC-PERP"]
+    fill_lag_result = next(
+        item
+        for item in backend_summary["results"]
+        if item["scenario_id"].endswith("/fill_lag_plus_1")
+    )
+    assert fill_lag_result["result"]["backend"] == "engine"
+    assert fill_lag_result["result"]["status"] == "failed"
+    assert fill_lag_result["result"]["metrics"] == {}
+    assert fill_lag_result["result"]["unsupported_semantics"] == []
+    assert any(
+        "unfillable_decision:BTC-PERP" in warning
+        for warning in fill_lag_result["result"]["warnings"]
+    )
 
 
 def test_run_validation_engine_backend_validates_threshold_exit_strategy(
@@ -1349,17 +1341,17 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     # so the validation step no longer forks away from the quick run.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, RiskRule, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1, stop_loss_bps=50.0, take_profit_bps=300.0),\n"
+        "        target=1.0,\n"
+        "        risk_rule=RiskRule(stop_loss=0.005, take_profit=0.03),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -1398,17 +1390,16 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
 
 def _long_strategy_text() -> str:
     return (
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -1430,212 +1421,25 @@ def _upward_rows(n: int = 5) -> list[dict[str, Any]]:
     ]
 
 
-def _enable_oracle(candidate: Path) -> None:
-    toml = candidate / "validation.toml"
-    toml.write_text(toml.read_text() + "\n[agreement_oracle]\nenabled = true\n")
-
-
-def _agreement_oracle_statuses(result) -> dict[str, set[str]]:
-    assert result.result_dir is not None
-    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    cost_fill = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    return {
-        "backend_summary": {
-            item["agreement_oracle"]["status"] for item in backend_summary["results"]
-        },
-        "cost_fill": {item["agreement_oracle"]["status"] for item in cost_fill["scenarios"]},
-        "manifest": {
-            item["agreement_oracle"]["status"] for item in manifest["backend"]["scenarios"]
-        },
-    }
-
-
-def _assert_agreement_oracle_status(result, expected: str, *, raw_agreement_present: bool) -> None:
-    assert _agreement_oracle_statuses(result) == {
-        "backend_summary": {expected},
-        "cost_fill": {expected},
-        "manifest": {expected},
-    }
-    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    cost_fill = json.loads((result.result_dir / "cost_fill_sensitivity.json").read_text())
-    manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
-    for payloads in (
-        backend_summary["results"],
-        cost_fill["scenarios"],
-        manifest["backend"]["scenarios"],
-    ):
-        assert all(("agreement" in item) is raw_agreement_present for item in payloads)
-
-
-def test_run_validation_agreement_oracle_disabled_status_is_explicit(tmp_path: Path, monkeypatch):
-    candidate = write_candidate(tmp_path)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows()),
-    )
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
-
-    _assert_agreement_oracle_status(result, "disabled", raw_agreement_present=False)
-
-
-def test_run_validation_agreement_oracle_not_run_status_when_backend_does_not_complete(
-    tmp_path: Path,
-    monkeypatch,
-):
-    candidate = write_candidate(tmp_path)
-    _enable_oracle(candidate)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows()),
-    )
-    backend = FakeBackend(
-        BackendRunResult(
-            backend="fake",
-            status="failed",
-            metrics={},
-            warnings=("backend failed",),
-            unsupported_semantics=(),
-        )
-    )
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
-
-    _assert_agreement_oracle_status(result, "not_run", raw_agreement_present=False)
-
-
-@pytest.mark.parametrize("status", ["pass", "skipped", "unavailable", "inconclusive"])
-def test_run_validation_agreement_oracle_result_status_is_explicit_everywhere(
-    tmp_path: Path,
-    monkeypatch,
-    status: str,
-):
-    from quant_strategies.validation.agreement import AgreementResult
-
-    candidate = write_candidate(tmp_path)
-    _enable_oracle(candidate)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows()),
-    )
-    monkeypatch.setattr(
-        "quant_strategies.validation.agreement.evaluate_agreement",
-        lambda **_kwargs: AgreementResult(status=status, note=f"forced {status}"),
-    )
-    backend = FakeBackend(
-        BackendRunResult(
-            backend="fake",
-            status="completed",
-            metrics={"net_return": 0.01, "trade_count": 1, "gross_return": 0.01},
-            warnings=(),
-            unsupported_semantics=(),
-        )
-    )
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
-
-    _assert_agreement_oracle_status(result, status, raw_agreement_present=True)
-
-
-def test_run_validation_agreement_oracle_passes_for_engine_vs_vbt(tmp_path: Path, monkeypatch):
-    pytest.importorskip("vectorbtpro")
-    candidate = write_candidate(tmp_path)
-    (candidate / "strategy.py").write_text(_long_strategy_text())
-    _enable_oracle(candidate)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=_upward_rows()),
-    )
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
-
-    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
-    assert statuses == {"pass"}
-    assert result.failure_stage != "agreement_oracle"
-    assert all(
-        not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons
-    )
-
-
-def test_run_validation_agreement_oracle_divergence_fails_run(tmp_path: Path, monkeypatch):
-    from quant_strategies.validation.agreement import AgreementResult
-
-    candidate = write_candidate(tmp_path)
-    _enable_oracle(candidate)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows()),
-    )
-
-    def diverging(**_kwargs):
-        return AgreementResult(
-            status="fail",
-            note="forced divergence",
-            engine_return=0.05,
-            vbt_return=0.20,
-            abs_deviation=0.15,
-            tolerance_abs=1e-6,
-            tolerance_rel=1e-3,
-        )
-
-    monkeypatch.setattr("quant_strategies.validation.agreement.evaluate_agreement", diverging)
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
-
-    assert result.decision.decision == "mechanical_fail"
-    assert result.failure_stage == "agreement_oracle"
-    assert result.decision.reasons[0].startswith("backend_agreement_failed")
-    assert "engine_return=0.05" in result.decision.reasons[0]
-    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    assert backend_summary["results"][0]["agreement_oracle"]["status"] == "fail"
-    assert backend_summary["results"][0]["agreement"]["status"] == "fail"
-
-
-def test_run_validation_agreement_oracle_skips_threshold_exit(tmp_path: Path, monkeypatch):
-    candidate = write_candidate(tmp_path)
-    (candidate / "strategy.py").write_text(
-        _long_strategy_text().replace(
-            "exit_policy=ExitPolicy(max_hold_bars=1)",
-            "exit_policy=ExitPolicy(max_hold_bars=1, stop_loss_bps=50.0)",
-        )
-    )
-    _enable_oracle(candidate)
-    monkeypatch.setattr(
-        "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=_upward_rows()),
-    )
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
-
-    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
-    statuses = {item["agreement"]["status"] for item in backend_summary["results"]}
-    assert statuses == {"skipped"}
-    assert all(
-        not reason.startswith("backend_agreement_failed") for reason in result.decision.reasons
-    )
-
-
-def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
+def test_run_validation_default_engine_backend_accepts_flat_target_as_zero_activity_book(
     tmp_path: Path, monkeypatch
 ):
-    # The engine ontology cannot represent a flat (no-position) target, so a flat
-    # decision reaches the engine backend and fails closed (a no-op decision has
-    # no PnL to evaluate). VBT previously reported this as unsupported_semantics.
+    # The target-book contract accepts a flat (0) target as a valid decision (it is a
+    # complete, no-position book), so the spine backend completes it with zero closed
+    # trades rather than rejecting the decision shape. The run still fails mechanically,
+    # but on the no-evidence trade gate -- never on an "engine_failed"/unsupported shape.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='flat', sizing_kind='target_weight', size=0.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.0,\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -1659,18 +1463,17 @@ def test_run_validation_default_engine_backend_fails_closed_on_flat_target(
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     assert result.decision.decision == "mechanical_fail"
-    assert result.decision.reasons == ("engine_failed",)
+    # Flat target is accepted: the backend completes with no closed trades, so the
+    # failure is the no-evidence trade gate, not an unsupported/engine-failed shape.
+    assert "engine_failed" not in result.decision.reasons
+    assert "unsupported_semantics" not in result.decision.reasons
     assert "strategy_generation_failed" not in result.decision.reasons
     assert result.result_dir is not None
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     base_result = backend_summary["results"][0]
-    legacy_generation_status = "_".join(("decision", "generation", "status"))
-    legacy_generation_flag = "_".join(("decisions", "regen" + "erated"))
-    assert legacy_generation_status not in base_result
-    assert legacy_generation_flag not in base_result
     assert base_result["decision_count"] == 1
-    assert base_result["result"]["status"] == "failed"
-    assert any("flat" in warning for warning in base_result["result"]["warnings"])
+    assert base_result["result"]["status"] == "completed"
+    assert base_result["result"]["metrics"]["trade_count"] == 0
 
 
 def test_run_validation_fails_before_backend_on_leveraged_target_weight(
@@ -1693,44 +1496,55 @@ def test_run_validation_fails_before_backend_on_leveraged_target_weight(
     assert backend.calls == 0
     data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
     assert data_audit["windows"][0]["passed"] is False
-    assert any("leveraged_target_weight" in item for item in data_audit["windows"][0]["violations"])
+    assert any(
+        "portfolio_target_weight_exceeds_one" in item
+        for item in data_audit["windows"][0]["violations"]
+    )
 
 
-def test_run_validation_fails_before_backend_on_overlapping_gross_exposure(
+def test_run_validation_fails_before_backend_on_cross_symbol_gross_exposure(
     tmp_path: Path, monkeypatch
 ):
+    # Same-symbol targets net by construction, so over-gross is only reachable across
+    # distinct instruments: two simultaneous 0.6 standing targets are an intended gross
+    # of 1.2 > 1.0, which the exposure admissibility advisory flags before the backend.
     candidate = write_candidate(tmp_path)
+    (candidate / "validation.toml").write_text(
+        (candidate / "validation.toml")
+        .read_text()
+        .replace('symbols = ["BTC-PERP"]', 'symbols = ["BTC-PERP", "ETH-PERP"]')
+    )
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
+        "    by_symbol = {}\n"
+        "    for row in rows:\n"
+        "        by_symbol.setdefault(row['symbol'], row)\n"
         "    decisions = []\n"
-        "    if len(rows) >= 1:\n"
-        "        decisions.append(StrategyDecision(\n"
-        "            strategy_id='demo',\n"
-        "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "            decision_time=rows[0]['timestamp'],\n"
-        "            as_of_time=rows[0]['timestamp'],\n"
-        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.6),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=3),\n"
-        "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
-        "        ))\n"
-        "    if len(rows) >= 2:\n"
-        "        decisions.append(StrategyDecision(\n"
-        "            strategy_id='demo',\n"
-        "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
-        "            decision_time=rows[1]['timestamp'],\n"
-        "            as_of_time=rows[1]['timestamp'],\n"
-        "            target=PositionTarget(direction='short', sizing_kind='target_weight', size=0.6),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=3),\n"
-        "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[1]['timestamp'], field='close', source='strategy_input'),),\n"
-        "        ))\n"
+        "    for symbol in ('BTC-PERP', 'ETH-PERP'):\n"
+        "        if symbol in by_symbol:\n"
+        "            row = by_symbol[symbol]\n"
+        "            decisions.append(TargetDecision(\n"
+        "                strategy_id='demo',\n"
+        "                instrument=InstrumentRef(kind='crypto_perp', symbol=symbol),\n"
+        "                decision_time=row['timestamp'],\n"
+        "                as_of_time=row['timestamp'],\n"
+        "                target=0.6,\n"
+        "                observations=(ObservationRef(symbol=symbol, timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
+        "            ))\n"
         "    return decisions\n"
     )
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+    loaded_rows = [
+        _bar(symbol, base + timedelta(minutes=minute), 100.0 + minute)
+        for symbol in ("BTC-PERP", "ETH-PERP")
+        for minute in range(8)
+    ]
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
-        lambda config, **_kwargs: LoadedData(rows=_upward_rows(8)),
+        lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
     backend = RecordingBackend()
 
@@ -1760,7 +1574,7 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
         )
     )
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
@@ -1770,24 +1584,22 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
         "    decisions = []\n"
         "    if 'BTC-PERP' in by_symbol:\n"
         "        row = by_symbol['BTC-PERP']\n"
-        "        decisions.append(StrategyDecision(\n"
+        "        decisions.append(TargetDecision(\n"
         "            strategy_id='demo',\n"
         "            instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "            decision_time=row['timestamp'],\n"
         "            as_of_time=row['timestamp'],\n"
-        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.6),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "            target=0.6,\n"
         "            observations=(ObservationRef(symbol='BTC-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
         "        ))\n"
         "    if 'ETH-PERP' in by_symbol:\n"
         "        row = by_symbol['ETH-PERP']\n"
-        "        decisions.append(StrategyDecision(\n"
+        "        decisions.append(TargetDecision(\n"
         "            strategy_id='demo',\n"
         "            instrument=InstrumentRef(kind='crypto_perp', symbol='ETH-PERP'),\n"
         "            decision_time=row['timestamp'],\n"
         "            as_of_time=row['timestamp'],\n"
-        "            target=PositionTarget(direction='short', sizing_kind='target_weight', size=0.6),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "            target=-(0.6),\n"
         "            observations=(ObservationRef(symbol='ETH-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
         "        ))\n"
         "    return decisions\n"
@@ -1921,20 +1733,19 @@ def test_run_validation_passes_merged_scenario_config_to_backend(tmp_path: Path,
 def test_run_validation_rejects_unknown_params_with_strategy_validator(tmp_path: Path, monkeypatch):
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    extra = set(params).difference({'weight'})\n"
         "    if extra:\n"
         "        raise ValueError(f'unknown params: {sorted(extra)}')\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=float(params['weight'])),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-float(params['weight']),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -2246,7 +2057,7 @@ class RecordingBackend:
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
@@ -2255,7 +2066,7 @@ class RecordingBackend:
         self.row_ids_by_scenario.append((config.scenario_id, id(rows)))
         self.rows_by_scenario.append((config.scenario_id, rows))
         self.decision_sizes_by_scenario.append(
-            (config.scenario_id, [decision.target.size for decision in decisions])
+            (config.scenario_id, [abs(decision.target) for decision in decisions])
         )
         return BackendRunResult(
             backend=self.name,
@@ -2276,7 +2087,7 @@ class ScenarioAwareBackend(RecordingBackend):
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
@@ -2299,7 +2110,7 @@ class ExplodingBackend:
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
@@ -2312,7 +2123,7 @@ class MalformedBackend:
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> None:
@@ -2325,7 +2136,7 @@ class ExitingBackend:
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> BackendRunResult:
@@ -2338,7 +2149,7 @@ class InvalidStatusBackend:
     def run(
         self,
         *,
-        decisions: list[StrategyDecision],
+        decisions: list[TargetDecision],
         rows: list[dict[str, Any]],
         config: Any,
     ) -> dict[str, object]:
@@ -2408,15 +2219,14 @@ def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkey
     # params. A schema-less strategy fails fast at the param_validation stage.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )
@@ -2437,28 +2247,29 @@ def test_run_validation_requires_strategy_validate_params(tmp_path: Path, monkey
     assert "validate_params" in audit["windows"][0]["violations"][0]
 
 
-def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, monkeypatch):
-    # F16: the gated net_return is recomputable from the emitted per-trade ledger.
-    # No backend injected -> the engine is the verdict source and emits the ledger.
+def test_run_validation_emits_replayable_netted_book_ledger(tmp_path: Path, monkeypatch):
+    # F16/D9: the gated net_return is recomputable from the emitted netted-book
+    # round-trip ledger. No backend injected -> the spine is the verdict source and
+    # emits the ledger. Open/close/open/close so each scenario ledger holds two closed
+    # round trips -- otherwise `sum == metric` is the tautology `x == x`.
+    from quant_strategies.core.portfolio_foundation import INITIAL_EQUITY
+
     candidate = write_candidate(tmp_path)
-    # Emit TWO causal decisions (at the first two bars, each depending only on its own
-    # row) so each scenario ledger holds >1 trade -- otherwise `sum == metric` is the
-    # tautology `x == x` and never exercises summation over the ledger.
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
+        "    targets = {0: 1.0, 1: 0.0, 2: 1.0, 3: 0.0}\n"
         "    out = []\n"
         "    for i, row in enumerate(rows):\n"
-        "        if i < 2:\n"
-        "            out.append(StrategyDecision(\n"
+        "        if i in targets:\n"
+        "            out.append(TargetDecision(\n"
         "                strategy_id='demo',\n"
         "                instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "                decision_time=row['timestamp'],\n"
         "                as_of_time=row['timestamp'],\n"
-        "                target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "                exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "                target=targets[i],\n"
         "                observations=(ObservationRef(symbol='BTC-PERP', timestamp=row['timestamp'], field='close', source='strategy_input'),),\n"
         "            ))\n"
         "    return out\n"
@@ -2473,11 +2284,11 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
     assert result.result_dir is not None
     manifest = json.loads((result.result_dir / "validation_manifest.json").read_text())
     assert manifest["validation"]["verdict_replayable"] is True
-    assert manifest["validation"]["verdict_replay_basis"] == "engine_trade_ledger"
+    assert manifest["validation"]["verdict_replay_basis"] == "netted_book_round_trip_ledger"
 
     backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
     ledgered = [item for item in backend_summary["results"] if item["trade_ledger_path"]]
-    assert ledgered  # the engine emitted at least one per-trade ledger
+    assert ledgered  # the spine emitted at least one netted-book round-trip ledger
     # Guard against regressing to the tautological single-trade case.
     assert any(item["result"]["metrics"]["trade_count"] >= 2 for item in ledgered)
     for item in ledgered:
@@ -2487,11 +2298,12 @@ def test_run_validation_emits_replayable_engine_trade_ledger(tmp_path: Path, mon
         assert manifest["artifacts"][item["trade_ledger_path"]]["sha256"] == file_sha256(
             ledger_file
         )
-        trades = read_jsonl(ledger_file)
+        round_trips = read_jsonl(ledger_file)
         metrics = item["result"]["metrics"]
-        assert len(trades) == metrics["trade_count"]
-        # the verdict net_return is exactly the sum of the emitted per-trade net returns
-        assert sum(t["net_return"] for t in trades) == pytest.approx(
+        assert len(round_trips) == metrics["trade_count"]
+        # the verdict net_return is exactly the sum of the round-trip realized PnL as a
+        # fraction of the standing NAV base (design D4 reconciliation).
+        assert sum(t["realized_pnl"] for t in round_trips) / INITIAL_EQUITY == pytest.approx(
             metrics["net_return"], abs=1e-9
         )
 
@@ -2505,15 +2317,14 @@ def test_run_validation_failure_path_artifact_write_error_returns_structured_res
     # be returned, not raised -- API consumers have no CLI backstop.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='short', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=-(1.0),\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
         "    )]\n"
     )

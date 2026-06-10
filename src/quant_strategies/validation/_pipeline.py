@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from dataclasses import field as _field
 from pathlib import Path
 from typing import TYPE_CHECKING as _TYPE_CHECKING
@@ -19,9 +19,10 @@ from quant_strategies.core.execution import (
     execute_strategy_run,
 )
 from quant_strategies.core.exposure import exposure_admissibility_violations
+from quant_strategies.core.portfolio_foundation import RoundTrip
 from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.provenance import file_sha256, text_sha256
 from quant_strategies.validation.artifact_names import safe_scenario_artifact_path
 from quant_strategies.validation.artifacts import (
@@ -73,20 +74,13 @@ class _ValidationContext:
 
 @dataclass
 class _ValidationState:
-    all_decisions: list[StrategyDecision] = _field(default_factory=list)
+    all_decisions: list[TargetDecision] = _field(default_factory=list)
     backend_results: list[ScenarioBackendRunResult] = _field(default_factory=list)
     data_audits: list[dict[str, Any]] = _field(default_factory=list)
     data_provenance: list[dict[str, Any]] = _field(default_factory=list)
     failure_reasons: list[str] = _field(default_factory=list)
     required_scenario_ids: list[str] = _field(default_factory=list)
     failure_stage: str | None = None
-
-
-@dataclass(frozen=True)
-class _AgreementOracleOutcome:
-    status: str
-    note: str = ""
-    agreement: Any | None = None
 
 
 _MIN_VALIDATION_TRADES = 10
@@ -576,26 +570,6 @@ def _run_window_scenarios(
             context, window, execution_spec, execution, scenario
         )
         state.backend_results.append(scenario_result)
-        _record_agreement_failure(state, scenario_result)
-
-
-def _record_agreement_failure(
-    state: _ValidationState,
-    scenario_result: ScenarioBackendRunResult,
-) -> None:
-    agreement = scenario_result.agreement
-    if agreement is None or agreement.status != "fail":
-        return
-    state.failure_reasons.append(
-        "backend_agreement_failed:"
-        f"scenario={scenario_result.scenario_id}:"
-        f"engine_return={agreement.engine_return}:"
-        f"vbt_return={agreement.vbt_return}:"
-        f"abs_dev={agreement.abs_deviation}:"
-        f"tol_abs={agreement.tolerance_abs}:tol_rel={agreement.tolerance_rel}"
-    )
-    if state.failure_stage is None:
-        state.failure_stage = "agreement_oracle"
 
 
 def _run_scenario_backend(
@@ -645,19 +619,12 @@ def _run_scenario_backend(
             )
     trade_ledger_path = None
     trade_ledger_sha256 = None
-    if backend_result.trades:
+    if backend_result.round_trips:
         trade_ledger_path, trade_ledger_sha256 = _write_scenario_trade_ledger(
             result_dir=context.result_dir,
             scenario_id=scenario.id,
-            trades=backend_result.trades,
+            round_trips=backend_result.round_trips,
         )
-    agreement_outcome = _run_agreement_oracle(
-        context,
-        scenario_config,
-        scenario_decisions,
-        execution,
-        backend_result,
-    )
     return ScenarioBackendRunResult(
         window_id=window.id,
         scenario_id=scenario.id,
@@ -670,58 +637,7 @@ def _run_scenario_backend(
         decision_records_sha256=decision_records_sha256,
         trade_ledger_path=trade_ledger_path,
         trade_ledger_sha256=trade_ledger_sha256,
-        agreement=agreement_outcome.agreement,
-        agreement_oracle_status=agreement_outcome.status,
-        agreement_oracle_note=agreement_outcome.note,
     )
-
-
-def _run_agreement_oracle(
-    context: _ValidationContext,
-    scenario_config: ScenarioRunConfig,
-    decisions: list[StrategyDecision],
-    execution: _StrategyExecutionResult,
-    backend_result: BackendRunResult,
-):
-    """Opt-in cross-check of the engine verdict against VectorBT Pro.
-
-    Off by default. Runs only when the backend completed, reusing the verdict's
-    already-computed metrics (no re-screen). A divergence becomes a mechanical_fail via
-    state.failure_reasons (see _record_agreement_failure). Any oracle error is
-    recorded as inconclusive and never crashes the run.
-    """
-    oracle = context.config.agreement_oracle
-    if not oracle.enabled:
-        return _AgreementOracleOutcome(status="disabled", note="agreement_oracle_disabled")
-    if backend_result.status != "completed":
-        return _AgreementOracleOutcome(
-            status="not_run",
-            note=f"backend_status:{backend_result.status}",
-        )
-
-    from quant_strategies.validation.agreement import AgreementResult, evaluate_agreement
-
-    try:
-        agreement = evaluate_agreement(
-            engine_metrics=backend_result.metrics,
-            decisions=list(decisions),
-            rows=execution.normalized_rows.projection_rows(),
-            config=scenario_config,
-            tolerance_abs=oracle.tolerance_abs,
-            tolerance_rel=oracle.tolerance_rel,
-        )
-        return _AgreementOracleOutcome(
-            status=agreement.status,
-            note=agreement.note,
-            agreement=agreement,
-        )
-    except Exception as exc:  # never let the cross-check crash the verdict
-        agreement = AgreementResult(status="inconclusive", note=f"agreement_oracle_error:{exc}")
-        return _AgreementOracleOutcome(
-            status=agreement.status,
-            note=agreement.note,
-            agreement=agreement,
-        )
 
 
 def _classify_validation_state(
@@ -828,7 +744,7 @@ def _failure_result(
     config: Any,
     config_path: Path,
     backend_name: str,
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],
@@ -969,7 +885,7 @@ def _write_scenario_decision_records(
     *,
     result_dir: Path,
     scenario_id: str,
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> tuple[str, str]:
     return _write_scenario_jsonl(
         result_dir=result_dir, subdir="decision_records", scenario_id=scenario_id, records=decisions
@@ -980,11 +896,13 @@ def _write_scenario_trade_ledger(
     *,
     result_dir: Path,
     scenario_id: str,
-    trades: Sequence[Any],
+    round_trips: Sequence[RoundTrip],
 ) -> tuple[str, str]:
-    # Per-scenario engine trade ledger: net_return is recomputable as sum(trade.net_return).
+    # Per-scenario netted-book round-trip ledger: the gated net_return is recomputable
+    # as sum(round_trip.realized_pnl) / initial equity (design D4 reconciliation).
+    records = [asdict(trip) for trip in round_trips]
     return _write_scenario_jsonl(
-        result_dir=result_dir, subdir="trade_ledgers", scenario_id=scenario_id, records=trades
+        result_dir=result_dir, subdir="trade_ledgers", scenario_id=scenario_id, records=records
     )
 
 
@@ -1028,7 +946,7 @@ def _write_static_validation_artifacts(*, result_dir: Path, config: Any, config_
     except OSError as exc:
         strategy_snapshot = f"# strategy snapshot unavailable: {exc}\n"
     write_text_artifact(result_dir, "strategy_snapshot.py", strategy_snapshot)
-    write_json_artifact(result_dir, "decision_schema.json", StrategyDecision.model_json_schema())
+    write_json_artifact(result_dir, "decision_schema.json", TargetDecision.model_json_schema())
 
 
 def _write_validation_artifacts(
@@ -1039,7 +957,7 @@ def _write_validation_artifacts(
     config: Any,
     config_path: Path,
     backend_name: str,
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
     data_audits: list[dict[str, Any]],
     data_provenance: list[dict[str, Any]],
     backend_results: list[ScenarioBackendRunResult],

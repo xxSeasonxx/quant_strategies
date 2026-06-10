@@ -8,11 +8,9 @@ from typing import Any
 
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
@@ -37,7 +35,7 @@ def close_by_symbol(rows: Sequence[Mapping[str, Any]], timestamp: datetime) -> d
     }
 
 
-def generate_cross_sectional_decisions(rows: Sequence[Mapping[str, Any]]) -> list[StrategyDecision]:
+def generate_cross_sectional_decisions(rows: Sequence[Mapping[str, Any]]) -> list[TargetDecision]:
     closes = close_by_symbol(rows, AS_OF)
     if len(closes) < 2:
         return []
@@ -47,46 +45,45 @@ def generate_cross_sectional_decisions(rows: Sequence[Mapping[str, Any]]) -> lis
         for symbol in sorted(closes)
     )
     return [
-        StrategyDecision(
+        TargetDecision(
             strategy_id="synthetic_cross_section",
             instrument=InstrumentRef(kind="crypto_perp", symbol=winner),
             decision_time=DECISION,
             as_of_time=AS_OF,
-            target=PositionTarget(direction="long", sizing_kind="target_weight", size=0.5),
-            exit_policy=ExitPolicy(max_hold_bars=3),
+            target=0.5,
             observations=observations,
             metadata={"cross_section_count": len(closes)},
         )
     ]
 
 
-def generate_fx_triangle_decisions(rows: Sequence[Mapping[str, Any]]) -> list[StrategyDecision]:
+def generate_fx_triangle_decisions(rows: Sequence[Mapping[str, Any]]) -> list[TargetDecision]:
     closes = close_by_symbol(rows, AS_OF)
     if not {"EURUSD", "USDJPY", "EURJPY"}.issubset(closes):
         return []
     residual = math.log(closes["EURJPY"] / (closes["EURUSD"] * closes["USDJPY"]))
     if abs(residual) < 0.0001:
         return []
-    direction = "short" if residual > 0 else "long"
+    # A standing signed weight-of-NAV target: short EURJPY on a positive residual.
+    target = -0.25 if residual > 0 else 0.25
     observations = tuple(
         ObservationRef(symbol=symbol, timestamp=AS_OF, field="close", source="synthetic")
         for symbol in ("EURUSD", "USDJPY", "EURJPY")
     )
     return [
-        StrategyDecision(
+        TargetDecision(
             strategy_id="synthetic_fx_triangle",
             instrument=InstrumentRef(kind="fx_pair", symbol="EURJPY"),
             decision_time=DECISION,
             as_of_time=AS_OF,
-            target=PositionTarget(direction=direction, sizing_kind="target_weight", size=0.25),
-            exit_policy=ExitPolicy(max_hold_bars=2),
+            target=target,
             observations=observations,
             metadata={"residual_bps": round(residual * 10_000, 6)},
         )
     ]
 
 
-def decision_fingerprint(decisions: list[StrategyDecision]) -> str:
+def decision_fingerprint(decisions: list[TargetDecision]) -> str:
     payload = [decision.model_dump(mode="json") for decision in decisions]
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
@@ -127,7 +124,7 @@ def test_fx_triangle_synthetic_generator_uses_only_as_of_rows_and_typed_observat
         ]
     )
 
-    assert decisions[0].target.direction == "short"
+    assert decisions[0].target < 0.0  # short EURJPY on a positive residual
     assert decisions[0].observations == (
         ObservationRef(symbol="EURUSD", timestamp=AS_OF, field="close", source="synthetic"),
         ObservationRef(symbol="USDJPY", timestamp=AS_OF, field="close", source="synthetic"),

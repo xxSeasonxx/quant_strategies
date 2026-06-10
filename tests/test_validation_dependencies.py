@@ -9,11 +9,9 @@ import quant_strategies.observation_dependencies as observation_dependencies
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
@@ -24,14 +22,13 @@ FUTURE = datetime(2026, 1, 1, 0, 2, tzinfo=UTC)
 def decision(
     symbol: str = "BTC-PERP",
     observations: tuple[ObservationRef, ...] = (),
-) -> StrategyDecision:
-    return StrategyDecision(
+) -> TargetDecision:
+    return TargetDecision(
         strategy_id="demo",
         instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
         decision_time=DECISION,
         as_of_time=AS_OF,
-        target=PositionTarget(direction="short", sizing_kind="target_weight", size=1.0),
-        exit_policy=ExitPolicy(max_hold_bars=2),
+        target=-1.0,
         observations=observations,
     )
 
