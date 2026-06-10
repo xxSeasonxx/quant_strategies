@@ -9,7 +9,6 @@ parity check against the on-disk Parquet the same run writes.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
@@ -256,20 +255,18 @@ def test_data_audit_failure_reports_causal_replay_failed(
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import (ExitPolicy, InstrumentRef, ObservationRef, "
-        "PositionTarget, StrategyDecision)\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    btc_rows = [row for row in rows if row['symbol'] == 'BTC-PERP']\n"
         "    if len(btc_rows) < 2:\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=btc_rows[1]['timestamp'],\n"
         "        as_of_time=btc_rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         # observation references the LAST row -> not available by decision_time
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=btc_rows[-1]['timestamp'], "
         "field='close', source='strategy_input'),),\n"
@@ -419,23 +416,23 @@ def test_default_result_is_backward_compatible():
 # --- real backend smoke (opt-in) ---------------------------------------------
 
 
-def test_real_vectorbtpro_fold_returns_smoke_if_installed():
-    """Prove the accessor extracts a typed series from the REAL backend's
-    portfolio_path (drives the real VectorBTProEvaluationBackend directly, like
-    the existing backend smoke, to avoid multi-scenario fill-lag fillability on
-    the deliberately tiny fixture)."""
-    if os.environ.get("RUN_VECTORBTPRO_SMOKE") != "1":
-        pytest.skip("set RUN_VECTORBTPRO_SMOKE=1 to run real VectorBT Pro fold-returns smoke")
-    import vectorbtpro  # noqa: F401
-    from tests.test_evaluation_backend import decision, scenario
+def test_spine_backend_fold_returns_smoke():
+    """Prove the accessor extracts a typed series from the REAL single book backend's
+    portfolio_path (drives ``SpineEvaluationBackend`` directly, the only money model)."""
+    from datetime import datetime as _dt
+
+    from tests.test_evaluation_backend import decision, flat, scenario
     from tests.test_evaluation_backend import rows as backend_rows
 
     from quant_strategies.evaluation.config import EvaluationMetricsConfig
     from quant_strategies.evaluation.fold_returns import fold_series_from_portfolio_path
-    from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
+    from quant_strategies.evaluation.spine_backend import SpineEvaluationBackend
 
-    result = VectorBTProEvaluationBackend().run(
-        decisions=[decision(size=0.25)],
+    result = SpineEvaluationBackend().run(
+        decisions=[
+            decision(target=0.25),
+            flat(when=_dt(2026, 1, 1, 0, 2, tzinfo=AS_OF.tzinfo)),
+        ],
         rows=backend_rows(),
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),

@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.metrics import MetricValue
 
@@ -31,11 +31,16 @@ class PortfolioMetricPayload:
 
 @dataclass(frozen=True)
 class PreparedPortfolioInputs:
-    close: Any
-    decisions: tuple[StrategyDecision, ...]
-    symbol_indexes: Mapping[str, Any]
-    decision_positions: tuple[int, ...]
-    source_rows: tuple[Mapping[str, Any], ...] = ()
+    """Per-window inputs shared across the window's cost/fill scenarios.
+
+    The single causal netted book consumes the standing ``TargetDecision`` stream and
+    the execution ``rows`` directly; the only per-scenario inputs are the cost/fill
+    config, so preparation just holds the window-constant decisions, rows, and data
+    kind once for reuse across the scenario fan-out.
+    """
+
+    decisions: tuple[TargetDecision, ...]
+    rows: tuple[Mapping[str, Any], ...]
     data_kind: str = "bars"
 
 

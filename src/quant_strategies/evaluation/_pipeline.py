@@ -34,7 +34,6 @@ from quant_strategies.evaluation.artifacts import (
     write_text_artifact,
 )
 from quant_strategies.evaluation.backends import (
-    DataKindNamedEvaluationBackend,
     EvaluationBackend,
     PreparedEvaluationBackend,
 )
@@ -54,10 +53,13 @@ from quant_strategies.evaluation.fold_returns import (
     split_portfolio_path_by_scenario,
     window_id_for_scenario,
 )
-from quant_strategies.evaluation.metrics import evaluation_metric_semantics
+from quant_strategies.evaluation.metrics import (
+    SHARED_ACCOUNTING_MODEL,
+    evaluation_metric_semantics,
+)
 from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEvaluationResult
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
-from quant_strategies.evaluation.vectorbtpro_backend import VectorBTProEvaluationBackend
+from quant_strategies.evaluation.spine_backend import SpineEvaluationBackend
 from quant_strategies.provenance import package_versions, python_identity
 
 
@@ -95,11 +97,13 @@ _REQUIRED_COMPLETED_COUNT_METRICS = (
     "return_nonfinite_count",
     "funding_event_count",
 )
-_REQUIRED_COMPLETED_FUNDING_MODELS = {"none", "project_perp_ledger_v1"}
+# The single shared accounting/funding model identity. The book reports it for every
+# data kind; the retired per-asset-class perp-ledger model name is gone (design D9).
+_REQUIRED_COMPLETED_FUNDING_MODELS = {SHARED_ACCOUNTING_MODEL}
 # Stages whose failure means the Tier-0 causal-replay / decision-contract
 # integrity check did not pass (vs. a pre-causal failure, which leaves it unknown).
 _CAUSAL_FAILURE_STAGES = frozenset({"data_audit", "preflight"})
-_PROVENANCE_PACKAGE_NAMES = ("quant-strategies", "quant-data", "vectorbtpro")
+_PROVENANCE_PACKAGE_NAMES = ("quant-strategies", "quant-data")
 _SECONDS_PER_YEAR = 365.2425 * 24 * 60 * 60
 _ANNUALIZATION_CADENCE_MISMATCH_FACTOR_THRESHOLD = 1.1
 _ANNUALIZED_RISK_METRICS = ("annualized_return", "volatility", "sharpe", "sortino", "calmar")
@@ -159,7 +163,7 @@ def _run_evaluation(
             assessment_status="evaluation_failed",
         )
 
-    selected_backend = backend or VectorBTProEvaluationBackend()
+    selected_backend = backend or SpineEvaluationBackend()
     context = _EvaluationContext(
         repo_root=root,
         config=config,
@@ -167,9 +171,7 @@ def _run_evaluation(
         result_dir=result_dir,
         selected_backend=selected_backend,
         event_emitter=events,
-        provenance=_run_provenance(
-            backend_name=_backend_name(selected_backend, data_kind=config.data.kind),
-        ),
+        provenance=_run_provenance(backend_name=_backend_name(selected_backend)),
     )
     state = _EvaluationState()
 
@@ -594,7 +596,7 @@ def _prepare_portfolio_inputs(
             "portfolio_input_preparation",
             strategy_id=context.config.strategy_id,
             window_id=window.id,
-            backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
+            backend=_backend_name(context.selected_backend),
             decision_count=len(execution.decisions),
             row_count=len(projection_rows),
             scenario_count=scenario_count,
@@ -651,7 +653,7 @@ def _run_portfolio_scenario(
         strategy_id=context.config.strategy_id,
         window_id=window.id,
         scenario_id=scenario.scenario_id,
-        backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
+        backend=_backend_name(context.selected_backend),
     ) as scenario_event:
         scenario_result = (
             context.selected_backend.run_prepared(
@@ -794,7 +796,7 @@ def _check_scenario_coverage(
         "portfolio_evaluation",
         strategy_id=context.config.strategy_id,
         scenario_id="scenario_coverage",
-        backend=_backend_name(context.selected_backend, data_kind=context.config.data.kind),
+        backend=_backend_name(context.selected_backend),
     ) as coverage_event:
         coverage_event.fail(message)
     return _failure_result(
@@ -851,9 +853,7 @@ def _write_completion_artifacts(
                 path_base=context.config.base_dir,
                 config=context.config,
                 config_path=context.config_path,
-                backend_name=_backend_name(
-                    context.selected_backend, data_kind=context.config.data.kind
-                ),
+                backend_name=_backend_name(context.selected_backend),
                 data_windows=state.data_windows,
                 table_artifacts=table_artifacts,
                 scenario_summary=scenario_summary,
@@ -1152,9 +1152,7 @@ def _median(values: Sequence[float]) -> float:
     return (float(ordered[midpoint - 1]) + float(ordered[midpoint])) / 2.0
 
 
-def _backend_name(backend: Any, *, data_kind: str | None = None) -> str:
-    if data_kind is not None and isinstance(backend, DataKindNamedEvaluationBackend):
-        return str(backend.name_for_data_kind(data_kind))
+def _backend_name(backend: Any) -> str:
     return getattr(backend, "name", "unknown")
 
 
@@ -1320,7 +1318,7 @@ def _write_failure_artifacts(
         "schema_version": "quant_strategies.evaluation.failure/v1",
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "strategy_id": context.config.strategy_id,
-        "backend": _backend_name(context.selected_backend, data_kind=context.config.data.kind),
+        "backend": _backend_name(context.selected_backend),
         "failure_stage": failure_stage,
         "assessment_status": assessment_status,
         "message": message,

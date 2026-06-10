@@ -6,6 +6,12 @@ from typing import Any
 
 MetricValue = float | int | str | bool | None
 
+# The single shared accounting/funding model identity reported by every completed
+# evaluation scenario. Evaluation runs the one causal netted portfolio book on every
+# surface (design D9); the retired per-asset-class ``project_perp_ledger_v1`` model
+# name no longer appears in the metric contract.
+SHARED_ACCOUNTING_MODEL = "netted_portfolio_book_v1"
+
 
 def finite_metric_or_none(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, Real):
@@ -27,9 +33,9 @@ def required_drawdown_metric(name: str, value: Any) -> float:
 def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     nav_base = "portfolio NAV path"
     returns_base = "full-grid periodic portfolio returns, including flat/no-position bars"
-    trades_base = "portfolio trade records"
+    trades_base = "portfolio round-trip ledger derived from the netted book"
     backend = (
-        "vectorbtpro for non-funding evaluations; project_perp_ledger_v1 for crypto_perp_funding"
+        f"{SHARED_ACCOUNTING_MODEL} (the single causal netted portfolio book on every surface)"
     )
     cost_scope = (
         "net of configured fees/slippage; includes funding cashflows for crypto_perp_funding; "
@@ -197,11 +203,11 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
         },
         "funding_model": {
             "unit": "label",
-            "base": "evaluation data-kind route",
+            "base": "single shared netted-book accounting model",
             "aggregation": "scenario label",
             "backend": backend,
             "not_authority": not_authority,
-            "null_when": "never for completed scenarios; project_perp_ledger_v1 for crypto_perp_funding and none otherwise",
+            "null_when": f"never for completed scenarios; always {SHARED_ACCOUNTING_MODEL}",
         },
         "benchmark_symbol": {
             "unit": "label",

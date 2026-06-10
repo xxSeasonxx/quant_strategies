@@ -202,17 +202,6 @@ def test_data_loader_bars_use_contract_loaders_not_raw_layer():
     assert "load_universe_bars" not in source
 
 
-def test_vectorbtpro_smoke_fails_loudly_when_enabled():
-    text = (ROOT / "tests" / "test_evaluation_backend.py").read_text()
-    smoke = text.split("def test_vectorbtpro_evaluation_backend_real_smoke_if_installed():", 1)[1]
-    smoke = smoke.split("\ndef test_", 1)[0]
-
-    assert "pytest.importorskip" not in smoke
-    assert "import pandas" in smoke
-    assert "import pyarrow" in smoke
-    assert "import vectorbtpro" in smoke
-
-
 def test_evaluation_constraints_pin_numeric_backend_versions():
     constraints = ROOT / "constraints" / "evaluation.txt"
 
@@ -310,7 +299,11 @@ def test_p3_simplification_uses_explicit_module_boundaries():
 
     assert not (evaluation / "backend.py").exists()
     assert not (evaluation / "runner.py").exists()
-    assert (evaluation / "vectorbtpro_backend.py").exists()
+    # The VectorBT Pro and project_perp_ledger evaluation backends are retired (D9):
+    # the single causal netted portfolio book is the only evaluation money model.
+    assert not (evaluation / "vectorbtpro_backend.py").exists()
+    assert not (evaluation / "project_perp_ledger.py").exists()
+    assert (evaluation / "spine_backend.py").exists()
     assert (evaluation / "results.py").exists()
     assert (evaluation / "_pipeline.py").exists()
     assert (validation / "results.py").exists()
@@ -327,7 +320,9 @@ def test_evaluation_pipeline_uses_protocols_not_reflective_dispatch():
     assert "Parameter" not in text
     assert "hasattr(context.selected_backend" not in text
     assert "PreparedEvaluationBackend" in text
-    assert "DataKindNamedEvaluationBackend" in text
+    # No data-kind routing hook: the single book prices every asset class (D9).
+    assert "DataKindNamedEvaluationBackend" not in text
+    assert "name_for_data_kind" not in text
 
 
 def _forbidden_runner_imports(

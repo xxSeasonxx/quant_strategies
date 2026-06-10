@@ -10,12 +10,12 @@ import pandas as pd
 import pytest
 
 import quant_strategies.evaluation._pipeline as evaluation_runner
-import quant_strategies.evaluation.vectorbtpro_backend as backend_module
 from quant_strategies.causality import LookaheadCheckResult
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
+from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
@@ -120,20 +120,18 @@ def write_candidate(
     )
     dataset_line = 'dataset = "demo_bars"\n' if data_kind == "bars" else ""
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, "
-        "PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         f"{validator}"
         "def generate_decisions(rows, params):\n"
         "    btc_rows = [row for row in rows if row['symbol'] == 'BTC-PERP']\n"
         "    if len(btc_rows) < 2:\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=btc_rows[1]['timestamp'],\n"
         "        as_of_time=btc_rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=btc_rows[1]['timestamp'], "
         "field='close', source='strategy_input'),),\n"
         "    )]\n"
@@ -371,7 +369,7 @@ def completed_metrics() -> dict[str, int | float | str]:
         "return_nonfinite_count": 0,
         "funding_cashflow_total": 0.0,
         "funding_event_count": 0,
-        "funding_model": "none",
+        "funding_model": SHARED_ACCOUNTING_MODEL,
     }
 
 
@@ -1296,7 +1294,7 @@ def test_run_evaluation_resolves_relative_config_path_from_cwd_when_repo_root_om
     assert result.result_dir.parent == tmp_path / "candidate" / "evaluation_results" / "demo"
 
 
-def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
+def test_run_evaluation_supports_crypto_perp_funding_through_the_spine_book(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1327,11 +1325,6 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=funding_rows),
     )
-    monkeypatch.setattr(
-        backend_module,
-        "require_evaluation_dependencies",
-        lambda: (_ for _ in ()).throw(AssertionError("VectorBT Pro should not be required")),
-    )
 
     result = run_evaluation(
         candidate / "evaluation.toml",
@@ -1345,12 +1338,23 @@ def test_run_evaluation_supports_crypto_perp_funding_with_project_perp_ledger(
     assert result.result_dir is not None
     assert (result.result_dir / "tables" / "funding_cashflows.parquet").exists()
     metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    # The single shared netted-book model identifies every scenario; the retired
+    # per-asset-class perp-ledger name is gone.
     assert {item["metrics"]["funding_model"] for item in metrics_payload["scenarios"]} == {
-        "project_perp_ledger_v1"
+        SHARED_ACCOUNTING_MODEL
     }
-    assert {item["backend"] for item in metrics_payload["scenarios"]} == {"project_perp_ledger_v1"}
+    assert {item["backend"] for item in metrics_payload["scenarios"]} == {SHARED_ACCOUNTING_MODEL}
+    assert (
+        "project_perp_ledger_v1" not in (result.result_dir / "evaluation_metrics.json").read_text()
+    )
+    # The held position is charged funding while open; how many of the two funding
+    # bars (0:03, 0:04) land after entry depends on the scenario's entry lag, so every
+    # scenario sees at least one non-zero funding cashflow.
+    for item in metrics_payload["scenarios"]:
+        assert item["metrics"]["funding_event_count"] >= 1
+        assert item["metrics"]["funding_cashflow_total"] != 0.0
     manifest = json.loads((result.result_dir / "evaluation_manifest.json").read_text())
-    assert manifest["evaluation"]["backend"]["name"] == "project_perp_ledger_v1"
+    assert manifest["evaluation"]["backend"]["name"] == SHARED_ACCOUNTING_MODEL
     assert "funding_cashflows" in {item["artifact_kind"] for item in manifest["tables"]}
     assert not [event for event in events if event["status"] == "failed"]
 
@@ -1376,11 +1380,6 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=no_event_rows),
     )
-    monkeypatch.setattr(
-        backend_module,
-        "require_evaluation_dependencies",
-        lambda: (_ for _ in ()).throw(AssertionError("VectorBT Pro should not be required")),
-    )
 
     result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path)
 
@@ -1389,7 +1388,7 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
     assert result.result_dir is not None
     metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
     for scenario in metrics_payload["scenarios"]:
-        assert scenario["backend"] == "project_perp_ledger_v1"
+        assert scenario["backend"] == SHARED_ACCOUNTING_MODEL
         assert scenario["metrics"]["funding_cashflow_total"] == 0.0
         assert scenario["metrics"]["funding_event_count"] == 0
 
@@ -1944,19 +1943,18 @@ def test_run_evaluation_fails_before_portfolio_on_missing_as_of_row(
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from datetime import timedelta\n"
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 2:\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'] - timedelta(minutes=1),\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         "    )]\n"
     )
     backend = BackendShouldNotBeCalled()
@@ -2033,18 +2031,16 @@ def test_run_evaluation_fails_before_portfolio_on_late_observation_dependency(
 
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, "
-        "PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         "        observations=(ObservationRef(symbol='ETH-PERP', timestamp=rows[0]['timestamp'], "
         "field='close', source='strategy_input'),),\n"
         "    )]\n"
@@ -2116,17 +2112,16 @@ def test_run_evaluation_fails_before_portfolio_on_missing_decision_observations(
 
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         "    )]\n"
     )
     backend = BackendShouldNotBeCalled()

@@ -196,6 +196,25 @@ class RoundTrip:
 
 
 @dataclass(frozen=True)
+class FundingEvent:
+    """One funding cashflow applied to the live net position at a funding-apply bar.
+
+    The same per-event detail the book charged against cash, exposed so a heavy
+    surface (evaluation) can serialize the funding trace without re-deriving funding
+    (the single funding home stays the book; design D8). ``cashflow`` is signed cash
+    on the account (`-signed_qty * mark * rate`): a long pays positive funding, a
+    short receives.
+    """
+
+    symbol: str
+    timestamp: datetime
+    funding_rate: float
+    position_units: float
+    mark_price: float
+    cashflow: float
+
+
+@dataclass(frozen=True)
 class FoundationMetric:
     window_id: str
     start_time: datetime
@@ -339,6 +358,7 @@ class BookWalkResult:
     feasibility: FeasibilityVerdict
     final_nav: float
     realized_pnl: float
+    funding_events: tuple[FundingEvent, ...] = ()
 
 
 def build_portfolio_foundation(
@@ -384,6 +404,43 @@ def build_portfolio_foundation(
         evidence_class=FOUNDATION_EVIDENCE_CLASS,
         scenarios=(realistic, stress),
         ledger=realistic_walk,
+    )
+
+
+def walk_portfolio_book(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    decisions: Sequence[TargetDecision],
+    data: DataConfig,
+    fill_model: FillModelConfig,
+    cost_model: CostModelConfig,
+    config: PortfolioFoundationConfig,
+) -> BookWalkResult:
+    """Run the single causal book once over ``rows`` at one cost/fill configuration.
+
+    This is the lower-level entry beneath :func:`build_portfolio_foundation`: it is the
+    same one causal, single-account, per-symbol-netted walk, but for exactly one cost
+    scenario (no internal cost-stress fan-out, no subwindow/DSR scoring, no zero-cost or
+    insufficient-sample scoring gate). It is the book a heavy surface (evaluation) runs
+    per ``(window, scenario)`` to derive that fold's NAV ``period_return`` series and the
+    fold scalars — one model of money on every surface (design D9). A
+    :class:`FeasibilityError` (leverage-budget / unfinanced-leverage breach) is still
+    raised mid-walk and never clamped (design D5); the cost-floor and minimum-sample
+    verdicts are scoring-scenario concerns owned by ``build_portfolio_foundation`` and
+    are intentionally not applied here, so a legitimate zero-cost evaluation scenario
+    is not spuriously infeasible.
+    """
+    row_index = _RowIndex(rows)
+    decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    per_side_cost_fraction = _cost_fraction(
+        cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side
+    )
+    return _walk_book(
+        row_index,
+        decision_plan,
+        per_side_cost_fraction=per_side_cost_fraction,
+        data_kind=data.kind,
+        config=config,
     )
 
 
@@ -596,11 +653,12 @@ def _walk_book(
     latched: dict[str, float] = {}
     path: list[PortfolioPathPoint] = []
     round_trips: list[RoundTrip] = []
+    funding_events: list[FundingEvent] = []
     financed = data_kind in _FINANCED_DATA_KINDS
 
     for timestamp in row_index.timestamps:
         # 1. Funding/financing on the NET held position (single localized friction).
-        cash += _apply_funding(row_index, positions, timestamp)
+        cash += _apply_funding(row_index, positions, timestamp, funding_events)
 
         # 2. RiskRule overlay on the printed mark BEFORE new entries this bar.
         for symbol in tuple(positions):
@@ -680,6 +738,7 @@ def _walk_book(
         feasibility=FeasibilityVerdict(feasible=True),
         final_nav=final_nav,
         realized_pnl=_realized_so_far(round_trips),
+        funding_events=tuple(funding_events),
     )
 
 
@@ -833,12 +892,14 @@ def _apply_funding(
     row_index: _RowIndex,
     positions: Mapping[str, _NetPosition],
     timestamp: datetime,
+    funding_events: list[FundingEvent],
 ) -> float:
     """Charge funding on the live NET held quantity at each funding-apply time.
 
     Reuses the shared funding invariants (dedup via ``funding_rates_match`` upstream
     in ``_RowIndex``, window rule ``entry < funding_ts <= now`` on the held leg, sign
     ``-signed_qty * mark * rate``). A long pays positive funding, a short receives.
+    Each applied cashflow is recorded into ``funding_events`` as the derived trace.
     """
     cash_delta = 0.0
     for symbol, funding_timestamp, funding_rate in row_index.funding_events_by_apply_time.get(
@@ -855,6 +916,16 @@ def _apply_funding(
         cashflow = -position.signed_qty * mark * funding_rate
         cash_delta += cashflow
         position.funding_cashflow += cashflow
+        funding_events.append(
+            FundingEvent(
+                symbol=symbol,
+                timestamp=timestamp,
+                funding_rate=funding_rate,
+                position_units=position.signed_qty,
+                mark_price=mark,
+                cashflow=cashflow,
+            )
+        )
     return cash_delta
 
 
