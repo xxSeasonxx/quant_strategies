@@ -87,7 +87,6 @@ class OutputConfig(RunnerConfigModel):
     quick_checks: bool = False
     artifact_profile: ArtifactProfile = "diagnostic"
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
-    foundation_enabled: bool = True
     foundation_subwindows: StrictInt = Field(default=6, ge=1, le=MAX_FOUNDATION_SUBWINDOWS)
     foundation_trial_count: StrictInt | None = Field(default=None, ge=1)
     foundation_benchmark_sharpe: float = 0.0

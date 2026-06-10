@@ -14,8 +14,6 @@ def compact(text: str) -> str:
 
 
 def test_reference_docs_describe_evaluate_surface_without_promotion_authority():
-    # docs/vectorbtpro.md is now a retirement note, not a current-surface
-    # reference, so it no longer carries the full evaluate-surface contract.
     for path in [
         "README.md",
         "FOUNDATION_LOCK.md",
@@ -36,7 +34,6 @@ def test_docs_describe_evaluation_example_and_path_anchoring():
     foundation = read("docs/foundation-surfaces.md")
     readme = read("README.md")
 
-    # The retired docs/vectorbtpro.md no longer anchors the evaluation example.
     assert "examples/simple_momentum/evaluation.toml" in foundation
 
     assert "candidate-local" in foundation
@@ -60,25 +57,18 @@ def test_validation_and_evaluation_examples_keep_window_dates_out_of_data_sectio
 
 
 def test_docs_include_installed_cli_refresh():
-    # The VectorBT Pro evaluation backend is retired (portfolio-book-spine), so
-    # the docs no longer instruct users to invoke the backend smoke: neither the
-    # `make check-vectorbtpro-smoke` target nor the RUN_VECTORBTPRO_SMOKE pytest
-    # command appears. (A non-prescriptive note that the Makefile/pyproject still
-    # carry leftover `check-vectorbtpro-smoke`/`vectorbtpro` build artifacts,
-    # pending build-file cleanup, is allowed.)
+    # The local check flow is `make check` (lint + tests) plus the installed-CLI
+    # refresh: install the package editable and run the CLI help.
     for path in ["README.md", "docs/foundation-surfaces.md"]:
         text = read(path)
         assert "make check" in text, path
         assert "conda run -n quant python -m pip install -e ." in text, path
         assert "conda run -n quant quant-strategies --help" in text, path
-        assert "make check-vectorbtpro-smoke" not in text, path
-        assert "RUN_VECTORBTPRO_SMOKE" not in text, path
 
 
 def test_docs_describe_at_risk_bar_returns_and_annualization_cadence_warnings():
     # Annualized metrics now derive from at-risk (capital-deployed) bars, not the
-    # retired full-grid / flat-bar union calendar (portfolio-book-spine). VBT is
-    # retired, so docs/vectorbtpro.md no longer describes the evaluation metric.
+    # retired full-grid / flat-bar union calendar (portfolio-book-spine).
     for path in ["README.md", "docs/foundation-surfaces.md"]:
         text = compact(read(path))
         assert "at-risk bars" in text, path
@@ -117,7 +107,6 @@ def test_docs_lock_sortino_funding_and_no_lookahead_semantics():
                 "README.md",
                 "FOUNDATION_LOCK.md",
                 "docs/foundation-surfaces.md",
-                "docs/vectorbtpro.md",
             ]
         )
     )
@@ -203,7 +192,6 @@ def test_docs_do_not_call_evaluation_validation_verdict():
             "PRD.md",
             "FOUNDATION_LOCK.md",
             "docs/foundation-surfaces.md",
-            "docs/vectorbtpro.md",
             "docs/quant-autoresearch-consumer.md",
         ]
         if (ROOT / path).exists()
@@ -233,7 +221,6 @@ def test_active_docs_do_not_present_engine_as_user_api():
             "PRD.md",
             "AGENTS.md",
             "docs/foundation-surfaces.md",
-            "docs/vectorbtpro.md",
         ]
     }
 

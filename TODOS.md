@@ -24,8 +24,9 @@ weight-of-NAV targets, idempotent, optional declared `RiskRule`). The engine fol
 it into **one causal single-account netted portfolio book** on every surface
 (`netted_portfolio_book_v1`); the **NAV path is the single scored object**; an
 envelope breach is a typed **fail-closed** `FeasibilityVerdict` (`succeeded` = feasible
-and completed). The per-trade ledger is a derived attribution view. VBT +
-`project_perp_ledger` + the single-trade agreement oracle are retired.
+and completed). The per-trade ledger is a derived attribution view. The legacy
+alternate backend, `project_perp_ledger`, and the single-trade agreement oracle are
+retired.
 
 Current quick-run state:
 
@@ -61,9 +62,8 @@ make check
 git diff --check
 ```
 
-Use `make check-vectorbtpro-smoke` only when the real VectorBT Pro evaluation
-smoke is the only needed slice. Run `conda run -n quant pytest -q` for final
-confidence when source, tests, or public APIs changed.
+Run `conda run -n quant pytest -q` for final confidence when source, tests, or
+public APIs changed.
 
 ## 2. Current Open Work
 
@@ -182,7 +182,7 @@ Preserve these contained residuals unless they become active work:
 - **R1** *(resolved by portfolio-book-spine, 2026-06-10)* `net_return` dual semantics
   — there is now one model of money; the per-trade `net_return` is the book walk's
   realized after-cost attribution (`gross + funding − cost`) and reconciles with the
-  NAV path. The retired VBT/perp-ledger second basis is gone.
+  NAV path. The retired second accounting basis is gone.
 - **R2** `_is_true_flag` coercion
 - **R3** `not_evaluated` soft-stop
 - **R4** causality's missing-`available_at` fallback
@@ -196,8 +196,8 @@ Preserve these contained residuals unless they become active work:
   trade-ledger JSONL. The CLI backstops escaped filesystem errors as clean exit
   `1`. Result-directory/static artifact creation, final artifact writes, and
   `_failure_result` paths are routed to structured `failure_stage` results.
-- **D2 *(resolved by portfolio-book-spine, 2026-06-10)* VectorBT Pro agreement
-  residual:** the single-trade agreement oracle and the VBT cross-check are retired;
+- **D2 *(resolved by portfolio-book-spine, 2026-06-10)* agreement-oracle
+  residual:** the single-trade agreement oracle and its cross-check are retired;
   the netted-book spine is the single accounting model on every surface. An
   independent cross-check (a second re-implementation that must agree, generalized
   from single-trade to the netted book) is a named follow-on, not a current surface.

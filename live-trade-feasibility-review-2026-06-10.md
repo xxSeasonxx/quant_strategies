@@ -27,19 +27,20 @@
 >
 > **Remaining work for the next session (from §14):**
 > - 🔴 **Open** — No. 11 (PIT `available_at ≥ timestamp` guard), No. 17 (relocate the
->   stale `researched/` artifacts), No. 18 (`foundation_enabled=False`→infeasible:
->   remove the dead knob or add a causality-only non-scored mode), No. 19 (purge the
->   stale VBT build refs in `pyproject`/`Makefile`), No. 20 (**rebuild the four
->   candidate strategies on the target-book contract** — clears the last deferred test).
+>   stale `researched/` artifacts), No. 20 (**rebuild the four candidate strategies on
+>   the target-book contract** — clears the last deferred test).
 > - ⏳ **Deferred follow-ons** (plug into the spine's market-model interface; several
 >   need new `quant_data` fields) — No. 3 capacity/ADV (a `volume` field), No. 6
 >   (tighten `off`/`micro` causality → non-scoreable), No. 7 (asset-class
 >   financing/borrow/carry — guarded meanwhile by the `unfinanced_leverage` verdict),
 >   No. 8 (intrabar OHLC stop fills + fill-price stress).
-> - ✅ Everything else is **Done** (the §1A root + most P0/P1).
+> - ✅ Everything else is **Done** (the §1A root + most P0/P1), now including **No. 18**
+>   (the dead `foundation_enabled` knob removed — the book is mandatory) and **No. 19**
+>   (VBT fully purged: build extras, `Makefile` smoke target, `evaluation/dependencies.py`
+>   import, the `vectorbtpro` purity-ban entry, and all active docs/tests scrubbed).
 >
-> Two decisions are Season's: No. 18 (the `foundation_enabled` knob) and No. 19 (keep
-> VBT scaffolding for the deferred cross-check, or purge). Cross-repo `quant_autoresearch`
+> Both of Season's decisions are resolved (2026-06-10): No. 18 → **remove** the knob;
+> No. 19 → **purge** all VBT (no scaffolding kept). Cross-repo `quant_autoresearch`
 > edits are written up in `docs/consumer/MIGRATION-portfolio-book-spine.md`.
 
 ---
@@ -378,7 +379,7 @@ This makes a capped, financed, netted >1-gross book *admissible and honestly sco
 > - **✅ Done** — 0a, 0b, 0c, 1, 2, 4, 5, 9, 10, 12, 13, 14, 15, 16: one causal single-account netted **NAV book** is the single scored object; idempotent **target-book** contract (stacking inexpressible); typed **fail-closed** `FeasibilityVerdict` (`succeeded` gated on it); **at-risk-bar** statistics + min-sample gate (the F2 fix); operator-frozen **`[leverage_budget]`** (gross+net); one **funding** home; per-trade ledger is a **derived attribution** view (NAV↔ledger reconciled); dead code removed; gross/net **utilization** emitted; docs/ADRs shipped.
 > - **🟡 Partial** — No. 3: zero-cost is now a fail-closed verdict ✅; **capacity/ADV** modeling deferred (needs a `quant_data` volume field).
 > - **⏳ Deferred follow-ons** (plug into the spine's market-model interface; several need upstream data): No. 6 (tighten `off`/`micro` causality → non-scoreable), No. 7 (F4 asset-class financing/borrow/carry — guarded meanwhile by the required `unfinanced_leverage` verdict), No. 8 (F5 intrabar OHLC stop fills + fill-price stress).
-> - **🔴 Open** — No. 11 (PIT `available_at ≥ timestamp` guard), No. 17 (stale `researched/` artifacts), plus the three new build residuals **No. 18–20** below.
+> - **🔴 Open** — No. 11 (PIT `available_at ≥ timestamp` guard), No. 17 (stale `researched/` artifacts), No. 20 (rebuild candidate strategies). **No. 18–19 now ✅ Done** (knob removed; VBT purged).
 
 | No. | Status | Priority | Action class | Finding | Recommendation |
 |---|---|---|---|---|---|
@@ -402,8 +403,8 @@ This makes a capped, financed, netted >1-gross book *admissible and honestly sco
 | 15 | ✅ Done | P2 | Add | §13 docs/ADRs | Write four ADRs (scored unit, capital model, scoreable-contract, open-ticket→target-state/rebalance ontology); fix usage-guide single-PnL claim and `succeeded` semantics. |
 | 16 | ✅ Done | P1 | Add | Risk-budget utilization not reported (Codex F3, §17) | Emit `max_gross_exposure`, `mean_gross_exposure`, a gross-exposure time-integral, and `return_per_unit_gross` on full_train + subwindow records. The climbed Sharpe/PSR is leverage-invariant, but the `total_return` and `max_drawdown` **gates** are leverage-sensitive yet gross-blind, and capital efficiency can't be assessed without gross. |
 | 17 | 🔴 Open | P1 | Retire | Stale research artifacts in the active repo (Codex F7, §17) | Move generated `researched/`/`candidates/` artifacts (`summary.json`/`diagnostics.json`/`artifacts/`) out of the active tree, or mark `researched/` frozen-and-excluded from agent context; add a repo-boundary test. Prevents an autonomous agent reading passed/causality-off stale artifacts as current evidence. (The repo-boundary test exists and currently fails on the untracked `researched/` dirs.) |
-| 18 | 🔴 Open | P1 | Refactor | **`foundation_enabled=False` → infeasible** (surfaced by the build) | The portfolio book is now the authoritative scored object, so `output.foundation_enabled=False` makes every run an `infeasible` verdict (nothing to score). Decide: **remove** the now-dead knob (the book is mandatory), or add a **causality-only, non-scored** mode that is not a failure. |
-| 19 | 🔴 Open | P2 | Retire | **Stale VBT build references** (surfaced by the build) | VBT is fully retired (both backends + the perp ledger deleted), but `pyproject.toml [vectorbtpro]`/`[evaluation]` extras, the `evaluation/dependencies.py` VBT optional-import, and the `Makefile check-vectorbtpro-smoke` target (whose test is deleted) remain. Purge them, **or** keep deliberately as scaffolding for the deferred independent netted-book cross-check (§1A Audit) — decide and document. |
+| 18 | ✅ Done | P1 | Refactor | **`foundation_enabled=False` → infeasible** (surfaced by the build) | **Resolved (2026-06-10): the dead knob is removed.** The portfolio book is mandatory — a run is either feasible-and-scored or a typed `feasibility` failure; there is no disabled, non-scored mode. Deleted `OutputConfig.foundation_enabled`, the runner guard, `PortfolioFoundationConfig.enabled` (read nowhere), and the disabled-foundation test. |
+| 19 | ✅ Done | P2 | Retire | **Stale VBT build references** (surfaced by the build) | **Resolved (2026-06-10): purged, no scaffolding kept.** Removed the `pyproject.toml [vectorbtpro]`/`[evaluation]` extras' VBT entries, the `constraints/evaluation.txt` pin, the `evaluation/dependencies.py` VBT optional-import (dead `require_evaluation_dependencies` + `EvaluationDependencies`), the `Makefile check-vectorbtpro-smoke` target, the `vectorbtpro` purity-ban root, and the `environment.json` package entry; scrubbed the brand name from all active docs/tests/specs (deleted `docs/vectorbtpro.md`). The `vectorbtpro`/`VBT` token now appears only in git history, this review pair, and the `openspec/changes/archive/**` provenance. |
 | 20 | 🔴 Open | P1 | Add | **Rebuild candidate strategies on the target-book contract** (surfaced by the build) | The four `candidates/*/strategy.py` (and `examples/simple_momentum`) still import the retired open-ticket contract (`StrategyDecision`/`ExitPolicy`); their tests are deleted and `test_committed_run_configs_use_decision_strategy_contract` is the deferred-red failure. Re-author them as `TargetDecision` target books + rerun; this clears the last deferred test. Season-owned (separate from the engine refactor). |
 
 ---

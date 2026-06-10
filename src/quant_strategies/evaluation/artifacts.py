@@ -334,7 +334,6 @@ def write_evaluation_manifest(
                 "pydantic",
                 "pandas",
                 "pyarrow",
-                "vectorbtpro",
             ),
             exclude_paths=(result_dir,),
         ),

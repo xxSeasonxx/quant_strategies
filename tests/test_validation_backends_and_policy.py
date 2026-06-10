@@ -216,7 +216,7 @@ def test_get_backend_rejects_unknown_backend_name():
 
 def test_get_backend_exposes_only_engine_backend():
     assert get_backend("engine").name == "engine"
-    for name in ("fake", "vectorbtpro"):
+    for name in ("fake", "unknown"):
         with pytest.raises(ValueError, match="unsupported validation backend"):
             get_backend(name)
 
@@ -298,7 +298,7 @@ def test_policy_gates_on_engine_funding_inclusive_net_return():
     # F2: the engine verdict source emits a funding-inclusive net_return. The
     # positive-evidence gate must key on that funding-inclusive number, not on the
     # price/cost-only path -- a perp that is price/cost-positive but funding-negative
-    # must not clear the gate (this is the perp economics the old vbt "net" omitted).
+    # must not clear the gate (this is the perp economics a price/cost-only "net" omits).
     def realistic(net_return: float, gross_return: float) -> tuple[ScenarioBackendRunResult, ...]:
         return tuple(
             completed_scenario(
@@ -795,10 +795,10 @@ def test_policy_mechanical_fail_for_required_backend_unavailable():
         data_passed=True,
         backend_results=[
             BackendRunResult(
-                backend="vectorbtpro",
+                backend="unsupported",
                 status="unavailable",
                 metrics={},
-                warnings=("vectorbtpro import failed",),
+                warnings=("backend import failed",),
                 unsupported_semantics=(),
             )
         ],
@@ -833,10 +833,10 @@ def test_policy_mechanical_fail_for_invalid_completed_metrics_before_backend_una
                 scenario_kind="cost",
                 required=True,
                 result=BackendRunResult(
-                    backend="vectorbtpro",
+                    backend="unsupported",
                     status="unavailable",
                     metrics={},
-                    warnings=("vectorbtpro import failed",),
+                    warnings=("backend import failed",),
                     unsupported_semantics=(),
                 ),
             ),

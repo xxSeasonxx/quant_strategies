@@ -9,13 +9,13 @@ scoring without using the heavier evaluation backend.
 
 The quick-run portfolio foundation SHALL compute from normalized quick-run rows
 and emitted decisions without importing or calling the evaluation backend. The
-quick-run path MUST NOT import `quant_strategies.evaluation`, `vectorbtpro`,
+quick-run path MUST NOT import `quant_strategies.evaluation`,
 `pandas`, or `numpy` to build foundation metrics.
 
 #### Scenario: Quick-run foundation import wall is preserved
 - **WHEN** the quick-run path imports `runner`, `engine`, `core`, and builds
   quick-run economics plus portfolio foundation metrics
-- **THEN** `quant_strategies.evaluation`, `vectorbtpro`, `pandas`, and `numpy`
+- **THEN** `quant_strategies.evaluation`, `pandas`, and `numpy`
   are absent from imported modules
 
 #### Scenario: Foundation uses quick-run execution rows

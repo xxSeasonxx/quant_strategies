@@ -13,14 +13,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vectorbtpro = [
-    "pandas>=2.2",
-    "vectorbtpro",
-]
 evaluation = [
     "pandas>=2.2",
     "pyarrow>=16",
-    "vectorbtpro",
 ]
 dev = [
     "mypy",

@@ -1,4 +1,3 @@
 # Verified numeric stack for controlled evaluation runs in the local quant env.
 pandas==2.3.3
 pyarrow==23.0.1
-vectorbtpro==2026.4.7

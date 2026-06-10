@@ -186,7 +186,6 @@ def write_config(
     focused_timeout_seconds: object | None = None,
     micro_probe_limit: object | None = None,
     micro_timeout_seconds: object | None = None,
-    foundation_enabled: bool | None = None,
     foundation_subwindows: object | None = None,
     foundation_trial_count: object | None = None,
     foundation_benchmark_sharpe: object | None = None,
@@ -224,11 +223,6 @@ def write_config(
     micro_timeout_seconds_line = (
         f"micro_timeout_seconds = {micro_timeout_seconds}\n"
         if micro_timeout_seconds is not None
-        else ""
-    )
-    foundation_enabled_line = (
-        f"foundation_enabled = {str(foundation_enabled).lower()}\n"
-        if foundation_enabled is not None
         else ""
     )
     foundation_subwindows_line = (
@@ -279,7 +273,7 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
+			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
 				'''.lstrip()
     )
     return config_path
@@ -1889,37 +1883,6 @@ def test_run_config_pre_engine_failure_leaves_foundation_none(
     assert result.foundation is None
 
 
-def test_run_config_disabled_foundation_is_infeasible(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    # The portfolio book IS the authoritative scored object on the spine, so disabling
-    # the foundation leaves nothing to score: the run is a fail-closed infeasible
-    # feasibility failure (no economics), not a completed run with foundation=None.
-    write_strategy(tmp_path)
-    config_path = write_config(
-        tmp_path,
-        artifact_profile="summary",
-        foundation_enabled=False,
-    )
-    monkeypatch.setattr(
-        execution,
-        "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
-    )
-
-    result = run_config(config_path, repo_root=tmp_path)
-
-    assert result.succeeded is False
-    assert result.outcome.failure_stage == "feasibility"
-    assert result.foundation is None
-    assert result.economics is None
-    assert result.feasibility is not None and result.feasibility.feasible is False
-    summary = read_summary(result.result_dir)
-    assert summary["status"] == "failed"
-    assert "portfolio_foundation" not in summary
-
-
 def write_over_leverage_strategy(repo_root: Path, *, target: float = 1.5) -> None:
     """A standing target whose intended gross exceeds the operator leverage budget."""
     strategy = repo_root / "strategies" / "demo.py"
@@ -2296,7 +2259,6 @@ foundation = build_portfolio_foundation(
 build_run_economics(foundation)
 
 forbidden = {
-    "vectorbtpro",
     "pandas",
     "numpy",
     "quant_strategies.evaluation",

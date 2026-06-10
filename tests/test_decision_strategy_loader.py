@@ -80,7 +80,6 @@ def test_load_decision_strategy_rejects_side_effect_calls_before_import(tmp_path
             "quant_strategies.evaluation",
         ),
         ("from quant_strategies import evaluation", "quant_strategies.evaluation"),
-        ("import vectorbtpro", "vectorbtpro"),
     ],
 )
 def test_load_decision_strategy_rejects_banned_imports_before_import(

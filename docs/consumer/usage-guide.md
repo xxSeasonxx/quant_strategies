@@ -44,8 +44,8 @@ generate_decisions(rows, params)        │
   view of that same walk, never an independent scored number — there is one model
   of money, not two.
 - **Evaluation** runs that same pure book and adds only artifact serialization
-  (pandas/pyarrow Parquet traces) around it. The VectorBT Pro and project
-  perp-ledger backends are **retired**.
+  (pandas/pyarrow Parquet traces) around it. The legacy alternate backends are
+  **retired**.
 
 You pick the surface by intent. You never wire them together yourself — each reads
 one config and returns one typed result.
@@ -279,7 +279,7 @@ print(result.foundation.feasible)            # authoritative scored NAV book on 
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
 with `results_dir`, `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
-(`foundation_enabled`, `foundation_subwindows`, `foundation_trial_count`,
+(`foundation_subwindows`, `foundation_trial_count`,
 `foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for the
 diagnostic profile) `diagnostic_sample_trades`.
 `foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
@@ -332,9 +332,9 @@ per-period traces.
 ### Quick-run portfolio foundation output
 
 `portfolio_foundation` is the **authoritative scored NAV book** — the single object
-Train scoring derives from, not a side-channel over a trade bag. It is populated
-only on a completed, **feasible** engine evaluation when `foundation_enabled` is
-true; an envelope breach makes the run non-scoreable (see the feasibility verdict
+Train scoring derives from, not a side-channel over a trade bag. The book is
+mandatory, so it is populated on every completed, **feasible** engine evaluation;
+an envelope breach makes the run non-scoreable (see the feasibility verdict
 below), so a populated foundation already means the book passed the envelope.
 
 Where to read it:
@@ -510,7 +510,7 @@ sanitization.
 **Reading it:** `result.succeeded` means the run completed with no failure stage.
 The advisory `result.decision.decision` (including `mechanical_fail`) is *evidence*
 — it never authorizes promotion, paper trading, or live trading. The single verdict
-backend is the netted portfolio book spine; the VectorBT Pro cross-check and the
+backend is the netted portfolio book spine; the legacy cross-check and the
 single-trade agreement oracle are retired (an independent netted-book cross-check is
 a planned follow-on, not a current surface).
 
@@ -567,7 +567,7 @@ only Parquet trace serialization around that pure book. There is one funding hom
 for `crypto_perp_funding` the book's NAV path includes price PnL, configured
 fees/slippage, and funding cashflows. Fillable perp windows with no funding events
 in the open interval accrue zero funding; malformed/conflicting/mark-misaligned
-funding rows still fail. The VectorBT Pro and project perp-ledger backends, and the
+funding rows still fail. The legacy alternate backends, and the
 per-asset-class funding-model name, are retired — the metric payload reports the
 single shared accounting model.
 

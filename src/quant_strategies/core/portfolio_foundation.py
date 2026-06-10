@@ -40,7 +40,6 @@ _EXPOSURE_TOLERANCE = 1e-9
 
 @dataclass(frozen=True)
 class PortfolioFoundationConfig:
-    enabled: bool = True
     subwindows: int = 6
     trial_count: int | None = None
     benchmark_sharpe: float = 0.0

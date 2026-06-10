@@ -112,7 +112,7 @@ def test_validation_manifest_ignores_incomplete_required_scenarios_for_global_re
 
 
 def test_validation_manifest_does_not_report_retired_agreement_oracle(tmp_path: Path):
-    # The single-trade agreement oracle and the VBT cross-check were retired (design D9);
+    # The single-trade agreement oracle and its cross-check were retired (design D9);
     # the manifest carries no agreement_oracle field on any scenario.
     manifest = write_manifest(
         tmp_path,

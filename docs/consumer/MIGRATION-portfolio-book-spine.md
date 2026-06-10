@@ -36,8 +36,8 @@ consumer must change, and (2) the **specific edits Season should apply in
   non-scoreable rather than a finite Sharpe from sample count alone.
 - **One accounting model everywhere.** Quick run, validation, and evaluation run the
   same pure book (`netted_portfolio_book_v1`); evaluation adds only Parquet trace
-  serialization. The VectorBT Pro backend, the `project_perp_ledger_v1` model name,
-  and the single-trade agreement oracle are retired; validation's
+  serialization. The legacy alternate evaluation backend, the `project_perp_ledger_v1`
+  model name, and the single-trade agreement oracle are retired; validation's
   `[agreement_oracle]` config section is rejected, and `verdict_source` is
   `"engine"` only.
 
@@ -99,4 +99,4 @@ Do **not** edit these from this repo. Apply in `/Users/Season_Yang/Personal/quan
 8. Remove any remaining "open ticket" / `StrategyDecision` / `PositionTarget` /
    `ExitPolicy` / "linear per-trade sum" / "fail-open `foundation=None`" /
    `foundation_max_gross_exposure` references, and any claim of a separate
-   VectorBT-Pro / perp-ledger evaluation backend, mirroring this repo's docs.
+   alternate / perp-ledger evaluation backend, mirroring this repo's docs.

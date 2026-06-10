@@ -88,7 +88,6 @@ def test_spine_backend_is_the_single_named_accounting_model():
 
     assert backend.name == SHARED_ACCOUNTING_MODEL
     assert backend.name != "project_perp_ledger_v1"
-    assert backend.name != "vectorbtpro"
 
 
 def test_spine_backend_satisfies_evaluation_backend_protocols():
@@ -248,7 +247,6 @@ def test_evaluation_metric_semantics_label_the_single_shared_model():
     assert semantics["total_return"]["base"] == "portfolio NAV path"
     assert SHARED_ACCOUNTING_MODEL in str(semantics["total_return"]["backend"])
     assert "project_perp_ledger_v1" not in str(semantics["total_return"]["backend"])
-    assert "vectorbtpro" not in str(semantics["total_return"]["backend"])
     assert semantics["funding_model"]["null_when"].startswith("never")
     assert SHARED_ACCOUNTING_MODEL in semantics["funding_model"]["null_when"]
     assert (

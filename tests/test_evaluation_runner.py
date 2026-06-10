@@ -1501,7 +1501,7 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
                 status="unavailable",
-                warnings=("vectorbtpro import failed",),
+                warnings=("pandas import failed",),
             )
 
     candidate = write_candidate(tmp_path)
@@ -1517,12 +1517,12 @@ def test_run_evaluation_maps_backend_unavailable_to_public_status(
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
     assert result.assessment_status == "portfolio_backend_unavailable"
-    assert "vectorbtpro import failed" in result.message
+    assert "pandas import failed" in result.message
     assert_failure_artifacts(
         result,
         failure_stage="portfolio_evaluation",
         assessment_status="portfolio_backend_unavailable",
-        message_fragment="vectorbtpro import failed",
+        message_fragment="pandas import failed",
     )
 
 
@@ -1544,7 +1544,7 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
             leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
-            raise EvaluationDependencyError("vectorbtpro import failed")
+            raise EvaluationDependencyError("pandas import failed")
 
         def run_prepared(self, *, prepared: dict[str, Any], scenario: Any, metrics: Any):
             self.run_prepared_calls += 1
@@ -1562,14 +1562,14 @@ def test_run_evaluation_maps_prepared_backend_dependency_error_to_unavailable(
     assert result.run_completed is False
     assert result.failure_stage == "portfolio_evaluation"
     assert result.assessment_status == "portfolio_backend_unavailable"
-    assert result.message == "vectorbtpro import failed"
+    assert result.message == "pandas import failed"
     assert backend.prepare_calls == 1
     assert backend.run_prepared_calls == 0
     assert_failure_artifacts(
         result,
         failure_stage="portfolio_evaluation",
         assessment_status="portfolio_backend_unavailable",
-        message_fragment="vectorbtpro import failed",
+        message_fragment="pandas import failed",
     )
 
 
@@ -1634,7 +1634,7 @@ def test_run_evaluation_maps_prepare_inputs_failures_to_portfolio_evaluation_fai
     [
         ("unsupported", "portfolio_evaluation_failed", "non_target_weight_sizing"),
         ("failed", "portfolio_evaluation_failed", "prepared scenario failed"),
-        ("unavailable", "portfolio_backend_unavailable", "vectorbtpro import failed"),
+        ("unavailable", "portfolio_backend_unavailable", "pandas import failed"),
     ],
 )
 def test_run_evaluation_maps_run_prepared_failure_statuses(

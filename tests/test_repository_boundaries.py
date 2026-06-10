@@ -121,12 +121,10 @@ def test_generated_result_roots_are_ignored():
 
 def test_makefile_exposes_single_local_check_command():
     text = (ROOT / "Makefile").read_text()
-    check_body = _makefile_target_body(text, "check")
     test_body = _makefile_target_body(text, "test")
 
     assert (
-        ".PHONY: format fix lint typecheck test check check-vectorbtpro-smoke "
-        "check-quant-data-contract check-all"
+        ".PHONY: format fix lint typecheck test check check-quant-data-contract check-all"
     ) in text
     assert _makefile_target_header(text, "check") == "check: lint test"
     assert "format:" in text
@@ -142,12 +140,6 @@ def test_makefile_exposes_single_local_check_command():
     assert "conda run -n quant python -m pip install -e ." in text
     assert "conda run -n quant quant-strategies --help" in text
     assert "conda run -n quant pytest -q" in test_body
-    assert "$(MAKE) check-vectorbtpro-smoke" in check_body
-    assert "check-vectorbtpro-smoke:" in text
-    assert (
-        "conda run -n quant env RUN_VECTORBTPRO_SMOKE=1 pytest "
-        "tests/test_evaluation_backend.py::test_vectorbtpro_evaluation_backend_real_smoke_if_installed"
-    ) in text
     assert "check-quant-data-contract:" in text
     assert (
         "conda run -n quant env RUN_QUANT_DATA_CONTRACT_SMOKE=1 pytest "
@@ -214,7 +206,6 @@ def test_evaluation_constraints_pin_numeric_backend_versions():
 
     assert "pandas==2.3.3" in lines
     assert "pyarrow==23.0.1" in lines
-    assert "vectorbtpro==2026.4.7" in lines
 
 
 def test_review_archive_index_points_to_current_disposition_anchor():
@@ -299,9 +290,8 @@ def test_p3_simplification_uses_explicit_module_boundaries():
 
     assert not (evaluation / "backend.py").exists()
     assert not (evaluation / "runner.py").exists()
-    # The VectorBT Pro and project_perp_ledger evaluation backends are retired (D9):
-    # the single causal netted portfolio book is the only evaluation money model.
-    assert not (evaluation / "vectorbtpro_backend.py").exists()
+    # The retired alternate evaluation backends are gone (D9): the single causal
+    # netted portfolio book is the only evaluation money model.
     assert not (evaluation / "project_perp_ledger.py").exists()
     assert (evaluation / "spine_backend.py").exists()
     assert (evaluation / "results.py").exists()
@@ -376,7 +366,6 @@ def test_root_phase_plans_are_not_active_context():
         "FOUNDATION_LOCK.md",
         "TODOS.md",
         "docs/foundation-surfaces.md",
-        "docs/vectorbtpro.md",
     ]
     offenders: list[str] = []
     for relative in active_docs:

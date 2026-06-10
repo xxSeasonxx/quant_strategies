@@ -376,7 +376,7 @@ not computed as an independent scored quantity. It SHALL remain first-class for
 alpha attribution and information-coefficient analysis, and SHALL expose no
 independent scored "trade-unit" return. The portfolio NAV book SHALL be the
 authoritative scored object. The quick-run code path MUST NOT introduce a runtime
-dependency on `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`.
+dependency on `pandas`, `numpy`, or `quant_strategies.evaluation`.
 
 #### Scenario: Ledger is derived from the one book
 - **WHEN** a completed quick run exposes the per-trade ledger
@@ -390,5 +390,5 @@ dependency on `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`
 
 #### Scenario: Quick-run path imports no heavyweight backend dependency
 - **WHEN** the quick-run path (`runner`, `engine`, `core`) is imported and exercised
-- **THEN** it does not import `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`
+- **THEN** it does not import `pandas`, `numpy`, or `quant_strategies.evaluation`
 

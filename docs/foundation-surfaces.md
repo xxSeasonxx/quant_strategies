@@ -61,8 +61,8 @@ All three surfaces use one shared decision/spec kernel **and one shared accounti
 book** — the single causal netted portfolio book (`netted_portfolio_book_v1`). The
 NAV path is the authoritative scored object on every surface; evaluation adds only
 Parquet trace serialization around that same pure book. There is no separate
-price-evidence fork: the VectorBT Pro and project perp-ledger backends and the
-single-trade agreement oracle are retired.
+price-evidence fork: the legacy alternate backends and the single-trade agreement
+oracle are retired.
 
 Path anchoring:
 
@@ -92,12 +92,6 @@ runs the full pytest suite. The accounting model is the pure-Python spine book o
 every surface; evaluation needs only `pandas` and `pyarrow` (the `[evaluation]`
 extra) for Parquet trace serialization. Controlled evaluation runs should install
 that stack with `constraints/evaluation.txt`.
-
-> Residual (build-file cleanup, not docs): the `Makefile` still defines a
-> `check-vectorbtpro-smoke` target and the `[evaluation]`/`vectorbtpro` extras in
-> `pyproject.toml` still list `vectorbtpro`, left over from the retired VBT backend.
-> The evaluation accounting path no longer imports `vectorbtpro`; these build
-> artifacts should be trimmed when the code/test cutover (Phase 2c) lands.
 
 ## Status And Result Interpretation
 
@@ -295,7 +289,7 @@ Purpose:
   six-scenario cost/fill matrix when no custom scenarios are configured;
 - produce portfolio, economic, and path evidence from the single shared netted
   portfolio book (`netted_portfolio_book_v1`), serialized to Parquet traces. The
-  VectorBT Pro and `project_perp_ledger_v1` backends are retired.
+  legacy alternate evaluation backends are retired.
 
 Evaluation fails before scenario expansion when the decision-row/observation
 dependency audit fails or when deterministic, emitted, or strict suppression

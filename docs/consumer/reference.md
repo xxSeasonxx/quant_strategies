@@ -178,7 +178,7 @@ strategy_path, strategy_id            # top-level
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
-         foundation_enabled, foundation_subwindows, foundation_trial_count,
+         foundation_subwindows, foundation_trial_count,
          foundation_benchmark_sharpe, foundation_cost_stress_multiplier
 ```
 
@@ -228,7 +228,7 @@ strategy_path, strategy_id, verdict_source?   # top-level
 ```
 
 `verdict_source` accepts only `"engine"` (the netted-book spine). The
-`[agreement_oracle]` section is **removed** — the VectorBT Pro cross-check and the
+`[agreement_oracle]` section is **removed** — the legacy cross-check and the
 single-trade agreement oracle are retired, and a config that still sets it is
 rejected.
 
@@ -281,7 +281,7 @@ the run completed and `failure_stage is None`.
 | `outcome` | `RunOutcome` | terminal status (below) |
 | `evidence` | `RunEvidence` | evidence quality (below) |
 | `economics` | `RunEconomics \| None` | per-trade attribution ledger **derived from the book walk**, populated on completed engine runs even under compact artifact profiles |
-| `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics); populated on a completed, feasible run when `foundation_enabled` |
+| `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics); the book is mandatory, so this is populated on every completed, feasible run and is `None` only when the run failed before/at the book (e.g. a feasibility breach) |
 | `feasibility` | `FeasibilityVerdict \| None` | typed fail-closed verdict; `None` when the run failed before the book was built; on a breach carries `reason` + observed exposure and maps to a `feasibility` `failure_stage` |
 | `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` — i.e. **feasible and completed**; a feasibility breach sets `failure_stage="feasibility"` |
 
@@ -354,8 +354,8 @@ ledger reconciles with the NAV path — one model of money, not two.
 
 `RunPortfolioFoundation` is the in-process **authoritative scored portfolio book**.
 Its NAV path is the single object Train scoring statistics derive from; it is not a
-diagnostic side-channel. It is populated only on a completed, **feasible** run when
-`foundation_enabled`. It carries compact full-Train and per-subwindow metrics (over
+diagnostic side-channel. The book is mandatory, so it is populated on every completed,
+**feasible** run. It carries compact full-Train and per-subwindow metrics (over
 **at-risk bars**) plus the book walk (`ledger`) the derived per-trade attribution is
 reconstructed from. The default scenarios are `realistic_costs` and `cost_stress`;
 full per-period return traces are not included in default artifacts.

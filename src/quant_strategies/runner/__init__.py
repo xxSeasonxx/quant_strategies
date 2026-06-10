@@ -783,8 +783,6 @@ def _build_portfolio_foundation(
     A non-feasibility build error (missing/unfillable rows) is a structured
     ``portfolio_foundation`` stage failure, not a fail-open success.
     """
-    if not config.output.foundation_enabled:
-        return None, None, None
     rows = (execution.execution_normalized_rows or execution.normalized_rows).projection_rows()
     try:
         with event_emitter.stage(
@@ -800,7 +798,6 @@ def _build_portfolio_foundation(
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
                 config=PortfolioFoundationConfig(
-                    enabled=config.output.foundation_enabled,
                     subwindows=config.output.foundation_subwindows,
                     trial_count=config.output.foundation_trial_count,
                     benchmark_sharpe=config.output.foundation_benchmark_sharpe,

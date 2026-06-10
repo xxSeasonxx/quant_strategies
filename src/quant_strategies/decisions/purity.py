@@ -23,7 +23,6 @@ BANNED_IMPORT_ROOTS = {
     "quant_strategies.runner",
     "quant_strategies.validation",
     "threading",
-    "vectorbtpro",
 }
 BANNED_CALL_NAMES = {
     "__import__",

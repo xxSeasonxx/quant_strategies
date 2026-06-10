@@ -53,7 +53,7 @@ evidence. It is not validation.
 - **Validation run:** validation requires `validate_params` and returns advisory
 retained-candidate mechanical evidence. It is not quant strategy evaluation.
 The verdict backend is the single netted-book spine (`verdict_source = "engine"`
-only); there is no VectorBT Pro validation backend and no opt-in agreement
+only); there is no alternate validation backend and no opt-in agreement
 oracle.
 - **Evaluation run:** evaluation uses
 `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
@@ -181,8 +181,8 @@ annualized/risk metrics family null unless cadence matches and
 - **Default verification:** `make check` refreshes the editable install, checks
 the installed CLI, and runs the full pytest suite. Evaluation needs only
 `pandas` and `pyarrow` (the `[evaluation]` extra) for Parquet trace
-serialization; the accounting path is the pure-Python spine book and no longer
-imports `vectorbtpro`.
+serialization; the accounting path is the pure-Python spine book with no
+backtest-library dependency.
 - **Quick-run failure semantics:** runner-stage failures return
 `RunOutcome.completed=False`, set `failure_stage`, and write `summary.json`
 with `run_completed=false`.
@@ -200,7 +200,7 @@ not run another broad blind foundation review unless Season asks for one.
 
 - Large facade modules are not immediate foundation blockers.
 - No independent cross-check of the spine's accounting exists today. The
-  single-trade VectorBT Pro agreement oracle is retired (it was single-trade-only
+  single-trade agreement oracle is retired (it was single-trade-only
   and gave no multi-trade verification); a netted-book agreement oracle is a named
   follow-on. The spine's correctness is guarded instead by the NAV↔ledger
   reconciliation test and the at-risk-bar / feasibility-verdict test suite.
@@ -237,8 +237,8 @@ requirements tighten.
 - **Independent netted-book cross-check:** the spine has no independent
 accounting cross-check today. Generalize the agreement oracle from single-trade
 to the full netted book (a second implementation that must agree with the spine)
-before any cross-check evidence is treated as multi-trade verification. VectorBT
-Pro could only return in that role, never as a divergent money-model routed by
+before any cross-check evidence is treated as multi-trade verification. Any
+reintroduced library could only return in that role, never as a divergent money-model routed by
 data kind.
 - **Validation/evaluation source output paths:** validation and evaluation
 configs still anchor `output.results_dir` beside the config so candidate-local

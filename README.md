@@ -194,7 +194,8 @@ Runs a frozen candidate through the research evaluation surface and writes
 portfolio, economic, and path evidence from the **same single causal netted
 portfolio book** as quick run and validation; evaluation adds only Parquet trace
 serialization through `pyarrow` around that pure book, with no JSONL fallback.
-The VectorBT Pro and `project_perp_ledger_v1` backends are retired. Evaluation
+The legacy alternate evaluation backends are retired — the single book is the only
+money model. Evaluation
 also writes normalized input row snapshots as Parquet and decision records as
 JSONL so completed evaluation metrics can be traced through the artifact package.
 Annualized evaluation metrics are computed over **at-risk bars** — the
@@ -282,7 +283,7 @@ Run `make check` before relying on the local environment for foundation runs.
 It refreshes the editable install, checks the installed CLI, and runs the full
 test suite. The accounting model is the pure-Python spine book on every surface;
 evaluation needs only `pandas` and `pyarrow` (the `[evaluation]` extra) for
-Parquet trace serialization, no longer `vectorbtpro`. Controlled evaluation runs
+Parquet trace serialization. Controlled evaluation runs
 should install that stack with `constraints/evaluation.txt`; `pyproject.toml`
 keeps broad optional dependency ranges for installability.
 
@@ -301,8 +302,6 @@ candidate-local.
   deferred triggers, and review protocol.
 - **[docs/foundation-surfaces.md](docs/foundation-surfaces.md)** — current quick-run,
   validation-run, and evaluation-run command/API/artifact reference.
-- **[docs/vectorbtpro.md](docs/vectorbtpro.md)** — VectorBT Pro retirement note
-  and library reference (kept for the named netted-book cross-check follow-on).
 - **[AGENTS.md](AGENTS.md)** — agent operating rules for this repository.
 
 ## Promotion discipline

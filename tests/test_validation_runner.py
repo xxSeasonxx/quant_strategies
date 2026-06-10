@@ -1335,8 +1335,8 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
     tmp_path: Path, monkeypatch
 ):
     # F7: a strategy with a stop-loss (threshold exit) was un-validatable under the
-    # vbt backend (unsupported -> mechanical_fail). The engine verdict source completes it,
-    # so the validation step no longer forks away from the quick run.
+    # retired alternate backend (unsupported -> mechanical_fail). The engine verdict
+    # source completes it, so the validation step no longer forks away from the quick run.
     candidate = write_candidate(tmp_path)
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import InstrumentRef, ObservationRef, RiskRule, TargetDecision\n"
@@ -1379,7 +1379,7 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
         item["result"]["backend"]: item["result"]["status"] for item in backend_summary["results"]
     }
     # The capability gap is gone: the engine completes the threshold-exit decision
-    # across every scenario (vbt would have returned unsupported -> mechanical_fail).
+    # across every scenario (the retired backend returned unsupported -> mechanical_fail).
     assert statuses == {"engine": "completed"}
     assert all(item["result"]["unsupported_semantics"] == [] for item in backend_summary["results"])
     assert "unsupported_semantics" not in result.decision.reasons
