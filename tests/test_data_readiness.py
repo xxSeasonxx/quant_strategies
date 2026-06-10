@@ -7,7 +7,7 @@ import pytest
 
 from quant_strategies.core.errors import DataReadinessError
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.runner import data_readiness
 
 DECISION_TIME = datetime(2024, 1, 1, tzinfo=UTC)
@@ -29,17 +29,16 @@ def row(**overrides: object) -> dict[str, object]:
     return payload
 
 
-def decision(**overrides: object) -> StrategyDecision:
+def decision(**overrides: object) -> TargetDecision:
     payload = {
         "strategy_id": "demo",
         "instrument": InstrumentRef(kind="equity_or_etf", symbol="SPY"),
         "decision_time": DECISION_TIME,
         "as_of_time": DECISION_TIME,
-        "target": PositionTarget(direction="long", sizing_kind="target_weight", size=1.0),
-        "exit_policy": ExitPolicy(max_hold_bars=1),
+        "target": 1.0,
     }
     payload.update(overrides)
-    return StrategyDecision(**payload)
+    return TargetDecision(**payload)
 
 
 @pytest.mark.parametrize("ready_at", [DECISION_TIME - timedelta(minutes=1), DECISION_TIME])

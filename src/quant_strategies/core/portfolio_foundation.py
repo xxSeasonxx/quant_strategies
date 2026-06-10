@@ -172,14 +172,27 @@ class RoundTrip:
     over cost basis, plus funding accrued while held, minus the traded costs). The
     sum of closed round-trip ``realized_pnl`` reconciles with NAV realized PnL
     (design D4); it is an attribution view of the same walk, never an independent
-    scored number.
+    scored number. The cash split (``gross_cash`` price proceeds, ``funding_cash``
+    accrued funding, ``cost_cash`` traded cost) lets the derived per-trade ledger
+    expose ``gross/funding/cost`` returns that sum to ``net`` without an independent
+    summation. ``entry_weight`` is the signed weight-of-NAV the leg opened at;
+    ``entry_mark``/``exit_mark`` are the leg's entry/exit fill marks.
     """
 
     symbol: str
     direction: str
+    decision_time: datetime
     entry_time: datetime
     exit_time: datetime
     realized_pnl: float
+    gross_cash: float
+    funding_cash: float
+    cost_cash: float
+    entry_weight: float
+    entry_mark: float
+    exit_mark: float
+    exit_reason: str
+    decision_id: str | None
 
 
 @dataclass(frozen=True)
@@ -259,10 +272,25 @@ class RunPortfolioFoundation:
     basis: str
     evidence_class: str
     scenarios: tuple[FoundationScenarioResult, ...]
+    # The realistic-cost scenario's single causal walk. Its NAV ``path`` is the
+    # authoritative scored object and its ``round_trips`` are the derived attribution
+    # ledger the per-trade economics view is reconstructed from (design D4) — one
+    # model of money, never an independent summation.
+    ledger: BookWalkResult
 
     @property
     def feasible(self) -> bool:
         return all(scenario.feasibility.feasible for scenario in self.scenarios)
+
+    def feasible_verdict(self) -> FeasibilityVerdict:
+        """The governing feasibility verdict: the first infeasible scenario's verdict,
+        else a feasible verdict. The mid-walk leverage/unfinanced breaches raise
+        :class:`FeasibilityError` before this object exists; the verdicts surfaced here
+        are the non-raising ones (zero-cost, insufficient samples) or feasible."""
+        for scenario in self.scenarios:
+            if not scenario.feasibility.feasible:
+                return scenario.feasibility
+        return FeasibilityVerdict(feasible=True)
 
     def summary_payload(self) -> dict[str, Any]:
         return cast(
@@ -332,31 +360,30 @@ def build_portfolio_foundation(
     """
     row_index = _RowIndex(rows)
     decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
-    scenarios = (
-        _build_scenario(
-            "realistic_costs",
-            row_index=row_index,
-            decision_plan=decision_plan,
-            data=data,
-            cost_model=cost_model,
-            cost_multiplier=1.0,
-            config=config,
-        ),
-        _build_scenario(
-            "cost_stress",
-            row_index=row_index,
-            decision_plan=decision_plan,
-            data=data,
-            cost_model=cost_model,
-            cost_multiplier=config.cost_stress_multiplier,
-            config=config,
-        ),
+    realistic, realistic_walk = _build_scenario(
+        "realistic_costs",
+        row_index=row_index,
+        decision_plan=decision_plan,
+        data=data,
+        cost_model=cost_model,
+        cost_multiplier=1.0,
+        config=config,
+    )
+    stress, _ = _build_scenario(
+        "cost_stress",
+        row_index=row_index,
+        decision_plan=decision_plan,
+        data=data,
+        cost_model=cost_model,
+        cost_multiplier=config.cost_stress_multiplier,
+        config=config,
     )
     return RunPortfolioFoundation(
         schema_version=FOUNDATION_SCHEMA_VERSION,
         basis=FOUNDATION_BASIS,
         evidence_class=FOUNDATION_EVIDENCE_CLASS,
-        scenarios=scenarios,
+        scenarios=(realistic, stress),
+        ledger=realistic_walk,
     )
 
 
@@ -375,11 +402,14 @@ class _NetPosition:
     signed_qty: float = 0.0
     target_weight: float = 0.0
     entry_signed_qty: float = 0.0
+    entry_weight: float = 0.0
+    entry_decision_time: datetime | None = None
     entry_time: datetime | None = None
     entry_mark: float | None = None
     peak_mark: float | None = None
     trough_mark: float | None = None
     risk_rule: RiskRule | None = None
+    decision_id: str | None = None
     cost_basis: float = 0.0
     open_cost: float = 0.0  # costs charged while building the current open leg
     funding_cashflow: float = 0.0
@@ -396,6 +426,7 @@ class _PlannedDecision:
     risk_rule: RiskRule | None
     fill_price: float
     decision_time: datetime
+    decision_id: str | None
 
 
 class _RowIndex:
@@ -494,6 +525,7 @@ class _DecisionPlan:
                     risk_rule=item.risk_rule,
                     fill_price=fill_price,
                     decision_time=item.decision_time,
+                    decision_id=item.decision_id,
                 )
             )
         self.by_time = {timestamp: tuple(items) for timestamp, items in sorted(by_time.items())}
@@ -509,7 +541,7 @@ def _build_scenario(
     cost_model: CostModelConfig,
     cost_multiplier: float,
     config: PortfolioFoundationConfig,
-) -> FoundationScenarioResult:
+) -> tuple[FoundationScenarioResult, BookWalkResult]:
     per_side_cost_fraction = _cost_fraction(
         (cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side) * cost_multiplier
     )
@@ -536,12 +568,15 @@ def _build_scenario(
         per_side_cost_fraction=per_side_cost_fraction,
         min_return_sample=config.min_return_sample,
     )
-    return FoundationScenarioResult(
-        scenario_id=scenario_id,
-        cost_multiplier=cost_multiplier,
-        feasibility=verdict,
-        full_train=full_train,
-        subwindows=tuple(subwindows),
+    return (
+        FoundationScenarioResult(
+            scenario_id=scenario_id,
+            cost_multiplier=cost_multiplier,
+            feasibility=verdict,
+            full_train=full_train,
+            subwindows=tuple(subwindows),
+        ),
+        walk,
     )
 
 
@@ -574,8 +609,11 @@ def _walk_book(
                 continue
             mark = row_index.mark_at(symbol, timestamp)
             _update_trailing(position, mark)
-            if _risk_rule_fired(position, mark):
-                cash += _flatten(position, mark, per_side_cost_fraction, timestamp, round_trips)
+            fired_reason = _risk_rule_fired(position, mark)
+            if fired_reason is not None:
+                cash += _flatten(
+                    position, mark, per_side_cost_fraction, timestamp, fired_reason, round_trips
+                )
                 # Latch the symbol flat at the standing weight that fired, so a
                 # standing target does not re-enter until a different target arrives.
                 latched[symbol] = position.target_weight
@@ -692,21 +730,21 @@ def _apply_decision(
     if position.is_flat:
         position.cost_basis = delta * fill_price
         position.signed_qty = target_qty
-        _open_leg(position, fill_price, timestamp, decision.risk_rule)
+        _open_leg(position, fill_price, timestamp, decision)
         position.open_cost = cost
     elif target_qty == 0.0 or crosses_zero:
         # Close (and possibly reverse) the current net leg: realize the closed leg,
         # record the round-trip, then re-open any residual as a fresh leg. The
         # closing leg bears the full traded cost; a reversal's re-open starts a new
         # leg whose open cost is zero (the single trade's cost closed the old leg).
-        cash_delta += _close_leg(position, fill_price, timestamp, cost, round_trips)
+        cash_delta += _close_leg(position, fill_price, timestamp, cost, "signal", round_trips)
         if target_qty == 0.0:
             position.signed_qty = 0.0
             position.risk_rule = None
         else:
             position.cost_basis = target_qty * fill_price
             position.signed_qty = target_qty
-            _open_leg(position, fill_price, timestamp, decision.risk_rule)
+            _open_leg(position, fill_price, timestamp, decision)
             position.open_cost = 0.0
     else:
         # Add to / trim the same-sign leg without crossing zero.
@@ -722,15 +760,18 @@ def _open_leg(
     position: _NetPosition,
     fill_price: float,
     timestamp: datetime,
-    risk_rule: RiskRule | None,
+    decision: _PlannedDecision,
 ) -> None:
     position.entry_time = timestamp
     position.entry_mark = fill_price
     position.peak_mark = fill_price
     position.trough_mark = fill_price
-    position.risk_rule = risk_rule
+    position.risk_rule = decision.risk_rule
     position.funding_cashflow = 0.0
     position.entry_signed_qty = position.signed_qty
+    position.entry_weight = decision.signed_weight
+    position.entry_decision_time = decision.decision_time
+    position.decision_id = decision.decision_id
 
 
 def _close_leg(
@@ -738,6 +779,7 @@ def _close_leg(
     exit_price: float,
     timestamp: datetime,
     close_cost: float,
+    exit_reason: str,
     round_trips: list[RoundTrip],
 ) -> float:
     """Realize the open leg at ``exit_price``, record the round-trip, return cash.
@@ -746,16 +788,29 @@ def _close_leg(
     separately). The round-trip ``realized_pnl`` is the full economic PnL of the
     round trip - price proceeds + funding accrued while held - the leg's open cost -
     the closing cost - so that, when the book ends flat, sum of realized PnL
-    reconciles exactly with realized NAV PnL (final NAV - initial equity) per D4.
+    reconciles exactly with realized NAV PnL (final NAV - initial equity) per D4. The
+    cash split (price proceeds, funding, total traded cost across open and close) is
+    recorded so the derived per-trade ledger can expose reconciling gross/funding/cost
+    returns.
     """
     proceeds = position.signed_qty * exit_price - position.cost_basis
+    total_cost = position.open_cost + close_cost
     round_trips.append(
         RoundTrip(
             symbol=position.symbol,
             direction=_direction(position.entry_signed_qty),
+            decision_time=cast(datetime, position.entry_decision_time),
             entry_time=cast(datetime, position.entry_time),
             exit_time=timestamp,
-            realized_pnl=proceeds + position.funding_cashflow - position.open_cost - close_cost,
+            realized_pnl=proceeds + position.funding_cashflow - total_cost,
+            gross_cash=proceeds,
+            funding_cash=position.funding_cashflow,
+            cost_cash=total_cost,
+            entry_weight=position.entry_weight,
+            entry_mark=cast(float, position.entry_mark),
+            exit_mark=exit_price,
+            exit_reason=exit_reason,
+            decision_id=position.decision_id,
         )
     )
     return proceeds
@@ -766,11 +821,12 @@ def _flatten(
     mark: float,
     per_side_cost_fraction: float,
     timestamp: datetime,
+    exit_reason: str,
     round_trips: list[RoundTrip],
 ) -> float:
     """Flatten the net position at ``mark`` for a fired RiskRule; record round-trip."""
     cost = abs(position.signed_qty * mark) * per_side_cost_fraction
-    return _close_leg(position, mark, timestamp, cost, round_trips) - cost
+    return _close_leg(position, mark, timestamp, cost, exit_reason, round_trips) - cost
 
 
 def _apply_funding(
@@ -809,36 +865,38 @@ def _update_trailing(position: _NetPosition, mark: float) -> None:
         position.trough_mark = mark
 
 
-def _risk_rule_fired(position: _NetPosition, mark: float) -> bool:
+def _risk_rule_fired(position: _NetPosition, mark: float) -> str | None:
+    """Return the fired rule's exit reason (``stop_loss``/``take_profit``/``trailing``)
+    or ``None`` when no declared threshold is crossed at this bar's printed mark."""
     rule = position.risk_rule
     if rule is None or position.entry_mark is None:
-        return False
+        return None
     entry = position.entry_mark
     is_long = position.signed_qty > 0.0
     if rule.stop_loss is not None:
         if is_long and mark <= entry * (1.0 - rule.stop_loss):
-            return True
+            return "stop_loss"
         if not is_long and mark >= entry * (1.0 + rule.stop_loss):
-            return True
+            return "stop_loss"
     if rule.take_profit is not None:
         if is_long and mark >= entry * (1.0 + rule.take_profit):
-            return True
+            return "take_profit"
         if not is_long and mark <= entry * (1.0 - rule.take_profit):
-            return True
+            return "take_profit"
     if rule.trailing is not None:
         if (
             is_long
             and position.peak_mark is not None
             and mark <= position.peak_mark * (1.0 - rule.trailing)
         ):
-            return True
+            return "trailing"
         if (
             not is_long
             and position.trough_mark is not None
             and mark >= position.trough_mark * (1.0 + rule.trailing)
         ):
-            return True
-    return False
+            return "trailing"
+    return None
 
 
 def _check_intended_budget(

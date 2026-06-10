@@ -26,8 +26,6 @@ from quant_strategies.provenance import (
 )
 from quant_strategies.runner.config import RunConfig
 
-RUNNER_EVIDENCE_SCHEMA_VERSION = "quant_strategies.runner.evidence/v1"
-
 
 def create_result_dir(config: RunConfig, *, now: datetime | None = None) -> Path:
     timestamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m-%dT%H%M%SZ")
@@ -59,37 +57,6 @@ def write_strategy_input_rows(result_dir: Path, rows: Sequence[Mapping[str, Any]
 def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
     lines = [_canonical_json_line(decision) for decision in decisions]
     (result_dir / "decision_records.jsonl").write_text("\n".join(lines) + ("\n" if lines else ""))
-
-
-def write_engine_request(result_dir: Path, request_json: str) -> None:
-    (result_dir / "engine_request.json").write_text(request_json)
-
-
-def write_evidence(result_dir: Path, evidence_json: str, *, quick_checks: bool) -> None:
-    (result_dir / "evidence.json").write_text(
-        runner_evidence_json(evidence_json, quick_checks=quick_checks)
-    )
-
-
-def runner_evidence_json(evidence_json: str, *, quick_checks: bool) -> str:
-    payload = json.loads(evidence_json)
-    payload["schema_version"] = RUNNER_EVIDENCE_SCHEMA_VERSION
-    payload["quick_checks"] = quick_checks
-    _remove_engine_mode_fields(payload)
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
-
-
-def _remove_engine_mode_fields(payload: dict[str, Any]) -> None:
-    payload.pop("mode", None)
-    screening_result = payload.get("screening_result")
-    if isinstance(screening_result, dict):
-        screening_result.pop("mode", None)
-    validation_report = payload.get("validation_report")
-    if isinstance(validation_report, dict):
-        validation_report.pop("mode", None)
-        nested_screening_result = validation_report.get("screening_result")
-        if isinstance(nested_screening_result, dict):
-            nested_screening_result.pop("mode", None)
 
 
 def evidence_quality(
@@ -387,64 +354,24 @@ def summary_payload(
     return payload
 
 
-def _trade_count(engine_run: EngineRun) -> int | None:
-    if engine_run.screen_summary is not None:
-        value = engine_run.screen_summary.get("trade_count")
-        return int(value) if value is not None else None
-    if engine_run.validate_summary is not None:
-        screening_result = engine_run.validate_summary.get("screening_result")
-        if isinstance(screening_result, dict):
-            value = screening_result.get("trade_count")
-            return int(value) if value is not None else None
-    return None
-
-
 def compact_engine_summary(
     engine_run: EngineRun,
     *,
     include_diagnostic_trades: bool = False,
 ) -> dict[str, object]:
-    source = engine_run.screen_summary
-    if source is None and engine_run.validate_summary is not None:
-        screening_result = engine_run.validate_summary.get("screening_result")
-        source = screening_result if isinstance(screening_result, dict) else None
+    """Compact the book-derived run summary for the ``summary.json`` engine block.
 
+    ``nav_attribution`` is the realized NAV attribution of the single book walk
+    (gross/funding/cost/net as fractions of NAV); it is the same model of money as
+    the per-trade ledger, not an independent per-trade sum.
+    """
     summary: dict[str, object] = {
-        "passed": engine_run.passed,
-        "trade_count": _trade_count(engine_run),
+        "feasible": engine_run.feasible,
+        "trade_count": engine_run.trade_count,
+        "nav_attribution": dict(engine_run.nav_attribution),
     }
-    trade_result = source.get("trade_result") if isinstance(source, dict) else None
-    if isinstance(trade_result, dict):
-        summary["trade_result"] = {
-            "sum_signed_trade_activity_gross": trade_result.get("sum_signed_trade_activity_gross"),
-            "sum_signed_trade_activity_funding": trade_result.get(
-                "sum_signed_trade_activity_funding"
-            ),
-            "sum_signed_trade_activity_cost": trade_result.get("sum_signed_trade_activity_cost"),
-            "sum_signed_trade_activity_net": trade_result.get("sum_signed_trade_activity_net"),
-        }
-    else:
-        summary["trade_result"] = {
-            "sum_signed_trade_activity_gross": None,
-            "sum_signed_trade_activity_funding": None,
-            "sum_signed_trade_activity_cost": None,
-            "sum_signed_trade_activity_net": None,
-        }
-    trades = source.get("trades") if isinstance(source, dict) else None
-    if include_diagnostic_trades and isinstance(trades, list):
-        summary["diagnostic_trades"] = trades
-    if engine_run.validate_summary is not None:
-        gates = engine_run.validate_summary.get("gates")
-        if isinstance(gates, list):
-            summary["gates"] = [
-                {
-                    "name": gate.get("name"),
-                    "passed": gate.get("passed"),
-                    "detail": gate.get("detail"),
-                }
-                for gate in gates
-                if isinstance(gate, dict)
-            ]
+    if include_diagnostic_trades:
+        summary["diagnostic_trades"] = [dict(trade) for trade in engine_run.diagnostic_trades]
     return summary
 
 
@@ -465,9 +392,9 @@ def assessment_status(
 ) -> str:
     if not quick_checks:
         return "diagnostics_complete"
-    if engine_run.passed and not evidence_quality.get("causality_verified"):
+    if engine_run.feasible and not evidence_quality.get("causality_verified"):
         return "quick_check_unverified"
-    return "quick_check_passed" if engine_run.passed else "quick_check_failed"
+    return "quick_check_passed" if engine_run.feasible else "quick_check_failed"
 
 
 def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
@@ -484,7 +411,7 @@ def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
             "market robustness, or promotion evidence."
         )
     else:
-        quick_check_status = "passed" if engine_run.passed else "failed"
+        quick_check_status = "passed" if engine_run.feasible else "failed"
         lines.append(f"quick_check_result: {quick_check_status}")
         interpretation = "runner quick checks only; not market robustness or promotion evidence."
     if config.data.kind == "crypto_perp_funding":

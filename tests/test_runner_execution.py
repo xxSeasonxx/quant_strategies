@@ -15,7 +15,7 @@ from quant_strategies.core.execution import (
     execute_strategy_run,
 )
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.runner.config import load_config
 
 TIMESTAMP = datetime(2024, 1, 1, tzinfo=UTC)
@@ -38,16 +38,14 @@ def rows() -> list[dict[str, Any]]:
 def decision(
     strategy_id: str = "demo",
     *,
-    direction: str = "long",
-    size: float = 1.0,
-) -> StrategyDecision:
-    return StrategyDecision(
+    target: float = 1.0,
+) -> TargetDecision:
+    return TargetDecision(
         strategy_id=strategy_id,
         instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
         decision_time=TIMESTAMP,
         as_of_time=TIMESTAMP,
-        target=PositionTarget(direction=direction, sizing_kind="target_weight", size=size),
-        exit_policy=ExitPolicy(max_hold_bars=1),
+        target=target,
     )
 
 
@@ -93,17 +91,16 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     loaded_rows = rows()
     write_strategy(
         tmp_path,
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return {'weight': float(params['weight'])}\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
         "        decision_time=rows[0]['timestamp'],\n"
         "        as_of_time=rows[0]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=params['weight']),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=params['weight'],\n"
         "    )]\n",
     )
     config = write_config(tmp_path)
@@ -314,7 +311,7 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
     loaded_rows = rows()
 
     def flat_decision_strategy(loaded_rows, params):
-        return [decision(direction="flat", size=0.0)]
+        return [decision(target=0.0)]
 
     write_strategy(tmp_path, "def generate_decisions(rows, params): return []\n")
     config = write_config(tmp_path)
@@ -327,21 +324,20 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
 
     assert tuple(dict(row) for row in result.loaded_rows) == tuple(loaded_rows)
     assert result.loaded_rows == result.normalized_rows.projection_rows()
-    assert result.decisions == [decision(direction="flat", size=0.0)]
+    assert result.decisions == [decision(target=0.0)]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality["data_availability_status"] == "complete"
 
 
 _SCHEMALESS_STRATEGY = (
-    "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+    "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
     "def generate_decisions(rows, params):\n"
-    "    return [StrategyDecision(\n"
+    "    return [TargetDecision(\n"
     "        strategy_id='demo',\n"
     "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
     "        decision_time=rows[0]['timestamp'],\n"
     "        as_of_time=rows[0]['timestamp'],\n"
-    "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-    "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+    "        target=1.0,\n"
     "    )]\n"
 )
 

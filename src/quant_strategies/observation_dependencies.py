@@ -6,12 +6,12 @@ from typing import Any
 
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 
 
 def audit_observation_dependencies(
     row_index: dict[tuple[str, datetime], list[Mapping[str, Any]]],
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> tuple[str, ...]:
     violations: list[str] = []
 

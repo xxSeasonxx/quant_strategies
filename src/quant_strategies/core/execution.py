@@ -18,7 +18,7 @@ from quant_strategies.decisions import (
     validate_decision_output,
     validate_strategy_params,
 )
-from quant_strategies.decisions.models import StrategyDecision
+from quant_strategies.decisions.models import TargetDecision
 
 ExecutionStage = Literal[
     "strategy_import",
@@ -29,7 +29,7 @@ ExecutionStage = Literal[
 
 GenerateDecisions = Callable[
     [Sequence[Mapping[str, object]], Mapping[str, object]],
-    list[StrategyDecision],
+    list[TargetDecision],
 ]
 
 
@@ -41,7 +41,7 @@ class StrategyExecutionResult:
     normalized_rows: NormalizedRows
     frozen_rows: tuple[FrozenMapping, ...]
     frozen_params: FrozenMapping
-    decisions: list[StrategyDecision]
+    decisions: list[TargetDecision]
     normalized_rows_sha256: str
     evidence_quality: dict[str, Any]
     param_contract: str = "validated"

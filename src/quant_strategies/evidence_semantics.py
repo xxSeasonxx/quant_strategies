@@ -5,9 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 EvidenceClass = Literal["quick_run_diagnostic", "validation_advisory"]
-StrategyContract = Literal["decision"]
-RunnerReturnModel = Literal["trade_result.sum_signed_trade_activity_net"]
-FundingModel = Literal["none", "linear_additive_adjustment"]
+StrategyContract = Literal["target_book"]
+RunnerReturnModel = Literal["portfolio_book_nav_path"]
+FundingModel = Literal["none", "netted_cash_funding_accrual"]
 
 
 class MetricSemantics(BaseModel):
@@ -34,50 +34,54 @@ def replayable_from_artifacts_for_profile(artifact_profile: str) -> bool:
 
 def funding_model_for_data_kind(data_kind: str) -> FundingModel:
     if data_kind == "crypto_perp_funding":
-        return "linear_additive_adjustment"
+        return "netted_cash_funding_accrual"
     return "none"
 
 
 def trade_result_metric_semantics(data_kind: str) -> dict[str, dict[str, object]]:
+    """Semantics for the book's realized NAV attribution totals.
+
+    These describe the single causal netted-book walk (`core.portfolio_foundation`):
+    the per-trade ledger and these totals are one model of money, derived from the same
+    NAV path. The retired per-trade ``sum_signed_trade_activity_*`` linear-sum metrics
+    no longer exist.
+    """
     funding_model = funding_model_for_data_kind(data_kind)
-    base = "signed target-weighted trade activity; not portfolio NAV"
+    base = "realized attribution of the single netted-book NAV walk, as a fraction of NAV"
     shared = {
         "unit": "decimal_fraction",
         "base": base,
-        "backend": "execution_kernel",
-        "comparability": "not_comparable_to_nav_path_returns_without_backend_agreement_test",
+        "backend": "portfolio_book_spine",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
         "tolerance": None,
     }
     semantics = (
         MetricSemantics(
-            name="trade_result.sum_signed_trade_activity_gross",
-            aggregation="sum over trades of signed target-weighted price return",
-            return_path_model="linear_per_trade_price_return",
-            asymmetry="not comparable to NAV-path total return without an explicit backend agreement test",
+            name="nav_attribution.sum_gross_return",
+            aggregation="sum over book round-trips of realized price proceeds / NAV",
+            return_path_model="netted_book_price_return",
+            asymmetry="realized round-trip price attribution of the netted book NAV path",
             **shared,
         ),
         MetricSemantics(
-            name="trade_result.sum_signed_trade_activity_funding",
-            aggregation="sum over engine-held intervals of supplied funding adjustments",
+            name="nav_attribution.sum_funding_return",
+            aggregation="sum over book round-trips of accrued funding cash / NAV",
             return_path_model=funding_model,
-            asymmetry=(
-                "linear additive funding adjustment; not a cash ledger or "
-                "portfolio funding accrual model"
-            ),
+            asymmetry="netted cash funding accrual on the net held position",
             **shared,
         ),
         MetricSemantics(
-            name="trade_result.sum_signed_trade_activity_cost",
-            aggregation="sum over trades of target-weighted round-trip fee and slippage cost",
-            return_path_model="linear_round_trip_bps_cost",
-            asymmetry="linear cost approximation; not venue-specific execution cost accounting",
+            name="nav_attribution.sum_cost_return",
+            aggregation="sum over book round-trips of traded cost on the netted delta / NAV",
+            return_path_model="netted_book_delta_cost",
+            asymmetry="cost charged on the traded delta of the netted book, not per ticket",
             **shared,
         ),
         MetricSemantics(
-            name="trade_result.sum_signed_trade_activity_net",
-            aggregation="gross plus funding minus cost, summed over trades",
-            return_path_model="linear_trade_activity_sum",
-            asymmetry="not comparable to NAV-path total return without an explicit backend agreement test",
+            name="nav_attribution.sum_net_return",
+            aggregation="gross plus funding minus cost, summed over book round-trips",
+            return_path_model="netted_book_nav_attribution",
+            asymmetry="reconciles with the NAV path's realized PnL",
             **shared,
         ),
     )
@@ -87,8 +91,8 @@ def trade_result_metric_semantics(data_kind: str) -> dict[str, dict[str, object]
 def runner_evidence_semantics(data_kind: str) -> dict[str, object]:
     return {
         "evidence_class": "quick_run_diagnostic",
-        "strategy_contract": "decision",
-        "return_model": "trade_result.sum_signed_trade_activity_net",
+        "strategy_contract": "target_book",
+        "return_model": "portfolio_book_nav_path",
         "funding_model": funding_model_for_data_kind(data_kind),
         "metric_semantics": trade_result_metric_semantics(data_kind),
         "promotion_eligible": False,

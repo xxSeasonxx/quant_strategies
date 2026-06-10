@@ -10,7 +10,6 @@ from typing import Any
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 from quant_strategies.runner.config import RunConfig
-from quant_strategies.runner.economic_metrics import diagnostic_slices
 
 SAMPLE_TRADE_FIELDS = (
     "decision_id",
@@ -38,14 +37,16 @@ def diagnostic_payload(
     portfolio_foundation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     trades = _diagnostic_trades(engine)
-    trade_result = _mapping_or_empty(engine.get("trade_result"))
+    nav_attribution = _mapping_or_empty(engine.get("nav_attribution"))
+    if economic_slices is None:
+        raise ValueError("diagnostic_payload requires economic_slices from the book ledger")
     return {
         "strategy_id": config.strategy_id,
         "quick_checks": config.output.quick_checks,
         "artifact_profile": "diagnostic",
         "replayable_from_artifacts": replayable_from_artifacts_for_profile("diagnostic"),
         "trade_count": engine.get("trade_count"),
-        "trade_result": trade_result,
+        "nav_attribution": nav_attribution,
         "assessment_status": assessment_status,
         "evidence_quality": json_safe_value(dict(evidence_quality)),
         "by_symbol": _group(trades, "symbol"),
@@ -53,10 +54,8 @@ def diagnostic_payload(
         "by_exit_reason": _group(trades, "exit_reason"),
         "holding_period": _holding_period(trades),
         "concentration": _concentration(trades),
-        "cost_funding_breakdown": _cost_funding_breakdown(trade_result),
-        "economic_slices": dict(economic_slices)
-        if economic_slices is not None
-        else diagnostic_slices(trades),
+        "cost_funding_breakdown": _cost_funding_breakdown(nav_attribution),
+        "economic_slices": dict(economic_slices),
         "portfolio_foundation": dict(portfolio_foundation)
         if portfolio_foundation is not None
         else None,
@@ -162,11 +161,11 @@ def _concentration(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _cost_funding_breakdown(trade_result: Mapping[str, Any]) -> dict[str, Any]:
-    gross = trade_result.get("sum_signed_trade_activity_gross")
-    funding = trade_result.get("sum_signed_trade_activity_funding")
-    cost = trade_result.get("sum_signed_trade_activity_cost")
-    net = trade_result.get("sum_signed_trade_activity_net")
+def _cost_funding_breakdown(nav_attribution: Mapping[str, Any]) -> dict[str, Any]:
+    gross = nav_attribution.get("sum_gross_return")
+    funding = nav_attribution.get("sum_funding_return")
+    cost = nav_attribution.get("sum_cost_return")
+    net = nav_attribution.get("sum_net_return")
     gross_float = _float_value(gross)
     return {
         "gross": gross,

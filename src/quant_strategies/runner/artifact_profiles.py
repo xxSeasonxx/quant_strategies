@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.core.serialization import json_safe_value, normalized_rows_sha256
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.evidence_semantics import (
     replayable_from_artifacts_for_profile,
     trade_result_metric_semantics,
@@ -22,7 +22,7 @@ def summary_profile_payload(
     *,
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]],
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
     row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
@@ -60,7 +60,7 @@ def write_summary_profile_artifact(
     *,
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]],
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
     engine: Mapping[str, Any],
     normalized_rows_hash: str | None = None,
     row_ranges: Mapping[str, Mapping[str, Any]] | None = None,
@@ -127,23 +127,29 @@ def _rows_profile_payload(
     }
 
 
-def _decision_summary(decisions: Sequence[StrategyDecision]) -> dict[str, Any]:
+def _decision_summary(decisions: Sequence[TargetDecision]) -> dict[str, Any]:
     symbols = Counter(item.instrument.symbol for item in decisions)
-    directions = Counter(item.target.direction for item in decisions)
+    directions = Counter(_target_direction(item.target) for item in decisions)
     instrument_kinds = Counter(item.instrument.kind for item in decisions)
-    intents = Counter(item.intent.action for item in decisions)
-    sizing_kinds = Counter(item.target.sizing_kind for item in decisions)
+    with_risk_rule = sum(1 for item in decisions if item.risk_rule is not None)
     decision_times = [item.decision_time for item in decisions]
     return {
         "count": len(decisions),
         "by_symbol": dict(sorted(symbols.items())),
         "by_direction": dict(sorted(directions.items())),
         "by_instrument_kind": dict(sorted(instrument_kinds.items())),
-        "by_intent": dict(sorted(intents.items())),
-        "by_sizing_kind": dict(sorted(sizing_kinds.items())),
+        "with_risk_rule_count": with_risk_rule,
         "min_decision_time": _iso_or_none(min(decision_times) if decision_times else None),
         "max_decision_time": _iso_or_none(max(decision_times) if decision_times else None),
     }
+
+
+def _target_direction(target: float) -> str:
+    if target > 0.0:
+        return "long"
+    if target < 0.0:
+        return "short"
+    return "flat"
 
 
 def _iso_or_none(value: datetime | None) -> str | None:

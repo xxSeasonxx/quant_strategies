@@ -4,7 +4,7 @@ from collections.abc import Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 
 _INFERRED_REQUIRED_FIELDS_BY_DATA_KIND = {
     "crypto_perp_funding": (
@@ -35,7 +35,7 @@ class DecisionReadinessConfig(BaseModel):
 
 
 def check_decision_readiness(
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
     readiness: DecisionReadinessConfig,
     *,
     data_kind: str = "bars",

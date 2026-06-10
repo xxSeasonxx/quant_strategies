@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict
 
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.observation_dependencies import (
     audit_observation_dependencies,
     observation_row_index,
@@ -26,7 +26,7 @@ class DataAudit(BaseModel):
 
 def audit_decision_rows(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> DataAudit:
     violations: list[str] = []
     if isinstance(rows, NormalizedRows):

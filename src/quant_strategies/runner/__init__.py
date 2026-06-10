@@ -27,13 +27,15 @@ from quant_strategies.core.execution import (
     execute_strategy_run,
 )
 from quant_strategies.core.portfolio_foundation import (
+    FeasibilityError,
+    FeasibilityVerdict,
     PortfolioFoundationConfig,
     RunPortfolioFoundation,
     build_portfolio_foundation,
 )
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 from quant_strategies.evidence_semantics import (
     replayable_from_artifacts_for_profile,
     runner_evidence_semantics,
@@ -103,6 +105,11 @@ class RunEvidence:
     row_contract: dict[str, object] | None = None
     causality: RunCausalityEvidence = RunCausalityEvidence()
     focused_causality: RunFocusedCausalityEvidence = RunFocusedCausalityEvidence()
+    # Reads the existing causality evidence (mode + verification): whether the run's
+    # causality check admitted scoring. This change surfaces the dimension; it does
+    # not change causality policy (whether off/micro should gate scoreability is an
+    # F6 follow-on per design).
+    causality_admissible: bool = False
     warnings: tuple[str, ...] = ()
 
 
@@ -126,6 +133,11 @@ class RunResult:
     evidence: RunEvidence = RunEvidence()
     economics: RunEconomics | None = None
     foundation: RunPortfolioFoundation | None = None
+    # Typed fail-closed feasibility verdict for the authoritative book. ``None`` only
+    # when the run failed before the book was built; an infeasible book carries a
+    # populated verdict (reason + observed exposure) and maps to a ``feasibility``
+    # failure_stage so ``succeeded`` is false (design D5).
+    feasibility: FeasibilityVerdict | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -231,7 +243,7 @@ def run_config(
     if config.output.artifact_profile == "full":
         artifacts.write_decision_records(result_dir, decision_window_decisions)
 
-    request, failure = _prepare_engine_request(
+    failure = _assert_engine_inputs_ready(
         config,
         result_dir,
         execution,
@@ -243,30 +255,34 @@ def run_config(
     if failure is not None:
         return failure
 
-    engine_run, failure = _evaluate_engine_request(
+    foundation, verdict, failure = _build_portfolio_foundation(
         config,
         result_dir,
-        request,
+        execution,
+        decision_window_decisions,
         evidence_quality,
         repo_root=effective_repo_root,
         event_emitter=events,
     )
     if failure is not None:
         return failure
+    if foundation is None or not foundation.feasible:
+        return _feasibility_failure_result(
+            config,
+            result_dir,
+            verdict,
+            repo_root=effective_repo_root,
+            evidence_quality=evidence_quality,
+            event_emitter=events,
+        )
 
-    economics = economic_metrics.build_run_economics(engine_run)
-    foundation, failure = _build_portfolio_foundation(
-        config,
-        result_dir,
-        execution,
-        decision_window_decisions,
+    economics = economic_metrics.build_run_economics(foundation)
+    engine_run = _engine_runner.evaluate_foundation(
         economics,
-        evidence_quality,
-        repo_root=effective_repo_root,
-        event_emitter=events,
+        feasible=foundation.feasible,
+        mode=_engine_mode(config),
+        include_diagnostics=True,
     )
-    if failure is not None:
-        return failure
     _write_execution_data_manifest(
         result_dir,
         config,
@@ -289,7 +305,7 @@ def run_config(
             event_emitter=events,
         )
     except OSError as exc:
-        # Engine ran and the verdict is known, but completion artifacts could not be
+        # The book was scored and feasible, but completion artifacts could not be
         # written. Return a structured artifact_write failure instead of raising.
         return RunResult(
             result_dir=result_dir,
@@ -299,6 +315,7 @@ def run_config(
             evidence=_run_evidence(config, evidence_quality),
             economics=economics,
             foundation=None,
+            feasibility=foundation.feasible_verdict(),
         )
     return RunResult(
         result_dir=result_dir,
@@ -314,6 +331,7 @@ def run_config(
         evidence=_run_evidence(config, evidence_quality),
         economics=economics,
         foundation=foundation,
+        feasibility=foundation.feasible_verdict(),
     )
 
 
@@ -638,16 +656,22 @@ def _write_focused_causality_cache(
         return
 
 
-def _prepare_engine_request(
+def _assert_engine_inputs_ready(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
-    decision_window_decisions: list[StrategyDecision],
+    decision_window_decisions: list[TargetDecision],
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
-) -> tuple[_engine_runner.EvaluationRequest | None, RunResult | None]:
+) -> RunResult | None:
+    """Gate the row contract and decision-row readiness before scoring the book.
+
+    The open-ticket translation layer (`assert_supported_decisions`) and the engine
+    request build were retired with the per-trade scorer: the target book consumes the
+    decisions directly and is the single PnL/NAV computation.
+    """
     try:
         with event_emitter.stage(
             "request_build",
@@ -658,9 +682,8 @@ def _prepare_engine_request(
             _assert_execution_row_contract_allows_engine_request(
                 execution.execution_normalized_rows
             )
-            _engine_runner.assert_supported_decisions(decision_window_decisions)
     except RunnerError as exc:
-        return None, _failure_result(
+        return _failure_result(
             config,
             result_dir,
             "request_build",
@@ -680,7 +703,7 @@ def _prepare_engine_request(
                 execution.normalized_rows, decision_window_decisions
             )
     except RunnerError as exc:
-        return None, _failure_result(
+        return _failure_result(
             config,
             result_dir,
             "data_readiness",
@@ -689,34 +712,7 @@ def _prepare_engine_request(
             evidence_quality=evidence_quality,
             event_emitter=event_emitter,
         )
-
-    try:
-        with event_emitter.stage(
-            "request_build",
-            strategy_id=config.strategy_id,
-            row_count=len(execution.execution_normalized_rows or execution.normalized_rows),
-            decision_count=len(decision_window_decisions),
-        ):
-            request = _engine_runner.build_request(
-                strategy_id=config.strategy_id,
-                rows=execution.execution_normalized_rows or execution.normalized_rows,
-                decisions=decision_window_decisions,
-                fill_model=config.fill_model,
-                cost_model=config.cost_model,
-            )
-            if config.output.artifact_profile == "full":
-                artifacts.write_engine_request(result_dir, _engine_runner.request_json(request))
-    except RunnerError as exc:
-        return None, _failure_result(
-            config,
-            result_dir,
-            "request_build",
-            str(exc),
-            repo_root=repo_root,
-            evidence_quality=evidence_quality,
-            event_emitter=event_emitter,
-        )
-    return request, None
+    return None
 
 
 def _assert_row_contract_allows_engine_request(evidence_quality: dict[str, object]) -> None:
@@ -757,8 +753,8 @@ def _row_contract_failure_message(row_contract: Mapping[str, object]) -> str:
 
 def _decision_window_decisions(
     config: config_module.RunConfig,
-    decisions: Sequence[StrategyDecision],
-) -> list[StrategyDecision]:
+    decisions: Sequence[TargetDecision],
+) -> list[TargetDecision]:
     return [
         decision
         for decision in decisions
@@ -771,57 +767,26 @@ def _date_in_window(value: datetime | date, start: date, end: date) -> bool:
     return start <= item <= end
 
 
-def _evaluate_engine_request(
-    config: config_module.RunConfig,
-    result_dir: Path,
-    request: _engine_runner.EvaluationRequest | None,
-    evidence_quality: dict[str, object],
-    *,
-    repo_root: Path,
-    event_emitter: RunnerStageEmitter,
-) -> tuple[_engine_runner.EngineRun | None, RunResult | None]:
-    if request is None:
-        raise ValueError("request is required when no failure was returned")
-    try:
-        with event_emitter.stage(
-            "engine_evaluation",
-            strategy_id=config.strategy_id,
-            quick_checks=config.output.quick_checks,
-        ):
-            return (
-                _engine_runner.evaluate_request(
-                    request,
-                    mode=_engine_mode(config),
-                    include_evidence=config.output.artifact_profile == "full",
-                    include_diagnostics=True,
-                ),
-                None,
-            )
-    except RunnerError as exc:
-        return None, _failure_result(
-            config,
-            result_dir,
-            "engine_evaluation",
-            str(exc),
-            repo_root=repo_root,
-            evidence_quality=evidence_quality,
-            event_emitter=event_emitter,
-        )
-
-
 def _build_portfolio_foundation(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
-    decision_window_decisions: list[StrategyDecision],
-    economics: RunEconomics,
+    decision_window_decisions: list[TargetDecision],
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
-) -> tuple[RunPortfolioFoundation | None, RunResult | None]:
+) -> tuple[RunPortfolioFoundation | None, FeasibilityVerdict | None, RunResult | None]:
+    """Build the authoritative scored book (fail-closed).
+
+    A :class:`FeasibilityError` is the typed fail-closed verdict (leverage budget,
+    unfinanced leverage) — surfaced as a populated verdict, never a swallowed
+    ``None`` (design D5); the caller maps it to a ``feasibility`` failure_stage.
+    A non-feasibility build error (missing/unfillable rows) is a structured
+    ``portfolio_foundation`` stage failure, not a fail-open success.
+    """
     if not config.output.foundation_enabled:
-        return None, None
+        return None, None, None
     rows = (execution.execution_normalized_rows or execution.normalized_rows).projection_rows()
     try:
         with event_emitter.stage(
@@ -830,39 +795,86 @@ def _build_portfolio_foundation(
             scenario_count=2,
             subwindows=config.output.foundation_subwindows,
         ):
-            return (
-                build_portfolio_foundation(
-                    rows=rows,
-                    decisions=decision_window_decisions,
-                    executed_trades=economics.trades,
-                    data=config.data,
-                    fill_model=config.fill_model,
-                    cost_model=config.cost_model,
-                    config=PortfolioFoundationConfig(
-                        enabled=config.output.foundation_enabled,
-                        subwindows=config.output.foundation_subwindows,
-                        trial_count=config.output.foundation_trial_count,
-                        benchmark_sharpe=config.output.foundation_benchmark_sharpe,
-                        cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
-                        max_gross_exposure=config.output.foundation_max_gross_exposure,
-                    ),
+            foundation = build_portfolio_foundation(
+                rows=rows,
+                decisions=decision_window_decisions,
+                data=config.data,
+                fill_model=config.fill_model,
+                cost_model=config.cost_model,
+                config=PortfolioFoundationConfig(
+                    enabled=config.output.foundation_enabled,
+                    subwindows=config.output.foundation_subwindows,
+                    trial_count=config.output.foundation_trial_count,
+                    benchmark_sharpe=config.output.foundation_benchmark_sharpe,
+                    cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
                 ),
-                None,
             )
-    except Exception as exc:
-        _append_evidence_warning(
-            evidence_quality,
-            f"portfolio_foundation_unavailable:{type(exc).__name__}:{exc}",
+    except FeasibilityError as exc:
+        return None, exc.verdict, None
+    except (ValueError, RunnerError) as exc:
+        return (
+            None,
+            None,
+            _failure_result(
+                config,
+                result_dir,
+                "portfolio_foundation",
+                f"portfolio_foundation_failed: {type(exc).__name__}: {exc}",
+                repo_root=repo_root,
+                evidence_quality=evidence_quality,
+                event_emitter=event_emitter,
+            ),
         )
-        return None, None
+    return foundation, foundation.feasible_verdict(), None
+
+
+def _feasibility_failure_result(
+    config: config_module.RunConfig,
+    result_dir: Path,
+    verdict: FeasibilityVerdict | None,
+    *,
+    repo_root: Path,
+    evidence_quality: dict[str, object],
+    event_emitter: RunnerStageEmitter,
+) -> RunResult:
+    """Map an infeasible book to a typed ``feasibility`` failure with the verdict.
+
+    The verdict reason (and observed exposure) is the actionable signal; the run is
+    not scoreable and ``succeeded`` is false (design D5).
+    """
+    effective_verdict = verdict or FeasibilityVerdict(
+        feasible=False, reason="infeasible", detail="portfolio book infeasible"
+    )
+    message = _feasibility_message(effective_verdict)
+    failure = _failure_result(
+        config,
+        result_dir,
+        "feasibility",
+        message,
+        repo_root=repo_root,
+        evidence_quality=evidence_quality,
+        event_emitter=event_emitter,
+    )
+    return replace(failure, feasibility=effective_verdict)
+
+
+def _feasibility_message(verdict: FeasibilityVerdict) -> str:
+    parts = [f"feasibility:{verdict.reason}" if verdict.reason else "feasibility:infeasible"]
+    if verdict.observed_gross is not None:
+        parts.append(f"observed_gross={verdict.observed_gross:.6g}")
+    if verdict.observed_net is not None:
+        parts.append(f"observed_net={verdict.observed_net:.6g}")
+    if verdict.detail:
+        parts.append(verdict.detail)
+    return "; ".join(parts)
 
 
 def _write_completion_artifacts(
     config: config_module.RunConfig,
     result_dir: Path,
     execution: StrategyExecutionResult,
-    decision_window_decisions: list[StrategyDecision],
-    engine_run: _engine_runner.EngineRun | None,
+    decision_window_decisions: list[TargetDecision],
+    engine_run: _engine_runner.EngineRun,
     economics: RunEconomics,
     foundation: RunPortfolioFoundation | None,
     evidence_quality: dict[str, object],
@@ -870,8 +882,6 @@ def _write_completion_artifacts(
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
 ) -> tuple[str, str]:
-    if engine_run is None:
-        raise ValueError("engine_run is required when no failure was returned")
     with event_emitter.stage(
         "artifact_writes", strategy_id=config.strategy_id, status_stage="completed"
     ):
@@ -886,12 +896,6 @@ def _write_completion_artifacts(
             quick_checks=config.output.quick_checks,
             evidence_quality=evidence_quality,
         )
-        if config.output.artifact_profile == "full" and engine_run.evidence_json:
-            artifacts.write_evidence(
-                result_dir,
-                engine_run.evidence_json,
-                quick_checks=config.output.quick_checks,
-            )
         if config.output.artifact_profile == "summary":
             from quant_strategies.runner.artifact_profiles import write_summary_profile_artifact
 
@@ -1066,7 +1070,7 @@ def _audit_observation_dependencies(
 
 def _assert_declared_observations_causal(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> None:
     row_index, timestamp_violations = observation_row_index(rows)
     violations = (
@@ -1183,8 +1187,31 @@ def _run_evidence(
             replay_warning=_optional_str(quality.get("replay_warning")),
         ),
         focused_causality=_run_focused_causality_evidence(quality.get("focused_causality")),
+        causality_admissible=_causality_admissible(config, quality),
         warnings=_string_tuple(quality.get("evidence_quality_warnings")),
     )
+
+
+def _causality_admissible(
+    config: config_module.RunConfig,
+    quality: Mapping[str, object],
+) -> bool:
+    """Read the existing causality evidence: does the causality dimension admit scoring?
+
+    Policy-neutral (design F6): current policy admits any mode that ran without a
+    rejection. ``off`` is admissible-but-unverified; verified strict/emitted replay is
+    admissible; a focused/micro pass that allowed scoring is admissible. This surfaces
+    the dimension on the result; it does not gate scoreability here.
+    """
+    check = str(quality.get("causality_check", config.output.causality_check))
+    if check == "off":
+        return True
+    if bool(quality.get("causality_verified")) or bool(quality.get("emitted_replay_verified")):
+        return True
+    focused = quality.get("focused_causality")
+    if isinstance(focused, Mapping) and bool(focused.get("scoring_allowed")):
+        return True
+    return False
 
 
 def _append_evidence_warning(evidence_quality: dict[str, object], warning: str) -> None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 
 LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
@@ -129,14 +129,14 @@ def row(symbol: str, timestamp: datetime, close: float) -> dict[str, object]:
     }
 
 
-def decision(symbol: str, timestamp: datetime, direction: str = "long") -> StrategyDecision:
-    return StrategyDecision(
+def decision(symbol: str, timestamp: datetime, direction: str = "long") -> TargetDecision:
+    target = 0.5 if direction == "long" else -0.5
+    return TargetDecision(
         strategy_id="demo",
         instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
         decision_time=timestamp,
         as_of_time=timestamp,
-        target=PositionTarget(direction=direction, sizing_kind="target_weight", size=0.5),
-        exit_policy=ExitPolicy(max_hold_bars=2),
+        target=target,
         metadata={"family": "test"},
     )
 
@@ -230,12 +230,12 @@ def diagnostic_payload(*args, **kwargs):
 def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
     metric_semantics = payload["metric_semantics"]
     assert set(metric_semantics) == {
-        "trade_result.sum_signed_trade_activity_gross",
-        "trade_result.sum_signed_trade_activity_funding",
-        "trade_result.sum_signed_trade_activity_cost",
-        "trade_result.sum_signed_trade_activity_net",
+        "nav_attribution.sum_gross_return",
+        "nav_attribution.sum_funding_return",
+        "nav_attribution.sum_cost_return",
+        "nav_attribution.sum_net_return",
     }
-    net = metric_semantics["trade_result.sum_signed_trade_activity_net"]
+    net = metric_semantics["nav_attribution.sum_net_return"]
     assert set(net) == {
         "name",
         "unit",
@@ -248,13 +248,13 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         "asymmetry",
     }
     assert net["unit"] == "decimal_fraction"
-    assert net["base"] == "signed target-weighted trade activity; not portfolio NAV"
-    assert net["backend"] == "execution_kernel"
-    assert (
-        net["comparability"] == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+    assert net["base"] == (
+        "realized attribution of the single netted-book NAV walk, as a fraction of NAV"
     )
+    assert net["backend"] == "portfolio_book_spine"
+    assert net["comparability"] == "reconciles_with_nav_path_realized_pnl"
     assert net["tolerance"] is None
-    assert "not comparable to NAV-path total return" in net["asymmetry"]
+    assert "reconciles with the NAV path" in net["asymmetry"]
 
 
 def test_normalized_rows_sha256_is_stable_for_json_equivalent_rows():
@@ -304,13 +304,13 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
         rows=rows,
         decisions=decisions,
         engine={
-            "passed": True,
+            "feasible": True,
             "trade_count": 2,
-            "trade_result": {
-                "sum_signed_trade_activity_gross": 0.03,
-                "sum_signed_trade_activity_funding": 0.0,
-                "sum_signed_trade_activity_cost": 0.0,
-                "sum_signed_trade_activity_net": 0.03,
+            "nav_attribution": {
+                "sum_gross_return": 0.03,
+                "sum_funding_return": 0.0,
+                "sum_cost_return": 0.0,
+                "sum_net_return": 0.03,
             },
         },
     )
@@ -325,13 +325,13 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
     assert payload["decisions"]["by_direction"] == {"long": 1, "short": 1}
     assert "signals" not in payload
     assert payload["engine"] == {
-        "passed": True,
+        "feasible": True,
         "trade_count": 2,
-        "trade_result": {
-            "sum_signed_trade_activity_gross": 0.03,
-            "sum_signed_trade_activity_funding": 0.0,
-            "sum_signed_trade_activity_cost": 0.0,
-            "sum_signed_trade_activity_net": 0.03,
+        "nav_attribution": {
+            "sum_gross_return": 0.03,
+            "sum_funding_return": 0.0,
+            "sum_cost_return": 0.0,
+            "sum_net_return": 0.03,
         },
     }
     assert_trade_result_metric_semantics(payload)
@@ -343,7 +343,7 @@ def test_summary_profile_payload_uses_precomputed_row_hash(tmp_path: Path):
         config=config(tmp_path),
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
-        engine={"passed": True, "trade_count": 1},
+        engine={"feasible": True, "trade_count": 1},
         normalized_rows_hash="a" * 64,
     )
 
@@ -363,7 +363,7 @@ def test_summary_profile_payload_normalizes_common_non_json_row_values(tmp_path:
             }
         ],
         decisions=[decision("SPY", timestamp)],
-        engine={"passed": True, "trade_count": 1},
+        engine={"feasible": True, "trade_count": 1},
     )
 
     sample = payload["rows"]["sample"][0]
@@ -384,13 +384,13 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
         rows=[row("SPY", timestamp, 100.0)],
         decisions=[decision("SPY", timestamp)],
         engine={
-            "passed": True,
+            "feasible": True,
             "trade_count": 1,
-            "trade_result": {
-                "sum_signed_trade_activity_gross": 0.01,
-                "sum_signed_trade_activity_funding": 0.0,
-                "sum_signed_trade_activity_cost": 0.0,
-                "sum_signed_trade_activity_net": 0.01,
+            "nav_attribution": {
+                "sum_gross_return": 0.01,
+                "sum_funding_return": 0.0,
+                "sum_cost_return": 0.0,
+                "sum_net_return": 0.01,
             },
         },
     )
@@ -414,13 +414,13 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         diagnostic_sample_trades=2,
     )
     engine = {
-        "passed": True,
+        "feasible": True,
         "trade_count": 3,
-        "trade_result": {
-            "sum_signed_trade_activity_gross": 0.06,
-            "sum_signed_trade_activity_funding": -0.01,
-            "sum_signed_trade_activity_cost": 0.03,
-            "sum_signed_trade_activity_net": 0.02,
+        "nav_attribution": {
+            "sum_gross_return": 0.06,
+            "sum_funding_return": -0.01,
+            "sum_cost_return": 0.03,
+            "sum_net_return": 0.02,
         },
         "diagnostic_trades": [
             {
@@ -477,18 +477,43 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         ],
     }
 
+    economic_slices = {
+        "schema_version": "quant_strategies.runner.economic_slices/v1",
+        "basis": "portfolio_book_round_trip_attribution",
+        "by_symbol": {
+            "SPY": {"count": 2},
+            "QQQ": {"count": 1},
+        },
+        "by_direction": {
+            "long": {"count": 2},
+            "short": {"count": 1},
+        },
+        "by_exit_reason": {
+            "take_profit": {"count": 1},
+            "stop_loss": {"count": 1},
+            "max_hold": {"count": 1},
+        },
+        "win_loss_distribution": {
+            "largest_win_net": 0.05,
+            "largest_loss_net": -0.03,
+            "median_trade_net": 0.0,
+            "sum_positive_net": 0.05,
+            "sum_negative_net": -0.03,
+        },
+    }
     payload = diagnostic_payload(
         config=run_config,
         engine=engine,
         assessment_status="quick_check_passed",
         evidence_quality={"causality_verified": True, "evidence_quality_warnings": []},
+        economic_slices=economic_slices,
     )
 
     assert payload["artifact_profile"] == "diagnostic"
     assert payload["replayable_from_artifacts"] is False
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in payload
     assert payload["trade_count"] == 3
-    assert payload["trade_result"] == engine["trade_result"]
+    assert payload["nav_attribution"] == engine["nav_attribution"]
     assert payload["assessment_status"] == "quick_check_passed"
     assert payload["evidence_quality"]["causality_verified"] is True
     assert payload["by_symbol"]["SPY"] == {
@@ -503,7 +528,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
     assert payload["by_exit_reason"]["take_profit"]["count"] == 1
     economic_slices = payload["economic_slices"]
     assert economic_slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
-    assert economic_slices["basis"] == "engine_trade_ledger"
+    assert economic_slices["basis"] == "portfolio_book_round_trip_attribution"
     assert economic_slices["by_symbol"]["SPY"]["count"] == 2
     assert economic_slices["by_symbol"]["QQQ"]["count"] == 1
     assert economic_slices["by_direction"]["long"]["count"] == 2

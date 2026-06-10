@@ -15,7 +15,7 @@ from typing import Any, Literal
 from quant_strategies.boundary import frozen_params, frozen_rows
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.decisions import StrategyDecision, validate_decision_output
+from quant_strategies.decisions import TargetDecision, validate_decision_output
 
 ReplayMode = Literal["emitted", "strict"]
 ReplayScope = Literal["off", "emitted", "strict", "focused", "micro", "bounded", "complete"]
@@ -128,12 +128,12 @@ class _VisibleRowIndex:
 @dataclass(frozen=True)
 class _ReplayDecisionIndex:
     baseline_payloads: tuple[dict[str, Any], ...]
-    by_decision_id: Mapping[str | None, tuple[tuple[int, StrategyDecision], ...]]
+    by_decision_id: Mapping[str | None, tuple[tuple[int, TargetDecision], ...]]
     allowed_by_asof_symbol: Mapping[tuple[datetime, str], frozenset[str | None]]
 
     @classmethod
-    def from_decisions(cls, decisions: Sequence[StrategyDecision]) -> _ReplayDecisionIndex:
-        by_decision_id: dict[str | None, list[tuple[int, StrategyDecision]]] = {}
+    def from_decisions(cls, decisions: Sequence[TargetDecision]) -> _ReplayDecisionIndex:
+        by_decision_id: dict[str | None, list[tuple[int, TargetDecision]]] = {}
         allowed_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
         for index, decision in enumerate(decisions):
             by_decision_id.setdefault(decision.decision_id, []).append((index, decision))
@@ -166,7 +166,7 @@ class _ReplayDecisionIndex:
         self,
         boundary: ReplayBoundary,
     ) -> tuple[dict[str, Any], ...]:
-        indexed_decisions: list[tuple[int, StrategyDecision]] = []
+        indexed_decisions: list[tuple[int, TargetDecision]] = []
         for decision_id in boundary.expected_decision_ids:
             for index, decision in self.by_decision_id.get(decision_id, ()):
                 if (
@@ -190,7 +190,7 @@ DecisionGenerator = Callable[
 
 def focused_replay_plan(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     key: FocusedCausalityKey,
     config: FocusedCausalityConfig,
@@ -217,7 +217,7 @@ def focused_replay_plan(
 
 def micro_replay_plan(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     max_probes: int = 5,
 ) -> FocusedReplayPlan:
@@ -231,7 +231,7 @@ def micro_replay_plan(
 
 def _micro_replay_plan_with_index(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     max_probes: int,
 ) -> tuple[FocusedReplayPlan, _VisibleRowIndex, _ReplayDecisionIndex]:
@@ -270,7 +270,7 @@ def check_micro_causality(
     *,
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
-    baseline_decisions: list[StrategyDecision],
+    baseline_decisions: list[TargetDecision],
     strategy_id: str,
     max_probes: int = 5,
     timeout_seconds: float = 2.0,
@@ -326,7 +326,7 @@ def check_bounded_causality(
     *,
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
-    baseline_decisions: list[StrategyDecision],
+    baseline_decisions: list[TargetDecision],
     strategy_id: str,
     max_probes: int = 64,
     timeout_seconds: float = 60.0,
@@ -379,7 +379,7 @@ def check_bounded_causality(
 
 def bounded_replay_plan(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     max_row_probes: int = 64,
 ) -> FocusedReplayPlan:
@@ -393,7 +393,7 @@ def bounded_replay_plan(
 
 def _bounded_replay_plan_with_index(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     max_row_probes: int,
 ) -> tuple[FocusedReplayPlan, _VisibleRowIndex, _ReplayDecisionIndex]:
@@ -418,7 +418,7 @@ def check_focused_causality(
     *,
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
-    baseline_decisions: list[StrategyDecision],
+    baseline_decisions: list[TargetDecision],
     strategy_id: str,
     key: FocusedCausalityKey,
     config: FocusedCausalityConfig | None = None,
@@ -491,7 +491,7 @@ def check_hidden_lookahead(
     *,
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
-    baseline_decisions: list[StrategyDecision],
+    baseline_decisions: list[TargetDecision],
     strategy_id: str,
     mode: ReplayMode = "strict",
     boundaries: Sequence[ReplayBoundary] | None = None,
@@ -547,7 +547,7 @@ def check_hidden_lookahead(
 
     row_index = _row_index or _visible_row_index(rows)
     replay_decision_ids_cache: dict[tuple[datetime, datetime], frozenset[str | None]] = {}
-    replay_decisions_cache: dict[tuple[datetime, datetime], tuple[StrategyDecision, ...]] = {}
+    replay_decisions_cache: dict[tuple[datetime, datetime], tuple[TargetDecision, ...]] = {}
     replay_payloads_cache: dict[tuple[datetime, datetime], tuple[dict[str, Any], ...]] = {}
     expected_payloads_by_boundary = {
         _boundary_identity(boundary): decision_index.expected_payloads_for_boundary(boundary)
@@ -671,7 +671,7 @@ def _deterministic_replay_failure(
     *,
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
     params: Mapping[str, Any],
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     baseline_payloads: tuple[dict[str, Any], ...] | None = None,
     strategy_id: str,
     mode: ReplayMode,
@@ -721,13 +721,13 @@ def _projection_rows(
 
 
 def _decision_payloads(
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
 ) -> tuple[dict[str, Any], ...]:
     return tuple(decision.model_dump(mode="json") for decision in decisions)
 
 
 def _expected_payloads_for_boundary(
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
     boundary: ReplayBoundary,
 ) -> tuple[dict[str, Any], ...]:
     return _decision_payloads(
@@ -887,7 +887,7 @@ def _dedupe_boundaries(boundaries: Sequence[ReplayBoundary]) -> tuple[ReplayBoun
 
 def _focused_candidate_boundaries(
     row_index: _VisibleRowIndex,
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     key: FocusedCausalityKey,
     config: FocusedCausalityConfig,
@@ -946,7 +946,7 @@ def _next_symbol_timestamp(
 
 def _focused_row_grid_boundaries(
     row_index: _VisibleRowIndex,
-    baseline_decisions: Sequence[StrategyDecision],
+    baseline_decisions: Sequence[TargetDecision],
     *,
     key: FocusedCausalityKey,
     max_items: int,
@@ -1008,7 +1008,7 @@ def _timestamps_by_symbol(row_index: _VisibleRowIndex) -> dict[str, list[datetim
 
 
 def _allowed_decision_ids(
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
     *,
     as_of_time: datetime,
     symbols: frozenset[str],
@@ -1154,7 +1154,7 @@ def _boundary_jsonable(boundary: ReplayBoundary) -> dict[str, object]:
     }
 
 
-def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBoundary, ...]:
+def _emitted_boundaries(decisions: Sequence[TargetDecision]) -> tuple[ReplayBoundary, ...]:
     items: dict[tuple[datetime, datetime], set[str | None]] = {}
     symbols: dict[tuple[datetime, datetime], set[str]] = {}
     for decision in decisions:
@@ -1175,7 +1175,7 @@ def _emitted_boundaries(decisions: Sequence[StrategyDecision]) -> tuple[ReplayBo
 
 def strict_replay_boundaries(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    decisions: Sequence[StrategyDecision],
+    decisions: Sequence[TargetDecision],
 ) -> tuple[ReplayBoundary, ...]:
     """Row-grid replay boundaries for strict suppression replay.
 
@@ -1345,7 +1345,7 @@ def _row_available_for_boundary(row: _VisibleRow, boundary: ReplayBoundary) -> b
     return True
 
 
-def _decision_matches_boundary(decision: StrategyDecision, boundary: ReplayBoundary) -> bool:
+def _decision_matches_boundary(decision: TargetDecision, boundary: ReplayBoundary) -> bool:
     if decision.as_of_time != boundary.as_of_time:
         return False
     if boundary.symbols and decision.instrument.symbol not in boundary.symbols:

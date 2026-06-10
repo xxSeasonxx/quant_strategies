@@ -7,7 +7,7 @@ from typing import Any
 from quant_strategies.core.errors import DataReadinessError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.decisions import StrategyDecision
+from quant_strategies.decisions import TargetDecision
 
 AVAILABILITY_FIELD = "available_at"
 DECISION_AS_OF_FIELD = "as_of_time"
@@ -15,7 +15,7 @@ DECISION_AS_OF_FIELD = "as_of_time"
 
 def assert_decision_rows_ready(
     rows: NormalizedRows | Sequence[Mapping[str, Any]],
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> None:
     if isinstance(rows, NormalizedRows):
         _assert_normalized_decision_rows_ready(rows, decisions)
@@ -51,7 +51,7 @@ def assert_decision_rows_ready(
 
 def _assert_normalized_decision_rows_ready(
     normalized_rows: NormalizedRows,
-    decisions: list[StrategyDecision],
+    decisions: list[TargetDecision],
 ) -> None:
     rows_by_key: dict[tuple[str, datetime], list[Mapping[str, Any]]] = {}
     for row in normalized_rows.projection_rows():

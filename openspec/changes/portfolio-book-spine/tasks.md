@@ -16,21 +16,21 @@
 
 - [x] 3.1 Derive all scored statistics (Sharpe/SE/effective-sample inputs, drawdown, total return) from the NAV path over **at-risk bars**, not a zero-padded calendar. Re-base `closed_trade_count` on netted-book round trips.
 - [x] 3.2 Add a minimum at-risk-sample gate: below the floor, a subwindow/full-Train statistic is reported non-scoreable with a typed reason, not emitted from sample count alone.
-- [ ] 3.3 Add a typed feasibility verdict on the run: `leverage_budget_breach` (observed gross/net), `zero_cost`, `insufficient_samples`, and a **required** `unfinanced_leverage` for asset classes without a modeled financing term (crypto-perp exempt). Surface a `causality_admissible` dimension read from existing causality evidence. Never clamp/normalize; never collapse to `None`.
-- [ ] 3.4 Move the leverage budget out of agent-editable config: remove `foundation_max_gross_exposure` from `OutputConfig`/`[output]`; add a protocol-frozen budget covering **both gross and net** ceilings. A breach of intended exposure yields the verdict.
+- [x] 3.3 Add a typed feasibility verdict on the run: `leverage_budget_breach` (observed gross/net), `zero_cost`, `insufficient_samples`, and a **required** `unfinanced_leverage` for asset classes without a modeled financing term (crypto-perp exempt). Surface a `causality_admissible` dimension read from existing causality evidence. Never clamp/normalize; never collapse to `None`.
+- [x] 3.4 Move the leverage budget out of agent-editable config: remove `foundation_max_gross_exposure` from `OutputConfig`/`[output]`; add a protocol-frozen budget covering **both gross and net** ceilings. A breach of intended exposure yields the verdict.
 
 ## 4. Runner wiring
 
-- [ ] 4.1 Make `RunResult.foundation` the authoritative scored book; carry the typed feasibility verdict; remove the fail-open `except Exception -> (None, None)` path.
-- [ ] 4.2 Gate `RunResult.succeeded` on the verdict by mapping an infeasible run to a typed `failure_stage` (keeps the `completed and failure_stage is None` formula intact).
-- [ ] 4.3 Re-home `runner/economic_metrics.py` so the ledger is built from the book walk's round-trips (attribution); drop the `_trade_field` duck-typing fallback.
-- [ ] 4.4 Replace free-form unavailable warnings with the typed verdict reasons; emit gross/net exposure utilization metrics (max/mean, time-integral) on full-train and subwindow records.
+- [x] 4.1 Make `RunResult.foundation` the authoritative scored book; carry the typed feasibility verdict; remove the fail-open `except Exception -> (None, None)` path.
+- [x] 4.2 Gate `RunResult.succeeded` on the verdict by mapping an infeasible run to a typed `failure_stage` (keeps the `completed and failure_stage is None` formula intact).
+- [x] 4.3 Re-home `runner/economic_metrics.py` so the ledger is built from the book walk's round-trips (attribution); drop the `_trade_field` duck-typing fallback.
+- [x] 4.4 Replace free-form unavailable warnings with the typed verdict reasons; emit gross/net exposure utilization metrics (max/mean, time-integral) on full-train and subwindow records.
 - [ ] 4.5 Remove the dead `promotion_eligible` field across runner, evidence DTOs, and validation; remove the `FoundationSubwindowMetric` alias.
 
 ## 5. Remove the old money-models (no compatibility shim)
 
-- [ ] 5.1 Delete the per-trade linear-sum scorer in `engine/evaluation.py` (`net_total = sum(...)`); make screening a derived view over the book walk.
-- [ ] 5.2 Delete the isolated `_select_exit` exit engine and the window-replay `_portfolio_path` / `_decision_windows` / dead `_fill_price` and the per-window position model.
+- [x] 5.1 Delete the per-trade linear-sum scorer in `engine/evaluation.py` (`net_total = sum(...)`); make screening a derived view over the book walk.
+- [x] 5.2 Delete the isolated `_select_exit` exit engine and the window-replay `_portfolio_path` / `_decision_windows` / dead `_fill_price` and the per-window position model.
 - [ ] 5.3 Delete `evaluation/project_perp_ledger.py`, the perp-ledger routing and model-name in `evaluation/vectorbtpro_backend.py` and `evaluation/metrics.py`, and the `_REQUIRED_COMPLETED_FUNDING_MODELS` gate in `validation/_pipeline.py`. Route all NAV through the shared spine book.
 - [ ] 5.4 Collapse funding to one implementation in `funding.py`; remove the foundation `_apply_funding` and the perp-ledger funding copies.
 - [ ] 5.5 Retire the single-trade-only agreement oracle in `validation/agreement.py` (per the D9 retire-VBT decision); keep DSR as a **diagnostic** recomputed on the at-risk statistics — re-home it, do not delete it.
@@ -43,12 +43,12 @@
 
 ## 7. Tests
 
-- [ ] 7.1 Author a minimal reference target-book strategy + config fixture (cross-sectional rebalance and a single-name entry with a `RiskRule`) for end-to-end tests.
-- [ ] 7.2 Invert the fail-open contract test in `tests/test_runner_api_cli.py`: a leverage breach is now a typed infeasible verdict with `succeeded = False`.
-- [ ] 7.3 Test netting (offsetting/again targets net, no stacking), the weight→quantity-at-decision-bar hold, same-bar fill-order-independent gross, and the `RiskRule` re-entry latch.
-- [ ] 7.4 Test at-risk-bar statistics and the min-sample gate (a 99%-flat strategy no longer inflates effective sample size / passes min-evidence).
-- [ ] 7.5 Test the feasibility verdict: `leverage_budget_breach`, `zero_cost`, and `unfinanced_leverage` (equity/FX gross>1 non-scoreable; crypto-perp exempt); and that flat/leveraged-intent targets are accepted (no translation-layer rejection).
-- [ ] 7.6 Add a reconciliation test: the derived per-trade ledger attributions reconcile with the NAV path's realized PnL.
+- [x] 7.1 Author a minimal reference target-book strategy + config fixture (cross-sectional rebalance and a single-name entry with a `RiskRule`) for end-to-end tests.
+- [x] 7.2 Invert the fail-open contract test in `tests/test_runner_api_cli.py`: a leverage breach is now a typed infeasible verdict with `succeeded = False`.
+- [x] 7.3 Test netting (offsetting/again targets net, no stacking), the weight→quantity-at-decision-bar hold, same-bar fill-order-independent gross, and the `RiskRule` re-entry latch.
+- [x] 7.4 Test at-risk-bar statistics and the min-sample gate (a 99%-flat strategy no longer inflates effective sample size / passes min-evidence).
+- [x] 7.5 Test the feasibility verdict: `leverage_budget_breach`, `zero_cost`, and `unfinanced_leverage` (equity/FX gross>1 non-scoreable; crypto-perp exempt); and that flat/leveraged-intent targets are accepted (no translation-layer rejection).
+- [x] 7.6 Add a reconciliation test: the derived per-trade ledger attributions reconcile with the NAV path's realized PnL.
 - [ ] 7.7 Update/remove engine, decision, foundation, evaluation, and candidate-config tests that encode the old open-ticket / trade-unit / fail-open / perp-ledger-model contract.
 
 ## 8. Docs

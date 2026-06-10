@@ -71,10 +71,10 @@ SUMMARY_KEYS = {
     "evidence_quality_warnings",
 }
 TRADE_RESULT_KEYS = {
-    "trade_result.sum_signed_trade_activity_gross",
-    "trade_result.sum_signed_trade_activity_funding",
-    "trade_result.sum_signed_trade_activity_cost",
-    "trade_result.sum_signed_trade_activity_net",
+    "nav_attribution.sum_gross_return",
+    "nav_attribution.sum_funding_return",
+    "nav_attribution.sum_cost_return",
+    "nav_attribution.sum_net_return",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
 LEGACY_REPLAYABILITY_METADATA_KEY = "_".join(("artifact", "trust", "tier"))
@@ -122,37 +122,48 @@ def rows(
 
 
 def write_strategy(repo_root: Path, *, fixed_quote_signal: bool = False) -> None:
+    """Write a minimal target-book strategy: open at the first bar, flatten two bars later.
+
+    Standing weight-of-NAV targets net by construction; the paired ``target=0`` decision
+    is the causal signal-driven close. Holding across >=2 at-risk bars yields a closed
+    round-trip with enough at-risk return sample to score (min_return_sample=2).
+    """
     strategy = repo_root / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
-    if fixed_quote_signal:
-        strategy.write_text(
-            "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
-            "def generate_decisions(rows, params):\n"
-            "    if len(rows) < 2:\n"
-            "        return []\n"
-            "    return [StrategyDecision(\n"
-            "        strategy_id='demo',\n"
-            "        instrument=InstrumentRef(kind='fx_pair', symbol='EURUSD'),\n"
-            "        decision_time=rows[1]['timestamp'],\n"
-            "        as_of_time=rows[1]['timestamp'],\n"
-            "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-            "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
-            "    )]\n"
+    kind, symbol = (
+        ("fx_pair", "'EURUSD'")
+        if fixed_quote_signal
+        else (
+            "equity_or_etf",
+            "rows[0]['symbol']",
         )
-        return
+    )
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    if len(rows) < 2:\n"
+        "    if len(rows) < 1:\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
-        "        strategy_id='demo',\n"
-        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
-        "        decision_time=rows[1]['timestamp'],\n"
-        "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
-        "    )]\n"
+        f"    instrument = InstrumentRef(kind='{kind}', symbol={symbol})\n"
+        "    decisions = [\n"
+        "        TargetDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=instrument,\n"
+        "            decision_time=rows[0]['timestamp'],\n"
+        "            as_of_time=rows[0]['timestamp'],\n"
+        "            target=1.0,\n"
+        "        )\n"
+        "    ]\n"
+        "    if len(rows) >= 3:\n"
+        "        decisions.append(\n"
+        "            TargetDecision(\n"
+        "                strategy_id='demo',\n"
+        "                instrument=instrument,\n"
+        "                decision_time=rows[2]['timestamp'],\n"
+        "                as_of_time=rows[2]['timestamp'],\n"
+        "                target=0.0,\n"
+        "            )\n"
+        "        )\n"
+        "    return decisions\n"
     )
 
 
@@ -182,7 +193,6 @@ def write_config(
     foundation_trial_count: object | None = None,
     foundation_benchmark_sharpe: object | None = None,
     foundation_cost_stress_multiplier: object | None = None,
-    foundation_max_gross_exposure: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
 ) -> Path:
@@ -242,11 +252,6 @@ def write_config(
         if foundation_cost_stress_multiplier is not None
         else ""
     )
-    foundation_max_gross_exposure_line = (
-        f"foundation_max_gross_exposure = {foundation_max_gross_exposure}\n"
-        if foundation_max_gross_exposure is not None
-        else ""
-    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -269,13 +274,13 @@ price = "{fill_price}"
 entry_lag_bars = {entry_lag_bars}
 
 [cost_model]
-fee_bps_per_side = 0.0
+fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
 
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}{foundation_max_gross_exposure_line}
+			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
 				'''.lstrip()
     )
     return config_path
@@ -326,8 +331,8 @@ def assert_assessment(
     assert summary["artifact_profile"] == artifact_profile
     assert summary["replayable_from_artifacts"] is expected_replayable
     assert summary["evidence_class"] == "quick_run_diagnostic"
-    assert summary["strategy_contract"] == "decision"
-    assert summary["return_model"] == "trade_result.sum_signed_trade_activity_net"
+    assert summary["strategy_contract"] == "target_book"
+    assert summary["return_model"] == "portfolio_book_nav_path"
     assert summary["funding_model"] == "none"
     assert_trade_result_metric_semantics(summary)
     assert summary["promotion_eligible"] is promotion_eligible
@@ -354,12 +359,11 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         }
         assert semantics["name"] == name
         assert semantics["unit"] == "decimal_fraction"
-        assert semantics["base"] == "signed target-weighted trade activity; not portfolio NAV"
-        assert semantics["backend"] == "execution_kernel"
-        assert (
-            semantics["comparability"]
-            == "not_comparable_to_nav_path_returns_without_backend_agreement_test"
+        assert semantics["base"] == (
+            "realized attribution of the single netted-book NAV walk, as a fraction of NAV"
         )
+        assert semantics["backend"] == "portfolio_book_spine"
+        assert semantics["comparability"] == "reconciles_with_nav_path_realized_pnl"
         assert semantics["tolerance"] is None
         assert semantics["asymmetry"]
 
@@ -368,7 +372,7 @@ def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, obj
     metrics = payload["economic_metrics"]
     assert isinstance(metrics, dict)
     assert metrics["schema_version"] == "quant_strategies.runner.economic_metrics/v1"
-    assert metrics["basis"] == "engine_trade_ledger"
+    assert metrics["basis"] == "portfolio_book_round_trip_attribution"
     assert set(metrics) == {
         "schema_version",
         "basis",
@@ -383,6 +387,10 @@ def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, obj
         "profit_factor",
         "cost_share_of_abs_gross",
         "funding_share_of_abs_gross",
+        "sum_gross_return",
+        "sum_funding_return",
+        "sum_cost_return",
+        "sum_net_return",
     }
     return metrics
 
@@ -520,7 +528,7 @@ def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 2:\n"
         "        return []\n"
@@ -528,13 +536,12 @@ def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
         "    future = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
         "    if any(row['close'] < as_of_row['close'] for row in future):\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
         "        decision_time=as_of_row['timestamp'],\n"
         "        as_of_time=as_of_row['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(
@@ -582,19 +589,18 @@ def test_run_config_off_policy_marks_replay_unverified_but_keeps_other_gates(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    as_of_row = rows[1]\n"
         "    future_rows = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
         "    decision_id = 'future-visible' if future_rows else 'prefix-only'\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        decision_id=decision_id,\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
         "        decision_time=as_of_row['timestamp'],\n"
         "        as_of_time=as_of_row['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path, artifact_profile="diagnostic", causality_check="off")
@@ -1401,17 +1407,16 @@ def test_run_config_strategy_and_replay_do_not_see_execution_buffer_rows(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    if any(row['timestamp'].isoformat().startswith('2024-01-03') for row in rows):\n"
         "        raise RuntimeError('strategy saw execution buffer row')\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
         "        decision_time=rows[-1]['timestamp'],\n"
         "        as_of_time=rows[-1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "        metadata={'strategy_row_count': len(rows)},\n"
         "    )]\n"
     )
@@ -1451,15 +1456,14 @@ def test_run_config_execution_buffer_fills_late_decision_exit(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
         "        decision_time=rows[-1]['timestamp'],\n"
         "        as_of_time=rows[-1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(
@@ -1551,17 +1555,16 @@ def test_run_config_engine_artifacts_use_only_decision_window_decisions(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    decisions = []\n"
         "    for row in rows:\n"
-        "        decisions.append(StrategyDecision(\n"
+        "        decisions.append(TargetDecision(\n"
         "            strategy_id='demo',\n"
         "            instrument=InstrumentRef(kind='equity_or_etf', symbol=row['symbol']),\n"
         "            decision_time=row['timestamp'],\n"
         "            as_of_time=row['timestamp'],\n"
-        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "            target=1.0,\n"
         "        ))\n"
         "    return decisions\n"
     )
@@ -1609,17 +1612,15 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
         "strategy_snapshot.py",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
-        "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",
         "environment.json",
         "summary.json",
-        "evidence.json",
         "notes.md",
     }
     assert {path.name for path in result.result_dir.iterdir() if path.is_file()} == expected
     decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
-    assert len(decision_records) == 1
+    assert len(decision_records) == 2
     assert decision_records[0].startswith('{"as_of_time":')
     assert ',"decision_time":' in decision_records[0]
     assert '": ' not in decision_records[0]
@@ -1628,13 +1629,16 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     assert "success" not in summary
     assert summary["stage"] == "completed"
     assert summary["status"] == "completed"
-    assert summary["engine"]["passed"] is True
+    assert summary["engine"]["feasible"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] > 0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] > 0
-    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
+    assert summary["engine"]["nav_attribution"]["sum_gross_return"] > 0
+    assert summary["engine"]["nav_attribution"]["sum_funding_return"] == 0.0
+    assert summary["engine"]["nav_attribution"]["sum_cost_return"] > 0
+    assert summary["engine"]["nav_attribution"]["sum_net_return"] == pytest.approx(
+        summary["engine"]["nav_attribution"]["sum_gross_return"]
+        + summary["engine"]["nav_attribution"]["sum_funding_return"]
+        - summary["engine"]["nav_attribution"]["sum_cost_return"]
+    )
     assert summary["data_availability_status"] == "complete"
     assert summary["availability_coverage"] == {
         "field": "available_at",
@@ -1666,10 +1670,9 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     assert data_manifest["row_contract"] == summary["row_contract"]
     assert data_manifest["causality_verified"] is True
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    evidence = json.loads((result.result_dir / "evidence.json").read_text())
-    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
-    assert evidence["quick_checks"] is True
-    assert_no_mode_fields(evidence)
+    # The engine evidence packet (evidence.json) was retired with the per-trade scorer;
+    # the authoritative book is the scored object.
+    assert not (result.result_dir / "evidence.json").exists()
     assert_assessment(result, summary, assessment_status="quick_check_passed")
     assert "runner quick checks only" in (result.result_dir / "notes.md").read_text()
 
@@ -1906,10 +1909,61 @@ def test_run_config_foundation_can_be_disabled(
     assert "portfolio_foundation" not in summary
 
 
-def test_run_config_foundation_failure_is_nonblocking_diagnostic_warning(
+def write_over_leverage_strategy(repo_root: Path, *, target: float = 1.5) -> None:
+    """A standing target whose intended gross exceeds the operator leverage budget."""
+    strategy = repo_root / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 1:\n"
+        "        return []\n"
+        "    return [TargetDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        f"        target={target},\n"
+        "    )]\n"
+    )
+
+
+def test_run_config_leverage_breach_fails_closed_with_typed_verdict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # Inverted fail-open contract (design D5): an intended over-leverage book is a
+    # typed, fail-closed infeasible verdict, never a swallowed foundation=None with a
+    # soft warning. succeeded is False and the verdict names the breach + observed gross.
+    write_over_leverage_strategy(tmp_path, target=1.5)
+    config_path = write_config(tmp_path, artifact_profile="summary")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is False
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.foundation is None
+    assert result.feasibility is not None
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "leverage_budget_breach"
+    assert result.feasibility.observed_gross == pytest.approx(1.5)
+    summary = read_summary(result.result_dir)
+    assert summary["status"] == "failed"
+    assert summary["failure_stage"] == "feasibility"
+
+
+def test_run_config_foundation_build_error_is_structured_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A non-feasibility build error (e.g. unfillable/missing rows) is a structured
+    # portfolio_foundation stage failure, not a fail-open completed run.
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
@@ -1925,18 +1979,64 @@ def test_run_config_foundation_failure_is_nonblocking_diagnostic_warning(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.outcome.completed is True
-    assert result.economics is not None
+    assert result.succeeded is False
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "portfolio_foundation"
     assert result.foundation is None
-    assert any(
-        warning.startswith("portfolio_foundation_unavailable:")
-        for warning in result.evidence.warnings
+
+
+def write_risk_rule_strategy(repo_root: Path) -> None:
+    """A single-name target with a declared stop-loss RiskRule enforced by the book."""
+    strategy = repo_root / "strategies" / "demo.py"
+    strategy.parent.mkdir(parents=True, exist_ok=True)
+    strategy.write_text(
+        "from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision\n"
+        "def generate_decisions(rows, params):\n"
+        "    if len(rows) < 1:\n"
+        "        return []\n"
+        "    return [TargetDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=1.0,\n"
+        "        risk_rule=RiskRule(stop_loss=0.05),\n"
+        "    )]\n"
     )
-    summary = read_summary(result.result_dir)
-    assert "portfolio_foundation" not in summary
-    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert summary["evidence_quality_warnings"] == data_manifest["evidence_quality_warnings"]
-    assert summary["evidence_quality_warnings"] == list(result.evidence.warnings)
+
+
+def test_run_config_reference_target_book_with_risk_rule_e2e(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Minimal reference target-book e2e (task 7.1): a single-name entry with a
+    # declared stop-loss the book enforces on the net position. The authoritative book
+    # is the scored object; the derived per-trade ledger reconciles with NAV.
+    write_risk_rule_strategy(tmp_path)
+    config_path = write_config(tmp_path, artifact_profile="diagnostic")
+    # enter long at fill bar (idx1=100), hold one flat bar (idx2=100), then a >5% drop
+    # at idx3 trips the stop and flattens -> two at-risk return bars, one stop round trip.
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 100.0, 90.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is True
+    assert result.foundation is not None
+    assert result.foundation.feasible is True
+    assert result.feasibility is not None and result.feasibility.feasible is True
+    assert result.economics is not None
+    # The stop fired -> exactly one closed round trip attributed as a stop_loss exit.
+    assert result.economics.trade_count == 1
+    trade = result.economics.trades[0]
+    assert trade.exit_reason == "stop_loss"
+    assert trade.side == "long"
+    # The ledger reconciles with the book's realized NAV PnL (one model of money).
+    ledger_net = sum(item.net_return for item in result.economics.trades)
+    assert result.economics.sum_net_return == pytest.approx(ledger_net)
 
 
 def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):
@@ -1947,20 +2047,27 @@ def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):
         config_module.load_config(config_path, repo_root=tmp_path)
 
 
-def test_runner_config_accepts_foundation_max_gross_exposure(tmp_path: Path):
+def test_runner_config_has_no_agent_editable_leverage_budget(tmp_path: Path):
+    # The leverage budget (gross and net) is operator-frozen in the protocol set,
+    # not an agent-editable [output] field (design D6 / task 3.4).
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, foundation_max_gross_exposure=1.2)
+    config_path = write_config(tmp_path)
 
     config = config_module.load_config(config_path, repo_root=tmp_path)
 
-    assert config.output.foundation_max_gross_exposure == pytest.approx(1.2)
+    assert not hasattr(config.output, "foundation_max_gross_exposure")
 
 
-def test_runner_config_rejects_foundation_max_gross_exposure_below_one(tmp_path: Path):
+def test_runner_config_rejects_unknown_foundation_max_gross_exposure_field(tmp_path: Path):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, foundation_max_gross_exposure=0.99)
+    config_path = write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace(
+            "[output]\n", "[output]\nfoundation_max_gross_exposure = 1.2\n"
+        )
+    )
 
-    with pytest.raises(RunnerError, match="foundation_max_gross_exposure"):
+    with pytest.raises(RunnerError):
         config_module.load_config(config_path, repo_root=tmp_path)
 
 
@@ -2009,28 +2116,63 @@ def test_run_config_pre_engine_failure_leaves_economics_none(
 def test_quick_run_economics_path_does_not_import_heavy_evaluation_dependencies():
     code = """
 import sys
-from types import SimpleNamespace
+from datetime import UTC, datetime, timedelta
 
 import quant_strategies.core.engine_runner
-import quant_strategies.core.portfolio_foundation
 import quant_strategies.engine
 import quant_strategies.runner
+from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.portfolio_foundation import (
+    PortfolioFoundationConfig,
+    build_portfolio_foundation,
+)
+from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.runner.economic_metrics import build_run_economics
 
-build_run_economics(SimpleNamespace(
-    screen_summary={
-        "trade_count": 0,
-        "trade_result": {
-            "sum_signed_trade_activity_gross": 0.0,
-            "sum_signed_trade_activity_funding": 0.0,
-            "sum_signed_trade_activity_cost": 0.0,
-            "sum_signed_trade_activity_net": 0.0,
-        },
-        "trades": [],
-    },
-    validate_summary=None,
-    passed=None,
-))
+start = datetime(2024, 1, 1, tzinfo=UTC)
+rows = [
+    {
+        "symbol": "SPY",
+        "timestamp": start + timedelta(days=i),
+        "open": 100.0,
+        "high": 100.0,
+        "low": 100.0,
+        "close": 100.0,
+        "available_at": start + timedelta(days=i),
+    }
+    for i in range(4)
+]
+decisions = [
+    TargetDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=start,
+        as_of_time=start,
+        target=1.0,
+    ),
+    TargetDecision(
+        strategy_id="demo",
+        instrument=InstrumentRef(kind="equity_or_etf", symbol="SPY"),
+        decision_time=start + timedelta(days=2),
+        as_of_time=start + timedelta(days=2),
+        target=0.0,
+    ),
+]
+foundation = build_portfolio_foundation(
+    rows=rows,
+    decisions=decisions,
+    data=DataConfig(
+        kind="bars",
+        dataset="equity_1min",
+        symbols=("SPY",),
+        start=start.date(),
+        end=(start + timedelta(days=3)).date(),
+    ),
+    fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+    cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+    config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+)
+build_run_economics(foundation)
 
 forbidden = {
     "vectorbtpro",
@@ -2258,15 +2400,17 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    if len(rows) < 2:\n"
+        "        return []\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=2, take_profit_bps=50.0),\n"
+        "        target=1.0,\n"
+        "        risk_rule=RiskRule(take_profit=0.005),\n"
         "        metadata={\n"
         "            'funding_pressure_bps': 3.25,\n"
         "            'entry_return_extension_bps': 42.0,\n"
@@ -2274,7 +2418,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "        },\n"
         "    )]\n"
     )
-    config_path = write_config(tmp_path, quick_checks=False)
+    config_path = write_config(tmp_path, quick_checks=False, artifact_profile="full")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2285,21 +2429,18 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
 
     assert result.outcome.completed is True
     assert result.result_dir is not None
-    request = json.loads((result.result_dir / "engine_request.json").read_text())
-    evidence = json.loads((result.result_dir / "evidence.json").read_text())
-    decision_payload = request["spec"]["decisions"][0]
-    trade = evidence["screening_result"]["trades"][0]
+    decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
+    decision_payload = json.loads(decision_records[0])
 
-    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
-    assert evidence["quick_checks"] is False
-    assert_no_mode_fields(evidence)
-    assert decision_payload["exit_policy"]["max_hold_bars"] == 2
-    assert decision_payload["exit_policy"]["take_profit_bps"] == 50.0
+    # The declared price-path RiskRule is carried on the decision; the book enforces it
+    # on the net position and attributes the close as a take_profit exit.
+    assert decision_payload["risk_rule"]["take_profit"] == 0.005
     assert decision_payload["metadata"]["funding_pressure_bps"] == 3.25
     assert decision_payload["metadata"]["entry_return_extension_bps"] == 42.0
     assert decision_payload["metadata"]["signal_family"] == "demo"
-    assert trade["exit_reason"] == "take_profit"
-    assert trade["decision_metadata"]["funding_pressure_bps"] == 3.25
+    assert result.economics is not None
+    trade = result.economics.trades[0]
+    assert trade.exit_reason == "take_profit"
 
 
 def test_quick_check_failure_keeps_completed_summary(
@@ -2708,18 +2849,17 @@ def test_runner_catches_hidden_lookahead_before_request_build(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    as_of_row = rows[1]\n"
         "    future_rows = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
         "    size = 2.0 if future_rows else 1.0\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
         "        decision_time=as_of_row['timestamp'],\n"
         "        as_of_time=as_of_row['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=size),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=size,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path)
@@ -2826,7 +2966,7 @@ def test_runner_catches_peek_to_suppress_with_strict_replay(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 2:\n"
         "        return []\n"
@@ -2834,13 +2974,12 @@ def test_runner_catches_peek_to_suppress_with_strict_replay(
         "    future = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
         "    if any(row['close'] < as_of_row['close'] for row in future):\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
         "        decision_time=as_of_row['timestamp'],\n"
         "        as_of_time=as_of_row['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path)
@@ -2883,15 +3022,14 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from datetime import datetime, timezone\n"
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "        observations=(ObservationRef(symbol='SPY', timestamp=datetime(2024, 1, 3, tzinfo=timezone.utc), field='close'),),\n"
         "    )]\n"
     )
@@ -3508,15 +3646,14 @@ def test_malformed_decision_time_remains_decision_generation_failure(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
         "        decision_time='not-a-timestamp',\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path)
@@ -3579,15 +3716,14 @@ def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='flat', sizing_kind='target_weight', size=0.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.0,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path)
@@ -3623,15 +3759,14 @@ def test_decision_strategy_id_mismatch_fails_before_writing_decision_records(
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='other',\n"
         "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[1]['symbol']),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=1.0),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=1.0,\n"
         "    )]\n"
     )
     config_path = write_config(tmp_path)
@@ -4056,12 +4191,10 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
         "strategy_snapshot.py",
         "strategy_input_rows.jsonl",
         "decision_records.jsonl",
-        "engine_request.json",
         "data_manifest.json",
         "run_manifest.json",
         "environment.json",
         "summary.json",
-        "evidence.json",
         "notes.md",
     }
 
