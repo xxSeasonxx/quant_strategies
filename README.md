@@ -122,8 +122,8 @@ through explicit strict replay and the later validation/evaluation surfaces.
 Completed quick-run summaries include engine-derived
 `economic_metrics` from the internal trade ledger plus diagnostic
 `portfolio_foundation` metrics for Train scoring. The foundation is a
-dependency-light quick-run portfolio-return matrix, not survivor-grade
-evaluation evidence. Python callers receive
+dependency-light quick-run portfolio-return matrix with compact full-Train and
+subwindow records, not survivor-grade evaluation evidence. Python callers receive
 `RunResult`; status lives under `result.outcome`, while replayability,
 row-contract, causality, and warning fields live under `result.evidence`;
 trade economics live under `result.economics`, and portfolio-foundation

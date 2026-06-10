@@ -166,12 +166,16 @@ strategy_path, strategy_id            # top-level
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
          foundation_enabled, foundation_subwindows, foundation_trial_count,
-         foundation_benchmark_sharpe, foundation_cost_stress_multiplier
+         foundation_benchmark_sharpe, foundation_cost_stress_multiplier,
+         foundation_max_gross_exposure
 ```
 
 `foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
 when omitted, foundation subwindow `dsr` values are null with a
 `missing_trial_count` warning.
+`foundation_max_gross_exposure` defaults to `1.0` and is bounded to values
+`>= 1.0`; it controls only the quick-run portfolio foundation's active gross
+target exposure limit.
 
 `artifact_profile`: `full` (replayable — writes input rows, decision records,
 engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary`
@@ -319,19 +323,189 @@ cost_return`) for that trade.
 `RunPortfolioFoundation` is the in-process quick-run portfolio-return foundation
 accessor. It is diagnostic Train evidence only. It is separate from
 `RunEconomics`: the latter remains a trade-unit engine ledger, while the
-foundation carries compact per-subwindow portfolio-return metrics for
-downstream scoring. The default scenarios are `realistic_costs` and
+foundation carries compact full-Train and per-subwindow portfolio-return
+metrics for downstream scoring. The default scenarios are `realistic_costs` and
 `cost_stress`; full per-period return traces are not included in default
 artifacts.
 
 Important payload fields include `schema_version`, `basis`, `evidence_class`,
-and `scenarios`. Each scenario reports subwindow metrics such as
-`return_sample_count`, `effective_sample_size`, `sharpe`,
+and `scenarios`. Each scenario reports a compact `full_train` metric record and
+subwindow metrics such as `return_sample_count`, `mean_return`,
+`return_volatility`, `effective_sample_size`, `sharpe`,
 `sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, `dsr`,
-`max_drawdown`, `closed_trade_count`, and `max_symbol_concentration`.
+`total_return`, `max_drawdown`, `closed_trade_count`, and
+`max_symbol_concentration`.
 When trial-count metadata is missing, `dsr` is `None` and the subwindow warning
 list includes `missing_trial_count`. `dsr_inputs` includes a `formula` field so
 consumers can pin the DSR threshold convention.
+
+Scenario payload fields:
+
+| Field | Type | Notes |
+|---|---|---|
+| `scenario_id` | `str` | `realistic_costs` or `cost_stress` |
+| `cost_multiplier` | `float` | multiplier applied to configured fee + slippage bps |
+| `full_train` | `dict` | compact metric record for the full Train scoring path |
+| `subwindow_count` | `int` | configured `foundation_subwindows` |
+| `min_dsr` / `median_dsr` | `float \| None` | subwindow DSR aggregates; not the keep-rule score |
+| `dsr_available_count` / `dsr_null_count` | `int` | number of subwindows with / without DSR |
+| `min_closed_trade_count` | `int` | weakest subwindow closed-trade count |
+| `max_symbol_concentration` | `float` | maximum subwindow symbol concentration |
+| `warning_counts` | `dict[str, int]` | counts of subwindow statistic warnings |
+| `subwindows` | `list[dict]` | matrix payload only; omitted from compact summary |
+
+Metric record fields (`full_train` and each subwindow):
+
+| Field | Type | Notes |
+|---|---|---|
+| `window_id` | `str` | `full_train` or `train_<n>` |
+| `start_time` / `end_time` | ISO datetime | metric window bounds |
+| `total_return` | `float \| None` | full Train: ending NAV / starting NAV - 1; subwindow: compounded endpoint-assigned period returns |
+| `max_drawdown` | `float \| None` | local peak-to-trough drawdown, negative or zero |
+| `closed_trade_count` | `int` | trades counted by exit time |
+| `max_symbol_concentration` | `float` | max active gross target-weight concentration by symbol |
+| `return_sample_count` | `int` | finite fixed-frequency portfolio period returns |
+| `mean_return` | `float \| None` | arithmetic mean of the period-return sample |
+| `return_volatility` | `float \| None` | sample standard deviation of period returns |
+| `effective_sample_size` | `float \| None` | lag-one autocorrelation adjustment, capped to `[1, sample_count]` |
+| `sharpe` | `float \| None` | sample Sharpe = `mean_return / return_volatility`; not annualized |
+| `sharpe_standard_error` | `float \| None` | skew/kurtosis-adjusted Sharpe SE using effective sample size |
+| `skew` / `kurtosis` | `float \| None` | sample-shape inputs for Sharpe SE and DSR |
+| `dsr_inputs` | `dict \| None` | DSR provenance, including formula and deflated threshold |
+| `dsr` | `float \| None` | optional audit statistic; null when trial count or inputs are missing |
+| `warnings` | `list[str]` | statistic warnings such as `missing_trial_count` |
+
+Consumer rules:
+
+- `summary_payload()` and `summary.json["portfolio_foundation"]` include
+  scenario summaries and `full_train`, but not `subwindows`.
+- `matrix_payload()` and `diagnostics.json["portfolio_foundation"]` include the
+  same scenario summaries plus `subwindows`.
+- Neither payload includes raw NAV arrays, period-return arrays, position traces,
+  or per-period holdings.
+- PSR and final Train score are not emitted here. Downstream consumers compute
+  them from `sharpe`, `sharpe_standard_error`, and protocol-owned hurdle/gate
+  settings.
+
+Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
+`summary.json["portfolio_foundation"]`:
+
+```json
+{
+  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v1",
+  "basis": "quick_run_lightweight_portfolio_path",
+  "evidence_class": "quick_run_portfolio_foundation_diagnostic",
+  "scenarios": {
+    "realistic_costs": {
+      "scenario_id": "realistic_costs",
+      "cost_multiplier": 1.0,
+      "full_train": {
+        "window_id": "full_train",
+        "start_time": "2024-01-01T00:00:00Z",
+        "end_time": "2024-01-07T23:59:59.999999Z",
+        "total_return": 0.03,
+        "max_drawdown": -0.01,
+        "closed_trade_count": 12,
+        "max_symbol_concentration": 1.0,
+        "return_sample_count": 1440,
+        "mean_return": 0.00002,
+        "return_volatility": 0.001,
+        "effective_sample_size": 900.0,
+        "sharpe": 0.25,
+        "sharpe_standard_error": 0.08,
+        "skew": -0.1,
+        "kurtosis": 3.2,
+        "dsr_inputs": {
+          "sample_length": 1440,
+          "effective_sample_size": 900.0,
+          "skew": -0.1,
+          "kurtosis": 3.2,
+          "trial_count": 25,
+          "benchmark_sharpe": 0.0,
+          "deflated_sharpe_threshold": 0.12,
+          "formula": "bailey_lopez_de_prado_expected_max_sharpe"
+        },
+        "dsr": 0.94,
+        "warnings": []
+      },
+      "subwindow_count": 6,
+      "min_dsr": 0.94,
+      "median_dsr": 0.94,
+      "dsr_available_count": 6,
+      "dsr_null_count": 0,
+      "min_closed_trade_count": 0,
+      "max_symbol_concentration": 1.0,
+      "warning_counts": {}
+    },
+    "cost_stress": {
+      "...": "same shape"
+    }
+  }
+}
+```
+
+Diagnostic matrix shape, used by `RunPortfolioFoundation.matrix_payload()` and
+`diagnostics.json["portfolio_foundation"]`, adds per-subwindow records under
+each scenario:
+
+```json
+{
+  "schema_version": "quant_strategies.quick_run.portfolio_foundation/v1",
+  "basis": "quick_run_lightweight_portfolio_path",
+  "evidence_class": "quick_run_portfolio_foundation_diagnostic",
+  "scenarios": {
+    "realistic_costs": {
+      "scenario_id": "realistic_costs",
+      "cost_multiplier": 1.0,
+      "full_train": {
+        "...": "same metric shape as summary"
+      },
+      "subwindow_count": 6,
+      "min_dsr": 0.94,
+      "median_dsr": 0.94,
+      "dsr_available_count": 6,
+      "dsr_null_count": 0,
+      "min_closed_trade_count": 0,
+      "max_symbol_concentration": 1.0,
+      "warning_counts": {},
+      "subwindows": [
+        {
+          "window_id": "train_1",
+          "start_time": "2024-01-01T00:00:00Z",
+          "end_time": "2024-01-02T00:00:00Z",
+          "total_return": 0.004,
+          "max_drawdown": -0.01,
+          "closed_trade_count": 3,
+          "max_symbol_concentration": 1.0,
+          "return_sample_count": 240,
+          "mean_return": 0.00002,
+          "return_volatility": 0.001,
+          "effective_sample_size": 180.0,
+          "sharpe": 0.25,
+          "sharpe_standard_error": 0.08,
+          "skew": -0.1,
+          "kurtosis": 3.2,
+          "dsr_inputs": {
+            "sample_length": 240,
+            "effective_sample_size": 180.0,
+            "skew": -0.1,
+            "kurtosis": 3.2,
+            "trial_count": 25,
+            "benchmark_sharpe": 0.0,
+            "deflated_sharpe_threshold": 0.12,
+            "formula": "bailey_lopez_de_prado_expected_max_sharpe"
+          },
+          "dsr": 0.94,
+          "warnings": []
+        }
+      ]
+    },
+    "cost_stress": {
+      "...": "same shape"
+    }
+  }
+}
+```
 
 ### `ValidationRunResult`
 

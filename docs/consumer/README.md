@@ -166,6 +166,9 @@ print(result.outcome.assessment_status)
 **Then go where your question points:**
 
 - *How do I write a strategy and run all three surfaces?* → [usage-guide.md](usage-guide.md)
+- *How do I read quick-run `portfolio_foundation` output for Train scoring?* →
+  [usage-guide.md#quick-run-portfolio-foundation-output](usage-guide.md#quick-run-portfolio-foundation-output)
+  and [reference.md#runportfoliofoundation](reference.md#runportfoliofoundation)
 - *What is the exact signature / field / config key / exit code?* → [reference.md](reference.md)
 - *What data exists and is my window safe?* → quant-data consumer guide (upstream)
 

@@ -75,28 +75,72 @@ subwindow.
 - **WHEN** a quick-run config sets `foundation_subwindows` above 64
 - **THEN** config loading fails
 
+#### Scenario: Configured max gross exposure controls foundation path admissibility
+- **WHEN** a quick-run config sets `foundation_max_gross_exposure` to a value
+  greater than or equal to 1.0
+- **THEN** the foundation path permits active gross target exposure up to that
+  configured limit
+- **AND** values below 1.0 are rejected during config loading
+- **AND** this setting does not change engine trade-ledger economics
+
 ### Requirement: Foundation reports subwindow metric inputs
 
 Each foundation subwindow metric record SHALL report the foundation inputs needed
-by downstream Train scoring: return sample count, effective sample size, Sharpe,
-Sharpe uncertainty inputs, skew, kurtosis, DSR inputs, DSR value when computable,
-max drawdown, closed-trade count, and max symbol concentration.
+by downstream Train scoring: return sample count, mean return, return
+volatility, effective sample size, Sharpe, Sharpe uncertainty inputs, skew,
+kurtosis, DSR inputs, DSR value when computable, total return, max drawdown,
+closed-trade count, and max symbol concentration.
 
 #### Scenario: Subwindow metrics include statistical inputs
 - **WHEN** a subwindow has finite observed portfolio returns
 - **THEN** its metric record includes `return_sample_count`,
-  `effective_sample_size`, `sharpe`, `sharpe_standard_error`, `skew`,
-  `kurtosis`, `dsr_inputs`, and `dsr`
+  `mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
+  `sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, and `dsr`
 
 #### Scenario: Subwindow metrics include gate inputs
 - **WHEN** a subwindow contains portfolio path and trade activity
-- **THEN** its metric record includes `max_drawdown`,
+- **THEN** its metric record includes `total_return`, `max_drawdown`,
   `closed_trade_count`, and `max_symbol_concentration`
 
 #### Scenario: Closed trades are counted by exit time
 - **WHEN** a trade enters before a subwindow and exits inside that subwindow
 - **THEN** it contributes to that subwindow's `closed_trade_count`
 - **AND** it does not contribute to the prior subwindow's closed-trade count
+
+### Requirement: Foundation reports full-Train metric inputs
+
+Each foundation scenario SHALL report a compact `full_train` metric record
+computed from the same scenario portfolio path used to derive subwindow metrics.
+The `full_train` record SHALL include the return-statistic inputs needed by
+downstream PSR scoring and minimal gate inputs that require upstream path
+accounting. Downstream systems SHALL NOT need raw period-return traces to
+calculate a PSR score from foundation statistics.
+
+#### Scenario: Full-Train metric includes statistical inputs
+- **WHEN** a scenario has finite observed Train portfolio returns
+- **THEN** its `full_train` record includes `return_sample_count`,
+  `effective_sample_size`, `mean_return`, `return_volatility`, `sharpe`,
+  `sharpe_standard_error`, `skew`, `kurtosis`, and `warnings`
+- **AND** those statistics are computed from the scenario's full Train scoring
+  path, not from subwindow summaries
+
+#### Scenario: Full-Train metric includes gate inputs
+- **WHEN** a scenario contains Train portfolio path and trade activity
+- **THEN** its `full_train` record includes `total_return`, `max_drawdown`,
+  `closed_trade_count`, and `max_symbol_concentration`
+
+#### Scenario: Foundation artifacts remain compact
+- **WHEN** a completed quick run writes foundation metrics
+- **THEN** `summary.json["portfolio_foundation"]` includes each scenario's
+  compact `full_train` record
+- **AND** `diagnostics.json["portfolio_foundation"]` includes each scenario's
+  compact `full_train` record and subwindow matrix
+- **AND** neither artifact includes full NAV or period-return traces by default
+
+#### Scenario: Full-Train metric is emitted for cost scenarios
+- **WHEN** the foundation emits `realistic_costs` and `cost_stress` scenarios
+- **THEN** each scenario includes its own `full_train` record computed under
+  that scenario's cost multiplier
 
 ### Requirement: DSR is explicit about missing inputs
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
-from statistics import NormalDist
+from statistics import NormalDist, stdev
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,18 @@ from quant_strategies.core.portfolio_foundation import (
     compute_return_statistics,
 )
 from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision
+
+
+def assert_no_path_traces(payload: object) -> None:
+    text = json.dumps(payload)
+    for forbidden in (
+        "period_return",
+        "period_returns",
+        "portfolio_value",
+        "portfolio_values",
+        "navs",
+    ):
+        assert forbidden not in text
 
 
 def bar_rows(*closes: float) -> list[dict[str, object]]:
@@ -74,13 +87,16 @@ def executed_trade(
 
 
 def test_compute_return_statistics_reports_dsr_inputs_and_missing_trial_warning():
+    values = [0.01, -0.005, 0.02, 0.0]
     stats = compute_return_statistics(
-        [0.01, -0.005, 0.02, 0.0],
+        values,
         trial_count=None,
         benchmark_sharpe=0.0,
     )
 
     assert stats.return_sample_count == 4
+    assert stats.mean_return == pytest.approx(sum(values) / len(values))
+    assert stats.return_volatility == pytest.approx(stdev(values))
     assert stats.effective_sample_size is not None
     assert stats.sharpe is not None
     assert stats.sharpe_standard_error is not None
@@ -151,12 +167,55 @@ def test_build_portfolio_foundation_slices_windows_and_counts_closed_trades_by_e
     stressed = payload["scenarios"]["cost_stress"]
 
     assert foundation.evidence_class == "quick_run_portfolio_foundation_diagnostic"
+    assert realistic["full_train"]["window_id"] == "full_train"
+    assert realistic["full_train"]["closed_trade_count"] == 2
+    assert realistic["full_train"]["return_sample_count"] == 5
+    expected_returns = [0.0, 2.0 / 101.0, 0.0, 0.0, 1.0 / 104.0]
+    assert realistic["full_train"]["total_return"] == pytest.approx(
+        (103.0 / 101.0) * (105.0 / 104.0) - 1.0
+    )
+    assert realistic["full_train"]["mean_return"] == pytest.approx(
+        sum(expected_returns) / len(expected_returns)
+    )
+    assert realistic["full_train"]["return_volatility"] == pytest.approx(stdev(expected_returns))
+    assert stressed["full_train"]["window_id"] == "full_train"
     assert len(realistic["subwindows"]) == 2
     assert len(stressed["subwindows"]) == 2
     assert realistic["subwindows"][0]["closed_trade_count"] == 1
     assert realistic["subwindows"][1]["closed_trade_count"] == 1
     assert realistic["subwindows"][0]["max_symbol_concentration"] == pytest.approx(1.0)
-    assert "period_returns" not in realistic["subwindows"][0]
+    assert_no_path_traces(payload)
+
+    summary = foundation.summary_payload()["scenarios"]["realistic_costs"]
+    assert summary["full_train"] == realistic["full_train"]
+    assert "subwindows" not in summary
+
+
+def test_subwindow_total_return_uses_same_return_intervals_as_statistics():
+    rows = bar_rows(100.0, 100.0, 110.0, 110.0)
+
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=[decision(rows[0]["timestamp"], hold_bars=2)],
+        executed_trades=[executed_trade(rows, entry_index=1, exit_index=3)],
+        data=DataConfig(
+            kind="bars",
+            dataset="equity_1min",
+            symbols=("SPY",),
+            start=datetime(2024, 1, 1).date(),
+            end=datetime(2024, 1, 4).date(),
+        ),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(subwindows=2, trial_count=5, benchmark_sharpe=0.0),
+    )
+
+    weak_boundary_window = foundation.matrix_payload()["scenarios"]["realistic_costs"][
+        "subwindows"
+    ][1]
+
+    assert weak_boundary_window["mean_return"] == pytest.approx(0.05)
+    assert weak_boundary_window["total_return"] == pytest.approx(0.1)
 
 
 def test_build_portfolio_foundation_does_not_double_count_open_notional():
@@ -242,9 +301,18 @@ def test_build_portfolio_foundation_cost_stress_changes_nonzero_cost_path():
     )
 
     payload = foundation.matrix_payload()
-    realistic = payload["scenarios"]["realistic_costs"]["subwindows"][0]
-    stressed = payload["scenarios"]["cost_stress"]["subwindows"][0]
-    assert stressed["max_drawdown"] < realistic["max_drawdown"]
+    realistic = payload["scenarios"]["realistic_costs"]
+    stressed = payload["scenarios"]["cost_stress"]
+    assert realistic["subwindows"][0]["max_drawdown"] == pytest.approx(
+        realistic["full_train"]["max_drawdown"]
+    )
+    assert stressed["subwindows"][0]["max_drawdown"] == pytest.approx(
+        stressed["full_train"]["max_drawdown"]
+    )
+    assert realistic["full_train"]["total_return"] == pytest.approx(-0.2036)
+    assert stressed["full_train"]["total_return"] == pytest.approx(-0.2072)
+    assert stressed["full_train"]["total_return"] < realistic["full_train"]["total_return"]
+    assert stressed["full_train"]["max_drawdown"] < realistic["full_train"]["max_drawdown"]
 
 
 def test_build_portfolio_foundation_requires_executed_trades():
@@ -357,3 +425,50 @@ def test_build_portfolio_foundation_rejects_overlapping_gross_exposure_above_one
             cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
             config=PortfolioFoundationConfig(subwindows=1, trial_count=5, benchmark_sharpe=0.0),
         )
+
+
+def test_build_portfolio_foundation_accepts_configured_gross_exposure_limit():
+    timestamps = [datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=index) for index in range(3)]
+    rows = [
+        {
+            "symbol": symbol,
+            "timestamp": timestamp,
+            "open": 100.0,
+            "high": 100.0,
+            "low": 100.0,
+            "close": 100.0,
+            "available_at": timestamp,
+        }
+        for symbol in ("SPY", "QQQ")
+        for timestamp in timestamps
+    ]
+
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=[
+            decision(timestamps[0], symbol="SPY", weight=0.6),
+            decision(timestamps[0], symbol="QQQ", weight=0.6),
+        ],
+        executed_trades=[
+            executed_trade(rows, entry_index=1, exit_index=2, symbol="SPY", weight=0.6),
+            executed_trade(rows, entry_index=4, exit_index=5, symbol="QQQ", weight=0.6),
+        ],
+        data=DataConfig(
+            kind="bars",
+            dataset="equity_1min",
+            symbols=("SPY", "QQQ"),
+            start=datetime(2024, 1, 1).date(),
+            end=datetime(2024, 1, 3).date(),
+        ),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
+        config=PortfolioFoundationConfig(
+            subwindows=1,
+            trial_count=5,
+            benchmark_sharpe=0.0,
+            max_gross_exposure=1.2,
+        ),
+    )
+
+    full_train = foundation.summary_payload()["scenarios"]["realistic_costs"]["full_train"]
+    assert full_train["max_symbol_concentration"] == pytest.approx(0.5)

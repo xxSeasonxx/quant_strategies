@@ -108,6 +108,48 @@ Keep these facts current:
 - **O13** Evaluation evidence does not authorize promotion, paper trading, or live
   trading.
 
+### 2.3 Live Portfolio Feasibility Issues
+
+Recent quick-run usage exposed a gap between trade-ticket Train diagnostics and
+live-shaped portfolio evidence. These are active issues to keep visible; this
+section records the problems only, not a proposed design.
+
+Observed issues:
+
+- **O14** A strategy can emit overlapping target-weight tickets whose active gross
+  exposure materially exceeds the apparent per-ticket size.
+- **O15** Trade-ledger quick-run economics can complete and look stable while the
+  portfolio-foundation NAV path is unavailable because active gross exposure
+  exceeds the configured foundation limit.
+- **O16** This creates two different evidence classes for the same candidate:
+  completed trade-ticket evidence and missing portfolio-path evidence. A human or
+  downstream loop can misread the completed quick run as live-shaped evidence if
+  the foundation blocker is not surfaced prominently.
+- **O17** Repeated signals can stack exposure when the strategy emits another
+  ticket instead of expressing a total intended portfolio allocation. This can
+  turn a signal-strength finding into unintended leverage.
+- **O18** Per-symbol or per-ticket suppression does not necessarily bound total
+  portfolio exposure. Portfolio-level gross exposure can still exceed the live
+  risk budget even when individual ticket sizes are small and individually
+  valid.
+- **O19** A candidate can pass Train-style trade-count, profitability, and
+  cost-stress diagnostics while remaining inadmissible for live portfolio
+  consideration because portfolio exposure, NAV-path drawdown, and leverage
+  utilization are not yet valid evidence.
+
+Leverage-specific issues:
+
+- **O20** Leverage is currently easy to introduce implicitly through stacked
+  tickets, not only through an explicit leverage parameter. This makes the actual
+  risk contract hard to read from strategy params alone.
+- **O21** A levered candidate is not directly comparable to an unlevered candidate
+  unless the evidence records the leverage contract and observed exposure path.
+- **O22** Without explicit leverage semantics, increased returns can reflect
+  increased gross exposure rather than better signal quality.
+- **O23** Missing or implicit margin, liquidation-buffer, funding-stress, and
+  drawdown-under-leverage evidence blocks live-trading interpretation even when
+  the Train trade ledger completes.
+
 ## 3. Locked Direction
 
 Use `FOUNDATION_LOCK.md` as the source of truth for contracts that should not be

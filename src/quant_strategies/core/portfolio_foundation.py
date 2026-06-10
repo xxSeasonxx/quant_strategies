@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from statistics import NormalDist
@@ -29,6 +29,7 @@ class PortfolioFoundationConfig:
     trial_count: int | None = None
     benchmark_sharpe: float = 0.0
     cost_stress_multiplier: float = 2.0
+    max_gross_exposure: float = 1.0
 
     def __post_init__(self) -> None:
         if self.subwindows < 1:
@@ -41,6 +42,8 @@ class PortfolioFoundationConfig:
             raise ValueError("foundation_benchmark_sharpe must be finite")
         if not math.isfinite(self.cost_stress_multiplier) or self.cost_stress_multiplier < 1.0:
             raise ValueError("foundation_cost_stress_multiplier must be >= 1")
+        if not math.isfinite(self.max_gross_exposure) or self.max_gross_exposure < 1.0:
+            raise ValueError("foundation_max_gross_exposure must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,8 @@ class DsrInputs:
 @dataclass(frozen=True)
 class ReturnStatistics:
     return_sample_count: int
+    mean_return: float | None
+    return_volatility: float | None
     effective_sample_size: float | None
     sharpe: float | None
     sharpe_standard_error: float | None
@@ -73,6 +78,8 @@ class ReturnStatistics:
     def payload(self) -> dict[str, Any]:
         payload = {
             "return_sample_count": self.return_sample_count,
+            "mean_return": self.mean_return,
+            "return_volatility": self.return_volatility,
             "effective_sample_size": self.effective_sample_size,
             "sharpe": self.sharpe,
             "sharpe_standard_error": self.sharpe_standard_error,
@@ -103,10 +110,11 @@ class FoundationTrade:
 
 
 @dataclass(frozen=True)
-class FoundationSubwindowMetric:
+class FoundationMetric:
     window_id: str
     start_time: datetime
     end_time: datetime
+    total_return: float | None
     max_drawdown: float | None
     closed_trade_count: int
     max_symbol_concentration: float
@@ -117,6 +125,7 @@ class FoundationSubwindowMetric:
             "window_id": self.window_id,
             "start_time": self.start_time,
             "end_time": self.end_time,
+            "total_return": self.total_return,
             "max_drawdown": self.max_drawdown,
             "closed_trade_count": self.closed_trade_count,
             "max_symbol_concentration": self.max_symbol_concentration,
@@ -125,11 +134,15 @@ class FoundationSubwindowMetric:
         return cast(dict[str, Any], json_safe_value(payload))
 
 
+FoundationSubwindowMetric = FoundationMetric
+
+
 @dataclass(frozen=True)
 class FoundationScenarioResult:
     scenario_id: str
     cost_multiplier: float
-    subwindows: tuple[FoundationSubwindowMetric, ...]
+    full_train: FoundationMetric
+    subwindows: tuple[FoundationMetric, ...]
 
     def summary_payload(self) -> dict[str, Any]:
         dsrs = [item.statistics.dsr for item in self.subwindows if item.statistics.dsr is not None]
@@ -142,6 +155,7 @@ class FoundationScenarioResult:
         payload = {
             "scenario_id": self.scenario_id,
             "cost_multiplier": self.cost_multiplier,
+            "full_train": self.full_train.payload(),
             "subwindow_count": len(self.subwindows),
             "min_dsr": min(dsrs) if dsrs else None,
             "median_dsr": _median(dsrs) if dsrs else None,
@@ -200,7 +214,7 @@ class RunPortfolioFoundation:
 
 
 def compute_return_statistics(
-    returns: Sequence[float],
+    returns: Iterable[float],
     *,
     trial_count: int | None,
     benchmark_sharpe: float,
@@ -208,51 +222,135 @@ def compute_return_statistics(
     values = [float(value) for value in returns if math.isfinite(float(value))]
     warnings: list[str] = []
     sample_count = len(values)
+    mean_return = (sum(values) / sample_count) if sample_count else None
     if sample_count < 2:
-        warnings.append("insufficient_return_sample")
-        if trial_count is None:
-            warnings.append("missing_trial_count")
-        return ReturnStatistics(
-            return_sample_count=sample_count,
-            effective_sample_size=None,
-            sharpe=None,
-            sharpe_standard_error=None,
-            skew=None,
-            kurtosis=None,
-            dsr_inputs=DsrInputs(
-                sample_length=sample_count,
-                effective_sample_size=None,
-                skew=None,
-                kurtosis=None,
-                trial_count=trial_count,
-                benchmark_sharpe=benchmark_sharpe,
-                deflated_sharpe_threshold=None,
-            ),
-            dsr=None,
-            warnings=tuple(warnings),
+        return _insufficient_return_statistics(
+            sample_count=sample_count,
+            mean_return=mean_return,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
         )
 
-    mean = sum(values) / sample_count
     stdev = _sample_stdev(values)
     if stdev == 0.0:
         warnings.append("zero_return_volatility")
         sharpe = None
     else:
-        sharpe = mean / stdev
-    skew, kurtosis = _shape(values, mean=mean, stdev=stdev)
+        sharpe = cast(float, mean_return) / stdev
+    skew, kurtosis = _shape(values, mean=cast(float, mean_return), stdev=stdev)
     effective_n = _effective_sample_size(values)
-    dsr_inputs = DsrInputs(
-        sample_length=sample_count,
+    return _return_statistics_with_dsr(
+        sample_count=sample_count,
+        mean_return=mean_return,
+        return_volatility=stdev,
         effective_sample_size=effective_n,
+        sharpe=sharpe,
         skew=skew,
         kurtosis=kurtosis,
         trial_count=trial_count,
         benchmark_sharpe=benchmark_sharpe,
-        deflated_sharpe_threshold=None,
+        warnings=warnings,
     )
+
+
+def _compute_return_statistics_from_chunks(
+    chunks: Sequence[Sequence[float]],
+    *,
+    trial_count: int | None,
+    benchmark_sharpe: float,
+) -> ReturnStatistics:
+    sample_count, total = _return_count_and_sum(chunks)
+    mean_return = (total / sample_count) if sample_count else None
+    if sample_count < 2:
+        return _insufficient_return_statistics(
+            sample_count=sample_count,
+            mean_return=mean_return,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+
+    mean = cast(float, mean_return)
+    stdev = _sample_stdev_from_chunks(chunks, sample_count=sample_count, mean=mean)
+    if stdev == 0.0:
+        warnings = ["zero_return_volatility"]
+        sharpe = None
+    else:
+        warnings = []
+        sharpe = mean / stdev
+    skew, kurtosis = _shape_from_chunks(
+        chunks,
+        sample_count=sample_count,
+        mean=mean,
+        stdev=stdev,
+    )
+    effective_n = _effective_sample_size_from_chunks(
+        chunks,
+        sample_count=sample_count,
+        mean=mean,
+    )
+    return _return_statistics_with_dsr(
+        sample_count=sample_count,
+        mean_return=mean_return,
+        return_volatility=stdev,
+        effective_sample_size=effective_n,
+        sharpe=sharpe,
+        skew=skew,
+        kurtosis=kurtosis,
+        trial_count=trial_count,
+        benchmark_sharpe=benchmark_sharpe,
+        warnings=warnings,
+    )
+
+
+def _insufficient_return_statistics(
+    *,
+    sample_count: int,
+    mean_return: float | None,
+    trial_count: int | None,
+    benchmark_sharpe: float,
+) -> ReturnStatistics:
+    warnings = ["insufficient_return_sample"]
+    if trial_count is None:
+        warnings.append("missing_trial_count")
+    return ReturnStatistics(
+        return_sample_count=sample_count,
+        mean_return=mean_return,
+        return_volatility=None,
+        effective_sample_size=None,
+        sharpe=None,
+        sharpe_standard_error=None,
+        skew=None,
+        kurtosis=None,
+        dsr_inputs=DsrInputs(
+            sample_length=sample_count,
+            effective_sample_size=None,
+            skew=None,
+            kurtosis=None,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+            deflated_sharpe_threshold=None,
+        ),
+        dsr=None,
+        warnings=tuple(warnings),
+    )
+
+
+def _return_statistics_with_dsr(
+    *,
+    sample_count: int,
+    mean_return: float | None,
+    return_volatility: float | None,
+    effective_sample_size: float | None,
+    sharpe: float | None,
+    skew: float | None,
+    kurtosis: float | None,
+    trial_count: int | None,
+    benchmark_sharpe: float,
+    warnings: list[str],
+) -> ReturnStatistics:
     sharpe_se = _sharpe_standard_error(
         sharpe,
-        effective_sample_size=effective_n,
+        effective_sample_size=effective_sample_size,
         skew=skew,
         kurtosis=kurtosis,
     )
@@ -260,7 +358,7 @@ def compute_return_statistics(
     threshold = None
     if trial_count is None:
         warnings.append("missing_trial_count")
-    elif sharpe is None or sharpe_se is None or effective_n is None:
+    elif sharpe is None or sharpe_se is None or effective_sample_size is None:
         warnings.append("missing_dsr_statistic")
     else:
         threshold = _deflated_sharpe_threshold(
@@ -271,7 +369,7 @@ def compute_return_statistics(
         dsr = _normal_cdf((sharpe - threshold) / sharpe_se)
     dsr_inputs = DsrInputs(
         sample_length=sample_count,
-        effective_sample_size=effective_n,
+        effective_sample_size=effective_sample_size,
         skew=skew,
         kurtosis=kurtosis,
         trial_count=trial_count,
@@ -280,7 +378,9 @@ def compute_return_statistics(
     )
     return ReturnStatistics(
         return_sample_count=sample_count,
-        effective_sample_size=effective_n,
+        mean_return=mean_return,
+        return_volatility=return_volatility,
+        effective_sample_size=effective_sample_size,
         sharpe=sharpe,
         sharpe_standard_error=sharpe_se,
         skew=skew,
@@ -429,8 +529,9 @@ def _build_scenario(
         row_index,
         decision_windows,
         per_side_cost_fraction=per_side_cost_fraction,
+        max_gross_exposure=config.max_gross_exposure,
     )
-    subwindows = _subwindow_metrics(
+    full_train, subwindows = _scenario_metrics(
         path,
         trades,
         subwindows=config.subwindows,
@@ -442,6 +543,7 @@ def _build_scenario(
     return FoundationScenarioResult(
         scenario_id=scenario_id,
         cost_multiplier=cost_multiplier,
+        full_train=full_train,
         subwindows=tuple(subwindows),
     )
 
@@ -542,6 +644,7 @@ def _portfolio_path(
     windows: Sequence[Mapping[str, Any]],
     *,
     per_side_cost_fraction: float,
+    max_gross_exposure: float,
 ) -> tuple[list[PortfolioPathPoint], list[FoundationTrade]]:
     entries_by_time: dict[datetime, list[Mapping[str, Any]]] = defaultdict(list)
     exits_by_time: dict[datetime, list[Mapping[str, Any]]] = defaultdict(list)
@@ -585,7 +688,7 @@ def _portfolio_path(
             signed_weight = _signed_weight(window)
             current_gross = sum(abs(position.target_weight) for position in active.values())
             next_gross = current_gross + abs(signed_weight)
-            if next_gross > 1.0 + 1e-12:
+            if next_gross > max_gross_exposure + 1e-12:
                 raise ValueError(
                     f"portfolio_target_weight_exceeds_one:{timestamp.isoformat()}:{next_gross}"
                 )
@@ -648,7 +751,7 @@ def _apply_funding(
             position.applied_funding_timestamps.add(funding_timestamp)
 
 
-def _subwindow_metrics(
+def _scenario_metrics(
     path: Sequence[PortfolioPathPoint],
     trades: Sequence[FoundationTrade],
     *,
@@ -657,56 +760,182 @@ def _subwindow_metrics(
     benchmark_sharpe: float,
     data_start: date,
     data_end: date,
-) -> list[FoundationSubwindowMetric]:
+) -> tuple[FoundationMetric, list[FoundationMetric]]:
+    default_start, default_end = _train_bound_times(data_start, data_end, tzinfo=None)
     if not path:
-        return []
+        full_train = _metric_from_accumulator(
+            "full_train",
+            _MetricAccumulator(start_time=default_start, end_time=default_end),
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+        return full_train, []
     scoring_path = [point for point in path if data_start <= point.timestamp.date() <= data_end]
     if not scoring_path:
-        return []
+        start_time, end_time = _train_bound_times(
+            data_start,
+            data_end,
+            tzinfo=path[0].timestamp.tzinfo,
+        )
+        full_train = _metric_from_accumulator(
+            "full_train",
+            _MetricAccumulator(start_time=start_time, end_time=end_time),
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+        return full_train, []
     bounds = _subwindow_bounds(scoring_path, subwindows=subwindows, start=data_start, end=data_end)
-    assignments = _assign_subwindows(scoring_path, bounds=bounds)
+    full_train_accumulator = _FullTrainAccumulator(
+        start_time=bounds[0][0],
+        end_time=bounds[-1][1],
+    )
     accumulators = [
-        _SubwindowAccumulator(start_time=start_time, end_time=end_time)
+        _MetricAccumulator(start_time=start_time, end_time=end_time)
         for start_time, end_time in bounds
     ]
-    for path_index, (point, assigned) in enumerate(zip(scoring_path, assignments, strict=True)):
+    for path_index, point in enumerate(scoring_path):
+        assigned = _bucket_for_timestamp(point.timestamp, bounds)
+        if assigned is None:
+            assigned = 0 if point.timestamp < bounds[0][0] else len(bounds) - 1
+        _record_full_train_path_point(full_train_accumulator, point)
         accumulator = accumulators[assigned]
-        accumulator.navs.append(point.portfolio_value)
-        accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
-        if path_index > 0:
-            accumulator.returns.append(point.period_return)
+        _record_path_point(accumulator, point, include_return=path_index > 0)
 
-    for trade in sorted(trades, key=lambda item: item.exit_time):
+    for trade in trades:
+        if _timestamp_in_window(
+            trade.exit_time,
+            full_train_accumulator.start_time,
+            full_train_accumulator.end_time,
+            is_last=True,
+        ):
+            full_train_accumulator.closed_trade_count += 1
         bucket = _bucket_for_timestamp(trade.exit_time, bounds)
         if bucket is not None:
             accumulators[bucket].closed_trade_count += 1
 
-    return [
-        FoundationSubwindowMetric(
-            window_id=f"train_{index + 1}",
-            start_time=accumulator.start_time,
-            end_time=accumulator.end_time,
-            max_drawdown=_local_max_drawdown(accumulator.navs) if accumulator.navs else None,
-            closed_trade_count=accumulator.closed_trade_count,
-            max_symbol_concentration=accumulator.max_concentration,
-            statistics=compute_return_statistics(
-                accumulator.returns,
+    return (
+        _metric_from_accumulator(
+            "full_train",
+            full_train_accumulator,
+            return_chunks=tuple(accumulator.returns for accumulator in accumulators),
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        ),
+        [
+            _metric_from_accumulator(
+                f"train_{index + 1}",
+                accumulator,
                 trial_count=trial_count,
                 benchmark_sharpe=benchmark_sharpe,
-            ),
-        )
-        for index, accumulator in enumerate(accumulators)
-    ]
+            )
+            for index, accumulator in enumerate(accumulators)
+        ],
+    )
 
 
 @dataclass
-class _SubwindowAccumulator:
+class _MetricAccumulator:
     start_time: datetime
     end_time: datetime
     returns: list[float] = field(default_factory=list)
     navs: list[float] = field(default_factory=list)
     max_concentration: float = 0.0
     closed_trade_count: int = 0
+
+
+@dataclass
+class _FullTrainAccumulator:
+    start_time: datetime
+    end_time: datetime
+    first_nav: float | None = None
+    last_nav: float | None = None
+    peak_nav: float | None = None
+    max_drawdown: float | None = None
+    max_concentration: float = 0.0
+    closed_trade_count: int = 0
+
+
+def _record_path_point(
+    accumulator: _MetricAccumulator,
+    point: PortfolioPathPoint,
+    *,
+    include_return: bool,
+) -> None:
+    accumulator.navs.append(point.portfolio_value)
+    accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
+    if include_return:
+        accumulator.returns.append(point.period_return)
+
+
+def _record_full_train_path_point(
+    accumulator: _FullTrainAccumulator,
+    point: PortfolioPathPoint,
+) -> None:
+    nav = point.portfolio_value
+    if accumulator.first_nav is None:
+        accumulator.first_nav = nav
+        accumulator.peak_nav = nav
+    accumulator.last_nav = nav
+    peak = nav if accumulator.peak_nav is None else max(accumulator.peak_nav, nav)
+    accumulator.peak_nav = peak
+    drawdown = 0.0 if peak == 0.0 else (nav / peak) - 1.0
+    accumulator.max_drawdown = (
+        drawdown if accumulator.max_drawdown is None else min(accumulator.max_drawdown, drawdown)
+    )
+    accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
+
+
+def _metric_from_accumulator(
+    window_id: str,
+    accumulator: _MetricAccumulator | _FullTrainAccumulator,
+    *,
+    returns: Iterable[float] | None = None,
+    return_chunks: Sequence[Sequence[float]] | None = None,
+    trial_count: int | None,
+    benchmark_sharpe: float,
+) -> FoundationMetric:
+    if return_chunks is not None:
+        statistics = _compute_return_statistics_from_chunks(
+            return_chunks,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+    elif returns is None:
+        if not isinstance(accumulator, _MetricAccumulator):
+            raise ValueError("metric_returns_required")
+        statistics = compute_return_statistics(
+            accumulator.returns,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+    else:
+        statistics = compute_return_statistics(
+            returns,
+            trial_count=trial_count,
+            benchmark_sharpe=benchmark_sharpe,
+        )
+    return FoundationMetric(
+        window_id=window_id,
+        start_time=accumulator.start_time,
+        end_time=accumulator.end_time,
+        total_return=_accumulator_total_return(accumulator),
+        max_drawdown=_accumulator_max_drawdown(accumulator),
+        closed_trade_count=accumulator.closed_trade_count,
+        max_symbol_concentration=accumulator.max_concentration,
+        statistics=statistics,
+    )
+
+
+def _train_bound_times(
+    start: date,
+    end: date,
+    *,
+    tzinfo: Any,
+) -> tuple[datetime, datetime]:
+    return (
+        datetime.combine(start, datetime.min.time(), tzinfo=tzinfo),
+        datetime.combine(end, datetime.max.time(), tzinfo=tzinfo),
+    )
 
 
 def _subwindow_bounds(
@@ -724,27 +953,6 @@ def _subwindow_bounds(
         right = start_dt + (end_dt - start_dt) * ((index + 1) / subwindows)
         bounds.append((left, right if index < subwindows - 1 else end_dt))
     return bounds
-
-
-def _assign_subwindows(
-    path: Sequence[PortfolioPathPoint],
-    *,
-    bounds: Sequence[tuple[datetime, datetime]],
-) -> list[int]:
-    result: list[int] = []
-    for point in path:
-        for index, (start_time, end_time) in enumerate(bounds):
-            if _timestamp_in_window(
-                point.timestamp,
-                start_time,
-                end_time,
-                is_last=index == len(bounds) - 1,
-            ):
-                result.append(index)
-                break
-        else:
-            result.append(0 if point.timestamp < bounds[0][0] else len(bounds) - 1)
-    return result
 
 
 def _bucket_for_timestamp(
@@ -833,11 +1041,82 @@ def _local_max_drawdown(values: Sequence[float]) -> float | None:
     return worst
 
 
+def _total_return(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    first = values[0]
+    if first == 0.0:
+        return None
+    return (values[-1] / first) - 1.0
+
+
+def _accumulator_total_return(
+    accumulator: _MetricAccumulator | _FullTrainAccumulator,
+) -> float | None:
+    if isinstance(accumulator, _MetricAccumulator):
+        return _compound_return(accumulator.returns)
+    if (
+        accumulator.first_nav is None
+        or accumulator.last_nav is None
+        or accumulator.first_nav == 0.0
+    ):
+        return None
+    return (accumulator.last_nav / accumulator.first_nav) - 1.0
+
+
+def _compound_return(values: Sequence[float]) -> float | None:
+    if not values:
+        return None
+    total = 1.0
+    for value in values:
+        total *= 1.0 + value
+    return total - 1.0
+
+
+def _accumulator_max_drawdown(
+    accumulator: _MetricAccumulator | _FullTrainAccumulator,
+) -> float | None:
+    if isinstance(accumulator, _MetricAccumulator):
+        return _local_max_drawdown(accumulator.navs) if accumulator.navs else None
+    return accumulator.max_drawdown
+
+
 def _sample_stdev(values: Sequence[float]) -> float:
     if len(values) < 2:
         return 0.0
     mean = sum(values) / len(values)
     variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    return math.sqrt(variance)
+
+
+def _iter_finite_chunk_values(chunks: Sequence[Sequence[float]]) -> Iterable[float]:
+    for chunk in chunks:
+        for value in chunk:
+            metric = float(value)
+            if math.isfinite(metric):
+                yield metric
+
+
+def _return_count_and_sum(chunks: Sequence[Sequence[float]]) -> tuple[int, float]:
+    count = 0
+    total = 0.0
+    for value in _iter_finite_chunk_values(chunks):
+        count += 1
+        total += value
+    return count, total
+
+
+def _sample_stdev_from_chunks(
+    chunks: Sequence[Sequence[float]],
+    *,
+    sample_count: int,
+    mean: float,
+) -> float:
+    if sample_count < 2:
+        return 0.0
+    variance = sum((value - mean) ** 2 for value in _iter_finite_chunk_values(chunks)) / (
+        sample_count - 1
+    )
     return math.sqrt(variance)
 
 
@@ -850,6 +1129,24 @@ def _shape(
     skew = sum(value**3 for value in centered) / len(centered)
     kurtosis = sum(value**4 for value in centered) / len(centered)
     return skew, kurtosis
+
+
+def _shape_from_chunks(
+    chunks: Sequence[Sequence[float]],
+    *,
+    sample_count: int,
+    mean: float,
+    stdev: float,
+) -> tuple[float | None, float | None]:
+    if sample_count < 2 or stdev == 0.0:
+        return None, None
+    skew_sum = 0.0
+    kurtosis_sum = 0.0
+    for value in _iter_finite_chunk_values(chunks):
+        centered = (value - mean) / stdev
+        skew_sum += centered**3
+        kurtosis_sum += centered**4
+    return skew_sum / sample_count, kurtosis_sum / sample_count
 
 
 def _effective_sample_size(values: Sequence[float]) -> float | None:
@@ -876,6 +1173,34 @@ def _lag_one_autocorrelation(values: Sequence[float]) -> float | None:
         (values[index] - mean) * (values[index - 1] - mean) for index in range(1, len(values))
     )
     return numerator / denominator
+
+
+def _effective_sample_size_from_chunks(
+    chunks: Sequence[Sequence[float]],
+    *,
+    sample_count: int,
+    mean: float,
+) -> float | None:
+    if sample_count < 2:
+        return None
+    if sample_count < 3:
+        return float(sample_count)
+    denominator = 0.0
+    numerator = 0.0
+    previous_centered: float | None = None
+    for value in _iter_finite_chunk_values(chunks):
+        centered = value - mean
+        denominator += centered**2
+        if previous_centered is not None:
+            numerator += centered * previous_centered
+        previous_centered = centered
+    if denominator == 0.0:
+        return float(sample_count)
+    rho = numerator / denominator
+    if rho <= 0.0:
+        return float(sample_count)
+    effective_n = float(sample_count) * (1.0 - rho) / (1.0 + rho)
+    return max(1.0, min(float(sample_count), effective_n))
 
 
 def _sharpe_standard_error(

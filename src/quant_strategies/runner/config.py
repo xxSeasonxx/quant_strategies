@@ -91,6 +91,7 @@ class OutputConfig(RunnerConfigModel):
     foundation_trial_count: StrictInt | None = Field(default=None, ge=1)
     foundation_benchmark_sharpe: float = 0.0
     foundation_cost_stress_multiplier: float = Field(default=2.0, ge=1.0)
+    foundation_max_gross_exposure: float = Field(default=1.0, ge=1.0)
     causality_check: CausalityCheck = "strict"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)
@@ -113,7 +114,11 @@ class OutputConfig(RunnerConfigModel):
             raise ValueError(f"output.{info.field_name} must be finite")
         return value
 
-    @field_validator("foundation_benchmark_sharpe", "foundation_cost_stress_multiplier")
+    @field_validator(
+        "foundation_benchmark_sharpe",
+        "foundation_cost_stress_multiplier",
+        "foundation_max_gross_exposure",
+    )
     @classmethod
     def validate_foundation_floats(cls, value: float, info: ValidationInfo) -> float:
         if not math.isfinite(value):

@@ -165,8 +165,11 @@ full-profile artifacts. Completed quick-run `summary.json` files include
 `economic_metrics`, a compact summary derived from the engine trade ledger, and
 `portfolio_foundation`, a compact diagnostic summary for Train scoring.
 Diagnostic-profile runs additionally write `diagnostics.json` with
-`economic_slices` and the portfolio-foundation matrix. Full per-period return
-traces are not written by default.
+`economic_slices` and the portfolio-foundation matrix. Each portfolio-foundation
+scenario includes a compact `full_train` metric record plus configured subwindow
+records so downstream scoring can combine full-window and weakest-window
+evidence without raw period-return traces. Full per-period return traces are not
+written by default.
 Failed quick-run `summary.json` files set `run_completed` to `false` and
 `failure_stage` to the failed runner stage.
 

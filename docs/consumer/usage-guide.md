@@ -252,10 +252,14 @@ with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]
 with `results_dir`, `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
 (`foundation_enabled`, `foundation_subwindows`, `foundation_trial_count`,
-`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for
-the diagnostic profile) `diagnostic_sample_trades`.
+`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`,
+`foundation_max_gross_exposure`), and (for the diagnostic profile)
+`diagnostic_sample_trades`.
 `foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
 you want DSR to stay null with an explicit missing-trial warning.
+`foundation_max_gross_exposure` defaults to `1.0`; raise it only when the
+downstream portfolio contract explicitly allows levered gross exposure in the
+quick-run foundation path.
 Use `causality_check = "micro"` for Train/autoresearch iteration. See
 [`examples/simple_momentum/run.toml`](../../examples/simple_momentum/run.toml).
 Research candidates live as candidate-local bundles:
@@ -284,10 +288,123 @@ Programmatic consumers can read quick-run after-cost economics from
 ledger plus the same summary scalars/slices written to artifacts, even under
 `artifact_profile = "summary"`; no `summary.json` scraping is required.
 Completed quick runs also expose diagnostic Train portfolio-return foundation
-metrics on `result.foundation`. Use that object for subwindow return statistics,
-DSR inputs, drawdown, trade-count, concentration, and cost-stressed foundation
-metrics. It remains quick-run diagnostic evidence, not evaluation evidence, and
-default artifacts write compact metrics rather than full per-period traces.
+metrics on `result.foundation`. Use that object for full-Train and subwindow
+return statistics, DSR inputs, drawdown, trade-count, concentration, total
+return, and cost-stressed foundation metrics. It remains quick-run diagnostic
+evidence, not evaluation evidence, and default artifacts write compact metrics
+rather than full per-period traces.
+
+### Quick-run portfolio foundation output
+
+Use `portfolio_foundation` when a downstream loop needs portfolio-path foundation
+metrics without rebuilding NAV from trade bags. The foundation is emitted only
+after completed engine evaluation and only when `foundation_enabled` is true.
+
+Where to read it:
+
+| Surface | Contains | Use for |
+|---|---|---|
+| `result.foundation.summary_payload()` | compact scenario summaries; same shape as `summary.json["portfolio_foundation"]` | hot-path scoring inputs that do not need every subwindow row |
+| `result.foundation.matrix_payload()` | compact scenario summaries plus `subwindows`; same shape as `diagnostics.json["portfolio_foundation"]` | diagnosis of weak Train slices |
+| `summary.json["portfolio_foundation"]` | compact persisted summary when foundation succeeds | artifact-only consumers |
+| `diagnostics.json["portfolio_foundation"]` | compact matrix under diagnostic profile | artifact-only consumers that need subwindow records |
+
+Every scenario has this shape:
+
+```text
+scenario_id                 # "realistic_costs" or "cost_stress"
+cost_multiplier             # 1.0 or foundation_cost_stress_multiplier
+full_train                  # one compact metric record for the full Train path
+subwindow_count             # configured foundation_subwindows
+min_dsr / median_dsr        # DSR aggregates across subwindows only
+dsr_available_count
+dsr_null_count
+min_closed_trade_count
+max_symbol_concentration
+warning_counts
+subwindows                  # matrix payload only; one compact metric per Train slice
+```
+
+Each metric record (`full_train` and each subwindow) contains:
+
+```text
+window_id
+start_time / end_time
+total_return
+max_drawdown
+closed_trade_count
+max_symbol_concentration
+return_sample_count
+mean_return
+return_volatility
+effective_sample_size
+sharpe
+sharpe_standard_error
+skew
+kurtosis
+dsr_inputs
+dsr
+warnings
+```
+
+Important semantics for agents:
+
+- `realistic_costs` is the base execution-cost scenario; `cost_stress` recomputes
+  the same foundation under `foundation_cost_stress_multiplier`.
+- `foundation_max_gross_exposure` controls the maximum active gross target
+  exposure accepted by the quick-run foundation. It does not change engine
+  trade-ledger economics.
+- `full_train` exists so downstream can calculate full-window evidence exactly;
+  do not reconstruct full-window Sharpe, PSR, or total return from subwindow
+  summaries.
+- `mean_return`, `return_volatility`, `sharpe`, `sharpe_standard_error`, `skew`,
+  and `kurtosis` are computed from fixed-frequency portfolio period returns, not
+  completed-trade returns.
+- Subwindow `total_return` compounds the same endpoint-assigned return intervals
+  used for that subwindow's return statistics.
+- DSR is an audit statistic that depends on `foundation_trial_count`. If that
+  count is omitted, `dsr` is `null` and `warnings` includes
+  `missing_trial_count`.
+- PSR and the final Train score are downstream policy. A downstream scorer can
+  compute `PSR = NormalCDF((sharpe - SR_h) / sharpe_standard_error)` from
+  foundation fields, then choose its own score/gates. `quant_strategies` does not
+  emit or optimize that score.
+- Compact artifacts do **not** include full NAV traces, `portfolio_value` arrays,
+  `period_return` arrays, or per-period positions. Use evaluation for
+  survivor-grade NAV/path traces.
+
+Minimal in-process read:
+
+```python
+from statistics import NormalDist
+
+from quant_strategies.runner import run_config
+
+result = run_config("candidates/my_candidate/run.toml")
+if not result.succeeded:
+    raise SystemExit(result.message)
+if result.foundation is None:
+    raise SystemExit("portfolio foundation unavailable")
+
+scenario = result.foundation.summary_payload()["scenarios"]["realistic_costs"]
+matrix = result.foundation.matrix_payload()["scenarios"]["realistic_costs"]
+
+sr_h = 0.0  # downstream protocol-owned hurdle
+
+def psr(record: dict[str, object]) -> float | None:
+    sharpe = record["sharpe"]
+    sharpe_se = record["sharpe_standard_error"]
+    if sharpe is None or sharpe_se is None:
+        return None
+    return NormalDist().cdf((float(sharpe) - sr_h) / float(sharpe_se))
+
+full_psr = psr(scenario["full_train"])
+subwindow_psrs = [psr(item) for item in matrix["subwindows"]]
+if full_psr is None or any(item is None for item in subwindow_psrs):
+    score = None
+else:
+    score = min(full_psr, min(item for item in subwindow_psrs if item is not None))
+```
 
 The micro causality policy is the Train/autoresearch replay annotation. It runs a
 tiny bounded replay sample, records probe and timeout evidence, and never blocks

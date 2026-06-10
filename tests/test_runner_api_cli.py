@@ -182,6 +182,7 @@ def write_config(
     foundation_trial_count: object | None = None,
     foundation_benchmark_sharpe: object | None = None,
     foundation_cost_stress_multiplier: object | None = None,
+    foundation_max_gross_exposure: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
 ) -> Path:
@@ -241,6 +242,11 @@ def write_config(
         if foundation_cost_stress_multiplier is not None
         else ""
     )
+    foundation_max_gross_exposure_line = (
+        f"foundation_max_gross_exposure = {foundation_max_gross_exposure}\n"
+        if foundation_max_gross_exposure is not None
+        else ""
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -269,8 +275,8 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
-			'''.lstrip()
+			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_enabled_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}{foundation_max_gross_exposure_line}
+				'''.lstrip()
     )
     return config_path
 
@@ -1836,11 +1842,24 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
     assert payload["basis"] == "quick_run_lightweight_portfolio_path"
     assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
     realistic = payload["scenarios"]["realistic_costs"]
+    assert realistic["full_train"]["window_id"] == "full_train"
+    assert realistic["full_train"]["closed_trade_count"] == 1
+    assert realistic["full_train"]["return_sample_count"] > 0
+    assert realistic["full_train"]["mean_return"] is not None
+    assert realistic["full_train"]["return_volatility"] is not None
     assert realistic["subwindow_count"] == 1
     assert realistic["min_closed_trade_count"] == 1
     assert realistic["max_symbol_concentration"] == pytest.approx(1.0)
     assert "subwindows" not in realistic
-    assert "period_returns" not in json.dumps(payload)
+    payload_text = json.dumps(payload)
+    for forbidden in (
+        "period_return",
+        "period_returns",
+        "portfolio_value",
+        "portfolio_values",
+        "navs",
+    ):
+        assert forbidden not in payload_text
 
 
 def test_run_config_pre_engine_failure_leaves_foundation_none(
@@ -1925,6 +1944,23 @@ def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):
     config_path = write_config(tmp_path, foundation_subwindows=65)
 
     with pytest.raises(RunnerError, match="foundation_subwindows"):
+        config_module.load_config(config_path, repo_root=tmp_path)
+
+
+def test_runner_config_accepts_foundation_max_gross_exposure(tmp_path: Path):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, foundation_max_gross_exposure=1.2)
+
+    config = config_module.load_config(config_path, repo_root=tmp_path)
+
+    assert config.output.foundation_max_gross_exposure == pytest.approx(1.2)
+
+
+def test_runner_config_rejects_foundation_max_gross_exposure_below_one(tmp_path: Path):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path, foundation_max_gross_exposure=0.99)
+
+    with pytest.raises(RunnerError, match="foundation_max_gross_exposure"):
         config_module.load_config(config_path, repo_root=tmp_path)
 
 
@@ -2072,7 +2108,15 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
     assert result.economics.slices_payload() == diagnostics["economic_slices"]
     assert result.foundation.matrix_payload() == diagnostics["portfolio_foundation"]
-    assert "period_returns" not in json.dumps(diagnostics["portfolio_foundation"])
+    foundation_text = json.dumps(diagnostics["portfolio_foundation"])
+    for forbidden in (
+        "period_return",
+        "period_returns",
+        "portfolio_value",
+        "portfolio_values",
+        "navs",
+    ):
+        assert forbidden not in foundation_text
     slices = diagnostics["economic_slices"]
     assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
     assert slices["basis"] == "engine_trade_ledger"
