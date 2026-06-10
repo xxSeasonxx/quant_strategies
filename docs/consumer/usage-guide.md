@@ -284,10 +284,11 @@ with `results_dir`, `quick_checks`, `artifact_profile`, optional
 diagnostic profile) `diagnostic_sample_trades`.
 `foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
 you want DSR to stay null with an explicit missing-trial warning.
-The **leverage budget (gross and net) is operator-frozen** — it is not an
-agent-editable `[output]` key. Intended exposure beyond the budget makes the run
-non-scoreable through the feasibility verdict (`leverage_budget_breach`), it is
-never clamped to fit.
+The **leverage budget (gross and net) is operator-frozen** in the
+`[leverage_budget]` section (`max_gross_exposure` / `max_net_exposure`, default
+`1.0/1.0`, `>= 1.0`) — it is not an agent-editable `[output]` key. Intended exposure
+beyond the budget makes the run non-scoreable through the feasibility verdict
+(`leverage_budget_breach`), it is never clamped to fit.
 Use `causality_check = "micro"` for Train/autoresearch iteration.
 Research candidates live as candidate-local bundles:
 `candidates/<candidate_id>/strategy.py` plus `run.toml` and optional

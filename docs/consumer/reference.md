@@ -158,6 +158,14 @@ Common sections, then per-surface differences. Dates are ISO strings
 
 **`[cost_model]`** — `fee_bps_per_side` (float), `slippage_bps_per_side` (float).
 
+**`[leverage_budget]`** — `max_gross_exposure` (float, default `1.0`, `>= 1.0`),
+`max_net_exposure` (float, default `1.0`, `>= 1.0`). Operator-frozen, peer to
+`[fill_model]`/`[cost_model]` (**not** an agent-editable `[output]` key). Intended
+gross/net exposure above either ceiling is non-scoreable via the feasibility verdict
+(`leverage_budget_breach`), never clamped to fit; the default `1.0/1.0` admits an
+unlevered book only, so a strategy that runs gross > 1 requires the operator to raise
+the ceiling.
+
 ### Quick run (`experiment.toml`)
 
 ```
@@ -166,6 +174,7 @@ strategy_path, strategy_id            # top-level
 [params] …
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
+[leverage_budget] max_gross_exposure, max_net_exposure
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
@@ -176,8 +185,9 @@ strategy_path, strategy_id            # top-level
 `foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
 when omitted, foundation subwindow `dsr` values are null with a
 `missing_trial_count` warning.
-The portfolio **leverage budget (gross and net) is operator-frozen**, not an
-agent-editable `[output]` key — there is no `foundation_max_gross_exposure` field.
+The portfolio **leverage budget (gross and net) lives in the operator-frozen
+`[leverage_budget]` section** (above), not an agent-editable `[output]` key — there
+is no `foundation_max_gross_exposure` field.
 Intended exposure beyond the budget is non-scoreable via the feasibility verdict
 (`leverage_budget_breach`), never clamped to fit.
 

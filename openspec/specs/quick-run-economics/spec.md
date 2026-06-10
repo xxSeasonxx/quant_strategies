@@ -6,29 +6,32 @@ programmatic consumers can rank and slice Train runs without scraping artifacts.
 ## Requirements
 ### Requirement: Quick-run per-trade economics are exposed typed and in-process
 
-`run_config` SHALL expose, on its returned `RunResult`, the after-cost per-trade ledger of a
-completed run as a typed, frozen in-process value object. Each per-trade record SHALL carry
-the engine's after-cost economics and the fields needed to slice the sample by time and by
-symbol: `symbol`, `side`, `weight`, `decision_time`, `entry_time`, `exit_time` (tz-aware
-datetimes), `entry_price`, `exit_price`, `exit_reason`, `gross_return`, `funding_return`,
-`cost_return`, `net_return`, and `decision_id`. A consumer MUST be able to obtain the ledger
-from the result object alone, without reading `summary.json` or any other artifact under
+`run_config` SHALL expose, on its returned `RunResult`, the after-cost per-trade
+ledger of a completed run as a typed, frozen in-process value object **derived from
+the single portfolio book walk**. Each record SHALL attribute one completed
+round-trip reconstructed from the netted book and SHALL carry the fields needed to
+slice the sample by time and by symbol: `symbol`, `side`, `weight`,
+`decision_time`, `entry_time`, `exit_time` (tz-aware datetimes), `entry_price`,
+`exit_price`, `exit_reason`, `gross_return`, `funding_return`, `cost_return`,
+`net_return`, and `decision_id`. A consumer MUST be able to obtain the ledger from
+the result object alone, without reading `summary.json` or any other artifact under
 `result_dir`.
 
-The exposed `net_return` SHALL be the same after-cost value the engine computes for the trade
-(`gross_return + funding_return - cost_return`), so the typed ledger is the same sample that
-feeds the summary scalars and the on-disk `economic_metrics`.
+The exposed `net_return` SHALL be the book walk's realized after-cost attribution
+for that round-trip (`gross_return + funding_return - cost_return`), computed on the
+netted single account so that the ledger and the NAV path describe one model of
+money rather than two.
 
 #### Scenario: Per-trade ledger available without artifacts
 - **WHEN** a quick run completes its engine evaluation
-- **THEN** `RunResult` carries a typed economics object whose per-trade ledger has one record per completed trade
+- **THEN** `RunResult` carries a typed economics object whose per-trade ledger has one record per completed book round-trip
 - **AND** each record exposes `symbol`, `side`, `weight`, tz-aware `decision_time`/`entry_time`/`exit_time`, `entry_price`/`exit_price`, `exit_reason`, and `gross_return`/`funding_return`/`cost_return`/`net_return`
 - **AND** the consumer obtains the ledger without reading any file under `result_dir`
 
-#### Scenario: Ledger record count matches the engine trade count
-- **WHEN** a quick run completes with N engine trades
+#### Scenario: Ledger round-trips match the netted book
+- **WHEN** a quick run completes with N completed round-trips on the netted book
 - **THEN** the in-process per-trade ledger contains exactly N records
-- **AND** their order matches the engine's trade order
+- **AND** their attributions reconcile with the NAV path's realized PnL
 
 ### Requirement: Quick-run summary economics scalars and slices are reachable from the result
 
@@ -64,30 +67,6 @@ write per-trade diagnostics to disk.
 #### Scenario: Economics do not depend on artifact writes
 - **WHEN** the economics object is read from a completed `RunResult`
 - **THEN** its contents are derived from the in-memory engine result, not from any file under `result_dir`
-
-### Requirement: The Train path stays trade-unit and dependency-light
-
-This capability SHALL preserve the existing trade-level quick-run economics
-contract: `RunEconomics` exposes only the trade-level (point-to-point,
-per-trade) economics the engine computes. A separate diagnostic portfolio
-foundation MAY expose portfolio-path-derived foundation metrics for Train
-scoring, but it MUST remain outside `RunEconomics`. The quick-run code path
-MUST NOT introduce a runtime dependency on `vectorbtpro`, `pandas`, `numpy`, or
-`quant_strategies.evaluation`.
-
-#### Scenario: Trade economics remain trade-unit
-- **WHEN** the quick-run economics object is read
-- **THEN** it exposes per-trade records and undeflated summary scalars/slices only
-- **AND** it exposes no per-period return series, no portfolio NAV path, and no PSR/DSR/PBO field
-
-#### Scenario: Portfolio foundation is separate from trade economics
-- **WHEN** a completed quick run exposes diagnostic portfolio foundation metrics
-- **THEN** those metrics are available from a separate `RunResult` field
-- **AND** `RunResult.economics` remains the engine trade-ledger object
-
-#### Scenario: Quick-run path imports no heavyweight backend dependency
-- **WHEN** the quick-run path (`runner`, `engine`, `core`) is imported and exercised
-- **THEN** it does not import `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`
 
 ### Requirement: The economics accessor is additive and non-breaking
 
@@ -389,3 +368,27 @@ ran.
 #### Scenario: Programmatic result carries micro evidence
 - **WHEN** a programmatic caller receives a `RunResult` from a micro quick run
 - **THEN** the result carries micro causality evidence without requiring artifact scraping
+
+### Requirement: The per-trade ledger is a derived attribution view on the dependency-light path
+
+The per-trade ledger SHALL be derived from the single causal portfolio book walk,
+not computed as an independent scored quantity. It SHALL remain first-class for
+alpha attribution and information-coefficient analysis, and SHALL expose no
+independent scored "trade-unit" return. The portfolio NAV book SHALL be the
+authoritative scored object. The quick-run code path MUST NOT introduce a runtime
+dependency on `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`.
+
+#### Scenario: Ledger is derived from the one book
+- **WHEN** a completed quick run exposes the per-trade ledger
+- **THEN** its records are attributions of the same book walk that produced the NAV path
+- **AND** there is no separate per-trade summation that can disagree with the NAV path
+
+#### Scenario: NAV is the scored unit, ledger is attribution
+- **WHEN** Train scoring reads a completed quick run
+- **THEN** the scored statistics come from the foundation NAV path
+- **AND** the per-trade ledger is available for attribution but is not an independent scored number
+
+#### Scenario: Quick-run path imports no heavyweight backend dependency
+- **WHEN** the quick-run path (`runner`, `engine`, `core`) is imported and exercised
+- **THEN** it does not import `vectorbtpro`, `pandas`, `numpy`, or `quant_strategies.evaluation`
+
