@@ -118,7 +118,6 @@ class RunOutcome:
     completed: bool = False
     failure_stage: str | None = None
     assessment_status: str = "runner_failed"
-    promotion_eligible: bool = False
     # "validated" / "unvalidated_passthrough" on a completed run; "unknown" on a
     # run that failed before the param contract was conclusively determined.
     param_contract: str = "unknown"
@@ -325,7 +324,6 @@ def run_config(
             completed=True,
             failure_stage=None,
             assessment_status=assessment_status,
-            promotion_eligible=False,
             param_contract=execution.param_contract,
         ),
         evidence=_run_evidence(config, evidence_quality),
@@ -1149,7 +1147,6 @@ def _failure_result(
             completed=False,
             failure_stage=stage,
             assessment_status="runner_failed",
-            promotion_eligible=False,
         ),
         evidence=_run_evidence(config, quality),
     )

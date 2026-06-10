@@ -24,7 +24,6 @@ class ValidationPolicyDecision(BaseModel):
     reasons: tuple[str, ...] = ()
     advisory_decision: ValidationDecision | None = None
     evidence_class: str = "validation_advisory"
-    promotion_eligible: bool = False
     paper_trade_eligible: bool = False
     live_eligible: bool = False
     requires_manual_approval: bool = True
@@ -48,7 +47,6 @@ class ValidationPolicyDecision(BaseModel):
             object.__setattr__(self, "advisory_decision", self.decision)
         semantics = validation_evidence_semantics()
         object.__setattr__(self, "evidence_class", str(semantics["evidence_class"]))
-        object.__setattr__(self, "promotion_eligible", bool(semantics["promotion_eligible"]))
         object.__setattr__(self, "paper_trade_eligible", bool(semantics["paper_trade_eligible"]))
         object.__setattr__(self, "live_eligible", bool(semantics["live_eligible"]))
         object.__setattr__(

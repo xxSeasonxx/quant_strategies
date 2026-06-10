@@ -31,7 +31,6 @@ def test_policy_declares_mechanical_thresholds_gates_in_order():
 def assert_advisory_only(decision: ValidationPolicyDecision) -> None:
     assert decision.evidence_class == "validation_advisory"
     assert decision.advisory_decision == decision.decision
-    assert decision.promotion_eligible is False
     assert decision.paper_trade_eligible is False
     assert decision.live_eligible is False
     assert decision.requires_manual_approval is True
@@ -78,19 +77,21 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
     }
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
-    assert net_return["base"] == "engine linear signed trade-activity sum, funding-inclusive"
+    assert net_return["base"] == (
+        "netted single-account portfolio book round-trip realized PnL, funding-inclusive"
+    )
     assert net_return["backend"] == "engine"
     assert net_return["tolerance"] is None
-    assert "not a NAV path" in net_return["asymmetry"]
+    assert "single model of money" in net_return["asymmetry"]
     trade_count = payload["trade_count"]
     assert trade_count["unit"] == "count"
     assert trade_count["tolerance"] == 0.0
     gross_return = payload["gross_return"]
     assert gross_return["unit"] == "decimal_fraction"
-    assert "agreement oracle cross-checks" in gross_return["comparability"]
+    assert "the gated net_return" in gross_return["comparability"]
     funding_return = payload["funding_return"]
     assert funding_return["unit"] == "decimal_fraction"
-    assert "included in net_return" in funding_return["base"]
+    assert "held net position" in funding_return["base"]
     cost_return = payload["cost_return"]
     assert cost_return["unit"] == "decimal_fraction"
 

@@ -95,7 +95,6 @@ def runner_evidence_semantics(data_kind: str) -> dict[str, object]:
         "return_model": "portfolio_book_nav_path",
         "funding_model": funding_model_for_data_kind(data_kind),
         "metric_semantics": trade_result_metric_semantics(data_kind),
-        "promotion_eligible": False,
         "paper_trade_eligible": False,
         "live_eligible": False,
         "requires_manual_approval": True,
@@ -105,7 +104,6 @@ def runner_evidence_semantics(data_kind: str) -> dict[str, object]:
 def validation_evidence_semantics() -> dict[str, object]:
     return {
         "evidence_class": "validation_advisory",
-        "promotion_eligible": False,
         "paper_trade_eligible": False,
         "live_eligible": False,
         "requires_manual_approval": True,

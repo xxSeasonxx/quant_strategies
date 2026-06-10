@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from enum import Enum
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -22,14 +21,6 @@ def _timezone_aware(value: datetime, field_name: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError(f"{field_name} must be timezone-aware")
     return value
-
-
-class Side(str, Enum):
-    LONG = "long"
-    SHORT = "short"
-
-
-ExitReason = Literal["stop_loss", "take_profit", "trailing_stop", "max_hold"]
 
 
 class Bar(EngineModel):
@@ -91,64 +82,3 @@ class EvaluationRequest(EngineModel):
     fill_model: FillModel = Field(default_factory=FillModel)
     cost_model: CostModel = Field(default_factory=CostModel)
     _indexed_bars: Any = PrivateAttr(default=None)
-
-
-class Trade(EngineModel):
-    decision_id: str | None = None
-    symbol: str
-    side: Side
-    decision_time: datetime
-    entry_time: datetime
-    exit_time: datetime
-    entry_price: float
-    exit_price: float
-    exit_reason: ExitReason
-    weight: float
-    gross_return: float
-    funding_return: float = 0.0
-    cost_return: float
-    net_return: float
-    decision_metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class TradeResult(EngineModel):
-    sum_signed_trade_activity_gross: float
-    sum_signed_trade_activity_funding: float = 0.0
-    sum_signed_trade_activity_cost: float
-    sum_signed_trade_activity_net: float
-
-
-class ScreeningResult(EngineModel):
-    mode: Literal["screen"] = "screen"
-    strategy_id: str
-    trade_count: int
-    trade_result: TradeResult
-    trades: tuple[Trade, ...]
-
-
-class GatingConfig(EngineModel):
-    min_trades: int = Field(default=1, ge=1)
-    require_positive_net: bool = True
-    require_positive_gross: bool = True
-
-
-class GateResult(EngineModel):
-    name: str
-    passed: bool
-    detail: str
-
-
-class GatingReport(EngineModel):
-    mode: Literal["gate"] = "gate"
-    strategy_id: str
-    passed: bool
-    gates: tuple[GateResult, ...]
-    screening_result: ScreeningResult | None = None
-
-
-class EvidencePacket(EngineModel):
-    schema_version: Literal["quant_strategies.engine.evidence/v4"] = EVIDENCE_SCHEMA_VERSION
-    mode: Literal["screen", "gate"]
-    strategy_id: str
-    screening_result: ScreeningResult | None = None
-    validation_report: GatingReport | None = None

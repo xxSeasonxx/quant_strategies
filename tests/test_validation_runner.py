@@ -263,7 +263,6 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
     assert decision_payload["decision"] == "mechanical_caution"
     assert decision_payload["evidence_class"] == "validation_advisory"
     assert decision_payload["advisory_decision"] == "mechanical_caution"
-    assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True
@@ -806,7 +805,6 @@ split_ids = ["validation_2026_h1", "validation_2026_h2"]
     decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
     assert decision_payload["decision"] == "mechanical_caution"
     assert decision_payload["advisory_decision"] == "mechanical_caution"
-    assert decision_payload["promotion_eligible"] is False
     assert decision_payload["paper_trade_eligible"] is False
     assert decision_payload["live_eligible"] is False
     assert decision_payload["requires_manual_approval"] is True

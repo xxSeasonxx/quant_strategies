@@ -18,9 +18,8 @@ from quant_strategies.causality import (
     FocusedCausalityResult,
     LookaheadCheckResult,
 )
-from quant_strategies.core import engine_runner
 from quant_strategies.core.data_loader import LoadedData
-from quant_strategies.core.errors import DataLoadError, EvaluationRunError, RunnerError
+from quant_strategies.core.errors import DataLoadError, RunnerError
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.runner import (
     RunEconomics,
@@ -51,7 +50,6 @@ SUMMARY_KEYS = {
     "return_model",
     "funding_model",
     "metric_semantics",
-    "promotion_eligible",
     "paper_trade_eligible",
     "live_eligible",
     "requires_manual_approval",
@@ -304,7 +302,6 @@ def assert_assessment(
     *,
     assessment_status: str,
     run_completed: bool | None = None,
-    promotion_eligible: bool = False,
     artifact_profile: str = "full",
     failure_stage: str | None = None,
 ) -> None:
@@ -313,7 +310,6 @@ def assert_assessment(
     assert result.outcome.completed is expected_run_completed
     assert result.outcome.failure_stage == failure_stage
     assert result.outcome.assessment_status == assessment_status
-    assert result.outcome.promotion_eligible is promotion_eligible
     assert result.evidence.replayable_from_artifacts is expected_replayable
     assert result.evidence.data_availability_status == summary["data_availability_status"]
     assert result.evidence.availability_coverage == summary["availability_coverage"]
@@ -335,7 +331,6 @@ def assert_assessment(
     assert summary["return_model"] == "portfolio_book_nav_path"
     assert summary["funding_model"] == "none"
     assert_trade_result_metric_semantics(summary)
-    assert summary["promotion_eligible"] is promotion_eligible
     assert summary["paper_trade_eligible"] is False
     assert summary["live_eligible"] is False
     assert summary["requires_manual_approval"] is True
@@ -393,16 +388,6 @@ def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, obj
         "sum_net_return",
     }
     return metrics
-
-
-def assert_no_mode_fields(value: object) -> None:
-    if isinstance(value, dict):
-        assert "mode" not in value
-        for item in value.values():
-            assert_no_mode_fields(item)
-    elif isinstance(value, list):
-        for item in value:
-            assert_no_mode_fields(item)
 
 
 def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
@@ -549,10 +534,14 @@ def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
         artifact_profile="diagnostic",
         causality_check="emitted",
     )
+    # Monotonic-up closes so the (lookahead-shaped) strategy emits a standing target at
+    # rows[1] that is held across enough at-risk bars to be feasible on the spine.
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 99.0, research_fields=True)),
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(100.0, 101.0, 102.0, 103.0, 104.0, research_fields=True)
+        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -607,7 +596,7 @@ def test_run_config_off_policy_marks_replay_unverified_but_keeps_other_gates(
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -628,7 +617,6 @@ def test_run_config_off_policy_marks_replay_unverified_but_keeps_other_gates(
         "causality_replay_skipped",
         "runner_causality_not_verified",
     ]
-    assert summary["promotion_eligible"] is False
     assert summary["paper_trade_eligible"] is False
     assert summary["live_eligible"] is False
     assert data_manifest["causality_check"] == "off"
@@ -957,10 +945,10 @@ def test_run_config_focused_policy_failure_rejects_before_engine_scoring(
 
     monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
     monkeypatch.setattr(
-        engine_runner,
-        "build_request",
+        runner_module,
+        "build_portfolio_foundation",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("focused failure should stop before engine scoring")
+            AssertionError("focused failure should stop before the book is scored")
         ),
     )
 
@@ -1007,10 +995,10 @@ def test_run_config_focused_policy_timeout_rejects_before_engine_scoring(
 
     monkeypatch.setattr(runner_module, "check_focused_causality", fake_check_focused_causality)
     monkeypatch.setattr(
-        engine_runner,
-        "build_request",
+        runner_module,
+        "build_portfolio_foundation",
         lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("focused timeout should stop before engine scoring")
+            AssertionError("focused timeout should stop before the book is scored")
         ),
     )
 
@@ -1404,79 +1392,92 @@ def test_run_config_strategy_and_replay_do_not_see_execution_buffer_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # The strategy sees only the decision window (4 bars); the execution buffer (6 bars)
+    # extends the book walk. A standing target entered at the window's first bar accrues
+    # enough at-risk return bars within the window to be feasible. The strategy must
+    # never observe a buffer row (01-05 onward).
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    if any(row['timestamp'].isoformat().startswith('2024-01-03') for row in rows):\n"
+        "    if any(row['timestamp'].isoformat().startswith('2024-01-05') for row in rows):\n"
         "        raise RuntimeError('strategy saw execution buffer row')\n"
         "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
-        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
-        "        decision_time=rows[-1]['timestamp'],\n"
-        "        as_of_time=rows[-1]['timestamp'],\n"
+        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol']),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
         "        target=1.0,\n"
-        "        metadata={'strategy_row_count': len(rows)},\n"
         "    )]\n"
     )
     config_path = write_config(
         tmp_path,
-        end="2024-01-02",
-        data_extra='load_end = "2024-01-04"\n',
+        end="2024-01-04",
+        data_extra='load_end = "2024-01-06"\n',
         artifact_profile="full",
         causality_check="emitted",
     )
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.outcome.completed is True
     assert result.economics is not None
-    assert result.economics.trade_count == 1
-    decision_record = json.loads(
-        (result.result_dir / "decision_records.jsonl").read_text().splitlines()[0]
-    )
-    assert decision_record["metadata"]["strategy_row_count"] == 2
+    # The strategy never raised (it saw no 01-05 buffer row); it observed only the 4
+    # decision-window rows, while the execution buffer carried all 6.
     strategy_rows = (result.result_dir / "strategy_input_rows.jsonl").read_text().splitlines()
-    assert len(strategy_rows) == 2
+    assert len(strategy_rows) == 4
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert data_manifest["rows"]["total"] == 2
-    assert data_manifest["execution_rows"]["total"] == 4
+    assert data_manifest["rows"]["total"] == 4
+    assert data_manifest["execution_rows"]["total"] == 6
 
 
 def test_run_config_execution_buffer_fills_late_decision_exit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # A late close decision at the decision window's last bar (01-04) has its exit fill
+    # land in the execution buffer (01-05); the book completes the round trip from the
+    # buffer rows the strategy never saw.
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
         "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
-        "    return [TargetDecision(\n"
-        "        strategy_id='demo',\n"
-        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=rows[-1]['symbol']),\n"
-        "        decision_time=rows[-1]['timestamp'],\n"
-        "        as_of_time=rows[-1]['timestamp'],\n"
-        "        target=1.0,\n"
-        "    )]\n"
+        "    instrument = InstrumentRef(kind='equity_or_etf', symbol=rows[0]['symbol'])\n"
+        "    return [\n"
+        "        TargetDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=instrument,\n"
+        "            decision_time=rows[0]['timestamp'],\n"
+        "            as_of_time=rows[0]['timestamp'],\n"
+        "            target=1.0,\n"
+        "        ),\n"
+        "        TargetDecision(\n"
+        "            strategy_id='demo',\n"
+        "            instrument=instrument,\n"
+        "            decision_time=rows[-1]['timestamp'],\n"
+        "            as_of_time=rows[-1]['timestamp'],\n"
+        "            target=0.0,\n"
+        "        ),\n"
+        "    ]\n"
     )
     config_path = write_config(
         tmp_path,
-        end="2024-01-02",
-        data_extra='load_end = "2024-01-04"\n',
+        end="2024-01-04",
+        data_extra='load_end = "2024-01-06"\n',
         artifact_profile="diagnostic",
-        causality_check="emitted",
+        causality_check="off",
     )
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -1484,10 +1485,11 @@ def test_run_config_execution_buffer_fills_late_decision_exit(
     assert result.outcome.completed is True
     assert result.economics is not None
     assert result.economics.trade_count == 1
-    assert result.economics.trades[0].decision_time.isoformat().startswith("2024-01-02")
+    assert result.economics.trades[0].decision_time.isoformat().startswith("2024-01-01")
+    assert result.economics.trades[0].exit_reason == "signal"
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
-    assert data_manifest["rows"]["total"] == 2
-    assert data_manifest["execution_rows"]["total"] == 4
+    assert data_manifest["rows"]["total"] == 4
+    assert data_manifest["execution_rows"]["total"] == 6
 
 
 def test_run_config_fails_when_buffer_has_no_decision_window_rows(
@@ -1570,26 +1572,27 @@ def test_run_config_engine_artifacts_use_only_decision_window_decisions(
     )
     config_path = write_config(
         tmp_path,
-        end="2024-01-02",
-        data_extra='load_end = "2024-01-04"\n',
+        end="2024-01-04",
+        data_extra='load_end = "2024-01-06"\n',
         artifact_profile="full",
         causality_check="off",
     )
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0, 106.0)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.outcome.completed is True
     decision_records = (result.result_dir / "decision_records.jsonl").read_text().splitlines()
-    request = json.loads((result.result_dir / "engine_request.json").read_text())
     summary = read_summary(result.result_dir)
-    assert len(decision_records) == 2
-    assert len(request["spec"]["decisions"]) == 2
-    assert summary["generated_decision_count"] == 2
+    # Only the 4 decision-window decisions are recorded; the execution buffer's rows
+    # produce no extra decisions, and the retired engine_request.json is not written.
+    assert len(decision_records) == 4
+    assert "engine_request.json" not in {p.name for p in result.result_dir.iterdir()}
+    assert summary["generated_decision_count"] == 4
     assert summary["excluded_decision_count"] == 0
 
 
@@ -1713,13 +1716,12 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
     assert_assessment(
         result, summary, assessment_status="quick_check_passed", artifact_profile="summary"
     )
-    assert summary["engine"]["passed"] is True
+    assert summary["engine"]["feasible"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
-    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
+    assert summary["engine"]["nav_attribution"]["sum_gross_return"] is not None
+    assert summary["engine"]["nav_attribution"]["sum_funding_return"] == 0.0
+    assert summary["engine"]["nav_attribution"]["sum_cost_return"] > 0
+    assert summary["engine"]["nav_attribution"]["sum_net_return"] is not None
     metrics = assert_summary_economic_metrics(summary)
     assert metrics["trade_count"] == summary["engine"]["trade_count"]
     assert metrics["hit_rate"] is not None
@@ -1731,13 +1733,14 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in profile
     assert profile["rows"]["row_count"] == 6
     assert profile["rows"]["sample_count"] == 5
-    assert profile["decisions"]["count"] == 1
+    # write_strategy emits an entry target and a paired target=0 close (two decisions).
+    assert profile["decisions"]["count"] == 2
     assert "signals" not in profile
-    assert profile["engine"]["passed"] is True
+    assert profile["engine"]["feasible"] is True
     assert profile["engine"]["trade_count"] == 1
-    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_gross"] is not None
-    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_cost"] is not None
-    assert profile["engine"]["trade_result"]["sum_signed_trade_activity_net"] is not None
+    assert profile["engine"]["nav_attribution"]["sum_gross_return"] is not None
+    assert profile["engine"]["nav_attribution"]["sum_cost_return"] is not None
+    assert profile["engine"]["nav_attribution"]["sum_net_return"] is not None
     assert "diagnostic_trades" not in profile["engine"]
     assert_trade_result_metric_semantics(profile)
 
@@ -1784,9 +1787,10 @@ def test_run_config_exposes_typed_in_process_economics(
     assert trade.decision_time.tzinfo is not None
     assert trade.entry_time.tzinfo is not None
     assert trade.exit_time.tzinfo is not None
-    assert trade.entry_price == pytest.approx(102.0)
+    assert trade.entry_price == pytest.approx(101.0)
     assert trade.exit_price == pytest.approx(104.0)
-    assert trade.exit_reason == "max_hold"
+    # The paired target=0 decision is a signal-driven close (not a max-hold horizon).
+    assert trade.exit_reason == "signal"
     assert trade.net_return == pytest.approx(
         trade.gross_return + trade.funding_return - trade.cost_return
     )
@@ -1813,7 +1817,7 @@ def test_run_config_economics_summary_matches_summary_json(
     assert result.economics.hit_rate == summary["economic_metrics"]["hit_rate"]
     assert result.economics.by_symbol["SPY"]["count"] == 1
     assert result.economics.by_direction["long"]["count"] == 1
-    assert result.economics.by_exit_reason["max_hold"]["count"] == 1
+    assert result.economics.by_exit_reason["signal"]["count"] == 1
 
 
 def test_run_config_exposes_portfolio_foundation_and_summary_json(
@@ -1842,7 +1846,7 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
     assert result.foundation.summary_payload() == summary["portfolio_foundation"]
     payload = summary["portfolio_foundation"]
     assert payload["evidence_class"] == "quick_run_portfolio_foundation_diagnostic"
-    assert payload["basis"] == "quick_run_lightweight_portfolio_path"
+    assert payload["basis"] == "quick_run_netted_portfolio_book"
     assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
     realistic = payload["scenarios"]["realistic_costs"]
     assert realistic["full_train"]["window_id"] == "full_train"
@@ -1884,10 +1888,13 @@ def test_run_config_pre_engine_failure_leaves_foundation_none(
     assert result.foundation is None
 
 
-def test_run_config_foundation_can_be_disabled(
+def test_run_config_disabled_foundation_is_infeasible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # The portfolio book IS the authoritative scored object on the spine, so disabling
+    # the foundation leaves nothing to score: the run is a fail-closed infeasible
+    # feasibility failure (no economics), not a completed run with foundation=None.
     write_strategy(tmp_path)
     config_path = write_config(
         tmp_path,
@@ -1902,10 +1909,13 @@ def test_run_config_foundation_can_be_disabled(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.outcome.completed is True
-    assert result.economics is not None
+    assert result.succeeded is False
+    assert result.outcome.failure_stage == "feasibility"
     assert result.foundation is None
+    assert result.economics is None
+    assert result.feasibility is not None and result.feasibility.feasible is False
     summary = read_summary(result.result_dir)
+    assert summary["status"] == "failed"
     assert "portfolio_foundation" not in summary
 
 
@@ -2235,7 +2245,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert_assessment(
         result,
         summary,
-        assessment_status="quick_check_failed",
+        assessment_status="quick_check_passed",
         artifact_profile="diagnostic",
     )
     assert "diagnostic_trades" not in summary["engine"]
@@ -2247,7 +2257,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in diagnostics
     assert diagnostics["assessment_status"] == summary["assessment_status"]
     assert diagnostics["trade_count"] == 1
-    assert diagnostics["trade_result"] == summary["engine"]["trade_result"]
+    assert diagnostics["nav_attribution"] == summary["engine"]["nav_attribution"]
     assert result.economics.slices_payload() == diagnostics["economic_slices"]
     assert result.foundation.matrix_payload() == diagnostics["portfolio_foundation"]
     foundation_text = json.dumps(diagnostics["portfolio_foundation"])
@@ -2261,10 +2271,10 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
         assert forbidden not in foundation_text
     slices = diagnostics["economic_slices"]
     assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
-    assert slices["basis"] == "engine_trade_ledger"
+    assert slices["basis"] == "portfolio_book_round_trip_attribution"
     assert slices["by_symbol"]["SPY"]["count"] == 1
     assert slices["by_direction"]["long"]["count"] == 1
-    assert slices["by_exit_reason"]["max_hold"]["count"] == 1
+    assert slices["by_exit_reason"]["signal"]["count"] == 1
     assert set(slices["win_loss_distribution"]) == {
         "largest_win_net",
         "largest_loss_net",
@@ -2273,6 +2283,8 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
         "sum_negative_net",
     }
     assert diagnostics["by_symbol"]["SPY"]["count"] == 1
+    # sample_trades returns up to `cap` trades sorted each way; with a single round trip
+    # that one trade appears in both the winners and losers samples.
     assert len(diagnostics["sample_trades"]["largest_winners"]) == 1
     assert len(diagnostics["sample_trades"]["largest_losers"]) == 1
 
@@ -2292,19 +2304,14 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
 def test_summary_profile_does_not_build_full_evidence_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # The engine evidence packet (evidence.json) was retired with the per-trade scorer;
+    # no artifact profile serializes it. The authoritative book is the scored object.
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
         execution,
         "load_data",
         lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
-    )
-    monkeypatch.setattr(
-        engine_runner,
-        "evidence_json",
-        lambda packet: (_ for _ in ()).throw(
-            AssertionError("summary mode should not serialize evidence")
-        ),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -2333,12 +2340,12 @@ def test_diagnostics_completion_is_not_validation_pass(
     assert summary["quick_checks"] is False
     assert summary["stage"] == "completed"
     assert summary["status"] == "completed"
-    assert summary["engine"]["passed"] is None
+    assert summary["engine"]["feasible"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_funding"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_cost"] == 0.0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
+    assert summary["engine"]["nav_attribution"]["sum_gross_return"] < 0
+    assert summary["engine"]["nav_attribution"]["sum_funding_return"] == 0.0
+    assert summary["engine"]["nav_attribution"]["sum_cost_return"] > 0
+    assert summary["engine"]["nav_attribution"]["sum_net_return"] < 0
     assert_assessment(result, summary, assessment_status="diagnostics_complete")
     notes = (result.result_dir / "notes.md").read_text()
     assert "status: completed" in notes
@@ -2347,10 +2354,13 @@ def test_diagnostics_completion_is_not_validation_pass(
     assert "not validation" in notes
 
 
-def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
+def test_empty_decisions_are_insufficient_sample_infeasible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # A book with no decisions deploys no capital, so it has no at-risk return bars.
+    # Under the fail-closed verdict (design D5 / task 3.2) that is a non-scoreable
+    # insufficient_samples run, not a "complete zero-trade" run.
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
@@ -2363,34 +2373,18 @@ def test_diagnostics_empty_decisions_complete_as_zero_trade_result(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.outcome.completed is True
-    assert result.result_dir is not None
+    assert result.succeeded is False
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.foundation is None
+    assert result.feasibility is not None
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "insufficient_samples"
     summary = read_summary(result.result_dir)
-    assert summary["quick_checks"] is False
-    assert summary["stage"] == "completed"
-    assert summary["status"] == "completed"
-    assert summary["engine"]["passed"] is None
-    assert summary["engine"]["trade_count"] == 0
-    assert summary["engine"]["trade_result"] == {
-        "sum_signed_trade_activity_gross": 0.0,
-        "sum_signed_trade_activity_funding": 0.0,
-        "sum_signed_trade_activity_cost": 0.0,
-        "sum_signed_trade_activity_net": 0.0,
-    }
-    metrics = assert_summary_economic_metrics(summary)
-    assert metrics["trade_count"] == 0
-    assert metrics["hit_rate"] is None
-    assert metrics["average_trade_net"] is None
-    assert metrics["profit_factor"] is None
-    assert_assessment(result, summary, assessment_status="diagnostics_complete")
-    request = json.loads((result.result_dir / "engine_request.json").read_text())
-    evidence = json.loads((result.result_dir / "evidence.json").read_text())
-    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
-    assert evidence["quick_checks"] is False
-    assert_no_mode_fields(evidence)
-    assert request["spec"]["decisions"] == []
-    assert evidence["screening_result"]["trade_count"] == 0
-    assert evidence["screening_result"]["trades"] == []
+    assert summary["status"] == "failed"
+    assert summary["failure_stage"] == "feasibility"
+    assert not (result.result_dir / "engine_request.json").exists()
+    assert not (result.result_dir / "evidence.json").exists()
 
 
 def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
@@ -2419,10 +2413,13 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "    )]\n"
     )
     config_path = write_config(tmp_path, quick_checks=False, artifact_profile="full")
+    # Enter long at the fill bar (idx2=100); a +0.3% move at idx3 stays under the 0.5%
+    # take-profit, and the +0.6% move at idx4 trips it -> two at-risk return bars, one
+    # take_profit round trip (clears the min_return_sample=2 gate).
     monkeypatch.setattr(
         execution,
         "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 102.0, 103.0, 104.0)),
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 100.0, 100.3, 100.6)),
     )
 
     result = run_config(config_path, repo_root=tmp_path)
@@ -2443,9 +2440,11 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
     assert trade.exit_reason == "take_profit"
 
 
-def test_quick_check_failure_keeps_completed_summary(
+def test_losing_but_feasible_run_keeps_completed_summary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # Feasibility is the quick check on the spine: a losing-but-feasible book still
+    # completes and passes (negative return is a feasible NAV path, not a gate failure).
     write_strategy(tmp_path)
     config_path = write_config(tmp_path, quick_checks=True)
     monkeypatch.setattr(
@@ -2462,19 +2461,20 @@ def test_quick_check_failure_keeps_completed_summary(
     assert summary["quick_checks"] is True
     assert summary["stage"] == "completed"
     assert summary["status"] == "completed"
-    assert summary["engine"]["passed"] is False
+    assert summary["engine"]["feasible"] is True
     assert summary["engine"]["trade_count"] == 1
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_gross"] < 0
-    assert summary["engine"]["trade_result"]["sum_signed_trade_activity_net"] < 0
-    assert summary["engine"]["gates"][0]["name"] == "valid_inputs"
-    assert_assessment(result, summary, assessment_status="quick_check_failed")
-    assert "quick_check_result: failed" in (result.result_dir / "notes.md").read_text()
+    assert summary["engine"]["nav_attribution"]["sum_gross_return"] < 0
+    assert summary["engine"]["nav_attribution"]["sum_net_return"] < 0
+    assert_assessment(result, summary, assessment_status="quick_check_passed")
+    assert "quick_check_result: passed" in (result.result_dir / "notes.md").read_text()
 
 
-def test_run_config_treats_empty_decisions_as_zero_trade_result(
+def test_empty_decisions_under_quick_checks_fail_closed_without_retired_artifacts(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # Empty decisions are insufficient_samples infeasible under quick checks too; the
+    # retired engine_request.json / evidence.json artifacts are no longer written.
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text("def generate_decisions(rows, params):\n    return []\n")
@@ -2487,38 +2487,15 @@ def test_run_config_treats_empty_decisions_as_zero_trade_result(
 
     result = run_config(config_path, repo_root=tmp_path)
 
-    assert result.outcome.completed is True
-    assert result.result_dir is not None
+    assert result.succeeded is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.feasibility is not None
+    assert result.feasibility.reason == "insufficient_samples"
     summary = read_summary(result.result_dir)
-    assert summary["quick_checks"] is True
-    assert summary["stage"] == "completed"
-    assert summary["status"] == "completed"
-    assert summary["engine"]["passed"] is False
-    assert summary["engine"]["trade_count"] == 0
-    assert summary["engine"]["trade_result"] == {
-        "sum_signed_trade_activity_gross": 0.0,
-        "sum_signed_trade_activity_funding": 0.0,
-        "sum_signed_trade_activity_cost": 0.0,
-        "sum_signed_trade_activity_net": 0.0,
-    }
-    assert {gate["name"]: gate["passed"] for gate in summary["engine"]["gates"]} == {
-        "valid_inputs": True,
-        "min_trades": False,
-        "positive_gross": False,
-        "positive_net": False,
-    }
-    assert_assessment(result, summary, assessment_status="quick_check_failed")
-
-    assert (result.result_dir / "decision_records.jsonl").read_text() == ""
-    request = json.loads((result.result_dir / "engine_request.json").read_text())
-    evidence = json.loads((result.result_dir / "evidence.json").read_text())
-    assert evidence["schema_version"] == artifacts.RUNNER_EVIDENCE_SCHEMA_VERSION
-    assert evidence["quick_checks"] is True
-    assert_no_mode_fields(evidence)
-    assert request["spec"]["decisions"] == []
-    assert evidence["validation_report"]["screening_result"]["trade_count"] == 0
-    assert evidence["validation_report"]["screening_result"]["trades"] == []
-    assert "quick_check_result: failed" in (result.result_dir / "notes.md").read_text()
+    assert summary["status"] == "failed"
+    assert summary["failure_stage"] == "feasibility"
+    assert not (result.result_dir / "engine_request.json").exists()
+    assert not (result.result_dir / "evidence.json").exists()
 
 
 def test_run_config_writes_data_failure_summary(
@@ -2644,10 +2621,12 @@ def test_strategy_path_directory_failure_writes_summary(tmp_path: Path):
     assert (result.result_dir / "run_manifest.json").exists()
 
 
-def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
+def test_raw_inputs_preserve_quote_and_funding_fields_in_strategy_input_rows(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # The retired engine_request.json is gone; the strategy input rows artifact is the
+    # record that quote and funding fields are preserved into the engine inputs.
     write_strategy(tmp_path, fixed_quote_signal=True)
     config_path = write_config(
         tmp_path,
@@ -2668,11 +2647,11 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
 
     assert result.result_dir is not None
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
+    assert not (result.result_dir / "engine_request.json").exists()
     jsonl_rows = [
         json.loads(line)
         for line in (result.result_dir / "strategy_input_rows.jsonl").read_text().splitlines()
     ]
-    request = json.loads((result.result_dir / "engine_request.json").read_text())
     assert jsonl_rows[0]["timestamp"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["available_at"] == "2024-01-01T00:00:00+00:00"
     assert jsonl_rows[0]["bar_ingested_at"] == "2024-01-01T00:00:00+00:00"
@@ -2681,13 +2660,9 @@ def test_raw_inputs_preserve_quote_and_funding_fields_in_engine_request(
     assert jsonl_rows[0]["bid"] == 1.09
     assert jsonl_rows[0]["ask"] == 1.11
     assert jsonl_rows[0]["funding_timestamp"] == "2024-01-01T00:00:00+00:00"
+    assert jsonl_rows[0]["funding_rate"] == 0.0001
     assert jsonl_rows[0]["has_funding_event"] is True
     assert jsonl_rows[1]["nullable"] is None
-    assert request["bars"][0]["bid"] == 1.09
-    assert request["bars"][0]["ask"] == 1.11
-    assert request["bars"][0]["funding_timestamp"] == "2024-01-01T00:00:00Z"
-    assert request["bars"][0]["funding_rate"] == 0.0001
-    assert request["bars"][0]["has_funding_event"] is True
 
 
 def test_run_config_marks_complete_available_at_coverage(
@@ -3227,11 +3202,10 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in run_manifest
     assert run_manifest["evidence"] == {
         "evidence_class": "quick_run_diagnostic",
-        "strategy_contract": "decision",
-        "return_model": "trade_result.sum_signed_trade_activity_net",
+        "strategy_contract": "target_book",
+        "return_model": "portfolio_book_nav_path",
         "funding_model": "none",
         "metric_semantics": run_manifest["evidence"]["metric_semantics"],
-        "promotion_eligible": False,
         "paper_trade_eligible": False,
         "live_eligible": False,
         "requires_manual_approval": True,
@@ -3241,7 +3215,7 @@ def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pyt
     assert run_manifest["artifacts"]["strategy_snapshot.py"]["sha256"]
     assert run_manifest["artifacts"]["strategy_input_rows.jsonl"]["sha256"]
     assert run_manifest["artifacts"]["decision_records.jsonl"]["sha256"]
-    assert run_manifest["artifacts"]["engine_request.json"]["sha256"]
+    assert "engine_request.json" not in run_manifest["artifacts"]
     assert "environment.json" not in run_manifest["artifacts"]
     assert data_manifest["data"] == {
         "kind": "bars",
@@ -3709,10 +3683,14 @@ def test_invalid_decision_output_fails_before_writing_decision_records(
     )
 
 
-def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts(
+def test_flat_only_target_is_accepted_but_insufficient_sample_infeasible(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
+    # A flat target is a valid contract input (the open-ticket translation layer that
+    # rejected flat targets was removed, task 1.3/7.5). A book that never deploys capital
+    # has no at-risk bars, so it is a fail-closed insufficient_samples verdict -- not a
+    # request_build rejection -- and the loaded-data/decision artifacts are preserved.
     strategy = tmp_path / "strategies" / "demo.py"
     strategy.parent.mkdir(parents=True, exist_ok=True)
     strategy.write_text(
@@ -3740,8 +3718,10 @@ def test_unsupported_quick_run_decision_keeps_loaded_data_and_decision_artifacts
     assert result.outcome.completed is False
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
-    assert summary["stage"] == "request_build"
-    assert "execution kernel cannot represent flat target for SPY" in summary["message"]
+    assert summary["stage"] == "feasibility"
+    assert result.feasibility is not None
+    assert result.feasibility.reason == "insufficient_samples"
+    assert "insufficient_samples" in summary["message"]
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert (result.result_dir / "strategy_input_rows.jsonl").exists()
     assert (result.result_dir / "data_manifest.json").exists()
@@ -3906,21 +3886,22 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
 
     assert result.result_dir is not None
     summary = json.loads((result.result_dir / "summary.json").read_text())
-    assert summary["funding_model"] == "linear_additive_adjustment"
+    assert summary["funding_model"] == "netted_cash_funding_accrual"
     run_manifest = json.loads((result.result_dir / "run_manifest.json").read_text())
-    assert run_manifest["evidence"]["funding_model"] == "linear_additive_adjustment"
-    funding = run_manifest["evidence"]["metric_semantics"][
-        "trade_result.sum_signed_trade_activity_funding"
-    ]
-    assert funding["return_path_model"] == "linear_additive_adjustment"
+    assert run_manifest["evidence"]["funding_model"] == "netted_cash_funding_accrual"
+    funding = run_manifest["evidence"]["metric_semantics"]["nav_attribution.sum_funding_return"]
+    assert funding["return_path_model"] == "netted_cash_funding_accrual"
     notes = (result.result_dir / "notes.md").read_text()
     assert "return_scope: price-and-funding" in notes
     assert "supplied funding events are included" in notes
 
 
-def test_request_build_failure_preserves_prior_stage_artifacts(
+def test_book_build_failure_preserves_prior_stage_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    # A short window whose close decision cannot fill is a structured portfolio_foundation
+    # stage failure; the prior-stage data/decision artifacts are still written and the
+    # retired engine_request.json is not.
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
     monkeypatch.setattr(
@@ -3940,34 +3921,7 @@ def test_request_build_failure_preserves_prior_stage_artifacts(
         assert (result.result_dir / name).exists()
     assert not (result.result_dir / "strategy_input_rows.csv").exists()
     assert not (result.result_dir / "engine_request.json").exists()
-    assert read_summary(result.result_dir)["stage"] == "request_build"
-
-
-def test_engine_failure_preserves_engine_request_and_writes_stage_summary(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
-    monkeypatch.setattr(
-        execution,
-        "load_data",
-        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
-    )
-    monkeypatch.setattr(
-        engine_runner,
-        "evaluate_request",
-        lambda request, *, mode, include_evidence=True, include_diagnostics=False: (
-            _ for _ in ()
-        ).throw(EvaluationRunError("engine unavailable")),
-    )
-
-    result = run_config(config_path, repo_root=tmp_path)
-
-    assert result.outcome.completed is False
-    assert result.result_dir is not None
-    assert (result.result_dir / "engine_request.json").exists()
-    assert read_summary(result.result_dir)["stage"] == "engine_evaluation"
+    assert read_summary(result.result_dir)["stage"] == "portfolio_foundation"
 
 
 def test_run_config_resolves_relative_config_path_against_repo_root_from_other_cwd(
@@ -4024,7 +3978,7 @@ def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: p
         "request_build",
         "data_readiness",
         "observation_audit",
-        "engine_evaluation",
+        "portfolio_foundation",
         "artifact_writes",
     }.issubset(completed_stages)
     completed_events = [event for event in events if event["status"] == "completed"]
@@ -4091,7 +4045,8 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     assert events
     assert all(event["event"] == "runner_stage" for event in events)
     assert any(
-        event["stage"] == "engine_evaluation" and event["status"] == "completed" for event in events
+        event["stage"] == "portfolio_foundation" and event["status"] == "completed"
+        for event in events
     )
 
 

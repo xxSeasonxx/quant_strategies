@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from engine_helpers import decision_for
 from quant_strategies.core.config import CostModelConfig, FillModelConfig
-from quant_strategies.engine import Bar, CostModel, FillModel, Side, StrategySpec, Trade
+from quant_strategies.engine import Bar, CostModel, FillModel, StrategySpec
 
 
 def test_engine_fill_and_cost_models_are_shared_core_contracts():
@@ -59,29 +59,6 @@ def test_costs_must_be_finite():
 
 def test_cost_model_keeps_round_trip_bps_on_shared_contract():
     assert CostModel(fee_bps_per_side=2.0, slippage_bps_per_side=3.0).round_trip_bps == 10.0
-
-
-def test_trade_accepts_decision_metadata():
-    aware_time = datetime(2024, 1, 1, tzinfo=UTC)
-
-    trade = Trade(
-        decision_id="decision-1",
-        symbol="BTC",
-        side=Side.LONG,
-        decision_time=aware_time,
-        entry_time=aware_time,
-        exit_time=aware_time,
-        entry_price=100.0,
-        exit_price=101.0,
-        exit_reason="max_hold",
-        weight=0.5,
-        gross_return=0.005,
-        cost_return=0.0,
-        net_return=0.005,
-        decision_metadata={"funding_pressure_bps": 3.5},
-    )
-
-    assert trade.decision_metadata == {"funding_pressure_bps": 3.5}
 
 
 def test_bar_accepts_valid_optional_quotes():

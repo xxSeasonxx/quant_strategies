@@ -14,56 +14,13 @@ from engine_helpers import decision_for
 from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.core import execution
 from quant_strategies.core.data_loader import LoadedData
-from quant_strategies.decisions import StrategyDecision
-from quant_strategies.engine import Bar, EvaluationRequest, FillModel, Side, StrategySpec, screen
+from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.runner import run_config
-
-
-def large_engine_request(
-    *,
-    symbol_count: int = 80,
-    bars_per_symbol: int = 2_000,
-    decisions_per_symbol: int = 100,
-) -> EvaluationRequest:
-    start = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
-    bars: list[Bar] = []
-    decisions: list[StrategyDecision] = []
-    for symbol_index in range(symbol_count):
-        symbol = f"SYM{symbol_index:03d}"
-        for bar_index in range(bars_per_symbol):
-            timestamp = start + timedelta(minutes=bar_index)
-            close = 100.0 + symbol_index + (bar_index * 0.01)
-            bars.append(
-                Bar(
-                    symbol=symbol,
-                    timestamp=timestamp,
-                    open=close,
-                    high=close,
-                    low=close,
-                    close=close,
-                )
-            )
-        first_decision_bar_index = bars_per_symbol - decisions_per_symbol - 5
-        for decision_index in range(decisions_per_symbol):
-            decision_bar_index = first_decision_bar_index + decision_index
-            decisions.append(
-                decision_for(
-                    symbol=symbol,
-                    decision_time=start + timedelta(minutes=decision_bar_index),
-                    side=Side.LONG if decision_index % 2 == 0 else Side.SHORT,
-                    max_hold_bars=2,
-                )
-            )
-    return EvaluationRequest(
-        spec=StrategySpec(strategy_id="performance_regression", decisions=tuple(decisions)),
-        bars=tuple(bars),
-        fill_model=FillModel(price="close", entry_lag_bars=1),
-    )
 
 
 def strategy_source() -> str:
     return (
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
         "def generate_decisions(rows, params):\n"
         "    decisions = []\n"
         "    symbols = []\n"
@@ -74,13 +31,12 @@ def strategy_source() -> str:
         "    for symbol in symbols[:5]:\n"
         "        symbol_rows = [row for row in rows if row['symbol'] == symbol]\n"
         "        timestamp = symbol_rows[1]['timestamp']\n"
-        "        decisions.append(StrategyDecision(\n"
+        "        decisions.append(TargetDecision(\n"
         "            strategy_id='summary_profile',\n"
         "            instrument=InstrumentRef(kind='equity_or_etf', symbol=symbol),\n"
         "            decision_time=timestamp,\n"
         "            as_of_time=timestamp,\n"
-        "            target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.1),\n"
-        "            exit_policy=ExitPolicy(max_hold_bars=2),\n"
+        "            target=0.1,\n"
         "        ))\n"
         "    return decisions\n"
     )
@@ -111,7 +67,7 @@ entry_lag_bars = 1
 exit_lag_bars = 0
 
 [cost_model]
-fee_bps_per_side = 0.0
+fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
 
 [output]
@@ -280,20 +236,18 @@ def write_evaluation_candidate(tmp_path: Path) -> Path:
     candidate = tmp_path / "candidate"
     candidate.mkdir()
     (candidate / "strategy.py").write_text(
-        "from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, "
-        "PositionTarget, StrategyDecision\n"
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
         "def validate_params(params):\n"
         "    return dict(params)\n"
         "def generate_decisions(rows, params):\n"
         "    if len(rows) < 2:\n"
         "        return []\n"
-        "    return [StrategyDecision(\n"
+        "    return [TargetDecision(\n"
         "        strategy_id='demo',\n"
         "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
         "        decision_time=rows[1]['timestamp'],\n"
         "        as_of_time=rows[1]['timestamp'],\n"
-        "        target=PositionTarget(direction='long', sizing_kind='target_weight', size=0.25),\n"
-        "        exit_policy=ExitPolicy(max_hold_bars=1),\n"
+        "        target=0.25,\n"
         "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[1]['timestamp'], "
         "field='close', source='strategy_input'),),\n"
         "    )]\n"
@@ -402,19 +356,8 @@ def completed_evaluation_metrics() -> dict[str, int | float | str]:
         "return_nonfinite_count": 0,
         "funding_cashflow_total": 0.0,
         "funding_event_count": 0,
-        "funding_model": "none",
+        "funding_model": SHARED_ACCOUNTING_MODEL,
     }
-
-
-def test_large_engine_screen_completes_under_runtime_budget():
-    request = large_engine_request()
-
-    start = time.perf_counter()
-    result = screen(request)
-    elapsed = time.perf_counter() - start
-
-    assert result.trade_count == 8_000
-    assert elapsed < 0.50
 
 
 def test_summary_profile_artifacts_stay_under_byte_budget(
@@ -628,8 +571,6 @@ def test_hidden_lookahead_grouped_replay_completes_under_runtime_budget():
         decision_for(
             symbol=f"SYM{decision_index:04d}",
             decision_time=as_of_time,
-            side=Side.LONG,
-            max_hold_bars=1,
             strategy_id="lookahead_perf",
         )
         for decision_index in range(decision_count)

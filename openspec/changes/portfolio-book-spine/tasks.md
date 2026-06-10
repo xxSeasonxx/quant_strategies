@@ -25,7 +25,7 @@
 - [x] 4.2 Gate `RunResult.succeeded` on the verdict by mapping an infeasible run to a typed `failure_stage` (keeps the `completed and failure_stage is None` formula intact).
 - [x] 4.3 Re-home `runner/economic_metrics.py` so the ledger is built from the book walk's round-trips (attribution); drop the `_trade_field` duck-typing fallback.
 - [x] 4.4 Replace free-form unavailable warnings with the typed verdict reasons; emit gross/net exposure utilization metrics (max/mean, time-integral) on full-train and subwindow records.
-- [ ] 4.5 Remove the dead `promotion_eligible` field across runner, evidence DTOs, and validation; remove the `FoundationSubwindowMetric` alias.
+- [x] 4.5 Remove the dead `promotion_eligible` field across runner, evidence DTOs, and validation; remove the `FoundationSubwindowMetric` alias.
 
 ## 5. Remove the old money-models (no compatibility shim)
 
@@ -49,7 +49,7 @@
 - [x] 7.4 Test at-risk-bar statistics and the min-sample gate (a 99%-flat strategy no longer inflates effective sample size / passes min-evidence).
 - [x] 7.5 Test the feasibility verdict: `leverage_budget_breach`, `zero_cost`, and `unfinanced_leverage` (equity/FX gross>1 non-scoreable; crypto-perp exempt); and that flat/leveraged-intent targets are accepted (no translation-layer rejection).
 - [x] 7.6 Add a reconciliation test: the derived per-trade ledger attributions reconcile with the NAV path's realized PnL.
-- [ ] 7.7 Update/remove engine, decision, foundation, evaluation, and candidate-config tests that encode the old open-ticket / trade-unit / fail-open / perp-ledger-model contract.
+- [x] 7.7 Update/remove engine, decision, foundation, evaluation, and candidate-config tests that encode the old open-ticket / trade-unit / fail-open / perp-ledger-model contract.
 
 ## 8. Docs
 
