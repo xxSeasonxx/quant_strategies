@@ -27,11 +27,20 @@
 >
 > **Remaining work for the next session (from §14):**
 > - 🔴 **Open** — No. 17 (relocate the stale `researched/` artifacts).
-> - ⏳ **Deferred follow-ons** (plug into the spine's market-model interface; several
->   need new `quant_data` fields) — No. 3 capacity/ADV (a `volume` field), No. 6
->   (tighten `off`/`micro` causality → non-scoreable), No. 7 (asset-class
->   financing/borrow/carry — guarded meanwhile by the `unfinanced_leverage` verdict),
->   No. 8 (intrabar OHLC stop fills + fill-price stress).
+> - ✅ **Shipped since (2026-06-10): No. 6 and No. 8.** No. 6 — `causality_check="off"` is
+>   non-scoreable by default (typed `causality` failure); modes that run some replay
+>   (`micro`+) stay scoreable, so the shipped scope gates `off` only and retains `micro` as
+>   the Train mode (S7/S8/O10), narrower than the original "off/micro" wording; the override
+>   is the operator-frozen `[causality_policy] allow_unverified_scoring`. No. 8 — `RiskRule`
+>   barriers trigger on intrabar high/low and fill at the level (gap-worsened to the bar
+>   open), plus a diagnostic `fill_stress` scenario.
+> - ⏳ **Follow-ons** (plug into the spine's market-model interface) — see `TODOS.md`
+>   §2.3/§2.4 for the in-repo vs upstream split. **No. 3** capacity/ADV is now **in-repo**
+>   (`volume` already ships in the loader bar schema; FX volume is tick-count), and the
+>   **dividend** half of **No. 7** is in-repo (`load_dividends` exists). Genuinely upstream
+>   (`quant_data`): equity short-borrow, FX swap points, a margin reference rate, and a
+>   structured survivorship/corporate-action manifest field — until those land, a
+>   non-financed class above net 1.0 stays a fail-closed `unfinanced_leverage` verdict.
 > - ✅ Everything else is **Done** (the §1A root + most P0/P1), now including **No. 11**
 >   (the row contract rejects `available_at < timestamp` as fail-closed look-ahead; the
 >   survivorship/corporate-action certification half is upstream `quant-data` work tracked
@@ -382,9 +391,9 @@ This makes a capped, financed, netted >1-gross book *admissible and honestly sco
 > **RESOLVED by the `portfolio-book-spine` change (2026-06-10).** The §1A root fix shipped as the `portfolio-book-spine` OpenSpec change (branch `portfolio-book-spine`, commits `a53a1ad`…`968300d`; archived) and was validated by three independent reviews (code / quant-math / performance, archived alongside the change) that also caught and fixed one validation-gate blocker (the gate used a realized-only trade sum that diverged from the NAV on non-flat folds → a real open-at-boundary winner was rejected; now gates on the marked NAV fold return). The per-row `Status` column below reflects the **original** assessment; **current status:**
 >
 > - **✅ Done** — 0a, 0b, 0c, 1, 2, 4, 5, 9, 10, 12, 13, 14, 15, 16: one causal single-account netted **NAV book** is the single scored object; idempotent **target-book** contract (stacking inexpressible); typed **fail-closed** `FeasibilityVerdict` (`succeeded` gated on it); **at-risk-bar** statistics + min-sample gate (the F2 fix); operator-frozen **`[leverage_budget]`** (gross+net); one **funding** home; per-trade ledger is a **derived attribution** view (NAV↔ledger reconciled); dead code removed; gross/net **utilization** emitted; docs/ADRs shipped.
-> - **🟡 Partial** — No. 3: zero-cost is now a fail-closed verdict ✅; **capacity/ADV** modeling deferred (needs a `quant_data` volume field).
-> - **⏳ Deferred follow-ons** (plug into the spine's market-model interface; several need upstream data): No. 6 (tighten `off`/`micro` causality → non-scoreable), No. 7 (F4 asset-class financing/borrow/carry — guarded meanwhile by the required `unfinanced_leverage` verdict), No. 8 (F5 intrabar OHLC stop fills + fill-price stress).
-> - **🔴 Open** — No. 17 (stale `researched/` artifacts). **No. 11, No. 18, No. 19, No. 20 now ✅ Done** (PIT guard; knob removed; VBT purged; candidates rebuilt on the target-book contract and rerun feasibly).
+> - **🟡 Partial** — No. 3: zero-cost is now a fail-closed verdict ✅; **capacity/ADV** modeling is **in-repo** (`volume` already ships in the loader bar schema — not upstream-blocked; FX volume is tick-count).
+> - **⏳ Follow-ons** (see `TODOS.md` §2.3/§2.4 for the in-repo vs upstream split): No. 3 capacity/ADV and the **dividend** half of No. 7 are **in-repo** (`volume` ships; `load_dividends` exists). Genuinely upstream `quant_data`: equity short-borrow, FX swap points, a margin reference rate, and a structured survivorship/corporate-action field — until those land, a non-financed class above net 1.0 stays a fail-closed `unfinanced_leverage` verdict.
+> - **🔴 Open** — No. 17 (stale `researched/` artifacts). **No. 6, No. 8, No. 11, No. 18, No. 19, No. 20 now ✅ Done** (No. 6 = `off` gated non-scoreable, `micro`+ retained, frozen `[causality_policy]` override; No. 8 = intrabar barrier triggers + gap-aware level fills + `fill_stress` scenario; PIT guard; knob removed; VBT purged; candidates rebuilt on the target-book contract and rerun feasibly).
 
 | No. | Status | Priority | Action class | Finding | Recommendation |
 |---|---|---|---|---|---|
@@ -396,9 +405,9 @@ This makes a capped, financed, netted >1-gross book *admissible and honestly sco
 | 3 | 🟡 Partial | P0 | Add | F1 zero-cost default + no capacity | **Mandatory non-zero cost floor** (per `DataKind`) for any scoreable run; plumb a `volume`/ADV field and emit turnover + notional/ADV diagnostics, **or** contract the absence of capacity modeling explicitly on `RunResult`. |
 | 4 | ✅ Done | P0 | Add | F3 leverage gate off the scored path; `size` unbounded | Run `core/exposure.py` admissibility on the **quick-run** path as a hard gate (or cap `PositionTarget.size`); make gross-budget breach the infeasible verdict from No. 1. |
 | 5 | ✅ Done | P0 | Refactor | §6.2 two PnL paths | Make the **NAV path the single scored unit**; engine ledger becomes attribution; add a reconciliation invariant test (unit weight, non-overlapping, zero funding ⇒ equal within tolerance). Confirm with `quant_autoresearch` which number it climbs. |
-| 6 | ⏳ Deferred | P1 | Add | F6 causality can be off / weak micro | Make `off`/`micro` runs **structurally non-scoreable** (stamp `assessment_status`/`param_contract`); the objective must gate on `evidence.causality`. |
+| 6 | ✅ Done | P1 | Add | F6 causality can be off / weak micro | **Shipped (scope: `off` only).** `causality_check="off"` runs no replay and is non-scoreable by default — a typed `failure_stage="causality"`. Modes that run some replay (`micro`/`emitted`/`focused`/`strict`) stay scoreable, so `micro` is retained as the Train mode (S7/S8/O10) rather than gated as the original wording proposed. Override: operator-frozen `[causality_policy] allow_unverified_scoring` (default `false`), not an agent-editable `[output]` key. |
 | 7 | ⏳ Deferred | P1 | Add | F4 asset-class friction asymmetry | Add financing-on-leverage, equity borrow + dividends, FX rollover — mirror `funding.py`, gated by `DataKind`; or contract coverage per kind on `RunResult` so unfinanced P&L isn't scored net-of-cost. |
-| 8 | ⏳ Deferred | P1 | Refactor | F5 intrabar stop optimism / frictionless exits | Evaluate stop/TP against intrabar low/high and fill at the level (or next-bar open); add a **fill-price stress** scenario (today `cost_stress` only scales bps). |
+| 8 | ✅ Done | P1 | Refactor | F5 intrabar stop optimism / frictionless exits | **Shipped.** `RiskRule` stop/TP/trailing trigger on the bar's intrabar high/low and fill at the barrier level, worsened to the bar open on a gap-through (`take_profit` takes no gap-favorable bonus; adverse barrier wins a same-bar tie). Added a diagnostic **`fill_stress`** scenario (`foundation_fill_stress_fraction`) applying adverse barrier-exit slippage; the climbed `realistic_costs` path is unaffected by the knob. |
 | 9 | ✅ Done | P1 | Add | §9 capital model | Move `foundation_max_gross_exposure` into operator-frozen protocol; allow gross>1 to cap; define gross **and net** budget; net same-symbol before cap/cost (F7). |
 | 10 | ✅ Done | P1 | Add | §7 observability | Add typed `foundation_status`/`foundation_feasibility` to `RunResult`; promote warnings to a closed enum with detail in a separate field; count/warn on dropped malformed rows. Consider the enumerated `score_admissibility` shape from the Codex review (§17): `run_completed / causality_admissible / portfolio_foundation_admissible / cost_stress_admissible / score_allowed`. |
 | 11 | ✅ Done | P1 | Add | F8 PIT | **Done (guard):** the row contract rejects `available_at < timestamp` as a fail-closed `row_available_at_before_timestamp` error (look-ahead availability — information cannot precede its event time). The survivorship/corporate-action certification half is `quant-data`-owned (no field exists to certify today) and is tracked as upstream follow-on `TODOS.md` O17. |

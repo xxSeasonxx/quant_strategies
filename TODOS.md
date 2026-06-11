@@ -36,8 +36,10 @@ Current quick-run state:
 - **S6** Quick-run configs support explicit causality policy:
   `off`, `emitted`, `strict`, `focused`, or `micro`.
 - **S7** Committed candidate quick-run configs declare an explicit causality policy;
-  Train / iteration diagnostics should use `micro` unless a config is intentionally
-  marked `off` for profiling/debugging.
+  Train / iteration diagnostics use `micro`. `causality_check="off"` runs no replay and is
+  **non-scoreable by default** (typed `failure_stage="causality"`, review No. 6); the
+  operator-frozen `[causality_policy] allow_unverified_scoring=true` re-admits `off` for
+  profiling/debugging and is not an agent-editable `[output]` key.
 - **S8** `micro` evidence is a Train/autoresearch replay annotation, not validation,
   evaluation, promotion, paper-trading, or live-trading evidence; focused evidence
   remains an advanced source-oriented quick-run mode.
@@ -123,55 +125,70 @@ into the book's localized market-model step and remain open; several need
 `quant-data` upstream fields:
 
 - **O14** Asset-class financing realism beyond crypto-perp funding: equity
-  short-borrow + dividends, FX rollover/carry, and margin financing on gross > 1
-  (upstream fields: §2.4 U2–U5). Until a class is modeled, a net exposure > 1.0
-  for it is a fail-closed `unfinanced_leverage` verdict (crypto perp is modeled,
-  so it is exempt), so unpriced leverage stays non-scoreable.
-- **O15** Capacity / ADV / market-impact sizing: unmodeled, and no `volume` field
-  exists to size against liquidity (upstream field: §2.4 U1).
-- **O16** Intrabar OHLC stop fills: `RiskRule` thresholds are evaluated on the
-  configured end-of-bar fill-price sample, not as intrabar high/low barrier orders.
+  short-borrow, FX rollover/carry, and margin financing on gross > 1 (upstream
+  fields: §2.4 U1–U3). Dividend accrual on held equity is **in-repo** work, not
+  upstream-blocked — the public `load_dividends` loader already exists upstream
+  (review No. 7). Until a class is modeled, a net exposure > 1.0 for it is a
+  fail-closed `unfinanced_leverage` verdict (crypto perp is modeled, so it is
+  exempt), so unpriced leverage stays non-scoreable.
+- **O15** Capacity / ADV / market-impact sizing: unmodeled here, but **not**
+  upstream-blocked. `volume` already ships in the loader bar schema (`_BAR_SCHEMA`
+  in `quant-data` `contract_loaders.py`, sourced from `equity_1min`/`forex_1min`)
+  and simply isn't consumed in this repo; the size-aware impact term (review No. 3)
+  is in-repo work. FX `volume` is tick count, not notional (consume the upstream
+  structured caveat `forex-volume-is-tick-count`), so FX capacity stays unsupported
+  until calibrated.
+- **O16 (RESOLVED 2026-06-10, review No. 8)** Intrabar OHLC stop fills shipped:
+  `RiskRule` stop/TP/trailing trigger on the bar's intrabar high/low and fill at the
+  barrier level (worsened to the bar open on a gap-through; adverse barrier wins a
+  same-bar tie). A diagnostic `fill_stress` scenario (`foundation_fill_stress_fraction`,
+  default 10 bps) applies extra adverse barrier-exit slippage; the climbed
+  `realistic_costs` path is unaffected by the knob.
 - **O17** Survivorship / corporate-action certification in the data manifest: the
   row contract now rejects look-ahead stamps (`available_at < timestamp`), but
   survivorship and corporate-action (split/dividend/delisting) integrity is
-  `quant-data`-owned and has no field to certify in the manifest today. Adding a
-  certification field is an upstream `quant-data` contract addition; this repo would
-  consume and surface it once it exists. (Closes the upstream half of review No. 11.)
+  `quant-data`-owned and has no machine-readable field to certify in the manifest
+  today (upstream field: §2.4 U4). Adding a certification field is an upstream
+  `quant-data` contract addition; this repo would consume and surface it once it
+  exists. (Closes the upstream half of review No. 11.)
 
 ### 2.4 Upstream `quant-data` Field/Contract Requests
 
-These foundation follow-ons are blocked on data this repo does not own (`L8`):
-each is a field or manifest-contract addition `quant-data` must materialize before
-the corresponding market-model term can be priced or the gate can certify. Each is
-an upstream contract addition that this repo consumes and surfaces once it lands;
-revisit the `L9` version bound when consuming it. Raise each with Season as upstream
-feedback. (Not all foundation gaps are upstream-blocked — review No. 6 causality
-scoreability and No. 8 / `O16` intrabar OHLC stop fills need no new field; build
-those in-repo.)
+These foundation follow-ons are genuinely blocked on data this repo does not own
+(`L8`): each is a field or manifest-contract addition `quant-data` must materialize
+before the corresponding market-model term can be priced or the gate can certify.
+Each is an upstream contract addition that this repo consumes and surfaces once it
+lands; revisit the `L9` version bound when consuming it. Raise each with Season as
+upstream feedback.
 
-- **U1 `volume` (per-bar traded volume).** Non-negative float at the OHLC cadence.
-  Unblocks capacity / ADV / market-impact sizing (`O15`, review No. 3): notional-vs-ADV
-  turnover diagnostics and a size-aware impact term. Until it lands, capacity is
-  unmodeled and quick runs should stamp the absence explicitly rather than imply safety.
-- **U2 Equity short-borrow rate (+ availability).** Per-symbol, point-in-time
+Verified present upstream, reclassified to in-repo (do **not** raise these as
+upstream requests): per-bar `volume` already ships in the loader bar schema
+(`O15`), and dividend events already have a public `load_dividends` loader (`O14`,
+review No. 7) — both gaps are in-repo modeling, not missing data. Other in-repo-only
+gaps: review No. 6 causality scoreability and No. 8 / `O16` intrabar OHLC stop fills
+need no new field.
+
+- **U1 Equity short-borrow rate (+ availability).** Per-symbol, point-in-time
   annualized borrow fee, ideally with a locate/availability flag. Unblocks equity
   short-borrow pricing (`O14`, review No. 7); without it a long/short equity book is
   scored as if shorting is free below net 1.0.
-- **U3 Dividend events.** Per-symbol ex-date + cash amount (subset of the
-  corporate-action feed). Unblocks dividend accrual on held equity positions
-  (`O14`, review No. 7).
-- **U4 FX rollover / swap points.** Per-pair, point-in-time swap points (or the rate
+- **U2 FX rollover / swap points.** Per-pair, point-in-time swap points (or the rate
   differential to derive them). Unblocks overnight FX carry/rollover pricing
   (`O14`, review No. 7); carry can be the entire edge or loss of an FX strategy.
-- **U5 Margin-financing rate.** Point-in-time financing rate (benchmark + spread) to
-  charge financing on book gross > 1 for non-perp classes (`O14`, review No. 7). Until
-  U2–U5 land, a non-financed class above net 1.0 stays a fail-closed
-  `unfinanced_leverage` verdict — the gap is fenced, but those strategies are
-  non-scoreable rather than honestly priced.
-- **U6 Survivorship / corporate-action certification.** A data-manifest field
-  certifying the panel is survivorship-bias-free and corporate-action-adjusted
-  (splits/dividends/delistings). Same item as `O17` (upstream half of review No. 11);
-  the in-repo row contract already rejects `available_at < timestamp` look-ahead.
+- **U3 Margin-financing rate (reference rate only).** Point-in-time benchmark /
+  reference financing rate to charge financing on book gross > 1 for non-perp
+  classes (`O14`, review No. 7). Ownership splits: upstream provides the PIT
+  reference rate; this repo owns the broker/account spread and margin policy as part
+  of the operator-frozen envelope. Until U1–U3 land, a non-financed class above net
+  1.0 stays a fail-closed `unfinanced_leverage` verdict — the gap is fenced, but
+  those strategies are non-scoreable rather than honestly priced.
+- **U4 Survivorship / corporate-action certification.** Machine-readable manifest
+  enums — `adjustment_status` (corporate-action-adjusted: splits / dividends /
+  delistings) and `survivorship_status` (survivorship-bias-free) — not a vague
+  boolean `certified`, so the gate can fail-close on them. Upstream already ships
+  prose/catalog caveats and a sparse universe stub; the ask is to promote those to a
+  structured contract field. Same item as `O17` (upstream half of review No. 11); the
+  in-repo row contract already rejects `available_at < timestamp` look-ahead.
 
 ## 3. Locked Direction
 
@@ -200,6 +217,13 @@ Preserve these contained residuals unless they become active work:
 - **R1** `_is_true_flag` coercion
 - **R2** `not_evaluated` soft-stop
 - **R3** causality's missing-`available_at` fallback
+- **R4** Barrier-exit slippage on the climbed path is the uniform `slippage_bps_per_side`;
+  the `zero_cost` floor guarantees only `fee+slippage > 0`, not `slippage > 0`, so a
+  `fee>0, slippage=0` config is scoreable with stops filling at the level/gap-open and no
+  slippage. Stop-specific extra slippage is modeled only in the `fill_stress` diagnostic,
+  not the scored number (standard bar-granularity limit; the post-trigger intrabar path is
+  unobservable). Optional action-3 tightening: require `slippage_bps > 0` in the cost
+  floor (uniform, affects all fills) — Season-owned, not part of the No. 8 contract.
 
 ## 5. Deferred Residuals
 
