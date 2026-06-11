@@ -181,10 +181,8 @@ Validation configs require unique window IDs and explicit `[readiness]`
 observation coverage. For `crypto_perp_funding`, readiness also requires
 decision observations for `close`, `funding_timestamp`, `funding_rate`, and
 `has_funding_event`. The verdict backend is the netted-book spine
-(`verdict_source = "engine"` only); the `[agreement_oracle]` config section is
-removed and a config that still sets it is rejected. An intended-gross or
-unfinanced-leverage breach is the fail-closed feasibility verdict, not a
-translation-layer rejection of flat/leveraged targets. Validation causality
+(`verdict_source = "engine"` only). An intended-gross or unfinanced-leverage
+breach is the fail-closed feasibility verdict. Validation causality
 replay defaults to complete replay and can be explicitly configured as bounded
 for large-panel research runs.
 
@@ -194,8 +192,7 @@ Runs a frozen candidate through the research evaluation surface and writes
 portfolio, economic, and path evidence from the **same single causal netted
 portfolio book** as quick run and validation; evaluation adds only Parquet trace
 serialization through `pyarrow` around that pure book, with no JSONL fallback.
-The legacy alternate evaluation backends are retired — the single book is the only
-money model. Evaluation
+The single book is the only money model. Evaluation
 also writes normalized input row snapshots as Parquet and decision records as
 JSONL so completed evaluation metrics can be traced through the artifact package.
 Annualized evaluation metrics are computed over **at-risk bars** — the
@@ -245,11 +242,9 @@ configured as bounded; result provenance records the replay scope.
   non-scoreable; crypto-perp funding is modeled, so a perp book is not flagged by
   that verdict.
 - **One funding model on every surface.** Funding is computed once, in the single
-  shared netted book, as a NAV cashflow on the net held position — there is no
-  separate engine-vs-evaluation funding basis and no `project_perp_ledger`
-  money-model. Fillable crypto perp windows with no funding events in the open
-  interval accrue zero funding; flagged funding rows still fail when malformed,
-  conflicting, or mark-misaligned.
+  shared netted book, as a NAV cashflow on the net held position. Fillable crypto
+  perp windows with no funding events in the open interval accrue zero funding;
+  flagged funding rows still fail when malformed, conflicting, or mark-misaligned.
 - **The engine package is internal.** Do not build user workflows on
   `quant_strategies.engine`; call quick run, validation run, or evaluation run.
 - **Research evaluation is separate from validation.** Historical portfolio,

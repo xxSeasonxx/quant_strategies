@@ -18,15 +18,13 @@ S2 mechanical evidence validation -> audit retained-candidate evidence integrity
 S3 research evaluation            -> stateless frozen-candidate portfolio/economic/path evidence
 ```
 
-Foundation contract (portfolio-book-spine, 2026-06-10): the strategy declares a
-**target book** (`generate_decisions -> Sequence[TargetDecision]`: standing, signed
-weight-of-NAV targets, idempotent, optional declared `RiskRule`). The engine folds
-it into **one causal single-account netted portfolio book** on every surface
+Foundation contract: the strategy declares a **target book**
+(`generate_decisions -> Sequence[TargetDecision]`: standing, signed weight-of-NAV
+targets, idempotent, optional declared `RiskRule`). The engine folds it into **one
+causal single-account netted portfolio book** on every surface
 (`netted_portfolio_book_v1`); the **NAV path is the single scored object**; an
 envelope breach is a typed **fail-closed** `FeasibilityVerdict` (`succeeded` = feasible
-and completed). The per-trade ledger is a derived attribution view. The legacy
-alternate backend, `project_perp_ledger`, and the single-trade agreement oracle are
-retired.
+and completed). The per-trade ledger is a derived attribution view.
 
 Current quick-run state:
 
@@ -118,41 +116,21 @@ Keep these facts current:
 - **O13** Evaluation evidence does not authorize promotion, paper trading, or live
   trading.
 
-### 2.3 Live Portfolio Feasibility Issues — RESOLVED by portfolio-book-spine
+### 2.3 Market-Model Follow-Ons
 
-These issues recorded the gap between trade-ticket Train diagnostics and
-live-shaped portfolio evidence. The **portfolio-book-spine** change (2026-06-10)
-resolves the cluster at the root — the atomic unit is now one causal netted
-portfolio book, not an isolated trade:
+The netted book prices crypto-perp funding today. These asset-class frictions plug
+into the book's localized market-model step and remain open; several need
+`quant-data` upstream fields:
 
-- **Signal-stacking / implicit leverage (O14, O17, O20, O22)** — RESOLVED. Targets
-  are idempotent signed weights of NAV; re-emitting the current target trades
-  nothing and same-symbol targets net to the latest value, so additive stacking is
-  **structurally inexpressible**. Returns can no longer come from stacked gross.
-- **Un-netted / per-ticket exposure (O18)** — RESOLVED. The book keys a running
-  signed quantity per symbol on one account; gross/net are measured on the netted,
-  marked book, so portfolio-level exposure is bounded by construction, not by
-  per-ticket suppression.
-- **Two evidence classes / missing portfolio path (O15, O16, O19)** — RESOLVED. The
-  NAV book is the single authoritative scored object; there is no separate
-  trade-ticket evidence class. A breach is a typed fail-closed verdict
-  (`failure_stage="feasibility"`, `succeeded=False`), not a completed run with a
-  silently-missing foundation, so a quick run can no longer be misread as
-  live-shaped when it is not.
-- **Leverage budget fail-open (O15 root) / comparability (O21)** — RESOLVED. The
-  gross+net leverage budget is operator-frozen and **fails closed** with an observed
-  exposure; the book is never clamped, so a levered intent is non-scoreable rather
-  than silently rescaled, and the leverage contract is explicit in the verdict.
-
-Residual (named follow-ons, plug into the spine's market-model interface; tracked
-in the change's Impact §, several need `quant-data` upstream work):
-
-- **O23** Asset-class financing realism beyond crypto-perp funding (equity
-  short-borrow + dividends, FX rollover/carry, margin financing on gross > 1) is
-  still upstream. The spine guards against minting free leverage in the meantime: a
-  net exposure > 1.0 for an asset class **without** modeled financing is a
-  fail-closed `unfinanced_leverage` verdict (crypto-perp funding is modeled, so it
-  is exempt). Capacity/ADV/impact and intrabar OHLC stop fills remain follow-ons.
+- **O14** Asset-class financing realism beyond crypto-perp funding: equity
+  short-borrow + dividends, FX rollover/carry, and margin financing on gross > 1.
+  Until a class is modeled, a net exposure > 1.0 for it is a fail-closed
+  `unfinanced_leverage` verdict (crypto perp is modeled, so it is exempt), so
+  unpriced leverage stays non-scoreable.
+- **O15** Capacity / ADV / market-impact sizing: unmodeled, and no `volume` field
+  exists to size against liquidity.
+- **O16** Intrabar OHLC stop fills: `RiskRule` thresholds are evaluated on the
+  configured end-of-bar fill-price sample, not as intrabar high/low barrier orders.
 
 ## 3. Locked Direction
 
@@ -166,9 +144,8 @@ Current locked direction:
 - **L3** Validation is mechanical evidence validation, advisory, and never promotion
   authority.
 - **L4** Evaluation is stateless frozen-candidate portfolio/economic/path evidence.
-- **L5** *(superseded by portfolio-book-spine, 2026-06-10)* The scored object is the
-  single netted-book **NAV path**, not a linear per-trade sum. The per-trade ledger
-  is a derived attribution view of that one book walk.
+- **L5** The scored object is the single netted-book **NAV path**; the per-trade
+  ledger is a derived attribution view of that one book walk.
 - **L6** Generated artifacts are evidence, not truth.
 - **L7** `quant_autoresearch` owns generation, search memory, variant ranking,
   stopping rules, and iteration decisions.
@@ -179,13 +156,9 @@ Current locked direction:
 
 Preserve these contained residuals unless they become active work:
 
-- **R1** *(resolved by portfolio-book-spine, 2026-06-10)* `net_return` dual semantics
-  — there is now one model of money; the per-trade `net_return` is the book walk's
-  realized after-cost attribution (`gross + funding − cost`) and reconciles with the
-  NAV path. The retired second accounting basis is gone.
-- **R2** `_is_true_flag` coercion
-- **R3** `not_evaluated` soft-stop
-- **R4** causality's missing-`available_at` fallback
+- **R1** `_is_true_flag` coercion
+- **R2** `not_evaluated` soft-stop
+- **R3** causality's missing-`available_at` fallback
 
 ## 5. Deferred Residuals
 
@@ -196,11 +169,10 @@ Preserve these contained residuals unless they become active work:
   trade-ledger JSONL. The CLI backstops escaped filesystem errors as clean exit
   `1`. Result-directory/static artifact creation, final artifact writes, and
   `_failure_result` paths are routed to structured `failure_stage` results.
-- **D2 *(resolved by portfolio-book-spine, 2026-06-10)* agreement-oracle
-  residual:** the single-trade agreement oracle and its cross-check are retired;
-  the netted-book spine is the single accounting model on every surface. An
-  independent cross-check (a second re-implementation that must agree, generalized
-  from single-trade to the netted book) is a named follow-on, not a current surface.
+- **D2 Independent netted-book cross-check:** the spine has no independent
+  accounting cross-check today. A second implementation that must agree with the
+  spine — the bar before any cross-check evidence is treated as verification — is a
+  named follow-on, not a current surface.
 - **D3 Candidate-local output residual (low priority):** validation and evaluation
   configs still anchor `output.results_dir` beside the config so
   candidate-local workspaces keep working. Revisit rejecting outputs under

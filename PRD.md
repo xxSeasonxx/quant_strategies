@@ -156,7 +156,7 @@ Every numeric quantity emitted by the foundation MUST:
 - Derive the **scored statistics from the single portfolio NAV path**, which is the
 one authoritative unit of return. The per-trade ledger is a *derived attribution
 view* of that same book (for alpha / information-coefficient analysis), never an
-independent scored quantity. There are not two models of money.
+independent scored quantity. There is one model of money.
 - Carry a declared **unit** and **base** (e.g., "fraction of entry notional",
 "percentage points of signed per-trade result", "NAV-path total return").
 - Declare whether the reported metric is replayable from artifacts alone. Compact

@@ -44,8 +44,7 @@ generate_decisions(rows, params)        │
   view of that same walk, never an independent scored number — there is one model
   of money, not two.
 - **Evaluation** runs that same pure book and adds only artifact serialization
-  (pandas/pyarrow Parquet traces) around it. The legacy alternate backends are
-  **retired**.
+  (pandas/pyarrow Parquet traces) around it.
 
 You pick the surface by intent. You never wire them together yourself — each reads
 one config and returns one typed result.
@@ -499,8 +498,6 @@ print(result.result_dir)
 `id` + `start`/`end`); `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 `[readiness]` (`min_observations_per_decision`, `required_observation_fields`);
 `[output]`; `[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]`.
-The `[agreement_oracle]` section is **removed** — a config that still sets it is
-rejected.
 
 For `crypto_perp_funding`, `[readiness]` additionally requires `close`,
 `funding_timestamp`, `funding_rate`, and `has_funding_event` observations on every
@@ -510,9 +507,7 @@ sanitization.
 **Reading it:** `result.succeeded` means the run completed with no failure stage.
 The advisory `result.decision.decision` (including `mechanical_fail`) is *evidence*
 — it never authorizes promotion, paper trading, or live trading. The single verdict
-backend is the netted portfolio book spine; the legacy cross-check and the
-single-trade agreement oracle are retired (an independent netted-book cross-check is
-a planned follow-on, not a current surface).
+backend is the netted portfolio book spine (`verdict_source = "engine"`).
 
 ---
 
@@ -567,9 +562,8 @@ only Parquet trace serialization around that pure book. There is one funding hom
 for `crypto_perp_funding` the book's NAV path includes price PnL, configured
 fees/slippage, and funding cashflows. Fillable perp windows with no funding events
 in the open interval accrue zero funding; malformed/conflicting/mark-misaligned
-funding rows still fail. The legacy alternate backends, and the
-per-asset-class funding-model name, are retired — the metric payload reports the
-single shared accounting model.
+funding rows still fail. The metric payload reports the single shared accounting
+model.
 
 Evaluation writes Parquet-only traces (`tables/portfolio_path.parquet`,
 `trades`, `target_positions`, `target_exposure_summary`, `funding_cashflows`) and

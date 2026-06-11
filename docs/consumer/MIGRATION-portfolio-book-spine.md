@@ -1,6 +1,6 @@
 # Migration — portfolio-book-spine (consumer-facing changes)
 
-This change (`openspec/changes/portfolio-book-spine`) made the **target book** the
+This change (`openspec/changes/archive/2026-06-10-portfolio-book-spine`) made the **target book** the
 strategy contract and the **single causal netted portfolio book** the one scored
 model of money on every surface. This doc records (1) what a `quant_strategies`
 consumer must change, and (2) the **specific edits Season should apply in

@@ -53,16 +53,15 @@ evidence. It is not validation.
 - **Validation run:** validation requires `validate_params` and returns advisory
 retained-candidate mechanical evidence. It is not quant strategy evaluation.
 The verdict backend is the single netted-book spine (`verdict_source = "engine"`
-only); there is no alternate validation backend and no opt-in agreement
-oracle.
+only).
 - **Evaluation run:** evaluation uses
 `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml` or
 `quant_strategies.evaluation.run_evaluation` and returns
 `EvaluationRunResult`. It writes detailed trace artifacts as Parquet through
 `pyarrow`.
-- **Per-fold return-series accessor (additive):** `EvaluationRunResult` also
-exposes the per-`(window, scenario)` out-of-sample return series typed and
-in-process — `fold_returns` (`FoldReturnSeries`: numpy `timestamps`/`values`,
+- **Per-fold return-series accessor:** `EvaluationRunResult` exposes the
+per-`(window, scenario)` out-of-sample return series typed and in-process —
+`fold_returns` (`FoldReturnSeries`: numpy `timestamps`/`values`,
 `periods_per_year`, `per_symbol`), `scenario_metrics` (`FoldScenarioMetrics`:
 undeflated `sharpe`/`sortino`/`calmar`/`max_drawdown`/`worst_period_return`/
 `trade_count`/`return_sample_count` + `causal_ok` + `provenance`),
@@ -74,8 +73,7 @@ non-finite) and honor the annualized-metric trust boundary. The evaluation
 accessor adds no significance statistics (PSR/DSR/PBO) — evaluation significance
 stays with the consumer (`quant_autoresearch`). Quick run may emit diagnostic
 Train portfolio-foundation DSR inputs/values, but they are not survivor-grade
-evaluation or promotion evidence. The fields are additive and default empty/None;
-`succeeded` is unchanged.
+evaluation or promotion evidence. The fields default empty/None.
 - **Decision/spec kernel and shared accounting:** the public surfaces use one
 shared decision/spec kernel and one shared accounting book — the single causal
 netted portfolio book (`netted_portfolio_book_v1`) on quick run, validation, and
@@ -83,8 +81,7 @@ evaluation. There are no separate per-surface price-evidence paths.
 - **Scored unit:** the netted single-account portfolio NAV path is the single
 authoritative scored unit; the per-trade ledger is a derived attribution view of
 the same book walk, kept first-class for alpha / information-coefficient research
-but never an independent scored number. (This reverses the prior lock that engine
-metrics were linear signed per-trade results scored independently of NAV.)
+but never an independent scored number.
 - **Feasibility verdict:** an envelope breach is a typed, **fail-closed**
 feasibility verdict, not a clamp and not a silent `None`. Intended gross/net over
 the operator-frozen leverage budget, a zero-cost scoreable run, unfinanced
@@ -144,32 +141,29 @@ evaluation; causal replay gates valid rows strictly on `available_at <= decision
 and a missing/invalid `available_at` fails the row contract rather than the
 lookahead guard.
 - **Funding basis:** funding is computed once, in the single shared netted
-portfolio book, as a NAV cashflow on the net held position — there is one funding
-implementation across quick run, validation, and evaluation, not a separate
-engine vs evaluation basis and no `project_perp_ledger` money-model. Fillable
+portfolio book, as a NAV cashflow on the net held position — one funding
+implementation across quick run, validation, and evaluation. Fillable
 crypto perp windows with no funding events in the open interval accrue zero
 funding; flagged funding rows still fail when malformed, conflicting, or
 mark-misaligned.
 - **Artifact boundary:** generated artifacts are evidence, not truth. Compact  
 quick-run artifacts are intentionally not full replay chains.
 
-## Current Run Readiness
+## Run Readiness
 
-As of 2026-06-04, the public architecture is not a rewrite case. The identified
-P0/P1/P2 run-readiness blockers have been fixed in the active codebase:
+The active codebase holds these run-readiness contracts:
 
 - **Evaluation audit parity:** evaluation runs the same decision-row /
 observation-dependency audit as validation before portfolio metrics and
 artifacts are trusted.
-- **Future-row strategy logic:** the current active strategy fixes keep
-fillability and hold-window feasibility in execution/evaluation logic rather
-than strategy signal generation.
+- **Fillability lives in the engine:** fillability and hold-window feasibility
+are enforced in execution/evaluation logic, not in strategy signal generation.
 - **Evaluation final-value semantics:** completed evaluation scenarios require
 `ending_value` to be the actual final portfolio value; a missing, NaN, or
 infinite final value fails the scenario.
-- **Current strategy readiness:** current candidate strategies under
-`candidates/` expose `validate_params` and have targeted validator plus
-causality/data-audit tests. Candidate folders remain research candidates until
+- **Candidate readiness:** strategies under `candidates/` are research
+candidates and declare the target-book contract; validation and evaluation
+require `validate_params`. Candidate folders remain research candidates until
 Season explicitly promotes or renames them.
 - **Evaluation evidence contract:** evaluation runs the single shared netted
 portfolio book, configs may opt into custom `[[scenarios]]`, and optional
@@ -181,29 +175,28 @@ annualized/risk metrics family null unless cadence matches and
 - **Default verification:** `make check` refreshes the editable install, checks
 the installed CLI, and runs the full pytest suite. Evaluation needs only
 `pandas` and `pyarrow` (the `[evaluation]` extra) for Parquet trace
-serialization; the accounting path is the pure-Python spine book with no
-backtest-library dependency.
+serialization; the accounting path is the pure-Python spine book.
 - **Quick-run failure semantics:** runner-stage failures return
 `RunOutcome.completed=False`, set `failure_stage`, and write `summary.json`
 with `run_completed=false`.
 - **Data dependency boundary:** `quant-data` is version-bounded as
 `>=0.1.0,<0.2.0` to guard the upstream data contract.
-- **Consumer contract:** `quant_autoresearch` should consume public
+- **Consumer contract:** `quant_autoresearch` consumes the public
 `run_config`, `run_validation`, and `run_evaluation` APIs. Candidate ranking,
 comparison, search memory, stopping rules, and promotion remain outside this
 repo.
 
-Start running with targeted configs and use delta reviews for new issues. Do
-not run another broad blind foundation review unless Season asks for one.
+Run with targeted configs and use disposition-aware delta reviews for new
+issues; run a broad foundation review only when Season asks for one.
 
 ## Accepted Debt
 
 - Large facade modules are not immediate foundation blockers.
-- No independent cross-check of the spine's accounting exists today. The
-  single-trade agreement oracle is retired (it was single-trade-only
-  and gave no multi-trade verification); a netted-book agreement oracle is a named
-  follow-on. The spine's correctness is guarded instead by the NAV↔ledger
-  reconciliation test and the at-risk-bar / feasibility-verdict test suite.
+- No independent cross-check of the spine's accounting exists today; a
+  netted-book agreement oracle (a second implementation that must agree with the
+  spine) is a named follow-on. The spine's correctness is guarded by the
+  NAV↔ledger reconciliation test and the at-risk-bar / feasibility-verdict test
+  suite.
 - Asset-class financing realism beyond crypto-perp funding (equity
   short-borrow/dividends, FX rollover/carry, margin financing on gross > 1),
   capacity/ADV/market-impact, and intrabar OHLC stop-fill realism are named
@@ -214,12 +207,11 @@ not run another broad blind foundation review unless Season asks for one.
 
 ## Approved Next Direction
 
-- Preserve the clarified contract: docs should distinguish quick run,
-mechanical evidence validation, and research evaluation without renaming
-current CLI commands, package paths, or artifact names.
+- Preserve the contract: docs distinguish quick run, mechanical evidence
+validation, and research evaluation without renaming current CLI commands,
+package paths, or artifact names.
 - Keep the quick-run Python result model nested as `RunResult.outcome` and
-`RunResult.evidence`; do not add flat compatibility aliases for retired runner
-result fields.
+`RunResult.evidence`; do not add flat compatibility aliases to the result model.
 - Keep research evaluation as the term for stateless frozen-candidate evidence;
 do not use it to mean the auto-research loop.
 - Keep the stateless research evaluation surface separate from validation and  
@@ -235,11 +227,10 @@ run is progressing still raise to direct API callers. Revisit if these writes
 become a practical reliability issue or if validation artifact durability
 requirements tighten.
 - **Independent netted-book cross-check:** the spine has no independent
-accounting cross-check today. Generalize the agreement oracle from single-trade
-to the full netted book (a second implementation that must agree with the spine)
-before any cross-check evidence is treated as multi-trade verification. Any
-reintroduced library could only return in that role, never as a divergent money-model routed by
-data kind.
+accounting cross-check today. A second, independent netted-book implementation
+that must agree with the spine is the bar before any cross-check evidence is
+treated as verification. Any such implementation is a cross-check only, never a
+divergent money-model routed by data kind.
 - **Validation/evaluation source output paths:** validation and evaluation
 configs still anchor `output.results_dir` beside the config so candidate-local
 workspaces keep working. Revisit source-directory rejection only if config path

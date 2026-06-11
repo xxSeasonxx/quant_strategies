@@ -61,8 +61,7 @@ All three surfaces use one shared decision/spec kernel **and one shared accounti
 book** — the single causal netted portfolio book (`netted_portfolio_book_v1`). The
 NAV path is the authoritative scored object on every surface; evaluation adds only
 Parquet trace serialization around that same pure book. There is no separate
-price-evidence fork: the legacy alternate backends and the single-trade agreement
-oracle are retired.
+price-evidence fork — every surface scores the same book.
 
 Path anchoring:
 
@@ -226,8 +225,7 @@ Important sections:
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
 - `[readiness]`;
 - `[output]`;
-- `[search_pressure]`, plus optional `[mechanical_thresholds]`. The
-  `[agreement_oracle]` section is removed; a config that still sets it is rejected.
+- `[search_pressure]`, plus optional `[mechanical_thresholds]`.
 
 Validation window IDs must be unique and must not collide after artifact-path
 sanitization. `[readiness]` requires at least one observation and one observed
@@ -245,8 +243,7 @@ Common artifacts include `validation_config.toml`, `strategy_snapshot.py`,
 `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`,
 trade-ledger JSONL files, `cost_fill_sensitivity.json`,
 `validation_decision.json`, `validation_manifest.json`, `environment.json`, and
-`validation_report.md`. There is one verdict backend (the netted-book spine); the
-retired agreement-oracle `agreement` payload is no longer written.
+`validation_report.md`. There is one verdict backend (the netted-book spine).
 
 CLI exit codes:
 
@@ -288,8 +285,7 @@ Purpose:
 - fan out configured `[[scenarios]]` per window, or the default fixed
   six-scenario cost/fill matrix when no custom scenarios are configured;
 - produce portfolio, economic, and path evidence from the single shared netted
-  portfolio book (`netted_portfolio_book_v1`), serialized to Parquet traces. The
-  legacy alternate evaluation backends are retired.
+  portfolio book (`netted_portfolio_book_v1`), serialized to Parquet traces.
 
 Evaluation fails before scenario expansion when the decision-row/observation
 dependency audit fails or when deterministic, emitted, or strict suppression
@@ -301,8 +297,7 @@ replay proof is incomplete. Data-audit failures return
 Evaluation runs the same single causal netted portfolio book as quick run and
 validation; funding lives in one place. For `crypto_perp_funding`, the book's NAV
 path includes price PnL, configured fees/slippage, and funding cashflows. The
-metric payload reports the single shared accounting model (`netted_portfolio_book_v1`);
-the per-asset-class perp-ledger model name is retired.
+metric payload reports the single shared accounting model (`netted_portfolio_book_v1`).
 Annualized metrics are computed over **at-risk bars** — the capital-deployed
 period returns from the `portfolio_path` trace, not a zero-padded calendar — so
 flat/no-position bars do not inflate the effective sample. The configured
@@ -335,10 +330,9 @@ authority.
 
 Primary config file: candidate-local `evaluation.toml`; see
 `examples/simple_momentum/evaluation.toml` for the config schema.
-(The checked-in `examples/` and `candidates/` bundles are mid-migration to the
-target-book contract — their `strategy.py` files still import the retired
-`StrategyDecision` shapes and are being redeveloped, so they are not yet runnable
-end-to-end against this surface, but the config schema is current.)
+(The checked-in `examples/` and `candidates/` strategy bundles do not yet implement
+the target-book contract end-to-end, so treat the documented schema here as
+authoritative rather than those files.)
 
 Important sections:
 

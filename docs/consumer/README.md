@@ -95,10 +95,8 @@ Write one pure strategy file declaring a **target book** and a small config, the
 run it. The strategy below sets a signed weight-of-NAV target per instrument and
 closes by setting the target back to `0`.
 
-> The checked-in `examples/` and `candidates/` strategies are mid-migration to this
-> target-book contract — they still import the retired `StrategyDecision` /
-> `PositionTarget` / `ExitPolicy` shapes and are being redeveloped (no
-> compatibility shim). Until they are rewritten, use the inline example below as the
+> The checked-in `examples/` and `candidates/` strategy files do not yet implement
+> this target-book contract end-to-end; use the inline example below as the
 > authoritative shape, not those files.
 
 ```python

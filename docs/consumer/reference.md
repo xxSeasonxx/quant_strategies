@@ -227,10 +227,7 @@ strategy_path, strategy_id, verdict_source?   # top-level
 [mechanical_thresholds]?                       # optional
 ```
 
-`verdict_source` accepts only `"engine"` (the netted-book spine). The
-`[agreement_oracle]` section is **removed** — the legacy cross-check and the
-single-trade agreement oracle are retired, and a config that still sets it is
-rejected.
+`verdict_source` accepts only `"engine"` (the netted-book spine).
 
 `crypto_perp_funding` additionally requires `close`, `funding_timestamp`,
 `funding_rate`, `has_funding_event` observations per decision. `strategy_path` and
@@ -663,7 +660,7 @@ Artifacts are evidence to inspect, not truth by construction. Generated roots
 | Surface | Always written | Notable extras |
 |---|---|---|
 | Quick run | `config.toml`, `strategy_snapshot.py`, `run_manifest.json`, `summary.json` (with `economic_metrics` and optional compact `portfolio_foundation`), `notes.md`, `environment.json`, `data_manifest.json` (when data loads) | `diagnostics.json` (`diagnostic`, includes `economic_slices` and portfolio-foundation matrix); decision records + evidence + engine request + strategy input rows (`full`) |
-| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | one verdict backend (the netted-book spine); the retired agreement-oracle `agreement` payload is no longer written |
+| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | one verdict backend (the netted-book spine) |
 | Evaluation | `evaluation_config.toml`, `strategy_snapshot.py`, `data_manifest.json`, `evaluation_metrics.json`, `scenario_summary.json`, `evaluation_manifest.json`, `environment.json`, `notes.md` | Parquet traces under `tables/` (requires `pyarrow`); `audit/` input rows + decision records; `evaluation_failure.json` on failure |
 
 The exhaustive artifact inventory (per-window/per-scenario tables and their
