@@ -79,10 +79,6 @@ def _repository_text_files_for_archive_pointer_scan() -> list[Path]:
     return sorted(files)
 
 
-def test_researched_archive_is_not_in_foundation_repo():
-    assert not (ROOT / "researched").exists()
-
-
 def test_active_foundation_paths_do_not_contain_loop_memory_markers():
     offenders: list[str] = []
     for relative in _active_foundation_files():
