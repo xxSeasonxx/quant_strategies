@@ -120,75 +120,83 @@ Keep these facts current:
 
 ### 2.3 Market-Model Follow-Ons
 
-The netted book prices crypto-perp funding today. These asset-class frictions plug
-into the book's localized market-model step and remain open; several need
-`quant-data` upstream fields:
+The netted book prices crypto-perp funding today. The remaining asset-class frictions
+and capacity are **in-repo modeling**: consume the already-public `quant_data` loaders
+and the catalog integrity contracts, and add a localized market-model term per
+`DataKind` (mirroring `funding.py`). There are **no missing upstream contracts** — every
+loader and integrity enum exists (authoritative pass, 2026-06-11). Where an item is
+still blocked it is on upstream **data coverage** (a `blocked`/empty dataset), tracked in
+§2.4. Read `quant_data.catalog.DATASET_STATUS[dataset]["status"]` at runtime — never
+hand-copy.
 
-- **O14** Asset-class financing realism beyond crypto-perp funding: equity
-  short-borrow, FX rollover/carry, and margin financing on gross > 1 (upstream
-  fields: §2.4 U1–U3). Dividend accrual on held equity is **in-repo** work, not
-  upstream-blocked — the public `load_dividends` loader already exists upstream
-  (review No. 7). Until a class is modeled, a net exposure > 1.0 for it is a
-  fail-closed `unfinanced_leverage` verdict (crypto perp is modeled, so it is
-  exempt), so unpriced leverage stays non-scoreable.
-- **O15** Capacity / ADV / market-impact sizing: unmodeled here, but **not**
-  upstream-blocked. `volume` already ships in the loader bar schema (`_BAR_SCHEMA`
-  in `quant-data` `contract_loaders.py`, sourced from `equity_1min`/`forex_1min`)
-  and simply isn't consumed in this repo; the size-aware impact term (review No. 3)
-  is in-repo work. FX `volume` is tick count, not notional (consume the upstream
-  structured caveat `forex-volume-is-tick-count`), so FX capacity stays unsupported
-  until calibrated.
+- **O14** Asset-class frictions beyond crypto-perp funding (review No. 7). In-repo:
+  consume the public point-in-time loaders and price the term per `DataKind`. Until a
+  class is priced, a net exposure > 1.0 for it stays a fail-closed `unfinanced_leverage`
+  verdict (crypto perp is modeled, so it is exempt).
+  - **Dividends — in-repo, data ready.** `load_dividends` returns `ticker, ex_date,
+    pay_date, declared_date, record_date, cash_amount, dividend_type, frequency`;
+    `dividends` is `usable_with_caveats` (2008→2026). ⚠️ Equity OHLCV is
+    `split_dividend_adjusted`, so do **not** re-add dividends on adjusted prices
+    (double-count); model explicit dividend cashflows only for the short side or
+    raw-price use.
+  - **Equity short-borrow — modeling ready, data-coverage blocked (§2.4).**
+    `load_equity_borrow_rates` returns `borrow_fee_rate, availability_status,
+    shares_available, notional_available, source`, but `equity_borrow_rates` is
+    `blocked` (no rows).
+  - **FX rollover/carry — modeling ready, data-coverage blocked (§2.4).**
+    `load_forex_rollover_rates` (`long_base_rate`/`short_base_rate`, roll dates);
+    `forex_rollover_rates` is `blocked`.
+  - **Margin financing on gross > 1 — modeling ready, data-coverage blocked (§2.4).**
+    `load_margin_reference_rates` returns an annualized reference `rate`; the broker
+    spread, compounding, and margin policy are this repo's operator-frozen envelope.
+    `margin_reference_rates` is `blocked`.
+- **O15** Capacity / ADV / market-impact sizing (review No. 3) — **in-repo, data present
+  now.** `volume` (plus `vwap`, `num_trades`) ships in the `load_strategy_bars` locked
+  schema (`symbol, timestamp, available_at, open, high, low, close, volume, vwap,
+  num_trades`) and already reaches the engine rows — the repo's `to_dicts()` load path
+  and `NormalizedRows` preserve every column; it simply isn't consumed yet. Add turnover
+  + notional/ADV diagnostics and a size-aware impact term in the book walk; optionally
+  surface `volume` in the row contract. Caveat: FX `volume` is **tick count, not
+  notional** (`forex-volume-is-tick-count`), so FX capacity needs calibration first.
 - **O16 (RESOLVED 2026-06-10, review No. 8)** Intrabar OHLC stop fills shipped:
   `RiskRule` stop/TP/trailing trigger on the bar's intrabar high/low and fill at the
   barrier level (worsened to the bar open on a gap-through; adverse barrier wins a
   same-bar tie). A diagnostic `fill_stress` scenario (`foundation_fill_stress_fraction`,
   default 10 bps) applies extra adverse barrier-exit slippage; the climbed
   `realistic_costs` path is unaffected by the knob.
-- **O17** Survivorship / corporate-action certification in the data manifest: the
-  row contract now rejects look-ahead stamps (`available_at < timestamp`), but
-  survivorship and corporate-action (split/dividend/delisting) integrity is
-  `quant-data`-owned and has no machine-readable field to certify in the manifest
-  today (upstream field: §2.4 U4). Adding a certification field is an upstream
-  `quant-data` contract addition; this repo would consume and surface it once it
-  exists. (Closes the upstream half of review No. 11.)
+- **O17** Survivorship / corporate-action gate (review No. 11/17) — **in-repo, fields
+  present now.** The old "no machine-readable field" framing is resolved:
+  `quant_data.catalog.DATASET_CONTRACTS[dataset]` exposes machine-readable
+  `adjustment_status`, `survivorship_status`, `corporate_action_event_status`, and
+  `caveat_ids`, and `quant_data.readiness.validate_dataset_window` is the gate. In-repo
+  work: read these to fail-closed when a strategy needs a stronger contract than the
+  dataset provides (equity is `not_survivorship_free`, `events_partial`). The PIT
+  `available_at < timestamp` row guard already ships (review No. 11). Delisting/rename
+  reconstruction uses `load_ticker_events`, whose `ticker_events` dataset is `blocked`
+  (no rows) → that half waits on data coverage (§2.4).
 
-### 2.4 Upstream `quant-data` Field/Contract Requests
+### 2.4 Upstream `quant-data` Data-Coverage Dependencies
 
-These foundation follow-ons are genuinely blocked on data this repo does not own
-(`L8`): each is a field or manifest-contract addition `quant-data` must materialize
-before the corresponding market-model term can be priced or the gate can certify.
-Each is an upstream contract addition that this repo consumes and surfaces once it
-lands; revisit the `L9` version bound when consuming it. Raise each with Season as
-upstream feedback.
+**No outstanding upstream contract/field requests.** Every loader and the catalog
+integrity enums (`adjustment_status`/`survivorship_status`/
+`corporate_action_event_status`) already exist — the prior "field request" framing was
+wrong: it judged against this repo's row contract, not the `quant_data` loader surface.
+The only remaining upstream dependency is **data coverage** — the loader and schema
+exist but the dataset is `blocked` (zero rows), so the corresponding in-repo friction
+cannot be priced until upstream **backfills** it. Read `DATASET_STATUS[dataset]["status"]`
+at runtime and treat `blocked` as "modeling ready, data pending." Raise backfill priority
+with Season as upstream feedback.
 
-Verified present upstream, reclassified to in-repo (do **not** raise these as
-upstream requests): per-bar `volume` already ships in the loader bar schema
-(`O15`), and dividend events already have a public `load_dividends` loader (`O14`,
-review No. 7) — both gaps are in-repo modeling, not missing data. Other in-repo-only
-gaps: review No. 6 causality scoreability and No. 8 / `O16` intrabar OHLC stop fills
-need no new field.
+| Blocked dataset | Loader | Unblocks (when backfilled) |
+|---|---|---|
+| `equity_borrow_rates` | `load_equity_borrow_rates` | equity short-borrow pricing (`O14`, No. 7) |
+| `forex_rollover_rates` | `load_forex_rollover_rates` | FX carry/rollover pricing (`O14`, No. 7) |
+| `margin_reference_rates` | `load_margin_reference_rates` | margin financing on gross > 1 (`O14`, No. 7) |
+| `ticker_events` | `load_ticker_events` | delisting/rename → survivorship reconstruction (`O17`, No. 17) |
 
-- **U1 Equity short-borrow rate (+ availability).** Per-symbol, point-in-time
-  annualized borrow fee, ideally with a locate/availability flag. Unblocks equity
-  short-borrow pricing (`O14`, review No. 7); without it a long/short equity book is
-  scored as if shorting is free below net 1.0.
-- **U2 FX rollover / swap points.** Per-pair, point-in-time swap points (or the rate
-  differential to derive them). Unblocks overnight FX carry/rollover pricing
-  (`O14`, review No. 7); carry can be the entire edge or loss of an FX strategy.
-- **U3 Margin-financing rate (reference rate only).** Point-in-time benchmark /
-  reference financing rate to charge financing on book gross > 1 for non-perp
-  classes (`O14`, review No. 7). Ownership splits: upstream provides the PIT
-  reference rate; this repo owns the broker/account spread and margin policy as part
-  of the operator-frozen envelope. Until U1–U3 land, a non-financed class above net
-  1.0 stays a fail-closed `unfinanced_leverage` verdict — the gap is fenced, but
-  those strategies are non-scoreable rather than honestly priced.
-- **U4 Survivorship / corporate-action certification.** Machine-readable manifest
-  enums — `adjustment_status` (corporate-action-adjusted: splits / dividends /
-  delistings) and `survivorship_status` (survivorship-bias-free) — not a vague
-  boolean `certified`, so the gate can fail-close on them. Upstream already ships
-  prose/catalog caveats and a sparse universe stub; the ask is to promote those to a
-  structured contract field. Same item as `O17` (upstream half of review No. 11); the
-  in-repo row contract already rejects `available_at < timestamp` look-ahead.
+Everything else the 2026-06-10 review flagged is **in-repo with data available now**:
+capacity/`volume` (`O15`), dividends (`O14`), and the survivorship/corporate-action gate
+(`O17`).
 
 ## 3. Locked Direction
 
@@ -242,6 +250,12 @@ Preserve these contained residuals unless they become active work:
   configs still anchor `output.results_dir` beside the config so
   candidate-local workspaces keep working. Revisit rejecting outputs under
   source directories only if config path ownership is redesigned.
+- **D4 `researched/` archive-boundary test removed (temporary, 2026-06-11):** review
+  No. 17's "stale `researched/` artifacts" concern was a `researched/`-must-not-exist
+  boundary test; it was removed because Season is actively working in `researched/`.
+  The repo no longer enforces the boundary. Restore the test (or relocate the
+  artifacts) once that work settles. The other repository-boundary tests
+  (loop-memory markers, archive-pointer scan) are unchanged.
 
 ## 6. Stale-Reference Checks
 

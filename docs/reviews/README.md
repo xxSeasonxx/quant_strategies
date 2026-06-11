@@ -33,7 +33,7 @@ Historical review disposition:
 | `2026-06-04-foundation-claude.md` | Historical Claude foundation working review; cleanup findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
 | `2026-06-04-foundation-codex.md` | Historical Codex foundation working review; cleanup findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
 | `2026-06-04-foundation-codex-quant.md` | Historical Codex quant-researcher-lens foundation working review; its row-order finding is implemented via the contract-loader migration (`../../openspec/specs/data-boundary/spec.md`) and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |
-| `2026-06-10-live-trade-feasibility-review.md` | Historical live-trade-feasibility review; its accepted findings are implemented via the `portfolio-book-spine` change and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs; remaining open follow-ups are tracked in `../../TODOS.md`. |
+| `2026-06-10-live-trade-feasibility-review.md` | **Retired (2026-06-11):** folded into `../../TODOS.md` (§2.3/§2.4 market-model follow-ons + §4/§5 residuals) and `../../FOUNDATION_LOCK.md`; no longer kept as a file — full text in git history. Accepted findings shipped via the `portfolio-book-spine` change and review No. 6/8/11/20; remaining work (No. 3 capacity, No. 7 frictions, No. 17 `researched/`) lives in `../../TODOS.md`. |
 
 Future foundation reviews should be disposition-aware delta reviews by default:
 read the current disposition anchor first, then classify findings as `new`,
