@@ -39,7 +39,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     )
     cost_scope = (
         "net of configured fees/slippage; includes funding cashflows for crypto_perp_funding; "
-        "excludes borrow, financing, and market impact"
+        "includes configured ADV market impact; excludes borrow and other financing"
     )
     not_authority = "not validation, promotion, paper trading, or live trading authority"
     benchmark_not_authority = "benchmark-relative evidence only; not ranking, promotion, paper trading, or live trading authority"

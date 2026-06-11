@@ -24,6 +24,7 @@ _REQUIRED_TRACE_TABLES = {
     "trades": "tables/trades.parquet",
     "target_positions": "tables/target_positions.parquet",
     "target_exposure_summary": "tables/target_exposure_summary.parquet",
+    "execution_events": "tables/execution_events.parquet",
     "funding_cashflows": "tables/funding_cashflows.parquet",
 }
 
@@ -105,6 +106,26 @@ _TRACE_COLUMN_TYPES = {
         "position_units": "float64",
         "mark_price": "float64",
         "funding_cashflow": "float64",
+    },
+    "execution_events": {
+        "scenario_id": "string",
+        "asset": "string",
+        "timestamp": "timestamp_us_utc",
+        "reason": "string",
+        "side": "string",
+        "fill_price": "float64",
+        "delta_units": "float64",
+        "normalized_notional": "float64",
+        "real_notional": "float64",
+        "base_cost": "float64",
+        "impact_cost": "float64",
+        "total_cost": "float64",
+        "bar_notional_volume": "float64",
+        "adv_notional_volume": "float64",
+        "bar_participation": "float64",
+        "adv_participation": "float64",
+        "decision_time": "timestamp_us_utc",
+        "decision_id": "string",
     },
 }
 
@@ -394,6 +415,7 @@ def write_evaluation_manifest(
                 "trades.parquet",
                 "target_positions.parquet",
                 "target_exposure_summary.parquet",
+                "execution_events.parquet",
                 "funding_cashflows.parquet",
                 *(Path(item["path"]).name for item in audit_artifacts["input_rows"]),
             },

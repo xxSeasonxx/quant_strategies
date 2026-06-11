@@ -109,6 +109,16 @@ exit_lag_bars = 0
 [cost_model]
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
+
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
 {extra_config}
 
 [readiness]
@@ -148,6 +158,9 @@ def rows():
             "high": 100.0,
             "low": 100.0,
             "close": 100.0,
+            "volume": 1_000.0,
+            "vwap": 100.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
@@ -158,6 +171,9 @@ def rows():
             "high": 101.0,
             "low": 101.0,
             "close": 101.0,
+            "volume": 1_000.0,
+            "vwap": 101.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
@@ -168,6 +184,9 @@ def rows():
             "high": 102.0,
             "low": 102.0,
             "close": 102.0,
+            "volume": 1_000.0,
+            "vwap": 102.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
     ]
@@ -182,6 +201,9 @@ def _bar(symbol: str, timestamp: datetime, close: float) -> dict[str, Any]:
         "high": close,
         "low": close,
         "close": close,
+        "volume": 1_000.0,
+        "vwap": close,
+        "num_trades": 100,
         "has_funding_event": False,
     }
 
@@ -202,9 +224,12 @@ def expected_row_records() -> list[dict[str, Any]]:
             "has_funding_event": False,
             "high": 100.0,
             "low": 100.0,
+            "num_trades": 100,
             "open": 100.0,
             "symbol": "BTC-PERP",
             "timestamp": AS_OF.isoformat(),
+            "volume": 1000.0,
+            "vwap": 100.0,
         },
         {
             "available_at": DECISION.isoformat(),
@@ -212,9 +237,12 @@ def expected_row_records() -> list[dict[str, Any]]:
             "has_funding_event": False,
             "high": 101.0,
             "low": 101.0,
+            "num_trades": 100,
             "open": 101.0,
             "symbol": "BTC-PERP",
             "timestamp": DECISION.isoformat(),
+            "volume": 1000.0,
+            "vwap": 101.0,
         },
         {
             "available_at": datetime(2026, 1, 1, 0, 2, tzinfo=UTC).isoformat(),
@@ -222,9 +250,12 @@ def expected_row_records() -> list[dict[str, Any]]:
             "has_funding_event": False,
             "high": 102.0,
             "low": 102.0,
+            "num_trades": 100,
             "open": 102.0,
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC).isoformat(),
+            "volume": 1000.0,
+            "vwap": 102.0,
         },
     ]
 
@@ -274,6 +305,7 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         "gross_return",
         "funding_return",
         "cost_return",
+        "impact_return",
     }
     assert backend_summary["metric_semantics"]["net_return"]["tolerance"] is None
     assert len(backend_summary["results"]) == 4
@@ -653,6 +685,7 @@ def test_strict_replay_boundaries_dedupe_shared_row_information_sets():
         SimpleNamespace(
             data=SimpleNamespace(kind="crypto_perp_funding"),
             fill_model=SimpleNamespace(price="close"),
+            capacity_model=SimpleNamespace(mode="off"),
         ),
         [*rows(), *eth_rows],
     )
@@ -1363,6 +1396,9 @@ def test_run_validation_engine_backend_validates_threshold_exit_strategy(
             "high": 100.0 + minute,
             "low": 100.0 + minute,
             "close": 100.0 + minute,
+            "volume": 1_000.0,
+            "vwap": 100.0 + minute,
+            "num_trades": 100,
             "has_funding_event": False,
         }
         for minute in range(5)
@@ -1413,6 +1449,9 @@ def _upward_rows(n: int = 5) -> list[dict[str, Any]]:
             "high": 100.0 + minute,
             "low": 100.0 + minute,
             "close": 100.0 + minute,
+            "volume": 1_000.0,
+            "vwap": 100.0 + minute,
+            "num_trades": 100,
             "has_funding_event": False,
         }
         for minute in range(n)
@@ -1450,6 +1489,9 @@ def test_run_validation_default_engine_backend_accepts_flat_target_as_zero_activ
             "high": 103.0,
             "low": 103.0,
             "close": 103.0,
+            "volume": 1_000.0,
+            "vwap": 103.0,
+            "num_trades": 100,
             "has_funding_event": False,
         }
     ]

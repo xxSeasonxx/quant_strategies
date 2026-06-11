@@ -116,12 +116,30 @@ def backend_metric_semantics() -> dict[str, dict[str, object]]:
         BackendMetricSemantics(
             name="cost_return",
             unit="decimal_fraction",
-            base="netted-book traded cost on the |delta notional| of each fill",
+            base=(
+                "netted-book total traded cost on the |delta notional| of each fill, "
+                "including base costs and market impact"
+            ),
             aggregation="sum of round-trip cost as a fraction of NAV base",
             backend="engine",
-            comparability="flat per-side bps on traded notional; deterministic from the cost model",
+            comparability=(
+                "total transaction-cost component of the gated net_return; includes the "
+                "impact_return component when ADV impact is enabled"
+            ),
             tolerance=0.0,
             asymmetry="cost deduction folded into net_return as net = gross + funding - cost",
+        ),
+        BackendMetricSemantics(
+            name="impact_return",
+            unit="decimal_fraction",
+            base="netted-book market-impact cash charged on capacity-priced execution events",
+            aggregation="sum of round-trip impact cost as a fraction of NAV base",
+            backend="engine",
+            comparability=(
+                "component of cost_return derived from the same execution events that update NAV"
+            ),
+            tolerance=0.0,
+            asymmetry="impact is included in cost_return, not subtracted separately from net_return",
         ),
     )
     return {item.name: item.model_dump(mode="json") for item in semantics}

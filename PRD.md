@@ -94,7 +94,8 @@ The product contract distinguishes three jobs:
 Mechanical evidence validation verifies that evidence was produced honestly,
 causally, reproducibly, and audibly under explicit config. It does not answer
 whether a strategy has durable alpha, statistical significance, regime
-robustness, benchmark-relative edge, capacity, or portfolio quality.
+robustness, benchmark-relative edge, liquidity beyond the configured capacity
+envelope, or portfolio quality.
 Research evaluation provides stateless frozen-candidate portfolio, economic,
 and path evidence. No foundation job authorizes promotion, paper trading, or
 live trading. Benchmark-relative metrics, when configured, are advisory
@@ -291,16 +292,19 @@ and does not grant promotion authority.
 **G8. Feasibility is a first-class, enforced contract ("passes ⟹ tradeable").**
 A strategy that passes Train evidence MUST be genuinely feasible to trade. The
 foundation scores it on one netted, financed, marked portfolio book under
-operator-frozen frictions (costs, fills, the leverage ceiling, asset universe, and
-window — the strategy author cannot relax these). A breach of the feasibility
-envelope — intended gross/net over the frozen leverage budget, a zero-cost
-scoreable run, or a statistically degenerate sample — MUST produce a typed,
-actionable **fail-closed** verdict that makes the run non-scoreable. The foundation
-MUST NOT clamp or normalize an infeasible book to fit the budget, and MUST NOT
-collapse a breach into a silent absence of evidence. "Leverage allowed but capped"
-means leverage *priced and bounded*, never free. The strategy owns the portfolio
-(allocation, sizing, netting intent, rebalancing, exits, declared risk); the
-foundation owns the accounting, the market model, and the frozen envelope.
+operator-frozen frictions (costs, fills, capacity/market impact, the leverage
+ceiling, asset universe, and window — the strategy author cannot relax these). A
+breach of the feasibility envelope — intended gross/net over the frozen leverage
+budget, unpriced, unsupported, or missing capacity evidence, a capacity
+participation limit breach, a zero-cost scoreable run, or a statistically
+degenerate sample — MUST produce a typed, actionable **fail-closed** verdict that
+makes the run non-scoreable. The foundation MUST NOT clamp or normalize an
+infeasible book to fit the budget or capacity limit, and MUST NOT collapse a breach
+into a silent absence of evidence. "Leverage allowed but capped" means leverage
+*priced and bounded*,
+never free. The strategy owns the portfolio (allocation, sizing, netting intent,
+rebalancing, exits, declared risk); the foundation owns the accounting, the market
+model, and the frozen envelope.
 
 ### 4.2 Non-goals (explicit, durable)
 

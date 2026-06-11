@@ -4,7 +4,9 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from quant_strategies.core.config import CapacityModelConfig
 from quant_strategies.core.errors import ConfigError
 from quant_strategies.decisions import load_decision_strategy
 from quant_strategies.runner.config import load_config
@@ -41,6 +43,7 @@ def write_config(
     artifact_profile: str | None = None,
     output_extra: str = "",
     data_extra: str = "",
+    include_capacity_model: bool = True,
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -48,6 +51,21 @@ def write_config(
     )
     quick_checks_line = (
         f"quick_checks = {str(quick_checks).lower()}\n" if quick_checks is not None else ""
+    )
+    capacity_model_section = (
+        """
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+"""
+        if include_capacity_model
+        else ""
     )
     config_path = repo_root / "run.toml"
     config_path.write_text(
@@ -75,6 +93,7 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
+{capacity_model_section}
 [output]
 results_dir = "{results_dir}"
 {quick_checks_line}{artifact_profile_line}{output_extra}
@@ -97,6 +116,8 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.params == {"weight": 1.0}
     assert config.data.load_start is None
     assert config.data.load_end is None
+    assert config.capacity_model.mode == "adv_impact"
+    assert config.capacity_model.portfolio_notional == 1_000_000.0
 
 
 def test_relative_strategy_path_resolves_from_config_directory(tmp_path: Path):
@@ -217,6 +238,21 @@ def test_missing_required_config_fields_are_rejected(tmp_path: Path, content: st
 
     with pytest.raises(ConfigError, match=message):
         load_config(path, repo_root=tmp_path)
+
+
+def test_capacity_model_is_required_for_run_config(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    with pytest.raises(ConfigError, match="capacity_model"):
+        load_config(
+            write_config(tmp_path, include_capacity_model=False),
+            repo_root=tmp_path,
+        )
+
+
+def test_adv_impact_capacity_model_requires_explicit_parameters():
+    with pytest.raises(ValidationError, match="adv_lookback_bars"):
+        CapacityModelConfig(mode="adv_impact", portfolio_notional=1_000.0)
 
 
 def test_legacy_output_mode_is_rejected(tmp_path: Path):

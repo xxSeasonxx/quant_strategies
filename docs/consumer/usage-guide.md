@@ -228,6 +228,8 @@ All three surfaces share these sections (full key list in
 [params]            # passed verbatim to your strategy's validate_params/generate_decisions
 [fill_model]        # price = "close"|"quote"; entry_lag_bars; exit_lag_bars
 [cost_model]        # fee_bps_per_side; slippage_bps_per_side
+[capacity_model]    # mode = "adv_impact"|"off"; portfolio_notional + ADV/impact limits
+[leverage_budget]   # max_gross_exposure; max_net_exposure
 [output]            # results_dir (+ profile/sizing for quick run)
 ```
 
@@ -277,8 +279,9 @@ print(result.foundation.feasible)            # authoritative scored NAV book on 
 ```
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
-with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`; `[output]`
-with `results_dir`, `quick_checks`, `artifact_profile`, optional
+with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`,
+`[capacity_model]`, `[leverage_budget]`; `[output]` with `results_dir`,
+`quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
 (`foundation_subwindows`, `foundation_trial_count`,
 `foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for the
@@ -290,6 +293,15 @@ The **leverage budget (gross and net) is operator-frozen** in the
 `1.0/1.0`, `>= 1.0`) — it is not an agent-editable `[output]` key. Intended exposure
 beyond the budget makes the run non-scoreable through the feasibility verdict
 (`leverage_budget_breach`), it is never clamped to fit.
+The **capacity model is also operator-frozen**. `mode = "adv_impact"` requires a
+positive `portfolio_notional`, causal prior ADV settings, max bar/ADV
+participation limits, and impact parameters. Supported `bars` and
+`crypto_perp_funding` rows must carry positive `volume`; impact is charged in the
+same NAV cash path and the book is never resized or split to fit a capacity limit.
+`mode = "off"` is explicit and allowed for profiling or flat/no-trade books, but a
+traded book fails closed with `capacity_unpriced`. `forex_with_quotes` ADV impact
+fails with `capacity_unsupported_volume_semantics` until FX notional liquidity is
+calibrated.
 Use `causality_check = "micro"` for Train/autoresearch iteration.
 Research candidates live as candidate-local bundles:
 `candidates/<candidate_id>/strategy.py` plus `run.toml` and optional
@@ -354,6 +366,7 @@ scenario_id                 # "realistic_costs" or "cost_stress"
 cost_multiplier             # 1.0 or foundation_cost_stress_multiplier
 feasibility                 # typed verdict payload (feasible, reason, observed_gross/net, detail)
 full_train                  # one compact metric record for the full Train path
+capacity                    # turnover, impact cost, bar participation, ADV participation
 subwindow_count             # configured foundation_subwindows
 min_dsr / median_dsr        # DSR aggregates across subwindows only
 dsr_available_count
@@ -400,6 +413,12 @@ Important semantics for agents:
   the observed exposure). The book is never clamped to fit. The `*_utilization`
   fields are the separate *live* mark-to-market exposure series — reported as a risk
   signal, not enforced intrabar.
+- The **capacity model is part of the same frozen envelope.** ADV impact charges
+  cash on each executed net delta; `capacity` reports execution-event count,
+  normalized/real turnover, impact cost, and max/mean bar and ADV participation.
+  Capacity-disabled traded books, unsupported FX ADV impact, missing/insufficient
+  volume history, and participation-limit breaches are fail-closed feasibility
+  reasons, not warnings.
 - `full_train` exists so downstream can calculate full-window evidence exactly;
   do not reconstruct full-window Sharpe, PSR, or total return from subwindow
   summaries.
@@ -497,7 +516,8 @@ print(result.result_dir)
 
 **Config** (`validation.toml`): top-level `strategy_path`, `strategy_id`, optional
 `verdict_source` (`"engine"` only); one or more `[[windows]]` (each with a unique
-`id` + `start`/`end`); `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
+`id` + `start`/`end`); `[data]`, `[params]`, `[fill_model]`, `[cost_model]`,
+`[capacity_model]`, `[leverage_budget]`;
 `[readiness]` (`min_observations_per_decision`, `required_observation_fields`);
 `[output]`; `[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]`.
 
@@ -538,7 +558,8 @@ print(result.evidence_quality_warnings)
 ```
 
 **Config** (`evaluation.toml`): top-level `strategy_path`, `strategy_id`;
-`[[windows]]`; `[data]`, `[params]`, `[fill_model]`, `[cost_model]`; `[metrics]`
+`[[windows]]`; `[data]`, `[params]`, `[fill_model]`, `[cost_model]`,
+`[capacity_model]`, `[leverage_budget]`; `[metrics]`
 with `annualization_periods_per_year` (must match bar cadence) and optional
 `min_annualized_samples` (default `20`); optional `[readiness]`, optional
 `[benchmark]` (`symbol`, which must also appear in `data.symbols`), and optional
@@ -567,9 +588,12 @@ in the open interval accrue zero funding; malformed/conflicting/mark-misaligned
 funding rows still fail. The metric payload reports the single shared accounting
 model.
 
-Evaluation writes Parquet-only traces (`tables/portfolio_path.parquet`,
-`trades`, `target_positions`, `target_exposure_summary`, `funding_cashflows`) and
-requires `pyarrow`. There is no JSONL fallback for row snapshots or traces.
+Evaluation writes Parquet-only traces (`tables/portfolio_path.parquet`, `trades`,
+`target_positions`, `target_exposure_summary`, `execution_events`,
+`funding_cashflows`) and requires `pyarrow`. `execution_events` is the detailed
+capacity/impact trace: one row per executed net delta with normalized/real notional,
+base cost, impact cost, total cost, bar/ADV notional volume, and bar/ADV
+participation. There is no JSONL fallback for row snapshots or traces.
 
 **Per-fold OOS returns in-process (no Parquet scraping).** A completed
 `EvaluationRunResult` also carries the per-`(window, scenario)` out-of-sample

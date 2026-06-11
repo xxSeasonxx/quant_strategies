@@ -72,6 +72,7 @@ TRADE_RESULT_KEYS = {
     "nav_attribution.sum_gross_return",
     "nav_attribution.sum_funding_return",
     "nav_attribution.sum_cost_return",
+    "nav_attribution.sum_impact_return",
     "nav_attribution.sum_net_return",
 }
 LEGACY_DISTRIBUTION = "quant" + "-engine"
@@ -96,6 +97,9 @@ def rows(
             "high": close,
             "low": close,
             "close": close,
+            "volume": 1_000_000.0,
+            "vwap": close,
+            "num_trades": 100,
         }
         if include_available_at:
             row["available_at"] = timestamp + readiness_lag
@@ -193,6 +197,7 @@ def write_config(
     params_extra: str = "",
     data_extra: str = "",
     leverage_budget_extra: str = "",
+    capacity_model_extra: str | None = None,
     causality_policy_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
@@ -246,6 +251,24 @@ def write_config(
         if foundation_cost_stress_multiplier is not None
         else ""
     )
+    capacity_model_block = (
+        capacity_model_extra
+        if capacity_model_extra is not None
+        else (
+            '[capacity_model]\nmode = "off"\n'
+            if kind == "forex_with_quotes"
+            else """[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
+"""
+        )
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -270,6 +293,8 @@ entry_lag_bars = {entry_lag_bars}
 [cost_model]
 fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
+
+{capacity_model_block}
 {leverage_budget_extra}{causality_policy_extra}
 [output]
 	results_dir = "results"
@@ -378,9 +403,11 @@ def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, obj
         "profit_factor",
         "cost_share_of_abs_gross",
         "funding_share_of_abs_gross",
+        "impact_share_of_abs_gross",
         "sum_gross_return",
         "sum_funding_return",
         "sum_cost_return",
+        "sum_impact_return",
         "sum_net_return",
     }
     return metrics
@@ -1680,6 +1707,7 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
         "high",
         "low",
         "close",
+        "volume",
         "available_at",
     ]
     assert summary["row_contract"]["quant_data_feedback"] == []
@@ -1839,6 +1867,54 @@ def test_run_config_economics_summary_matches_summary_json(
     assert result.economics.by_symbol["SPY"]["count"] == 1
     assert result.economics.by_direction["long"]["count"] == 1
     assert result.economics.by_exit_reason["signal"]["count"] == 1
+
+
+def test_run_config_surfaces_capacity_diagnostics_and_economic_impact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        foundation_subwindows=1,
+        foundation_trial_count=5,
+        capacity_model_extra="""[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 100.0
+impact_exponent = 1.0
+""",
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 100.0, 100.0, 100.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert result.economics is not None
+    trade = result.economics.trades[0]
+    assert trade.impact_return > 0.0
+    assert trade.cost_return > trade.impact_return
+    summary = read_summary(result.result_dir)
+    assert summary["economic_metrics"]["sum_impact_return"] == pytest.approx(
+        result.economics.sum_impact_return
+    )
+    capacity = summary["portfolio_foundation"]["scenarios"]["realistic_costs"]["capacity"]
+    assert capacity["execution_event_count"] == 2
+    assert capacity["total_impact_cost"] > 0.0
+    diagnostics = json.loads((result.result_dir / "diagnostics.json").read_text())
+    diagnostic_capacity = diagnostics["portfolio_foundation"]["scenarios"]["realistic_costs"][
+        "capacity"
+    ]
+    assert diagnostic_capacity["total_impact_cost"] == pytest.approx(capacity["total_impact_cost"])
 
 
 def test_run_config_exposes_portfolio_foundation_and_summary_json(
@@ -2254,7 +2330,12 @@ from datetime import UTC, datetime, timedelta
 import quant_strategies.core.engine_runner
 import quant_strategies.engine
 import quant_strategies.runner
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+)
 from quant_strategies.core.portfolio_foundation import (
     PortfolioFoundationConfig,
     build_portfolio_foundation,
@@ -2271,6 +2352,9 @@ rows = [
         "high": 100.0,
         "low": 100.0,
         "close": 100.0,
+        "volume": 1_000_000.0,
+        "vwap": 100.0,
+        "num_trades": 100,
         "available_at": start + timedelta(days=i),
     }
     for i in range(4)
@@ -2303,6 +2387,16 @@ foundation = build_portfolio_foundation(
     ),
     fill_model=FillModelConfig(price="close", entry_lag_bars=1),
     cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+    capacity_model=CapacityModelConfig(
+        mode="adv_impact",
+        portfolio_notional=1000.0,
+        adv_lookback_bars=3,
+        adv_min_observations=1,
+        max_bar_participation=1.0,
+        max_adv_participation=1.0,
+        impact_coefficient_bps=0.0,
+        impact_exponent=1.0,
+    ),
     config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
 )
 build_run_economics(foundation)
@@ -3194,6 +3288,46 @@ def test_run_config_records_row_contract_feedback(
         "row_missing_required_field": 1,
     }
     assert data_manifest["row_contract"] == row_contract
+
+
+def test_capacity_enabled_run_rejects_missing_volume_before_engine_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    contract_rows = rows(100.0, 101.0, 102.0, research_fields=True)
+    for row in contract_rows:
+        row.pop("volume")
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=contract_rows)
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "request_build"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
+    row_contract = summary["row_contract"]
+    assert summary["stage"] == "request_build"
+    assert "row_contract_failed: row_missing_required_field:volume:3" in summary["message"]
+    assert row_contract["status"] == "failed"
+    assert row_contract["required_fields"] == [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "available_at",
+    ]
+    assert row_contract["missing_required_fields"] == {"volume": 3}
+    assert row_contract["quant_data_feedback"] == ["row_missing_required_field:volume:3"]
+    assert data_manifest["row_contract"] == row_contract
+    assert not (result.result_dir / "engine_request.json").exists()
 
 
 def test_run_config_records_engine_invalid_row_contract_before_engine_request(

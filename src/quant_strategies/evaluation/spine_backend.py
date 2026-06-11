@@ -16,8 +16,9 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
-from quant_strategies.core.config import DataConfig, LeverageBudgetConfig
+from quant_strategies.core.config import CapacityModelConfig, DataConfig, LeverageBudgetConfig
 from quant_strategies.core.portfolio_foundation import (
+    REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     BookWalkResult,
     FeasibilityError,
     PortfolioFoundationConfig,
@@ -55,6 +56,7 @@ class SpineEvaluationBackend:
         *,
         decisions: Sequence[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
+        capacity_model: CapacityModelConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PreparedPortfolioInputs:
@@ -62,6 +64,7 @@ class SpineEvaluationBackend:
             decisions=tuple(decisions),
             rows=tuple(dict(row) for row in rows),
             data_kind=data_kind,
+            capacity_model=capacity_model,
             leverage_budget=leverage_budget,
         )
 
@@ -72,6 +75,7 @@ class SpineEvaluationBackend:
         rows: Sequence[Mapping[str, Any]],
         scenario: EvaluationScenario,
         metrics: EvaluationMetricsConfig,
+        capacity_model: CapacityModelConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PortfolioEvaluationResult:
@@ -79,6 +83,7 @@ class SpineEvaluationBackend:
             decisions=decisions,
             rows=rows,
             data_kind=data_kind,
+            capacity_model=capacity_model,
             leverage_budget=leverage_budget,
         )
         return self.run_prepared(prepared=prepared, scenario=scenario, metrics=metrics)
@@ -103,11 +108,17 @@ class SpineEvaluationBackend:
             walk = _walk_for_scenario(prepared, scenario)
         except FeasibilityError as exc:
             verdict = exc.verdict
+            unsupported = (
+                (verdict.reason,)
+                if verdict.reason == REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS
+                else ()
+            )
             return PortfolioEvaluationResult(
                 scenario_id=scenario.scenario_id,
                 backend=self.name,
-                status="failed",
-                warnings=(_feasibility_warning(verdict),),
+                status="unsupported" if unsupported else "failed",
+                unsupported_semantics=unsupported,
+                warnings=() if unsupported else (_feasibility_warning(verdict),),
             )
         except ValueError as exc:
             return PortfolioEvaluationResult(
@@ -150,6 +161,7 @@ def _walk_for_scenario(
         data=_data_config(prepared.data_kind, prepared.rows),
         fill_model=scenario.fill_model,
         cost_model=scenario.cost_model,
+        capacity_model=prepared.capacity_model,
         config=PortfolioFoundationConfig(
             max_gross_exposure=prepared.leverage_budget.max_gross_exposure,
             max_net_exposure=prepared.leverage_budget.max_net_exposure,

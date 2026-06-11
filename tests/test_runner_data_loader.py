@@ -25,6 +25,9 @@ def row(symbol: str, close: float = 100.0, **extra: object) -> dict[str, object]
         "high": close,
         "low": close,
         "close": close,
+        "volume": 1_000.0,
+        "vwap": close,
+        "num_trades": 100,
     }
     base.update(extra)
     return base
@@ -64,6 +67,9 @@ entry_lag_bars = 1
 [cost_model]
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
+
+[capacity_model]
+mode = "off"
 
 [output]
 results_dir = "results"

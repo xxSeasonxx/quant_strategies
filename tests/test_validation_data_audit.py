@@ -72,6 +72,7 @@ def test_audit_normalized_rows_flags_missing_available_at():
     config = SimpleNamespace(
         data=SimpleNamespace(kind="bars"),
         fill_model=SimpleNamespace(price="close"),
+        capacity_model=SimpleNamespace(mode="off"),
     )
     rows = [
         {

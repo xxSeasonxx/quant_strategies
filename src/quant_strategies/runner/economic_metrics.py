@@ -43,6 +43,7 @@ class RunTrade:
     gross_return: float
     funding_return: float
     cost_return: float
+    impact_return: float
     net_return: float
     decision_id: str | None
 
@@ -63,9 +64,11 @@ class RunEconomics:
     profit_factor: float | None
     cost_share_of_abs_gross: float | None
     funding_share_of_abs_gross: float | None
+    impact_share_of_abs_gross: float | None
     sum_gross_return: float
     sum_funding_return: float
     sum_cost_return: float
+    sum_impact_return: float
     sum_net_return: float
     by_symbol: Mapping[str, Mapping[str, Any]]
     by_direction: Mapping[str, Mapping[str, Any]]
@@ -88,9 +91,11 @@ class RunEconomics:
                 "profit_factor": self.profit_factor,
                 "cost_share_of_abs_gross": self.cost_share_of_abs_gross,
                 "funding_share_of_abs_gross": self.funding_share_of_abs_gross,
+                "impact_share_of_abs_gross": self.impact_share_of_abs_gross,
                 "sum_gross_return": self.sum_gross_return,
                 "sum_funding_return": self.sum_funding_return,
                 "sum_cost_return": self.sum_cost_return,
+                "sum_impact_return": self.sum_impact_return,
                 "sum_net_return": self.sum_net_return,
             }
         )
@@ -123,6 +128,7 @@ def build_run_economics(foundation: RunPortfolioFoundation) -> RunEconomics:
     sum_gross = sum(trade.gross_return for trade in trades)
     sum_funding = sum(trade.funding_return for trade in trades)
     sum_cost = sum(trade.cost_return for trade in trades)
+    sum_impact = sum(trade.impact_return for trade in trades)
     sum_net = sum(nets)
     return RunEconomics(
         schema_version=SUMMARY_SCHEMA_VERSION,
@@ -139,9 +145,11 @@ def build_run_economics(foundation: RunPortfolioFoundation) -> RunEconomics:
         profit_factor=_profit_factor(wins, losses),
         cost_share_of_abs_gross=_share_of_abs_gross(sum_cost, sum_gross),
         funding_share_of_abs_gross=_share_of_abs_gross(sum_funding, sum_gross),
+        impact_share_of_abs_gross=_share_of_abs_gross(sum_impact, sum_gross),
         sum_gross_return=sum_gross,
         sum_funding_return=sum_funding,
         sum_cost_return=sum_cost,
+        sum_impact_return=sum_impact,
         sum_net_return=sum_net,
         by_symbol=_group_summaries(trades, lambda trade: trade.symbol),
         by_direction=_group_summaries(trades, lambda trade: trade.side),
@@ -164,6 +172,7 @@ def _run_trade_from_round_trip(trip: RoundTrip) -> RunTrade:
         gross_return=trip.gross_cash / INITIAL_EQUITY,
         funding_return=trip.funding_cash / INITIAL_EQUITY,
         cost_return=trip.cost_cash / INITIAL_EQUITY,
+        impact_return=trip.impact_cost_cash / INITIAL_EQUITY,
         net_return=trip.realized_pnl / INITIAL_EQUITY,
         decision_id=trip.decision_id,
     )
@@ -173,16 +182,17 @@ def _group_summaries(
     trades: Sequence[RunTrade],
     key: Any,
 ) -> Mapping[str, Mapping[str, Any]]:
-    grouped: defaultdict[str, list[float]] = defaultdict(list)
+    grouped: defaultdict[str, list[RunTrade]] = defaultdict(list)
     for trade in trades:
-        grouped[str(key(trade))].append(trade.net_return)
+        grouped[str(key(trade))].append(trade)
     result: dict[str, Mapping[str, Any]] = {}
-    for name, nets in sorted(grouped.items(), key=lambda item: item[0]):
-        result[name] = MappingProxyType(_group_summary(nets))
+    for name, group_trades in sorted(grouped.items(), key=lambda item: item[0]):
+        result[name] = MappingProxyType(_group_summary(group_trades))
     return MappingProxyType(result)
 
 
-def _group_summary(nets: Sequence[float]) -> dict[str, Any]:
+def _group_summary(trades: Sequence[RunTrade]) -> dict[str, Any]:
+    nets = [trade.net_return for trade in trades]
     wins = [net for net in nets if net > 0]
     losses = [net for net in nets if net < 0]
     flats = [net for net in nets if net == 0]
@@ -191,6 +201,10 @@ def _group_summary(nets: Sequence[float]) -> dict[str, Any]:
         "winning_trade_count": len(wins),
         "losing_trade_count": len(losses),
         "flat_trade_count": len(flats),
+        "gross_sum": sum(trade.gross_return for trade in trades),
+        "funding_sum": sum(trade.funding_return for trade in trades),
+        "cost_sum": sum(trade.cost_return for trade in trades),
+        "impact_sum": sum(trade.impact_return for trade in trades),
         "net_sum": sum(nets),
         "average_trade_net": _average(nets),
         "hit_rate": _ratio(len(wins), len(nets)),

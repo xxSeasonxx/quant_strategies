@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+)
 from quant_strategies.core.engine_runner import EngineRun, evaluate_foundation
 from quant_strategies.core.portfolio_foundation import (
     PortfolioFoundationConfig,
@@ -26,6 +31,9 @@ def _rows(*closes: float) -> list[dict[str, object]]:
                 "high": close,
                 "low": close,
                 "close": close,
+                "volume": 1_000.0,
+                "vwap": close,
+                "num_trades": 100,
                 "available_at": timestamp,
             }
         )
@@ -60,6 +68,16 @@ def _foundation(rows, decisions, *, end_index: int):
         data=_data_config(end_index),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=CapacityModelConfig(
+            mode="adv_impact",
+            portfolio_notional=1_000.0,
+            adv_lookback_bars=3,
+            adv_min_observations=1,
+            max_bar_participation=1.0,
+            max_adv_participation=1.0,
+            impact_coefficient_bps=0.0,
+            impact_exponent=1.0,
+        ),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
 

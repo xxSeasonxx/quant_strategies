@@ -70,6 +70,16 @@ exit_lag_bars = 0
 fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 390
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
+
 [output]
 results_dir = "results"
 artifact_profile = "summary"
@@ -95,6 +105,9 @@ def runner_rows(symbol_count: int = 5, bars_per_symbol: int = 400) -> list[dict[
                     "high": close,
                     "low": close,
                     "close": close,
+                    "volume": 1_000_000.0,
+                    "vwap": close,
+                    "num_trades": 100,
                 }
             )
     return rows
@@ -167,6 +180,13 @@ def minimal_trace_table_artifacts(
         ),
         write_parquet_artifact(
             result_dir,
+            "tables/execution_events.parquet",
+            pd.DataFrame({"scenario_id": []}),
+            artifact_kind="execution_events",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
             "tables/funding_cashflows.parquet",
             pd.DataFrame(
                 {
@@ -197,6 +217,9 @@ def evaluation_rows() -> list[dict[str, Any]]:
             "high": 100.0,
             "low": 100.0,
             "close": 100.0,
+            "volume": 1_000.0,
+            "vwap": 100.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
@@ -207,6 +230,9 @@ def evaluation_rows() -> list[dict[str, Any]]:
             "high": 101.0,
             "low": 101.0,
             "close": 101.0,
+            "volume": 1_000.0,
+            "vwap": 101.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
@@ -217,6 +243,9 @@ def evaluation_rows() -> list[dict[str, Any]]:
             "high": 102.0,
             "low": 102.0,
             "close": 102.0,
+            "volume": 1_000.0,
+            "vwap": 102.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
@@ -227,6 +256,9 @@ def evaluation_rows() -> list[dict[str, Any]]:
             "high": 103.0,
             "low": 103.0,
             "close": 103.0,
+            "volume": 1_000.0,
+            "vwap": 103.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
     ]
@@ -279,6 +311,16 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
+
 [metrics]
 annualization_periods_per_year = 365
 
@@ -300,6 +342,7 @@ class FakeEvaluationBackend:
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        capacity_model: Any = None,
         leverage_budget: Any = None,
     ):
         pd = pytest.importorskip("pandas")
@@ -335,6 +378,7 @@ class FakeEvaluationBackend:
                     "decision_count": [1],
                 }
             ),
+            execution_events=pd.DataFrame({"scenario_id": []}),
             funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
         return PortfolioEvaluationResult(
@@ -402,6 +446,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             decisions: Sequence[Any],
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
+            capacity_model: Any = None,
             leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1
@@ -415,6 +460,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             scenario: Any,
             metrics: Any,
             data_kind: str = "bars",
+            capacity_model: Any = None,
             leverage_budget: Any = None,
         ):
             self.backend_calls += 1
@@ -471,6 +517,7 @@ def test_strip_trace_tables_removes_dataframe_payload_from_summaries():
         target_exposure_summary=pd.DataFrame(
             {"scenario_id": ["base"], "asset": ["BTC-PERP"], "decision_count": [1]}
         ),
+        execution_events=pd.DataFrame({"scenario_id": []}),
         funding_cashflows=pd.DataFrame({"scenario_id": []}),
     )
     result = PortfolioEvaluationResult(

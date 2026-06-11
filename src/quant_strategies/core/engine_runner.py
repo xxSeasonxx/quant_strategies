@@ -52,6 +52,7 @@ def evaluate_foundation(
             "sum_gross_return": economics.sum_gross_return,
             "sum_funding_return": economics.sum_funding_return,
             "sum_cost_return": economics.sum_cost_return,
+            "sum_impact_return": economics.sum_impact_return,
             "sum_net_return": economics.sum_net_return,
         },
         diagnostic_trades=diagnostic_trades,
@@ -73,6 +74,7 @@ def _trade_payload(trade: Any) -> dict[str, Any]:
             "gross_return": trade.gross_return,
             "funding_return": trade.funding_return,
             "cost_return": trade.cost_return,
+            "impact_return": trade.impact_return,
             "net_return": trade.net_return,
             "decision_id": trade.decision_id,
         }

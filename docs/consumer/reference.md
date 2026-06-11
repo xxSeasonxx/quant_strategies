@@ -161,6 +161,16 @@ Common sections, then per-surface differences. Dates are ISO strings
 
 **`[cost_model]`** — `fee_bps_per_side` (float), `slippage_bps_per_side` (float).
 
+**`[capacity_model]`** — required on quick run, validation, and evaluation.
+Operator-frozen, peer to `[fill_model]` / `[cost_model]` / `[leverage_budget]`.
+`mode = "adv_impact"` requires `portfolio_notional > 0`,
+`adv_lookback_bars`, `adv_min_observations <= adv_lookback_bars`,
+`max_bar_participation`, `max_adv_participation`, `impact_coefficient_bps`, and
+`impact_exponent`; supported `bars` and `crypto_perp_funding` row contracts require
+positive `volume`. `mode = "off"` is explicit, but a traded book is non-scoreable
+via `capacity_unpriced`. `forex_with_quotes` with ADV impact is unsupported and
+fails with `capacity_unsupported_volume_semantics`.
+
 **`[leverage_budget]`** — `max_gross_exposure` (float, default `1.0`, `>= 1.0`),
 `max_net_exposure` (float, default `1.0`, `>= 1.0`). Operator-frozen, peer to
 `[fill_model]`/`[cost_model]` (**not** an agent-editable `[output]` key). Intended
@@ -177,6 +187,9 @@ strategy_path, strategy_id            # top-level
 [params] …
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
+[capacity_model] mode, portfolio_notional, adv_lookback_bars, adv_min_observations,
+                 max_bar_participation, max_adv_participation,
+                 impact_coefficient_bps, impact_exponent
 [leverage_budget] max_gross_exposure, max_net_exposure
 [causality_policy] allow_unverified_scoring
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
@@ -232,7 +245,7 @@ generation, strategy-input artifacts, and causality replay still use only
 strategy_path, strategy_id, verdict_source?   # top-level
 [[windows]] id (unique), start, end           # one or more
 [data]   kind, dataset, symbols               # no inline start/end
-[params], [fill_model], [cost_model]
+[params], [fill_model], [cost_model], [capacity_model], [leverage_budget]
 [readiness] min_observations_per_decision (int), required_observation_fields (list[str])
 [causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [output] results_dir
@@ -256,7 +269,7 @@ still included.
 strategy_path, strategy_id                     # top-level
 [[windows]] id, start, end
 [data]   kind, dataset, symbols
-[params], [fill_model], [cost_model]
+[params], [fill_model], [cost_model], [capacity_model], [leverage_budget]
 [metrics] annualization_periods_per_year (int), min_annualized_samples (int, default 20)
 [causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [readiness]?                                    # optional; defaults to >=1 obs + >=1 symbol per decision
@@ -302,9 +315,12 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 
 **`FeasibilityVerdict`**: `feasible` (bool), `reason` (str|None — one of
 `leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
-`insufficient_samples`), `observed_gross` (float|None), `observed_net` (float|None),
-`detail` (str|None). `.payload()` returns the JSON-safe dict. The book is never
-clamped, normalized, or collapsed into an untyped `None` on a breach.
+`capacity_unpriced`, `capacity_unsupported_volume_semantics`,
+`capacity_missing_volume`, `capacity_insufficient_adv_history`,
+`capacity_limit_breach`, `insufficient_samples`), `observed_gross` (float|None),
+`observed_net` (float|None), `detail` (str|None). `.payload()` returns the
+JSON-safe dict. The book is never clamped, normalized, resized, split, or collapsed
+into an untyped `None` on a breach.
 
 **`RunEvidence`**: `replayable_from_artifacts` (bool|None), `data_availability_status`
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
@@ -347,8 +363,8 @@ path, or significance statistics.
 | `trades` | `tuple[RunTrade, ...]` | Per-trade attribution ledger (one record per netted-book round-trip) |
 | `trade_count`, win/loss/flat counts | `int` | Summary scalar counts |
 | `hit_rate`, `average_trade_net`, `average_win_net`, `average_loss_net`, `profit_factor` | `float \| None` | Undeflated per-trade scalars |
-| `cost_share_of_abs_gross`, `funding_share_of_abs_gross` | `float \| None` | Cost/funding shares of absolute gross attribution |
-| `sum_gross_return`, `sum_funding_return`, `sum_cost_return`, `sum_net_return` | `float` | Ledger totals; reconcile with the NAV path's realized PnL |
+| `cost_share_of_abs_gross`, `funding_share_of_abs_gross`, `impact_share_of_abs_gross` | `float \| None` | Cost/funding/impact shares of absolute gross attribution |
+| `sum_gross_return`, `sum_funding_return`, `sum_cost_return`, `sum_impact_return`, `sum_net_return` | `float` | Ledger totals; impact is included in `sum_cost_return`; totals reconcile with the NAV path's realized PnL |
 | `by_symbol`, `by_direction`, `by_exit_reason` | `dict[str, dict]` | Economic slice groupings |
 | `win_loss_distribution` | `dict[str, object]` | Largest/median/sum win-loss slice payload |
 | `summary_payload()` | `dict[str, object]` | Dict equal to `summary.json["economic_metrics"]` |
@@ -356,9 +372,11 @@ path, or significance statistics.
 
 `RunTrade` fields: `symbol`, `side`, `weight`, tz-aware `decision_time` /
 `entry_time` / `exit_time`, `entry_price`, `exit_price`, `exit_reason`,
-`gross_return`, `funding_return`, `cost_return`, `net_return`, and `decision_id`.
+`gross_return`, `funding_return`, `cost_return`, `impact_return`, `net_return`, and
+`decision_id`.
 Each is the realized after-cost attribution of one round-trip on the netted single
-account, so `net_return = gross_return + funding_return − cost_return` and the
+account, so `net_return = gross_return + funding_return - cost_return`;
+`impact_return` is a component of `cost_return`, not a second subtraction, and the
 ledger reconciles with the NAV path — one model of money, not two.
 
 #### `RunPortfolioFoundation`
@@ -377,12 +395,12 @@ in default artifacts.
 Top-level payload fields are `schema_version`
 (`quant_strategies.quick_run.portfolio_foundation/v2`), `basis`
 (`quick_run_netted_portfolio_book`), `evidence_class`, and `scenarios`. Each scenario
-reports a typed `feasibility` payload, a compact `full_train` metric record, and
-subwindow metrics such as `return_sample_count`, `mean_return`, `return_volatility`,
-`effective_sample_size`, `sharpe`, `sharpe_standard_error`, `skew`, `kurtosis`,
-`dsr_inputs`, `dsr`, `total_return`, `max_drawdown`, `closed_trade_count`,
-`max_symbol_concentration`, and the live `max/mean_gross_utilization` /
-`max/mean_net_utilization` exposure series.
+reports a typed `feasibility` payload, compact `capacity` diagnostics, a compact
+`full_train` metric record, and subwindow metrics such as `return_sample_count`,
+`mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
+`sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, `dsr`, `total_return`,
+`max_drawdown`, `closed_trade_count`, `max_symbol_concentration`, and the live
+`max/mean_gross_utilization` / `max/mean_net_utilization` exposure series.
 When trial-count metadata is missing, `dsr` is `None` and the subwindow warning
 list includes `missing_trial_count`. `dsr_inputs` includes a `formula` field so
 consumers can pin the DSR threshold convention.
@@ -394,6 +412,7 @@ Scenario payload fields:
 | `scenario_id` | `str` | `realistic_costs`, `cost_stress`, or `fill_stress` |
 | `cost_multiplier` | `float` | multiplier applied to configured fee + slippage bps |
 | `feasibility` | `dict` | typed verdict payload: `feasible`, `reason`, `observed_gross`, `observed_net`, `detail` |
+| `capacity` | `dict` | execution event count, normalized/real turnover, impact cost, and max/mean bar and ADV participation |
 | `full_train` | `dict` | compact metric record for the full Train scoring path |
 | `subwindow_count` | `int` | configured `foundation_subwindows` |
 | `min_dsr` / `median_dsr` | `float \| None` | subwindow DSR aggregates; not the keep-rule score |
@@ -456,6 +475,16 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
         "observed_gross": 0.25,
         "observed_net": 0.25,
         "detail": null
+      },
+      "capacity": {
+        "execution_event_count": 2,
+        "total_normalized_turnover": 50.0,
+        "total_real_turnover": 500000.0,
+        "total_impact_cost": 0.0025,
+        "max_bar_participation": 0.005,
+        "mean_bar_participation": 0.005,
+        "max_adv_participation": 0.005,
+        "mean_adv_participation": 0.005
       },
       "full_train": {
         "window_id": "full_train",
@@ -525,6 +554,9 @@ each scenario:
         "observed_gross": 0.25,
         "observed_net": 0.25,
         "detail": null
+      },
+      "capacity": {
+        "...": "same capacity shape as summary"
       },
       "full_train": {
         "...": "same metric shape as summary"

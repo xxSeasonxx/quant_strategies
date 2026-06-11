@@ -9,9 +9,11 @@ declares a **target book** (standing, signed weight-of-NAV `TargetDecision`s per
 instrument); the engine folds it into one netted, financed, marked book on every
 surface (`netted_portfolio_book_v1`) and scores its **NAV path**. The per-trade
 ledger is a derived attribution view of that same walk. An envelope breach (over
-the operator-frozen leverage budget, zero-cost on a scoreable run, unfinanced
-leverage, degenerate sample) is a typed **fail-closed** feasibility verdict that
-makes `succeeded=False` — never clamped, never a silent `None`. See `PRD.md` G8.
+the operator-frozen leverage budget, unpriced, unsupported, or missing capacity
+evidence, a capacity participation-limit breach, zero-cost on a scoreable run,
+unfinanced leverage, degenerate sample) is a typed **fail-closed** feasibility
+verdict that makes `succeeded=False` — never clamped, never a silent `None`. See
+`PRD.md` G8.
 
 ```text
 quick run      input: strategy.py + experiment.toml
@@ -56,6 +58,11 @@ rows locally before hashing or execution. `available_at` is an unconditional
 hard requirement on every row; causal replay gates valid rows strictly on
 `available_at <= decision_time`, and a missing/invalid `available_at` fails the
 row contract rather than the lookahead guard.
+When `[capacity_model].mode = "adv_impact"` on supported `bars` or
+`crypto_perp_funding` data, the row contract also requires positive `volume` so
+bar/ADV participation and impact pricing cannot silently run on missing liquidity
+inputs. `forex_with_quotes` remains unsupported for ADV impact because FX
+`volume` is tick-count activity, not calibrated notional liquidity.
 
 All three surfaces use one shared decision/spec kernel **and one shared accounting
 book** — the single causal netted portfolio book (`netted_portfolio_book_v1`). The
@@ -155,7 +162,8 @@ Important sections:
 
 - top-level `strategy_path`, `strategy_id`;
 - `[data]` loaded through `quant_data`;
-- `[params]`, `[fill_model]`, `[cost_model]`;
+- `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
+  `[leverage_budget]`;
 - `[output]` with repo-local generated `results_dir` under `results/`, artifact
 profile, and diagnostic sizing.
 
@@ -170,13 +178,15 @@ full-profile artifacts. Completed, feasible quick-run `summary.json` files inclu
 `economic_metrics`, a compact summary of the per-trade attribution ledger derived
 from the book walk, and `portfolio_foundation`, the compact summary of the
 authoritative scored NAV book (schema `v2`, basis `quick_run_netted_portfolio_book`)
-for Train scoring. Diagnostic-profile runs additionally write `diagnostics.json`
-with `economic_slices` and the portfolio-foundation matrix. Each
-portfolio-foundation scenario carries a typed `feasibility` payload plus a compact
-`full_train` metric record and configured subwindow records — computed over at-risk
-bars — so downstream scoring can combine full-window and weakest-window evidence
-without raw period-return traces. Full per-period return traces are not written by
-default.
+for Train scoring. The economics summary includes impact-cost attribution, and
+each portfolio-foundation scenario includes compact capacity diagnostics: execution
+event count, normalized/real turnover, impact cost, and max/mean bar and ADV
+participation. Diagnostic-profile runs additionally write `diagnostics.json` with
+`economic_slices` and the portfolio-foundation matrix. Each portfolio-foundation
+scenario carries a typed `feasibility` payload plus a compact `full_train` metric
+record and configured subwindow records — computed over at-risk bars — so
+downstream scoring can combine full-window and weakest-window evidence without raw
+period-return traces. Full per-period return traces are not written by default.
 Failed or infeasible quick-run `summary.json` files set `run_completed` to `false`
 and `failure_stage` to the failed runner stage (`feasibility` on an envelope
 breach).
@@ -212,9 +222,9 @@ Purpose:
 scenarios;
 - require `validate_params`;
 - run strict row-contract, observation, and hidden-lookahead checks;
-- run the candidate through the single causal netted portfolio book; an
-  intended-gross or unfinanced-leverage breach is the fail-closed feasibility
-  verdict, not a translation-layer rejection of flat/leveraged targets;
+- run the candidate through the single causal netted portfolio book; intended-gross,
+  capacity, or unfinanced-leverage breaches are fail-closed feasibility verdicts,
+  not translation-layer rejections of flat/leveraged targets;
 - emit an advisory validation decision from the validation policy.
 
 Primary config file: candidate-local `validation.toml`.
@@ -224,7 +234,8 @@ Important sections:
 - top-level `strategy_path`, `strategy_id`, optional `verdict_source` (`"engine"`
   only — the netted-book spine);
 - `[[windows]]`;
-- `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
+- `[data]`, `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
+  `[leverage_budget]`;
 - `[readiness]`;
 - `[output]`;
 - `[search_pressure]`, plus optional `[mechanical_thresholds]`.
@@ -340,7 +351,8 @@ Important sections:
 
 - top-level `strategy_path`, `strategy_id`;
 - `[[windows]]`;
-- `[data]`, `[params]`, `[fill_model]`, `[cost_model]`;
+- `[data]`, `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
+  `[leverage_budget]`;
 - `[metrics]` with `annualization_periods_per_year` and optional
   `min_annualized_samples`;
 - optional `[readiness]` for decision observation requirements; defaults to at
@@ -388,6 +400,7 @@ or traces. Decision records are JSONL for direct audit.
 | `tables/trades.parquet`                  | aggregate trade trace rows by `scenario_id`                                                                                                              |
 | `tables/target_positions.parquet`        | aggregate target-position entry/exit events by `scenario_id`, timestamp, and asset; this is target schedule evidence, not realized broker position state |
 | `tables/target_exposure_summary.parquet` | aggregate target exposure decision counts and target round-trip turnover by `scenario_id` and asset                                                      |
+| `tables/execution_events.parquet`        | one row per executed net delta with normalized/real notional, base cost, impact cost, total cost, bar/ADV notional volume, and bar/ADV participation       |
 | `tables/funding_cashflows.parquet`       | aggregate funding cashflow rows by `scenario_id`, timestamp, and asset; empty but schema-valid for non-funding evaluations                               |
 
 

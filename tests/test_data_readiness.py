@@ -17,6 +17,7 @@ def config() -> SimpleNamespace:
     return SimpleNamespace(
         data=SimpleNamespace(kind="bars"),
         fill_model=SimpleNamespace(price="close"),
+        capacity_model=SimpleNamespace(mode="off"),
     )
 
 

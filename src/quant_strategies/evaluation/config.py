@@ -17,6 +17,7 @@ from pydantic import (
 )
 
 from quant_strategies.core.config import (
+    CapacityModelConfig,
     CausalityReplayConfig,
     CostModelConfig,
     DataConfig,
@@ -129,6 +130,7 @@ class EvaluationConfig(EvaluationConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    capacity_model: CapacityModelConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     metrics: EvaluationMetricsConfig
     causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
@@ -185,6 +187,7 @@ class EvaluationConfig(EvaluationConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            capacity_model=self.capacity_model,
             leverage_budget=self.leverage_budget,
             require_param_validator=True,
         )

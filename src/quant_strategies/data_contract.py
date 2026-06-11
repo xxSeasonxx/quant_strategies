@@ -31,6 +31,7 @@ RowContractSeverity = Literal["warning", "error"]
 _BASE_REQUIRED_FIELDS = ("symbol", "timestamp", "open", "high", "low", "close")
 _OHLC_FIELDS = ("open", "high", "low", "close")
 _QUOTE_FIELDS = ("bid", "ask", "mid")
+_CAPACITY_VOLUME_DATA_KINDS = {"bars", "crypto_perp_funding"}
 _ISSUE_SAMPLE_SIZE = 25
 
 
@@ -239,6 +240,11 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                 normalized,
                 issues,
                 require_fields=data_kind == "forex_with_quotes" and fill_price == "quote",
+            )
+            _normalize_capacity_fields(
+                normalized,
+                issues,
+                require_volume=_requires_capacity_volume(config, data_kind),
             )
 
             available_at = normalized.get("available_at")
@@ -494,6 +500,8 @@ def required_row_fields(config: Any) -> tuple[str, ...]:
         fields.append("has_funding_event")
     if data_kind == "forex_with_quotes" and _fill_price(config) == "quote":
         fields.extend(_QUOTE_FIELDS)
+    if _requires_capacity_volume(config, data_kind):
+        fields.append("volume")
     fields.append("available_at")
     return tuple(fields)
 
@@ -504,6 +512,14 @@ def _data_kind(config: Any) -> str:
 
 def _fill_price(config: Any) -> str | None:
     return getattr(config.fill_model, "price", None)
+
+
+def _capacity_mode(config: Any) -> str:
+    return str(config.capacity_model.mode)
+
+
+def _requires_capacity_volume(config: Any, data_kind: str) -> bool:
+    return _capacity_mode(config) == "adv_impact" and data_kind in _CAPACITY_VOLUME_DATA_KINDS
 
 
 def _normalize_mapping_keys(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -723,6 +739,34 @@ def _normalize_quote_fields(
             allow_zero=False,
         )
     _validate_quote_order(row, issues)
+
+
+def _normalize_capacity_fields(
+    row: dict[str, Any],
+    issues: _IssueSink,
+    *,
+    require_volume: bool,
+) -> None:
+    if not require_volume:
+        return
+    if _is_missing(row, "volume"):
+        issues.append(
+            _issue(
+                "row_missing_required_field",
+                "volume",
+                row,
+                severity="error",
+                message="capacity-enabled row is missing required field 'volume'",
+            )
+        )
+        return
+    _normalize_numeric_field(
+        row,
+        "volume",
+        issues,
+        minimum=0.0,
+        allow_zero=False,
+    )
 
 
 def _validate_ohlc_order(row: Mapping[str, Any], issues: _IssueSink) -> None:

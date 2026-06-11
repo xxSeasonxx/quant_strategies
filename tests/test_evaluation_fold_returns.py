@@ -53,6 +53,7 @@ class MultiBarFakeBackend(FakeBackend):
         scenario: Any,
         metrics: Any,
         data_kind: str = "bars",
+        capacity_model: Any = None,
         leverage_budget: Any = None,
     ) -> PortfolioEvaluationResult:
         timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
@@ -87,6 +88,7 @@ class MultiBarFakeBackend(FakeBackend):
                     "decision_count": [1],
                 }
             ),
+            execution_events=pd.DataFrame({"scenario_id": []}),
             funding_cashflows=pd.DataFrame({"scenario_id": []}),
         )
         return PortfolioEvaluationResult(
@@ -299,6 +301,16 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
+
 [metrics]
 annualization_periods_per_year = 365
 
@@ -422,7 +434,7 @@ def test_spine_backend_fold_returns_smoke():
     portfolio_path (drives ``SpineEvaluationBackend`` directly, the only money model)."""
     from datetime import datetime as _dt
 
-    from tests.test_evaluation_backend import decision, flat, scenario
+    from tests.test_evaluation_backend import capacity_model, decision, flat, scenario
     from tests.test_evaluation_backend import rows as backend_rows
 
     from quant_strategies.evaluation.config import EvaluationMetricsConfig
@@ -437,6 +449,7 @@ def test_spine_backend_fold_returns_smoke():
         rows=backend_rows(),
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        capacity_model=capacity_model(),
     )
     assert result.status == "completed"
     assert result.tables is not None

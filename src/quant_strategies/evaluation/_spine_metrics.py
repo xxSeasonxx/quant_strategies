@@ -24,6 +24,7 @@ from typing import Any
 
 from quant_strategies.core.portfolio_foundation import (
     BookWalkResult,
+    ExecutionEvent,
     FundingEvent,
     RoundTrip,
 )
@@ -57,6 +58,26 @@ _TRADE_COLUMNS = (
     "gross_cash",
     "funding_cash",
     "cost_cash",
+)
+_EXECUTION_EVENT_COLUMNS = (
+    "scenario_id",
+    "asset",
+    "timestamp",
+    "reason",
+    "side",
+    "fill_price",
+    "delta_units",
+    "normalized_notional",
+    "real_notional",
+    "base_cost",
+    "impact_cost",
+    "total_cost",
+    "bar_notional_volume",
+    "adv_notional_volume",
+    "bar_participation",
+    "adv_participation",
+    "decision_time",
+    "decision_id",
 )
 _FUNDING_COLUMNS = (
     "scenario_id",
@@ -148,6 +169,7 @@ def spine_trace_tables(
         trades=_trades_frame(pd, walk.round_trips, scenario_id),
         target_positions=_target_positions_frame(pd, walk.round_trips, scenario_id),
         target_exposure_summary=_target_exposure_summary_frame(pd, walk.round_trips, scenario_id),
+        execution_events=_execution_events_frame(pd, walk.execution_events, scenario_id),
         funding_cashflows=_funding_cashflows_frame(pd, walk.funding_events, scenario_id),
     )
 
@@ -379,4 +401,33 @@ def _funding_cashflows_frame(pd: Any, events: Sequence[FundingEvent], scenario_i
             for event in events
         ],
         columns=_FUNDING_COLUMNS,
+    )
+
+
+def _execution_events_frame(pd: Any, events: Sequence[ExecutionEvent], scenario_id: str) -> Any:
+    return pd.DataFrame.from_records(
+        [
+            {
+                "scenario_id": scenario_id,
+                "asset": event.symbol,
+                "timestamp": event.timestamp,
+                "reason": event.reason,
+                "side": event.side,
+                "fill_price": event.fill_price,
+                "delta_units": event.delta_units,
+                "normalized_notional": event.normalized_notional,
+                "real_notional": event.real_notional,
+                "base_cost": event.base_cost,
+                "impact_cost": event.impact_cost,
+                "total_cost": event.total_cost,
+                "bar_notional_volume": event.bar_notional_volume,
+                "adv_notional_volume": event.adv_notional_volume,
+                "bar_participation": event.bar_participation,
+                "adv_participation": event.adv_participation,
+                "decision_time": event.decision_time,
+                "decision_id": event.decision_id,
+            }
+            for event in events
+        ],
+        columns=_EXECUTION_EVENT_COLUMNS,
     )

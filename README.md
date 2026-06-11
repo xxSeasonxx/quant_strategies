@@ -80,10 +80,11 @@ The design has one spine:
   view of the same walk, kept first-class for alpha research but never an
   independent scored number.
 - **Feasibility fails closed.** An envelope breach — intended gross/net over the
-  operator-frozen leverage budget, a zero-cost scoreable run, unfinanced leverage,
-  or a degenerate sample — yields a typed feasibility verdict that makes the run
-  non-scoreable with an actionable reason. It is never clamped and never collapsed
-  into a silent `None`; `succeeded` is gated on it.
+  operator-frozen leverage budget, unpriced, unsupported, or missing capacity
+  evidence, a capacity participation-limit breach, a zero-cost scoreable run,
+  unfinanced leverage, or a degenerate sample — yields a typed feasibility verdict
+  that makes the run non-scoreable with an actionable reason. It is never clamped
+  and never collapsed into a silent `None`; `succeeded` is gated on it.
 - **Three implemented public surfaces today.** A fast *quick run* for diagnostic
   evidence, an *advisory validation run* for retained-candidate mechanical
   evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
@@ -175,8 +176,9 @@ breach), and writes `summary.json` with `run_completed: false`.
 Runs the same kernel and the same single causal netted portfolio book across
 configured windows and stress scenarios, then returns advisory retained-candidate
 mechanical evidence. It is an evidence audit, not research evaluation: never
-statistical significance, regime robustness, portfolio quality, capacity, or
-promotion authority. `paper_trade_eligible` / `live_eligible` always stay false.
+statistical significance, regime robustness, portfolio quality, liquidity beyond
+the configured capacity envelope, or promotion authority. `paper_trade_eligible` /
+`live_eligible` always stay false.
 Validation configs require unique window IDs and explicit `[readiness]`
 observation coverage. For `crypto_perp_funding`, readiness also requires
 decision observations for `close`, `funding_timestamp`, `funding_rate`, and
@@ -241,6 +243,15 @@ configured as bounded; result provenance records the replay scope.
   unpriced-leverage book (an asset class whose financing is not yet modeled)
   non-scoreable; crypto-perp funding is modeled, so a perp book is not flagged by
   that verdict.
+- **Capacity is an operator-frozen scoring envelope.** Quick run, validation, and
+  evaluation configs must declare `[capacity_model]`. Supported bars and
+  crypto-perp runs with `mode = "adv_impact"` require positive row `volume`;
+  impact is charged inside the same NAV cash path and diagnostics report turnover,
+  impact cost, bar participation, and ADV participation. `mode = "off"` is allowed
+  for explicit profiling/flat books, but a traded book fails closed with
+  `capacity_unpriced`. `forex_with_quotes` ADV impact is unsupported until FX
+  notional liquidity is calibrated and fails with
+  `capacity_unsupported_volume_semantics`.
 - **One funding model on every surface.** Funding is computed once, in the single
   shared netted book, as a NAV cashflow on the net held position. Fillable crypto
   perp windows with no funding events in the open interval accrue zero funding;

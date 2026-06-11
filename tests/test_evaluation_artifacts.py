@@ -167,6 +167,30 @@ def test_table_metadata_reads_scenario_ids_from_parquet_footer(tmp_path: Path):
             },
         ),
         (
+            "execution_events",
+            pd.DataFrame({"scenario_id": []}),
+            {
+                "scenario_id": "string",
+                "asset": "string",
+                "timestamp": "timestamp[us, tz=UTC]",
+                "reason": "string",
+                "side": "string",
+                "fill_price": "double",
+                "delta_units": "double",
+                "normalized_notional": "double",
+                "real_notional": "double",
+                "base_cost": "double",
+                "impact_cost": "double",
+                "total_cost": "double",
+                "bar_notional_volume": "double",
+                "adv_notional_volume": "double",
+                "bar_participation": "double",
+                "adv_participation": "double",
+                "decision_time": "timestamp[us, tz=UTC]",
+                "decision_id": "string",
+            },
+        ),
+        (
             "funding_cashflows",
             pd.DataFrame({"scenario_id": []}),
             {
@@ -506,7 +530,7 @@ def test_write_evaluation_manifest_keeps_trace_tables_out_of_artifact_hashes(tmp
     assert not any(path.endswith(".parquet") for path in artifact_paths)
     assert manifest["tables"][0]["path"] == "tables/portfolio_path.parquet"
     assert manifest["tables"][0]["file_sha256"]
-    assert manifest["trace_artifacts"]["table_count"] == 5
+    assert manifest["trace_artifacts"]["table_count"] == 6
 
 
 def test_write_json_artifact_rejects_path_escape(tmp_path: Path):
@@ -596,6 +620,34 @@ def _write_required_trace_tables(
                 }
             ),
             artifact_kind="target_exposure_summary",
+            scenario_ids=scenario_ids,
+        ),
+        write_parquet_artifact(
+            result_dir,
+            "tables/execution_events.parquet",
+            pd.DataFrame(
+                {
+                    "scenario_id": [],
+                    "asset": [],
+                    "timestamp": [],
+                    "reason": [],
+                    "side": [],
+                    "fill_price": [],
+                    "delta_units": [],
+                    "normalized_notional": [],
+                    "real_notional": [],
+                    "base_cost": [],
+                    "impact_cost": [],
+                    "total_cost": [],
+                    "bar_notional_volume": [],
+                    "adv_notional_volume": [],
+                    "bar_participation": [],
+                    "adv_participation": [],
+                    "decision_time": [],
+                    "decision_id": [],
+                }
+            ),
+            artifact_kind="execution_events",
             scenario_ids=scenario_ids,
         ),
         write_parquet_artifact(

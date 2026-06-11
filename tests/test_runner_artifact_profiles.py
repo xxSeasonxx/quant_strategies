@@ -181,6 +181,16 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = 0.0
+impact_exponent = 1.0
+
 [output]
 results_dir = "results"
 quick_checks = true
@@ -233,6 +243,7 @@ def assert_trade_result_metric_semantics(payload: dict[str, object]) -> None:
         "nav_attribution.sum_gross_return",
         "nav_attribution.sum_funding_return",
         "nav_attribution.sum_cost_return",
+        "nav_attribution.sum_impact_return",
         "nav_attribution.sum_net_return",
     }
     net = metric_semantics["nav_attribution.sum_net_return"]
@@ -310,6 +321,7 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
                 "sum_gross_return": 0.03,
                 "sum_funding_return": 0.0,
                 "sum_cost_return": 0.0,
+                "sum_impact_return": 0.0,
                 "sum_net_return": 0.03,
             },
         },
@@ -331,6 +343,7 @@ def test_summary_profile_payload_contains_rows_decisions_and_engine(tmp_path: Pa
             "sum_gross_return": 0.03,
             "sum_funding_return": 0.0,
             "sum_cost_return": 0.0,
+            "sum_impact_return": 0.0,
             "sum_net_return": 0.03,
         },
     }
@@ -390,6 +403,7 @@ def test_write_summary_profile_artifact_writes_json(tmp_path: Path):
                 "sum_gross_return": 0.01,
                 "sum_funding_return": 0.0,
                 "sum_cost_return": 0.0,
+                "sum_impact_return": 0.0,
                 "sum_net_return": 0.01,
             },
         },
@@ -420,6 +434,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
             "sum_gross_return": 0.06,
             "sum_funding_return": -0.01,
             "sum_cost_return": 0.03,
+            "sum_impact_return": 0.0,
             "sum_net_return": 0.02,
         },
         "diagnostic_trades": [
@@ -437,6 +452,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
                 "gross_return": 0.05,
                 "funding_return": 0.0,
                 "cost_return": 0.0,
+                "impact_return": 0.0,
                 "net_return": 0.05,
                 "decision_metadata": {"family": "test"},
             },
@@ -454,6 +470,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
                 "gross_return": -0.02,
                 "funding_return": -0.01,
                 "cost_return": 0.0,
+                "impact_return": 0.0,
                 "net_return": -0.03,
                 "decision_metadata": {"family": "test"},
             },
@@ -471,6 +488,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
                 "gross_return": 0.03,
                 "funding_return": 0.0,
                 "cost_return": 0.03,
+                "impact_return": 0.0,
                 "net_return": 0.0,
                 "decision_metadata": {"family": "test"},
             },
@@ -521,6 +539,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         "gross": pytest.approx(0.03),
         "funding": pytest.approx(-0.01),
         "cost": pytest.approx(0.0),
+        "impact": pytest.approx(0.0),
         "net": pytest.approx(0.02),
     }
     assert payload["by_direction"]["long"]["count"] == 2
@@ -560,8 +579,10 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         "gross": 0.06,
         "funding": -0.01,
         "cost": 0.03,
+        "impact": 0.0,
         "net": 0.02,
         "cost_fraction_of_abs_gross": pytest.approx(0.5),
+        "impact_fraction_of_abs_gross": pytest.approx(0.0),
     }
     assert [item["decision_id"] for item in payload["sample_trades"]["largest_winners"]] == [
         "winner",
@@ -583,6 +604,7 @@ def test_diagnostic_payload_contains_bounded_behavior_slices(tmp_path: Path):
         "gross_return",
         "funding_return",
         "cost_return",
+        "impact_return",
         "net_return",
     }
     assert "decision_metadata" not in payload["sample_trades"]["largest_winners"][0]

@@ -13,10 +13,16 @@ TIMESTAMP = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
 AVAILABLE_AT = datetime(2024, 1, 1, 9, 31, tzinfo=UTC)
 
 
-def config(kind: str = "bars", *, fill_price: str = "close") -> SimpleNamespace:
+def config(
+    kind: str = "bars",
+    *,
+    fill_price: str = "close",
+    capacity_mode: str = "off",
+) -> SimpleNamespace:
     return SimpleNamespace(
         data=SimpleNamespace(kind=kind),
         fill_model=SimpleNamespace(price=fill_price),
+        capacity_model=SimpleNamespace(mode=capacity_mode),
     )
 
 
@@ -86,6 +92,50 @@ def test_nonpositive_ohlc_emits_invalid_numeric_field(
         ("row_invalid_numeric_field", field_name)
     ]
     assert normalized.row_contract_summary()["status"] == "failed"
+
+
+def test_capacity_enabled_supported_rows_require_positive_volume():
+    missing_volume = valid_row()
+    negative_volume = valid_row(
+        timestamp=TIMESTAMP + timedelta(minutes=1),
+        available_at=AVAILABLE_AT + timedelta(minutes=1),
+        volume=-1.0,
+    )
+
+    normalized = NormalizedRows.from_rows(
+        config(capacity_mode="adv_impact"),
+        [missing_volume, negative_volume],
+    )
+
+    assert normalized.row_contract_summary()["required_fields"] == [
+        "symbol",
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "available_at",
+    ]
+    assert [(issue.reason, issue.field) for issue in normalized.issues] == [
+        ("row_missing_required_field", "volume"),
+        ("row_invalid_numeric_field", "volume"),
+    ]
+    assert normalized.row_contract_summary()["missing_required_fields"] == {"volume": 1}
+    assert normalized.row_contract_summary()["status"] == "failed"
+
+
+def test_capacity_enabled_supported_rows_preserve_volume_inputs():
+    normalized = NormalizedRows.from_rows(
+        config(capacity_mode="adv_impact"),
+        [valid_row(volume=Decimal("1000.5"), vwap=Decimal("100.25"), num_trades=42)],
+    )
+
+    projected = normalized.projection_rows()[0]
+    assert projected["volume"] == 1000.5
+    assert projected["vwap"] == Decimal("100.25")
+    assert projected["num_trades"] == 42
+    assert normalized.row_contract_summary()["status"] == "passed"
 
 
 def test_invalid_ohlc_order_emits_invalid_ohlc_order():

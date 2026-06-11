@@ -11,13 +11,23 @@ from __future__ import annotations
 
 import math
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from statistics import stdev
 
 import pytest
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+)
 from quant_strategies.core.portfolio_foundation import (
     INITIAL_EQUITY,
+    REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY,
+    REASON_CAPACITY_LIMIT_BREACH,
+    REASON_CAPACITY_UNPRICED,
+    REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     REASON_INSUFFICIENT_SAMPLES,
     REASON_LEVERAGE_BUDGET_BREACH,
     REASON_UNFINANCED_LEVERAGE,
@@ -40,6 +50,29 @@ def ts(index: int) -> datetime:
     return START + timedelta(days=index)
 
 
+def capacity_model(
+    *,
+    mode: str = "adv_impact",
+    impact_coefficient_bps: float = 0.0,
+    portfolio_notional: float = 1_000.0,
+    adv_min_observations: int = 1,
+    max_bar_participation: float = 1.0,
+    max_adv_participation: float = 1.0,
+) -> CapacityModelConfig:
+    if mode == "off":
+        return CapacityModelConfig(mode="off")
+    return CapacityModelConfig(
+        mode="adv_impact",
+        portfolio_notional=portfolio_notional,
+        adv_lookback_bars=3,
+        adv_min_observations=adv_min_observations,
+        max_bar_participation=max_bar_participation,
+        max_adv_participation=max_adv_participation,
+        impact_coefficient_bps=impact_coefficient_bps,
+        impact_exponent=1.0,
+    )
+
+
 def bar_rows(
     *closes: float,
     symbol: str = "SPY",
@@ -55,6 +88,9 @@ def bar_rows(
             "high": close,
             "low": close,
             "close": close,
+            "volume": 1_000.0,
+            "vwap": close,
+            "num_trades": 100,
             "available_at": ts(index),
         }
         if index in funding_at:
@@ -81,6 +117,9 @@ def ohlc_rows(
                 "high": high,
                 "low": low,
                 "close": close,
+                "volume": 1_000.0,
+                "vwap": close,
+                "num_trades": 100,
                 "available_at": ts(index),
             }
         )
@@ -123,6 +162,7 @@ def walk(
     kind: str = "bars",
     per_side_cost_fraction: float = 0.0,
     config: PortfolioFoundationConfig | None = None,
+    capacity: CapacityModelConfig | None = None,
     entry_lag_bars: int = 1,
 ) -> BookWalkResult:
     row_index = _RowIndex(rows)
@@ -136,8 +176,114 @@ def walk(
         plan,
         per_side_cost_fraction=per_side_cost_fraction,
         data_kind=kind,
+        capacity_model=capacity or capacity_model(),
         config=config or PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
+
+
+# --------------------------------------------------------------------------------------
+# capacity / ADV / market-impact execution events
+# --------------------------------------------------------------------------------------
+
+
+def test_capacity_impact_reduces_nav_and_records_execution_event():
+    rows = bar_rows(100.0, 100.0, 100.0)
+    result = walk(
+        rows,
+        [target(0, 0.5)],
+        capacity=capacity_model(impact_coefficient_bps=100.0, portfolio_notional=1_000.0),
+    )
+
+    # normalized notional = 50; real notional = 500; prior ADV notional = 100,000;
+    # impact fraction = 100 bps * 0.005 = 0.00005; normalized impact cash = 0.0025.
+    assert result.final_nav == pytest.approx(INITIAL_EQUITY - 0.0025)
+    assert len(result.execution_events) == 1
+    event = result.execution_events[0]
+    assert event.symbol == "SPY"
+    assert event.timestamp == ts(1)
+    assert event.side == "buy"
+    assert event.normalized_notional == pytest.approx(50.0)
+    assert event.real_notional == pytest.approx(500.0)
+    assert event.bar_notional_volume == pytest.approx(100_000.0)
+    assert event.adv_notional_volume == pytest.approx(100_000.0)
+    assert event.bar_participation == pytest.approx(0.005)
+    assert event.adv_participation == pytest.approx(0.005)
+    assert event.impact_cost == pytest.approx(0.0025)
+    assert event.total_cost == pytest.approx(0.0025)
+
+
+def test_capacity_off_traded_book_fails_closed():
+    with pytest.raises(FeasibilityError) as exc:
+        walk(bar_rows(100.0, 100.0, 100.0), [target(0, 0.5)], capacity=capacity_model(mode="off"))
+
+    assert exc.value.verdict.reason == REASON_CAPACITY_UNPRICED
+
+
+def test_capacity_off_flat_book_is_allowed():
+    result = walk(bar_rows(100.0, 100.0), [], capacity=capacity_model(mode="off"))
+
+    assert result.final_nav == INITIAL_EQUITY
+    assert result.execution_events == ()
+
+
+def test_forex_capacity_impact_is_unsupported():
+    with pytest.raises(FeasibilityError) as exc:
+        walk(
+            bar_rows(100.0, 100.0, 100.0),
+            [target(0, 0.5)],
+            kind="forex_with_quotes",
+            capacity=capacity_model(),
+        )
+
+    assert exc.value.verdict.reason == REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS
+
+
+def test_forex_capacity_impact_is_unsupported_even_without_trades():
+    with pytest.raises(FeasibilityError) as exc:
+        walk(
+            bar_rows(100.0, 100.0),
+            [],
+            kind="forex_with_quotes",
+            capacity=capacity_model(),
+        )
+
+    assert exc.value.verdict.reason == REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS
+
+
+def test_capacity_notional_volume_prefers_positive_decimal_vwap():
+    rows = bar_rows(100.0, 100.0, 100.0)
+    rows[1]["vwap"] = Decimal("50.0")
+
+    result = walk(
+        rows,
+        [target(0, 0.5)],
+        capacity=capacity_model(impact_coefficient_bps=0.0),
+    )
+
+    assert result.execution_events[0].bar_notional_volume == pytest.approx(50_000.0)
+
+
+def test_capacity_adv_history_uses_prior_rows_only():
+    with pytest.raises(FeasibilityError) as exc:
+        walk(
+            bar_rows(100.0, 100.0, 100.0),
+            [target(0, 0.5)],
+            capacity=capacity_model(adv_min_observations=2),
+        )
+
+    assert exc.value.verdict.reason == REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY
+
+
+def test_capacity_participation_breach_fails_closed():
+    with pytest.raises(FeasibilityError) as exc:
+        walk(
+            bar_rows(100.0, 100.0, 100.0),
+            [target(0, 0.5)],
+            capacity=capacity_model(max_adv_participation=0.001),
+        )
+
+    assert exc.value.verdict.reason == REASON_CAPACITY_LIMIT_BREACH
+    assert "adv_participation" in (exc.value.verdict.detail or "")
 
 
 # --------------------------------------------------------------------------------------
@@ -245,6 +391,9 @@ def quote_bar_rows(
                 "bid": bid,
                 "ask": ask,
                 "mid": close,
+                "volume": 1_000.0,
+                "vwap": close,
+                "num_trades": 100,
                 "available_at": ts(index),
             }
         )
@@ -265,7 +414,8 @@ def quote_walk(
         row_index,
         plan,
         per_side_cost_fraction=0.0,
-        data_kind="forex_with_quotes",
+        data_kind="bars",
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
 
@@ -513,6 +663,7 @@ def test_flat_tail_does_not_change_sample_count_vs_short_window():
             data=data_config(end),
             fill_model=FillModelConfig(price="close", entry_lag_bars=1),
             cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+            capacity_model=capacity_model(),
             config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
         )
         full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
@@ -531,6 +682,7 @@ def test_degenerate_sample_gated_as_non_scoreable_verdict():
         data=data_config(2),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
@@ -604,6 +756,7 @@ def test_zero_cost_on_scoreable_run_is_non_scoreable():
         data=data_config(3),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
@@ -816,6 +969,7 @@ def test_closed_round_trips_counted_by_exit_time_per_subwindow():
         data=data_config(7),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=2, trial_count=5),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
@@ -838,6 +992,7 @@ def test_build_foundation_emits_three_scenarios_and_utilization_fields():
         data=data_config(4),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5, cost_stress_multiplier=2.0),
     )
     payload = foundation.matrix_payload()
@@ -855,6 +1010,26 @@ def test_build_foundation_emits_three_scenarios_and_utilization_fields():
     text = __import__("json").dumps(payload)
     for forbidden in ("period_return", "portfolio_value", "navs"):
         assert forbidden not in text
+
+
+def test_foundation_summary_reports_capacity_diagnostics():
+    rows = bar_rows(100.0, 100.0, 100.0)
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=[target(0, 0.5)],
+        data=data_config(2),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(impact_coefficient_bps=100.0, portfolio_notional=1_000.0),
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
+
+    capacity = foundation.matrix_payload()["scenarios"]["realistic_costs"]["capacity"]
+    assert capacity["execution_event_count"] == 1
+    assert capacity["total_normalized_turnover"] == pytest.approx(50.0)
+    assert capacity["total_impact_cost"] == pytest.approx(0.0025)
+    assert capacity["max_bar_participation"] == pytest.approx(0.005)
+    assert capacity["max_adv_participation"] == pytest.approx(0.005)
 
 
 def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic():
@@ -876,6 +1051,7 @@ def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic()
         "data": data_config(4),
         "fill_model": FillModelConfig(price="close", entry_lag_bars=1),
         "cost_model": cost_model,
+        "capacity_model": capacity_model(),
     }
 
     stressed = build_portfolio_foundation(
@@ -906,6 +1082,7 @@ def test_build_foundation_reports_every_configured_subwindow_even_when_empty():
         data=data_config(2),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=4, trial_count=None),
     )
     subwindows = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"]
@@ -929,6 +1106,7 @@ def test_max_symbol_concentration_from_netted_book():
         data=data_config(2, symbols=("AAA", "BBB")),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
     full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]

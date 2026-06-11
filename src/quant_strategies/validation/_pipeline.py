@@ -860,6 +860,7 @@ def _scenario_config(
             "cost_model": {**_plain_mapping(config.cost_model), **scenario.cost_model},
             "fill_model": {**_plain_mapping(config.fill_model), **scenario.fill_model},
             "data": _plain_mapping(data),
+            "capacity_model": _plain_mapping(config.capacity_model),
             "leverage_budget": _plain_mapping(config.leverage_budget),
         }
     )

@@ -72,9 +72,20 @@ def trade_result_metric_semantics(data_kind: str) -> dict[str, dict[str, object]
         ),
         MetricSemantics(
             name="nav_attribution.sum_cost_return",
-            aggregation="sum over book round-trips of traded cost on the netted delta / NAV",
+            aggregation=(
+                "sum over book round-trips of total traded cost on the netted delta / NAV"
+            ),
             return_path_model="netted_book_delta_cost",
-            asymmetry="cost charged on the traded delta of the netted book, not per ticket",
+            asymmetry=(
+                "total cost charged on the traded delta of the netted book, including impact"
+            ),
+            **shared,
+        ),
+        MetricSemantics(
+            name="nav_attribution.sum_impact_return",
+            aggregation="sum over book round-trips of market-impact cost / NAV",
+            return_path_model="netted_book_adv_impact_cost",
+            asymmetry="component of sum_cost_return, not a second subtraction from net",
             **shared,
         ),
         MetricSemantics(

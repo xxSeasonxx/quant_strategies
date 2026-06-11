@@ -1,6 +1,7 @@
 """Neutral shared primitives for quant strategy workflows."""
 
 from quant_strategies.core.config import (
+    CapacityModelConfig,
     CostModelConfig,
     DataConfig,
     DataKind,
@@ -10,6 +11,7 @@ from quant_strategies.core.config import (
 )
 
 __all__ = [
+    "CapacityModelConfig",
     "CostModelConfig",
     "DataConfig",
     "DataKind",

@@ -4,7 +4,12 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+)
 from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision
 from quant_strategies.validation.backends import BackendMetrics
 from quant_strategies.validation.config import ScenarioRunConfig
@@ -24,6 +29,9 @@ def bar(minute: int, close: float) -> dict:
         "high": close,
         "low": close,
         "close": close,
+        "volume": 1_000.0,
+        "vwap": close,
+        "num_trades": 100,
     }
 
 
@@ -69,6 +77,7 @@ def scenario_config(
     *,
     fee_bps: float = 1.0,
     slippage_bps: float = 0.0,
+    impact_coefficient_bps: float = 0.0,
     data_kind: str = "bars",
     entry_lag_bars: int = 1,
 ):
@@ -77,6 +86,16 @@ def scenario_config(
         scenario_id="realistic",
         fill_model=FillModelConfig(price="close", entry_lag_bars=entry_lag_bars, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=fee_bps, slippage_bps_per_side=slippage_bps),
+        capacity_model=CapacityModelConfig(
+            mode="adv_impact",
+            portfolio_notional=1_000.0,
+            adv_lookback_bars=3,
+            adv_min_observations=1,
+            max_bar_participation=1.0,
+            max_adv_participation=1.0,
+            impact_coefficient_bps=impact_coefficient_bps,
+            impact_exponent=1.0,
+        ),
         data=DataConfig(
             kind=data_kind,
             dataset=dataset,
@@ -123,6 +142,18 @@ def test_spine_backend_metrics_reconcile_net_equals_gross_plus_funding_minus_cos
     traded_notional = qty * 101.0 + qty * 103.0  # entry fill 101, exit fill 103
     expected_cost = traded_notional * (5.0 + 2.0) / 10_000.0 / 100.0
     assert m["cost_return"] == pytest.approx(expected_cost)
+
+
+def test_spine_backend_metrics_include_impact_return():
+    result = SpineBackend().run(
+        decisions=long_round_trip(),
+        rows=rows(),
+        config=scenario_config(fee_bps=0.0, impact_coefficient_bps=100.0),
+    )
+
+    assert result.status == "completed"
+    assert result.metrics["impact_return"] > 0.0
+    assert result.metrics["cost_return"] == pytest.approx(result.metrics["impact_return"])
 
 
 def test_spine_backend_net_return_is_funding_inclusive():

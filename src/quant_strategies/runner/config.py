@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import Field, StrictInt, ValidationError, ValidationInfo, field_validator
 
 from quant_strategies.core.config import (
+    CapacityModelConfig,
     CausalityPolicyConfig,
     CostModelConfig,
     DataConfig,
@@ -139,6 +140,7 @@ class RunConfig(RunnerConfigModel):
     params: dict[str, Any] = Field(default_factory=dict)
     fill_model: FillModelConfig
     cost_model: CostModelConfig
+    capacity_model: CapacityModelConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     causality_policy: CausalityPolicyConfig = Field(default_factory=CausalityPolicyConfig)
     output: OutputConfig
@@ -164,6 +166,7 @@ class RunConfig(RunnerConfigModel):
             params=self.params,
             fill_model=self.fill_model,
             cost_model=self.cost_model,
+            capacity_model=self.capacity_model,
             leverage_budget=self.leverage_budget,
         )
 

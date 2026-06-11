@@ -74,6 +74,7 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
         "gross_return",
         "funding_return",
         "cost_return",
+        "impact_return",
     }
     net_return = payload["net_return"]
     assert net_return["unit"] == "decimal_fraction"
@@ -96,6 +97,9 @@ def assert_backend_metric_semantics(payload: dict[str, object]) -> None:
     assert "held net position" in funding_return["base"]
     cost_return = payload["cost_return"]
     assert cost_return["unit"] == "decimal_fraction"
+    impact_return = payload["impact_return"]
+    assert impact_return["unit"] == "decimal_fraction"
+    assert "execution events" in impact_return["comparability"]
 
 
 def completed_scenario(

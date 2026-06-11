@@ -115,6 +115,13 @@ def test_generated_result_roots_are_ignored():
     assert set(result.stdout.splitlines()) == set(ignored_roots)
 
 
+def test_generated_researched_output_is_excluded_from_ruff():
+    payload = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    ruff_config = payload["tool"]["ruff"]
+
+    assert "researched" in ruff_config["extend-exclude"]
+
+
 def test_makefile_exposes_single_local_check_command():
     text = (ROOT / "Makefile").read_text()
     test_body = _makefile_target_body(text, "test")

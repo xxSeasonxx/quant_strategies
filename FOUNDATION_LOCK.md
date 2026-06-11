@@ -14,7 +14,8 @@ same-symbol exposure nets and cannot stack, with optional declared price-path
 on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**: the
 netted single-account portfolio NAV path is the single authoritative scored unit,
 and the per-trade ledger is a derived attribution view of the same walk. An
-envelope breach (over the operator-frozen leverage budget, zero-cost on a
+envelope breach (over the operator-frozen leverage budget, unpriced, unsupported,
+or missing capacity evidence, a capacity participation-limit breach, zero-cost on a
 scoreable run, unfinanced leverage, or a degenerate sample) is a typed
 **fail-closed** feasibility verdict that makes `succeeded=False` — never clamped,
 never a silent `None`. See `PRD.md` G8 and `AGENTS.md`.
@@ -88,13 +89,22 @@ the same book walk, kept first-class for alpha / information-coefficient researc
 but never an independent scored number.
 - **Feasibility verdict:** an envelope breach is a typed, **fail-closed**
 feasibility verdict, not a clamp and not a silent `None`. Intended gross/net over
-the operator-frozen leverage budget, a zero-cost scoreable run, unfinanced
-leverage on an unmodeled asset class, or a statistically degenerate sample makes
-the run infeasible / non-scoreable with an actionable typed reason
-(`leverage_budget_breach` + observed gross, `zero_cost`, `unfinanced_leverage`,
-`insufficient_samples`); a benign data gap and an internal error remain
-distinguishable verdicts. `RunResult.succeeded` is gated on the verdict, and a
-breach sets `failure_stage`.
+the operator-frozen leverage budget, unpriced, unsupported, or missing capacity
+evidence, a capacity participation-limit breach, a zero-cost scoreable run,
+unfinanced leverage on an unmodeled asset class, or a statistically degenerate
+sample makes the run infeasible / non-scoreable with an actionable typed reason
+(`leverage_budget_breach` + observed gross, `capacity_unpriced`,
+`capacity_unsupported_volume_semantics`, `capacity_missing_volume`,
+`capacity_insufficient_adv_history`, `capacity_limit_breach`, `zero_cost`,
+`unfinanced_leverage`, `insufficient_samples`); a benign data gap and an internal
+error remain distinguishable verdicts. `RunResult.succeeded` is gated on the
+verdict, and a breach sets `failure_stage`.
+- **Capacity/ADV/market impact status:** O15 is implemented for supported bars and
+crypto-perp data through the operator-frozen `[capacity_model]` envelope. ADV
+impact charges the single NAV cash path and emits compact quick-run diagnostics
+plus evaluation `execution_events` traces. `forex_with_quotes` remains explicitly
+unsupported for ADV impact because FX `volume` is tick-count activity, not
+calibrated notional liquidity.
 - **At-risk-bar statistics:** foundation return statistics are computed over the
 bars on which capital is actually deployed (at-risk bars), not a zero-padded
 union-of-timestamps calendar; flat bars do not inflate the effective sample. A
@@ -209,9 +219,9 @@ issues; run a broad foundation review only when Season asks for one.
   NAV↔ledger reconciliation test and the at-risk-bar / feasibility-verdict test
   suite.
 - Asset-class financing realism beyond crypto-perp funding (equity
-  short-borrow/dividends, FX rollover/carry, margin financing on gross > 1),
-  capacity/ADV/market-impact, and intrabar OHLC stop-fill realism are named
-  follow-ons that plug into the book's localized friction step; an
+  short-borrow/dividends, FX rollover/carry, margin financing on gross > 1) and
+  richer venue/order-execution modeling beyond the current ADV-impact envelope
+  remain follow-ons that plug into the book's localized friction step; an
   `unfinanced_leverage` fail-closed verdict keeps unpriced-leverage books
   non-scoreable until they land.
 - Runtime sandboxing is deferred unless strategy code becomes untrusted.

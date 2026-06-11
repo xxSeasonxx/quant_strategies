@@ -8,7 +8,13 @@ from datetime import date, datetime
 from statistics import NormalDist
 from typing import Any, cast
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, DataKind, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    DataKind,
+    FillModelConfig,
+)
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.decisions import RiskRule, TargetDecision
 from quant_strategies.funding import funding_rates_match
@@ -37,6 +43,11 @@ REASON_LEVERAGE_BUDGET_BREACH = "leverage_budget_breach"
 REASON_ZERO_COST = "zero_cost"
 REASON_INSUFFICIENT_SAMPLES = "insufficient_samples"
 REASON_UNFINANCED_LEVERAGE = "unfinanced_leverage"
+REASON_CAPACITY_UNPRICED = "capacity_unpriced"
+REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS = "capacity_unsupported_volume_semantics"
+REASON_CAPACITY_MISSING_VOLUME = "capacity_missing_volume"
+REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY = "capacity_insufficient_adv_history"
+REASON_CAPACITY_LIMIT_BREACH = "capacity_limit_breach"
 
 _EXPOSURE_TOLERANCE = 1e-9
 
@@ -203,6 +214,7 @@ class RoundTrip:
     exit_mark: float
     exit_reason: str
     decision_id: str | None
+    impact_cost_cash: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -222,6 +234,29 @@ class FundingEvent:
     position_units: float
     mark_price: float
     cashflow: float
+
+
+@dataclass(frozen=True)
+class ExecutionEvent:
+    """One executed net delta and its capacity/impact accounting."""
+
+    symbol: str
+    timestamp: datetime
+    reason: str
+    side: str
+    fill_price: float
+    delta_units: float
+    normalized_notional: float
+    real_notional: float
+    base_cost: float
+    impact_cost: float
+    total_cost: float
+    bar_notional_volume: float
+    adv_notional_volume: float
+    bar_participation: float
+    adv_participation: float
+    decision_time: datetime | None = None
+    decision_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +299,7 @@ class FoundationScenarioResult:
     feasibility: FeasibilityVerdict
     full_train: FoundationMetric
     subwindows: tuple[FoundationMetric, ...]
+    capacity: Mapping[str, Any]
 
     def summary_payload(self) -> dict[str, Any]:
         dsrs = [item.statistics.dsr for item in self.subwindows if item.statistics.dsr is not None]
@@ -278,6 +314,7 @@ class FoundationScenarioResult:
             "cost_multiplier": self.cost_multiplier,
             "feasibility": self.feasibility.payload(),
             "full_train": self.full_train.payload(),
+            "capacity": dict(self.capacity),
             "subwindow_count": len(self.subwindows),
             "min_dsr": min(dsrs) if dsrs else None,
             "median_dsr": _median(dsrs) if dsrs else None,
@@ -368,6 +405,7 @@ class BookWalkResult:
     feasibility: FeasibilityVerdict
     final_nav: float
     realized_pnl: float
+    execution_events: tuple[ExecutionEvent, ...] = ()
     funding_events: tuple[FundingEvent, ...] = ()
 
 
@@ -378,6 +416,7 @@ def build_portfolio_foundation(
     data: DataConfig,
     fill_model: FillModelConfig,
     cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
 ) -> RunPortfolioFoundation:
     """Build the authoritative scored portfolio book over the two cost scenarios.
@@ -396,6 +435,7 @@ def build_portfolio_foundation(
         decision_plan=decision_plan,
         data=data,
         cost_model=cost_model,
+        capacity_model=capacity_model,
         cost_multiplier=1.0,
         config=config,
     )
@@ -405,6 +445,7 @@ def build_portfolio_foundation(
         decision_plan=decision_plan,
         data=data,
         cost_model=cost_model,
+        capacity_model=capacity_model,
         cost_multiplier=config.cost_stress_multiplier,
         config=config,
     )
@@ -419,6 +460,7 @@ def build_portfolio_foundation(
             decision_plan=decision_plan,
             data=data,
             cost_model=cost_model,
+            capacity_model=capacity_model,
             cost_multiplier=1.0,
             fill_stress=config.fill_stress_fraction,
             config=config,
@@ -440,6 +482,7 @@ def walk_portfolio_book(
     data: DataConfig,
     fill_model: FillModelConfig,
     cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
 ) -> BookWalkResult:
     """Run the single causal book once over ``rows`` at one cost/fill configuration.
@@ -466,6 +509,7 @@ def walk_portfolio_book(
         decision_plan,
         per_side_cost_fraction=per_side_cost_fraction,
         data_kind=data.kind,
+        capacity_model=capacity_model,
         config=config,
     )
 
@@ -495,6 +539,7 @@ class _NetPosition:
     decision_id: str | None = None
     cost_basis: float = 0.0
     open_cost: float = 0.0  # costs charged while building the current open leg
+    open_impact_cost: float = 0.0
     funding_cashflow: float = 0.0
 
     @property
@@ -593,6 +638,41 @@ class _RowIndex:
             _positive_row_field(row, "close", symbol, timestamp),
         )
 
+    def adv_notional_before(
+        self,
+        symbol: str,
+        timestamp: datetime,
+        *,
+        lookback_bars: int,
+        min_observations: int,
+    ) -> float:
+        prior = [
+            row
+            for row in self.by_symbol.get(symbol, ())
+            if isinstance(row.get("timestamp"), datetime) and row["timestamp"] < timestamp
+        ][-lookback_bars:]
+        if len(prior) < min_observations:
+            raise FeasibilityError(
+                FeasibilityVerdict(
+                    feasible=False,
+                    reason=REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY,
+                    detail=(
+                        f"capacity ADV history {len(prior)} < minimum {min_observations} "
+                        f"for {symbol} before {timestamp.isoformat()}"
+                    ),
+                )
+            )
+        values = [
+            _row_notional_volume(
+                row,
+                fallback_price=_positive_row_field(row, "close", symbol, row["timestamp"]),
+                symbol=symbol,
+                timestamp=row["timestamp"],
+            )
+            for row in prior
+        ]
+        return sum(values) / len(values)
+
 
 class _DecisionPlan:
     """Resolves each standing target to its effective fill bar (entry-lag honored).
@@ -646,6 +726,7 @@ def _build_scenario(
     decision_plan: _DecisionPlan,
     data: DataConfig,
     cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
     cost_multiplier: float,
     fill_stress: float = 0.0,
     config: PortfolioFoundationConfig,
@@ -659,6 +740,7 @@ def _build_scenario(
         per_side_cost_fraction=per_side_cost_fraction,
         fill_stress=fill_stress,
         data_kind=data.kind,
+        capacity_model=capacity_model,
         config=config,
     )
     full_train, subwindows = _scenario_metrics(
@@ -684,9 +766,26 @@ def _build_scenario(
             feasibility=verdict,
             full_train=full_train,
             subwindows=tuple(subwindows),
+            capacity=_capacity_diagnostics(walk),
         ),
         walk,
     )
+
+
+def _capacity_diagnostics(walk: BookWalkResult) -> dict[str, Any]:
+    events = walk.execution_events
+    bar_participations = [event.bar_participation for event in events]
+    adv_participations = [event.adv_participation for event in events]
+    return {
+        "execution_event_count": len(events),
+        "total_normalized_turnover": sum(event.normalized_notional for event in events),
+        "total_real_turnover": sum(event.real_notional for event in events),
+        "total_impact_cost": sum(event.impact_cost for event in events),
+        "max_bar_participation": max(bar_participations, default=0.0),
+        "mean_bar_participation": _mean(bar_participations),
+        "max_adv_participation": max(adv_participations, default=0.0),
+        "mean_adv_participation": _mean(adv_participations),
+    }
 
 
 def _walk_book(
@@ -696,8 +795,10 @@ def _walk_book(
     per_side_cost_fraction: float,
     fill_stress: float = 0.0,
     data_kind: DataKind,
+    capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
 ) -> BookWalkResult:
+    _check_capacity_supported(data_kind, capacity_model)
     cash = INITIAL_EQUITY
     peak = INITIAL_EQUITY
     previous_nav: float | None = None
@@ -707,6 +808,7 @@ def _walk_book(
     path: list[PortfolioPathPoint] = []
     round_trips: list[RoundTrip] = []
     funding_events: list[FundingEvent] = []
+    execution_events: list[ExecutionEvent] = []
     financed = data_kind in _FINANCED_DATA_KINDS
 
     for timestamp in row_index.timestamps:
@@ -728,12 +830,16 @@ def _walk_book(
                     position, level, bar_open, exit_reason, fill_stress
                 )
                 cash += _flatten(
+                    row_index,
                     position,
                     fill_price,
                     per_side_cost_fraction,
+                    capacity_model,
+                    data_kind,
                     timestamp,
                     exit_reason,
                     round_trips,
+                    execution_events,
                 )
                 # Latch the symbol flat at the standing weight that fired, so a
                 # standing target does not re-enter until a different target arrives.
@@ -761,13 +867,17 @@ def _walk_book(
             )
             for decision in planned:
                 cash += _apply_decision(
+                    row_index,
                     positions,
                     latched,
                     decision,
                     equity=equity,
                     per_side_cost_fraction=per_side_cost_fraction,
+                    capacity_model=capacity_model,
+                    data_kind=data_kind,
                     timestamp=timestamp,
                     round_trips=round_trips,
+                    execution_events=execution_events,
                 )
 
         # 4. Mark-to-market on one account -> NAV[t]; exposure series. Live marked
@@ -811,6 +921,7 @@ def _walk_book(
         feasibility=FeasibilityVerdict(feasible=True),
         final_nav=final_nav,
         realized_pnl=_realized_so_far(round_trips),
+        execution_events=tuple(execution_events),
         funding_events=tuple(funding_events),
     )
 
@@ -846,14 +957,18 @@ def _resolve_fill(
 
 
 def _apply_decision(
+    row_index: _RowIndex,
     positions: dict[str, _NetPosition],
     latched: dict[str, float],
     decision: _PlannedDecision,
     *,
     equity: float,
     per_side_cost_fraction: float,
+    capacity_model: CapacityModelConfig,
+    data_kind: DataKind,
     timestamp: datetime,
     round_trips: list[RoundTrip],
+    execution_events: list[ExecutionEvent],
 ) -> float:
     """Net one standing target into the book; return the cash delta.
 
@@ -880,8 +995,24 @@ def _apply_decision(
         position.risk_rule = decision.risk_rule
         return 0.0
 
-    cost = abs(delta * fill_price) * per_side_cost_fraction
-    cash_delta = -cost
+    normalized_notional = abs(delta * fill_price)
+    base_cost = normalized_notional * per_side_cost_fraction
+    event = _capacity_execution_event(
+        row_index,
+        symbol=symbol,
+        timestamp=timestamp,
+        reason="signal",
+        delta_units=delta,
+        fill_price=fill_price,
+        normalized_notional=normalized_notional,
+        base_cost=base_cost,
+        capacity_model=capacity_model,
+        data_kind=data_kind,
+        decision_time=decision.decision_time,
+        decision_id=decision.decision_id,
+    )
+    execution_events.append(event)
+    cash_delta = -event.total_cost
     crosses_zero = (position.signed_qty > 0.0 > target_qty) or (
         position.signed_qty < 0.0 < target_qty
     )
@@ -890,13 +1021,22 @@ def _apply_decision(
         position.cost_basis = delta * fill_price
         position.signed_qty = target_qty
         _open_leg(position, fill_price, timestamp, decision)
-        position.open_cost = cost
+        position.open_cost = event.total_cost
+        position.open_impact_cost = event.impact_cost
     elif target_qty == 0.0 or crosses_zero:
         # Close (and possibly reverse) the current net leg: realize the closed leg,
         # record the round-trip, then re-open any residual as a fresh leg. The
         # closing leg bears the full traded cost; a reversal's re-open starts a new
         # leg whose open cost is zero (the single trade's cost closed the old leg).
-        cash_delta += _close_leg(position, fill_price, timestamp, cost, "signal", round_trips)
+        cash_delta += _close_leg(
+            position,
+            fill_price,
+            timestamp,
+            event.total_cost,
+            event.impact_cost,
+            "signal",
+            round_trips,
+        )
         if target_qty == 0.0:
             position.signed_qty = 0.0
             position.risk_rule = None
@@ -905,11 +1045,13 @@ def _apply_decision(
             position.signed_qty = target_qty
             _open_leg(position, fill_price, timestamp, decision)
             position.open_cost = 0.0
+            position.open_impact_cost = 0.0
     else:
         # Add to / trim the same-sign leg without crossing zero.
         position.cost_basis += delta * fill_price
         position.signed_qty = target_qty
-        position.open_cost += cost
+        position.open_cost += event.total_cost
+        position.open_impact_cost += event.impact_cost
         position.risk_rule = decision.risk_rule
 
     return cash_delta
@@ -927,6 +1069,7 @@ def _open_leg(
     position.trough_mark = fill_price
     position.risk_rule = decision.risk_rule
     position.funding_cashflow = 0.0
+    position.open_impact_cost = 0.0
     position.entry_signed_qty = position.signed_qty
     position.entry_weight = decision.signed_weight
     position.entry_decision_time = decision.decision_time
@@ -938,6 +1081,7 @@ def _close_leg(
     exit_price: float,
     timestamp: datetime,
     close_cost: float,
+    close_impact_cost: float,
     exit_reason: str,
     round_trips: list[RoundTrip],
 ) -> float:
@@ -962,6 +1106,7 @@ def _close_leg(
     """
     proceeds = position.signed_qty * exit_price - position.cost_basis
     total_cost = position.open_cost + close_cost
+    total_impact_cost = position.open_impact_cost + close_impact_cost
     round_trips.append(
         RoundTrip(
             symbol=position.symbol,
@@ -973,6 +1118,7 @@ def _close_leg(
             gross_cash=proceeds,
             funding_cash=position.funding_cashflow,
             cost_cash=total_cost,
+            impact_cost_cash=total_impact_cost,
             entry_weight=position.entry_weight,
             entry_mark=cast(float, position.entry_mark),
             exit_mark=exit_price,
@@ -984,19 +1130,208 @@ def _close_leg(
 
 
 def _flatten(
+    row_index: _RowIndex,
     position: _NetPosition,
     fill_price: float,
     per_side_cost_fraction: float,
+    capacity_model: CapacityModelConfig,
+    data_kind: DataKind,
     timestamp: datetime,
     exit_reason: str,
     round_trips: list[RoundTrip],
+    execution_events: list[ExecutionEvent],
 ) -> float:
     """Flatten the net position at ``fill_price`` for a fired RiskRule; record round-trip.
 
     ``fill_price`` is the barrier fill from :func:`_barrier_fill_price` (level, gap-aware,
     optionally fill-stressed), not the bar close; cost scales with the executed notional."""
-    cost = abs(position.signed_qty * fill_price) * per_side_cost_fraction
-    return _close_leg(position, fill_price, timestamp, cost, exit_reason, round_trips) - cost
+    delta = -position.signed_qty
+    normalized_notional = abs(delta * fill_price)
+    base_cost = normalized_notional * per_side_cost_fraction
+    event = _capacity_execution_event(
+        row_index,
+        symbol=position.symbol,
+        timestamp=timestamp,
+        reason=exit_reason,
+        delta_units=delta,
+        fill_price=fill_price,
+        normalized_notional=normalized_notional,
+        base_cost=base_cost,
+        capacity_model=capacity_model,
+        data_kind=data_kind,
+        decision_time=position.entry_decision_time,
+        decision_id=position.decision_id,
+    )
+    execution_events.append(event)
+    return (
+        _close_leg(
+            position,
+            fill_price,
+            timestamp,
+            event.total_cost,
+            event.impact_cost,
+            exit_reason,
+            round_trips,
+        )
+        - event.total_cost
+    )
+
+
+def _capacity_execution_event(
+    row_index: _RowIndex,
+    *,
+    symbol: str,
+    timestamp: datetime,
+    reason: str,
+    delta_units: float,
+    fill_price: float,
+    normalized_notional: float,
+    base_cost: float,
+    capacity_model: CapacityModelConfig,
+    data_kind: DataKind,
+    decision_time: datetime | None,
+    decision_id: str | None,
+) -> ExecutionEvent:
+    if capacity_model.mode == "off":
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_CAPACITY_UNPRICED,
+                detail=f"capacity model is off for executed notional at {timestamp.isoformat()}",
+            )
+        )
+    _check_capacity_supported(data_kind, capacity_model)
+    if capacity_model.portfolio_notional is None:
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_CAPACITY_UNPRICED,
+                detail="capacity_model.portfolio_notional is required for ADV impact",
+            )
+        )
+
+    real_notional = normalized_notional * capacity_model.portfolio_notional / INITIAL_EQUITY
+    row = row_index.row_at(symbol, timestamp)
+    bar_notional = _row_notional_volume(
+        row, fallback_price=fill_price, symbol=symbol, timestamp=timestamp
+    )
+    adv_notional = row_index.adv_notional_before(
+        symbol,
+        timestamp,
+        lookback_bars=capacity_model.adv_lookback_bars,
+        min_observations=capacity_model.adv_min_observations,
+    )
+    bar_participation = real_notional / bar_notional
+    adv_participation = real_notional / adv_notional
+    _check_capacity_limit(
+        "bar_participation",
+        bar_participation,
+        capacity_model.max_bar_participation,
+        timestamp,
+    )
+    _check_capacity_limit(
+        "adv_participation",
+        adv_participation,
+        capacity_model.max_adv_participation,
+        timestamp,
+    )
+    impact_fraction = _cost_fraction(capacity_model.impact_coefficient_bps) * (
+        adv_participation**capacity_model.impact_exponent
+    )
+    impact_cost = normalized_notional * impact_fraction
+    total_cost = base_cost + impact_cost
+    return ExecutionEvent(
+        symbol=symbol,
+        timestamp=timestamp,
+        reason=reason,
+        side="buy" if delta_units > 0.0 else "sell",
+        fill_price=fill_price,
+        delta_units=delta_units,
+        normalized_notional=normalized_notional,
+        real_notional=real_notional,
+        base_cost=base_cost,
+        impact_cost=impact_cost,
+        total_cost=total_cost,
+        bar_notional_volume=bar_notional,
+        adv_notional_volume=adv_notional,
+        bar_participation=bar_participation,
+        adv_participation=adv_participation,
+        decision_time=decision_time,
+        decision_id=decision_id,
+    )
+
+
+def _check_capacity_supported(data_kind: DataKind, capacity_model: CapacityModelConfig) -> None:
+    if capacity_model.mode != "adv_impact" or data_kind != "forex_with_quotes":
+        return
+    raise FeasibilityError(
+        FeasibilityVerdict(
+            feasible=False,
+            reason=REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
+            detail="forex volume is tick-count activity, not notional capacity volume",
+        )
+    )
+
+
+def _check_capacity_limit(
+    name: str,
+    observed: float,
+    limit: float,
+    timestamp: datetime,
+) -> None:
+    if observed <= limit + _EXPOSURE_TOLERANCE:
+        return
+    raise FeasibilityError(
+        FeasibilityVerdict(
+            feasible=False,
+            reason=REASON_CAPACITY_LIMIT_BREACH,
+            detail=f"{name} {observed:.6g} > limit {limit:.6g} at {timestamp.isoformat()}",
+        )
+    )
+
+
+def _row_notional_volume(
+    row: Mapping[str, Any],
+    *,
+    fallback_price: float,
+    symbol: str,
+    timestamp: datetime,
+) -> float:
+    raw_volume = row.get("volume")
+    if not isinstance(raw_volume, (int, float)) or isinstance(raw_volume, bool):
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_CAPACITY_MISSING_VOLUME,
+                detail=f"missing positive capacity volume for {symbol} at {timestamp.isoformat()}",
+            )
+        )
+    volume = float(raw_volume)
+    if volume <= 0.0 or not math.isfinite(volume):
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_CAPACITY_MISSING_VOLUME,
+                detail=f"missing positive capacity volume for {symbol} at {timestamp.isoformat()}",
+            )
+        )
+    raw_vwap = row.get("vwap")
+    price = fallback_price
+    try:
+        maybe_vwap = _positive_float(raw_vwap, "invalid_vwap")
+    except ValueError:
+        maybe_vwap = None
+    if maybe_vwap is not None:
+        price = maybe_vwap
+    if price <= 0.0 or not math.isfinite(price):
+        raise FeasibilityError(
+            FeasibilityVerdict(
+                feasible=False,
+                reason=REASON_CAPACITY_MISSING_VOLUME,
+                detail=f"missing positive capacity price for {symbol} at {timestamp.isoformat()}",
+            )
+        )
+    return volume * price
 
 
 def _apply_funding(

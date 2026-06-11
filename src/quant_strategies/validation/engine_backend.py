@@ -55,6 +55,7 @@ class SpineBackend:
                 data=config.data,
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
+                capacity_model=config.capacity_model,
                 config=PortfolioFoundationConfig(
                     subwindows=1,
                     max_gross_exposure=config.leverage_budget.max_gross_exposure,
@@ -104,6 +105,7 @@ def _ledger_metrics(walk: BookWalkResult) -> dict[str, float | int]:
     gross = sum(trip.gross_cash for trip in walk.round_trips) / INITIAL_EQUITY
     funding = sum(trip.funding_cash for trip in walk.round_trips) / INITIAL_EQUITY
     cost = sum(trip.cost_cash for trip in walk.round_trips) / INITIAL_EQUITY
+    impact = sum(trip.impact_cost_cash for trip in walk.round_trips) / INITIAL_EQUITY
     net = (walk.final_nav - INITIAL_EQUITY) / INITIAL_EQUITY
     return {
         "net_return": net,
@@ -111,6 +113,7 @@ def _ledger_metrics(walk: BookWalkResult) -> dict[str, float | int]:
         "gross_return": gross,
         "funding_return": funding,
         "cost_return": cost,
+        "impact_return": impact,
     }
 
 

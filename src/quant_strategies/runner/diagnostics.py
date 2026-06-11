@@ -23,6 +23,7 @@ SAMPLE_TRADE_FIELDS = (
     "gross_return",
     "funding_return",
     "cost_return",
+    "impact_return",
     "net_return",
 )
 
@@ -96,12 +97,20 @@ def _group(trades: Sequence[Mapping[str, Any]], key: str) -> dict[str, dict[str,
         grouped[name]["gross"] += _float_value(trade.get("gross_return"))
         grouped[name]["funding"] += _float_value(trade.get("funding_return"))
         grouped[name]["cost"] += _float_value(trade.get("cost_return"))
+        grouped[name]["impact"] += _float_value(trade.get("impact_return"))
         grouped[name]["net"] += _float_value(trade.get("net_return"))
     return dict(sorted(grouped.items()))
 
 
 def _empty_group() -> dict[str, Any]:
-    return {"count": 0, "gross": 0.0, "funding": 0.0, "cost": 0.0, "net": 0.0}
+    return {
+        "count": 0,
+        "gross": 0.0,
+        "funding": 0.0,
+        "cost": 0.0,
+        "impact": 0.0,
+        "net": 0.0,
+    }
 
 
 def _holding_period(trades: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -165,15 +174,20 @@ def _cost_funding_breakdown(nav_attribution: Mapping[str, Any]) -> dict[str, Any
     gross = nav_attribution.get("sum_gross_return")
     funding = nav_attribution.get("sum_funding_return")
     cost = nav_attribution.get("sum_cost_return")
+    impact = nav_attribution.get("sum_impact_return")
     net = nav_attribution.get("sum_net_return")
     gross_float = _float_value(gross)
     return {
         "gross": gross,
         "funding": funding,
         "cost": cost,
+        "impact": impact,
         "net": net,
         "cost_fraction_of_abs_gross": (
             None if gross_float == 0.0 else _float_value(cost) / abs(gross_float)
+        ),
+        "impact_fraction_of_abs_gross": (
+            None if gross_float == 0.0 else _float_value(impact) / abs(gross_float)
         ),
     }
 

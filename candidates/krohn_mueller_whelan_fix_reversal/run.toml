@@ -30,6 +30,9 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+[capacity_model]
+mode = "off"
+
 [output]
 results_dir = "results"
 quick_checks = true

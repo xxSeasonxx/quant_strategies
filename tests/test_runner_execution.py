@@ -31,6 +31,9 @@ def rows() -> list[dict[str, Any]]:
             "high": 101.0,
             "low": 99.0,
             "close": 100.5,
+            "volume": 1_000.0,
+            "vwap": 100.5,
+            "num_trades": 100,
         }
     ]
 
@@ -79,6 +82,9 @@ entry_lag_bars = 1
 [cost_model]
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
+
+[capacity_model]
+mode = "off"
 
 [output]
 results_dir = "results"

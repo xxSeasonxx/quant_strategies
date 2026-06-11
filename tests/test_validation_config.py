@@ -15,6 +15,7 @@ from quant_strategies.validation.errors import ValidationConfigError
 
 def test_shared_config_primitives_are_neutral_not_runner_owned():
     from quant_strategies.core.config import (
+        CapacityModelConfig,
         CostModelConfig,
         DataConfig,
         FillModelConfig,
@@ -27,15 +28,19 @@ def test_shared_config_primitives_are_neutral_not_runner_owned():
     assert WindowedDataConfig.__module__ == "quant_strategies.core.config"
     assert FillModelConfig.__module__ == "quant_strategies.core.config"
     assert CostModelConfig.__module__ == "quant_strategies.core.config"
+    assert CapacityModelConfig.__module__ == "quant_strategies.core.config"
     assert runner_config.DataConfig is DataConfig
     assert runner_config.FillModelConfig is FillModelConfig
     assert runner_config.CostModelConfig is CostModelConfig
+    assert runner_config.CapacityModelConfig is CapacityModelConfig
     assert ValidationConfig.model_fields["data"].annotation is WindowedDataConfig
     assert ValidationConfig.model_fields["fill_model"].annotation is FillModelConfig
     assert ValidationConfig.model_fields["cost_model"].annotation is CostModelConfig
+    assert ValidationConfig.model_fields["capacity_model"].annotation is CapacityModelConfig
     assert ScenarioRunConfig.model_fields["data"].annotation is DataConfig
     assert ScenarioRunConfig.model_fields["fill_model"].annotation is FillModelConfig
     assert ScenarioRunConfig.model_fields["cost_model"].annotation is CostModelConfig
+    assert ScenarioRunConfig.model_fields["capacity_model"].annotation is CapacityModelConfig
 
 
 def write_strategy(path: Path) -> None:
@@ -50,6 +55,7 @@ def write_config(
     include_readiness: bool = True,
     search_pressure: str | None = 'prior_search = "none"',
     extra: str = "",
+    include_capacity_model: bool = True,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     readiness = (
@@ -69,6 +75,21 @@ required_observation_fields = ["close"]
 {search_pressure}
 """
         if search_pressure is not None
+        else ""
+    )
+    capacity_model_section = (
+        """
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+"""
+        if include_capacity_model
         else ""
     )
     path.write_text(
@@ -97,6 +118,7 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 {extra}
+{capacity_model_section}
 {readiness}
 
 [output]
@@ -201,6 +223,7 @@ def test_load_validation_config_resolves_paths_from_config_directory(tmp_path: P
     assert config.mechanical_thresholds.max_stressed_activity_loss == -0.02
     assert config.mechanical_thresholds.max_fill_lag_activity_loss == -0.02
     assert config.search_pressure.prior_search == "none"
+    assert config.capacity_model.portfolio_notional == 1_000_000.0
 
 
 def test_load_validation_config_accepts_mechanical_thresholds_overrides(tmp_path: Path):
@@ -230,6 +253,16 @@ max_fill_lag_activity_loss = -0.03
     assert config.mechanical_thresholds.min_positive_window_fraction == 0.75
     assert config.mechanical_thresholds.max_stressed_activity_loss == -0.05
     assert config.mechanical_thresholds.max_fill_lag_activity_loss == -0.03
+
+
+def test_capacity_model_is_required_for_validation_config(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path, include_capacity_model=False)
+
+    with pytest.raises(ValidationConfigError, match="capacity_model"):
+        load_validation_config(config_path)
 
 
 def test_load_validation_config_rejects_legacy_mechanical_threshold_section_name(

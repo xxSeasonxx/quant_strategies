@@ -24,6 +24,16 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 390
+adv_min_observations = 1
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+
 [readiness]
 min_observations_per_decision = 2
 required_observation_fields = ["close"]

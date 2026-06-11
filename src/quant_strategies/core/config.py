@@ -88,6 +88,59 @@ class CostModelConfig(SharedConfigModel):
         return 2.0 * (self.fee_bps_per_side + self.slippage_bps_per_side)
 
 
+class CapacityModelConfig(SharedConfigModel):
+    """Operator-frozen capacity envelope for scoreable execution realism.
+
+    ``mode='off'`` is explicit and useful for profiling or flat/no-activity books, but
+    the portfolio book treats traded notional with capacity off as non-scoreable. The
+    config is a protocol envelope, not an output/diagnostic option.
+    """
+
+    mode: Literal["off", "adv_impact"]
+    portfolio_notional: float | None = None
+    adv_lookback_bars: int | None = Field(default=None, ge=1)
+    adv_min_observations: int | None = Field(default=None, ge=1)
+    max_bar_participation: float | None = Field(default=None, gt=0.0)
+    max_adv_participation: float | None = Field(default=None, gt=0.0)
+    impact_coefficient_bps: float | None = Field(default=None, ge=0.0)
+    impact_exponent: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_capacity(self) -> CapacityModelConfig:
+        values = (
+            self.portfolio_notional,
+            self.max_bar_participation,
+            self.max_adv_participation,
+            self.impact_coefficient_bps,
+            self.impact_exponent,
+        )
+        if any(value is not None and not math.isfinite(value) for value in values):
+            raise ValueError("capacity_model values must be finite")
+        if self.mode == "adv_impact":
+            required = {
+                "portfolio_notional": self.portfolio_notional,
+                "adv_lookback_bars": self.adv_lookback_bars,
+                "adv_min_observations": self.adv_min_observations,
+                "max_bar_participation": self.max_bar_participation,
+                "max_adv_participation": self.max_adv_participation,
+                "impact_coefficient_bps": self.impact_coefficient_bps,
+                "impact_exponent": self.impact_exponent,
+            }
+            missing = [name for name, value in required.items() if value is None]
+            if missing:
+                fields = ", ".join(missing)
+                raise ValueError(
+                    f"capacity_model {fields} must be explicit when mode = 'adv_impact'"
+                )
+            if self.portfolio_notional <= 0.0:
+                raise ValueError(
+                    "capacity_model.portfolio_notional must be > 0 when mode = 'adv_impact'"
+                )
+            if self.adv_min_observations > self.adv_lookback_bars:
+                raise ValueError("capacity_model.adv_min_observations must be <= adv_lookback_bars")
+        return self
+
+
 class LeverageBudgetConfig(SharedConfigModel):
     """Operator-frozen leverage envelope (gross + net), part of the protocol set.
 
@@ -150,6 +203,7 @@ class StrategyExecutionSpec:
     strategy_path: Path
     strategy_id: str
     data: DataConfig
+    capacity_model: CapacityModelConfig
     params: dict[str, Any] = field(default_factory=dict)
     fill_model: FillModelConfig = field(default_factory=FillModelConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)

@@ -4,7 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from quant_strategies.core.config import CostModelConfig, DataConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    DataConfig,
+    FillModelConfig,
+)
 from quant_strategies.core.portfolio_foundation import (
     PortfolioFoundationConfig,
     RunPortfolioFoundation,
@@ -35,6 +40,9 @@ def bar_rows(*closes: float, symbol: str = "SPY") -> list[dict[str, object]]:
                 "high": close,
                 "low": close,
                 "close": close,
+                "volume": 1_000.0,
+                "vwap": close,
+                "num_trades": 100,
                 "available_at": ts(index),
             }
         )
@@ -64,6 +72,7 @@ def foundation_for(
     decisions: list[TargetDecision],
     *,
     fee_bps_per_side: float = 1.0,
+    impact_coefficient_bps: float = 0.0,
 ) -> RunPortfolioFoundation:
     return build_portfolio_foundation(
         rows=rows,
@@ -77,6 +86,16 @@ def foundation_for(
         ),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=fee_bps_per_side, slippage_bps_per_side=0.0),
+        capacity_model=CapacityModelConfig(
+            mode="adv_impact",
+            portfolio_notional=1_000.0,
+            adv_lookback_bars=3,
+            adv_min_observations=1,
+            max_bar_participation=1.0,
+            max_adv_participation=1.0,
+            impact_coefficient_bps=impact_coefficient_bps,
+            impact_exponent=1.0,
+        ),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
 
@@ -103,6 +122,28 @@ def test_build_run_economics_derives_typed_ledger_from_the_book_walk():
     )
 
 
+def test_run_economics_attributes_market_impact_as_cost_component():
+    rows = bar_rows(100.0, 100.0, 100.0, 100.0)
+    economics = build_run_economics(
+        foundation_for(
+            rows,
+            [target(0, 0.5), target(2, 0.0)],
+            fee_bps_per_side=0.0,
+            impact_coefficient_bps=100.0,
+        )
+    )
+
+    trade = economics.trades[0]
+    assert trade.impact_return > 0.0
+    assert trade.cost_return == pytest.approx(trade.impact_return)
+    assert trade.net_return == pytest.approx(
+        trade.gross_return + trade.funding_return - trade.cost_return
+    )
+    summary = economics.summary_payload()
+    assert summary["sum_impact_return"] == pytest.approx(trade.impact_return)
+    assert summary["impact_share_of_abs_gross"] is None
+
+
 def test_run_economics_summary_and_slices_payloads_match_the_new_contract():
     rows = bar_rows(100.0, 100.0, 102.0, 104.0, 105.0)
     economics = build_run_economics(foundation_for(rows, [target(0, 1.0), target(2, 0.0)]))
@@ -122,9 +163,11 @@ def test_run_economics_summary_and_slices_payloads_match_the_new_contract():
         "profit_factor",
         "cost_share_of_abs_gross",
         "funding_share_of_abs_gross",
+        "impact_share_of_abs_gross",
         "sum_gross_return",
         "sum_funding_return",
         "sum_cost_return",
+        "sum_impact_return",
         "sum_net_return",
     }
     assert summary["schema_version"] == "quant_strategies.runner.economic_metrics/v1"
@@ -135,6 +178,7 @@ def test_run_economics_summary_and_slices_payloads_match_the_new_contract():
     assert slices["schema_version"] == "quant_strategies.runner.economic_slices/v1"
     assert slices["basis"] == "portfolio_book_round_trip_attribution"
     assert slices["by_symbol"]["SPY"]["count"] == 1
+    assert "impact_sum" in slices["by_symbol"]["SPY"]
     assert slices["by_direction"]["long"]["count"] == 1
     assert set(slices["win_loss_distribution"]) == {
         "largest_win_net",

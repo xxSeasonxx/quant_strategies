@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 
-from quant_strategies.core.config import CostModelConfig, FillModelConfig
+from quant_strategies.core.config import CapacityModelConfig, CostModelConfig, FillModelConfig
 from quant_strategies.core.portfolio_foundation import (
+    REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     BookWalkResult,
+    ExecutionEvent,
     FeasibilityVerdict,
     FundingEvent,
     PortfolioPathPoint,
@@ -30,18 +32,40 @@ DECISION = datetime(2026, 1, 1, 0, 1, tzinfo=UTC)
 
 def rows() -> list[dict[str, Any]]:
     return [
-        {"symbol": "BTC-PERP", "timestamp": AS_OF, "close": 100.0, "has_funding_event": False},
-        {"symbol": "BTC-PERP", "timestamp": DECISION, "close": 101.0, "has_funding_event": False},
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": AS_OF,
+            "close": 100.0,
+            "volume": 1_000.0,
+            "vwap": 100.0,
+            "num_trades": 100,
+            "has_funding_event": False,
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": DECISION,
+            "close": 101.0,
+            "volume": 1_000.0,
+            "vwap": 101.0,
+            "num_trades": 100,
+            "has_funding_event": False,
+        },
         {
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
             "close": 102.0,
+            "volume": 1_000.0,
+            "vwap": 102.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
         {
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 3, tzinfo=UTC),
             "close": 103.0,
+            "volume": 1_000.0,
+            "vwap": 103.0,
+            "num_trades": 100,
             "has_funding_event": False,
         },
     ]
@@ -80,6 +104,19 @@ def scenario(**overrides: Any) -> EvaluationScenario:
     return EvaluationScenario(**base)
 
 
+def capacity_model() -> CapacityModelConfig:
+    return CapacityModelConfig(
+        mode="adv_impact",
+        portfolio_notional=1_000.0,
+        adv_lookback_bars=3,
+        adv_min_observations=1,
+        max_bar_participation=1.0,
+        max_adv_participation=1.0,
+        impact_coefficient_bps=0.0,
+        impact_exponent=1.0,
+    )
+
+
 # --- one shared book on every surface; no data-kind routing ------------------
 
 
@@ -115,6 +152,7 @@ def test_spine_backend_returns_metrics_and_tables_for_a_long_round_trip():
         rows=rows(),
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        capacity_model=capacity_model(),
     )
 
     assert result.status == "completed"
@@ -130,6 +168,14 @@ def test_spine_backend_returns_metrics_and_tables_for_a_long_round_trip():
     assert not result.tables.portfolio_path.empty
     assert "period_return" in result.tables.portfolio_path.columns
     assert not result.tables.trades.empty
+    assert not result.tables.execution_events.empty
+    assert {
+        "normalized_notional",
+        "real_notional",
+        "bar_participation",
+        "adv_participation",
+        "impact_cost",
+    }.issubset(result.tables.execution_events.columns)
     assert list(result.tables.target_positions["event"]) == ["entry", "exit"]
     assert result.tables.funding_cashflows.empty
 
@@ -140,6 +186,7 @@ def test_spine_backend_emits_no_trade_evidence_for_zero_decisions():
         rows=rows(),
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        capacity_model=capacity_model(),
     )
 
     assert result.status == "completed"
@@ -150,8 +197,24 @@ def test_spine_backend_emits_no_trade_evidence_for_zero_decisions():
     assert result.metrics["funding_model"] == SHARED_ACCOUNTING_MODEL
     assert result.tables is not None
     assert result.tables.trades.empty
+    assert result.tables.execution_events.empty
     assert result.tables.target_positions.empty
     assert result.tables.funding_cashflows.empty
+
+
+def test_spine_backend_surfaces_capacity_feasibility_reason_as_unsupported_semantics():
+    result = SpineEvaluationBackend().run(
+        decisions=[],
+        rows=rows(),
+        scenario=scenario(),
+        metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        data_kind="forex_with_quotes",
+        capacity_model=capacity_model(),
+    )
+
+    assert result.status == "unsupported"
+    assert result.unsupported_semantics == (REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,)
+    assert result.warnings == ()
 
 
 def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breach():
@@ -168,6 +231,7 @@ def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breac
         rows=[*rows(), *eth_rows],
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        capacity_model=capacity_model(),
     )
 
     assert result.status == "failed"
@@ -184,6 +248,9 @@ def test_spine_backend_models_funding_for_crypto_perp_kind():
             "symbol": "BTC-PERP",
             "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "close": 104.0,
+            "volume": 1_000.0,
+            "vwap": 104.0,
+            "num_trades": 100,
             "funding_timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "funding_rate": 0.0003,
             "has_funding_event": True,
@@ -199,6 +266,7 @@ def test_spine_backend_models_funding_for_crypto_perp_kind():
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         data_kind="crypto_perp_funding",
+        capacity_model=capacity_model(),
     )
 
     assert result.status == "completed"
@@ -213,7 +281,11 @@ def test_spine_backend_models_funding_for_crypto_perp_kind():
 def test_spine_backend_run_prepared_reuses_window_inputs_across_scenarios():
     backend = SpineEvaluationBackend()
     decisions = [decision(target=0.5), flat(when=datetime(2026, 1, 1, 0, 2, tzinfo=UTC))]
-    prepared = backend.prepare_inputs(decisions=decisions, rows=rows())
+    prepared = backend.prepare_inputs(
+        decisions=decisions,
+        rows=rows(),
+        capacity_model=capacity_model(),
+    )
 
     base = scenario()
     stress = scenario(
@@ -435,6 +507,25 @@ def test_spine_trace_tables_project_round_trips_and_funding():
         mark_price=103.0,
         cashflow=-0.2,
     )
+    execution_event = ExecutionEvent(
+        symbol="BTC-PERP",
+        timestamp=datetime(2026, 1, 1, 0, 2, tzinfo=UTC),
+        reason="signal",
+        side="buy",
+        fill_price=102.0,
+        delta_units=0.5,
+        normalized_notional=51.0,
+        real_notional=510.0,
+        base_cost=0.1,
+        impact_cost=0.2,
+        total_cost=0.3,
+        bar_notional_volume=102_000.0,
+        adv_notional_volume=101_000.0,
+        bar_participation=0.005,
+        adv_participation=0.00504950495049505,
+        decision_time=DECISION,
+        decision_id="demo:abc",
+    )
     walk = BookWalkResult(
         path=(
             PortfolioPathPoint(
@@ -452,12 +543,14 @@ def test_spine_trace_tables_project_round_trips_and_funding():
         feasibility=FeasibilityVerdict(feasible=True),
         final_nav=100.0,
         realized_pnl=1.5,
+        execution_events=(execution_event,),
         funding_events=(funding,),
     )
 
     tables = spine_trace_tables(pd, walk, "w/realistic_costs/base_fill")
 
     assert list(tables.trades["asset"]) == ["BTC-PERP"]
+    assert list(tables.execution_events["asset"]) == ["BTC-PERP"]
     assert list(tables.target_positions["event"]) == ["entry", "exit"]
     assert tables.target_exposure_summary.loc[0, "decision_count"] == 1
     assert tables.target_exposure_summary.loc[0, "target_round_trip_turnover"] == pytest.approx(1.0)
@@ -473,6 +566,7 @@ def test_spine_backend_real_pandas_smoke():
         rows=rows(),
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
+        capacity_model=capacity_model(),
     )
 
     assert result.status == "completed"

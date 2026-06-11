@@ -606,6 +606,7 @@ def _prepare_portfolio_inputs(
                     decisions=execution.decisions,
                     rows=projection_rows,
                     data_kind=context.config.data.kind,
+                    capacity_model=context.config.capacity_model,
                     leverage_budget=context.config.leverage_budget,
                 )
                 if isinstance(context.selected_backend, PreparedEvaluationBackend)
@@ -670,6 +671,7 @@ def _run_portfolio_scenario(
                 scenario=scenario,
                 metrics=context.config.metrics,
                 data_kind=context.config.data.kind,
+                capacity_model=context.config.capacity_model,
                 leverage_budget=context.config.leverage_budget,
             )
         )
@@ -723,6 +725,23 @@ def _run_portfolio_scenario(
             )
         if scenario_result.tables is None:
             message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
+            if not scenario.required:
+                state.backend_results.append(
+                    _strip_trace_tables(_failed_optional_result(scenario_result, message))
+                )
+                _record_optional_scenario_failure(state, scenario, message)
+                return None
+            scenario_event.fail(message, backend_status=scenario_result.status)
+            return _failure_result(
+                context,
+                state,
+                "portfolio_evaluation",
+                "portfolio_evaluation_failed",
+                message,
+            )
+        missing_trace_table = _missing_trace_table(scenario_result)
+        if missing_trace_table is not None:
+            message = f"{scenario_result.scenario_id}: missing trace table: {missing_trace_table}"
             if not scenario.required:
                 state.backend_results.append(
                     _strip_trace_tables(_failed_optional_result(scenario_result, message))
@@ -1167,6 +1186,7 @@ def _write_trace_tables(
         "trades",
         "target_positions",
         "target_exposure_summary",
+        "execution_events",
         "funding_cashflows",
     )
     frames = {
@@ -1202,6 +1222,22 @@ def _write_trace_tables(
     return table_artifacts
 
 
+def _missing_trace_table(result: PortfolioEvaluationResult) -> str | None:
+    if result.tables is None:
+        return "tables"
+    for artifact_kind in (
+        "portfolio_path",
+        "trades",
+        "target_positions",
+        "target_exposure_summary",
+        "execution_events",
+        "funding_cashflows",
+    ):
+        if getattr(result.tables, artifact_kind) is None:
+            return artifact_kind
+    return None
+
+
 def _cleanup_trace_table_dirs(result_dir: Path) -> None:
     for dirname in ("tables", "tables_staging"):
         path = result_dir / dirname
@@ -1219,8 +1255,6 @@ def _combine_trace_frames(results: list[PortfolioEvaluationResult], table_name: 
     for result in results:
         assert result.tables is not None
         frame = getattr(result.tables, table_name)
-        if frame is None:
-            frame = pd.DataFrame({"scenario_id": []})
         frames.append(frame)
     if not frames:
         return pd.DataFrame({"scenario_id": []})

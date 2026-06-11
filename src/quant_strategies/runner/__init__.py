@@ -797,6 +797,7 @@ def _build_portfolio_foundation(
                 data=config.data,
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
+                capacity_model=config.capacity_model,
                 config=PortfolioFoundationConfig(
                     subwindows=config.output.foundation_subwindows,
                     trial_count=config.output.foundation_trial_count,

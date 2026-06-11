@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from quant_strategies.core.config import (
+    CapacityModelConfig,
     CostModelConfig,
     DataConfig,
     FillModelConfig,
@@ -38,7 +39,23 @@ def write_config(
     annualization: int = 252,
     min_annualized_samples: int | None = None,
     extra: str = "",
+    include_capacity_model: bool = True,
 ) -> None:
+    capacity_model_section = (
+        """
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+"""
+        if include_capacity_model
+        else ""
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'''
@@ -67,6 +84,7 @@ exit_lag_bars = 0
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+{capacity_model_section}
 [metrics]
 annualization_periods_per_year = {annualization}
 {f"min_annualized_samples = {min_annualized_samples}" if min_annualized_samples is not None else ""}
@@ -96,6 +114,16 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
     assert not hasattr(config.data, "end")
     assert config.metrics.annualization_periods_per_year == 252
     assert config.metrics.min_annualized_samples == 20
+    assert config.capacity_model == CapacityModelConfig(
+        mode="adv_impact",
+        portfolio_notional=1_000_000.0,
+        adv_lookback_bars=3,
+        adv_min_observations=1,
+        max_bar_participation=0.50,
+        max_adv_participation=0.25,
+        impact_coefficient_bps=10.0,
+        impact_exponent=0.5,
+    )
     assert config.to_execution_spec(config.windows[0]) == StrategyExecutionSpec(
         strategy_path=candidate / "strategy.py",
         strategy_id="demo",
@@ -109,6 +137,7 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
         params={"weight": 0.5},
         fill_model=FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
         cost_model=CostModelConfig(fee_bps_per_side=0.5, slippage_bps_per_side=0.5),
+        capacity_model=config.capacity_model,
         require_param_validator=True,
     )
 
@@ -187,6 +216,15 @@ def test_load_evaluation_config_requires_positive_annualization(tmp_path: Path):
     write_config(candidate / "evaluation.toml", annualization=0)
 
     with pytest.raises(EvaluationConfigError, match="annualization_periods_per_year"):
+        load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_capacity_model_is_required_for_evaluation_config(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    write_config(candidate / "evaluation.toml", include_capacity_model=False)
+
+    with pytest.raises(EvaluationConfigError, match="capacity_model"):
         load_evaluation_config(candidate / "evaluation.toml")
 
 
