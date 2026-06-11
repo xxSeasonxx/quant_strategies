@@ -34,17 +34,24 @@ pytestmark = pytest.mark.skipif(
 
 EQUITY_DATASET = "equity_1min"
 WINDOW_DAYS = 5
+# Per-symbol live coverage can lag the dataset-level ``data_end`` (the strict readiness
+# gate enforces the *per-symbol* live end), and equity bars skip weekends/holidays. Back
+# off from ``data_end`` so the small window sits inside any single symbol's coverage —
+# this sentinel guards contract SHAPE (tz/availability/ordering/uniqueness), not the
+# freshness of the latest bar.
+EDGE_MARGIN_DAYS = 10
 
 
 def _smoke_window() -> tuple[date, date]:
-    """Return a small recent ``(start, end)`` window from the catalog data_end."""
+    """Return a small recent ``(start, end)`` window safely inside per-symbol coverage."""
     from quant_data.catalog import DATASET_STATUS
 
     data_end = DATASET_STATUS[EQUITY_DATASET]["data_end"]
     assert isinstance(data_end, date), (
         f"DATASET_STATUS['{EQUITY_DATASET}']['data_end'] must be a date, got {type(data_end)!r}"
     )
-    return data_end - timedelta(days=WINDOW_DAYS), data_end
+    end = data_end - timedelta(days=EDGE_MARGIN_DAYS)
+    return end - timedelta(days=WINDOW_DAYS), end
 
 
 def _is_utc_datetime(value: object) -> bool:
