@@ -56,16 +56,24 @@ contract SHALL provide no way to express additive same-symbol stacking.
 
 The engine SHALL enforce an optional declared `RiskRule` — limited to `stop_loss`,
 `take_profit`, and `trailing` thresholds — causally on the instrument's net
-position, flattening the instrument at the bar the threshold is crossed. A target
-MAY carry such a `RiskRule`. A fired `RiskRule` SHALL latch the instrument flat
-until the strategy emits a new (different) target for it. Exits that are derivable
-from data or time (signal reversal, fixed hold horizon) SHALL be expressed as
-explicit target decisions, not as `RiskRule` thresholds.
+position. Thresholds SHALL be evaluated against the bar's **intrabar range**
+(high/low), so a barrier pierced intrabar fires even if the close recovered, and the
+exit SHALL fill at the barrier level, worsened to the bar open on a gap-through
+(`take_profit` SHALL NOT take a gap-favorable bonus). When a single bar touches both
+an adverse barrier (`stop_loss`/`trailing`) and `take_profit`, the adverse barrier
+SHALL win. A target MAY carry such a `RiskRule`. A fired `RiskRule` SHALL latch the
+instrument flat until the strategy emits a new (different) target for it. Exits that
+are derivable from data or time (signal reversal, fixed hold horizon) SHALL be
+expressed as explicit target decisions, not as `RiskRule` thresholds.
 
-#### Scenario: A stop fires and flattens at the crossing bar
-- **WHEN** a position carries a `stop_loss` and the causal end-of-bar printed mark crosses the stop level
-- **THEN** the engine flattens the position at that bar (evaluated end-of-bar on printed marks; intrabar OHLC barrier fills are deferred fill realism, not part of this contract)
+#### Scenario: A stop fires on the intrabar low even when the close recovers
+- **WHEN** a long position carries a `stop_loss` and the bar's low pierces the stop level while the close recovers above it
+- **THEN** the engine flattens the position at that bar, filling at the stop level (worsened to the bar open on a gap-through)
 - **AND** the flatten is attributable to the stop in the result
+
+#### Scenario: A same-bar stop and take-profit resolves to the adverse stop
+- **WHEN** a bar touches both the `stop_loss` and `take_profit` levels of a position
+- **THEN** the adverse `stop_loss` fires rather than the `take_profit`
 
 #### Scenario: A fired rule latches the instrument flat
 - **WHEN** a `RiskRule` has fired and flattened an instrument whose standing target is still non-zero

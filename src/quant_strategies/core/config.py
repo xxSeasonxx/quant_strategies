@@ -108,6 +108,22 @@ class LeverageBudgetConfig(SharedConfigModel):
         return self
 
 
+class CausalityPolicyConfig(SharedConfigModel):
+    """Operator-frozen scoreability policy for the causality dimension.
+
+    Owned by the operator alongside ``[cost_model]``/``[fill_model]``/``[leverage_budget]`` —
+    never an agent-editable ``[output]`` field, so a climbing agent cannot relax it. A
+    ``causality_check`` of ``off`` runs *no* look-ahead replay, so its NAV path could be
+    built on leaked-future alpha; by default such a run is non-scoreable (a typed
+    ``causality`` failure, not a swallowed pass). Every mode that runs some replay
+    (``micro``/``emitted``/``focused``/``strict``) remains scoreable; ``micro`` stays the
+    Train iteration mode. The operator can set ``allow_unverified_scoring = true`` to permit
+    ``off`` to score deliberately (profiling/debugging, or a downstream that accepts the risk).
+    """
+
+    allow_unverified_scoring: bool = False
+
+
 class CausalityReplayConfig(SharedConfigModel):
     scope: CausalityReplayScope = "complete"
     probe_limit: int = Field(default=64, ge=1)

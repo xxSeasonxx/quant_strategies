@@ -183,10 +183,12 @@ breach).
 
 `RiskRule` stop-loss, take-profit, and trailing thresholds are declared as
 **fractions of the position's entry mark** and enforced by the engine on the net
-position: they are evaluated on the configured end-of-bar fill price (`close` or
-`quote`), not as intrabar high/low barrier orders, and a fired rule latches the
-instrument flat until the strategy emits a new (different) target. Data/time exits
-are explicit `target=0` decisions, not `RiskRule`s.
+position: they are evaluated against the bar's **intrabar range** (high/low) — a
+barrier pierced intrabar fires even if the close recovered — and fill at the barrier
+level, worsened to the bar open on a gap-through (`take_profit` takes no gap-favorable
+bonus; an adverse barrier wins a same-bar tie). A fired rule latches the instrument flat
+until the strategy emits a new (different) target. Data/time exits are explicit
+`target=0` decisions, not `RiskRule`s.
 
 ## Validation Run
 

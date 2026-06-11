@@ -65,6 +65,28 @@ def bar_rows(
     return rows
 
 
+def ohlc_rows(
+    *bars: tuple[float, float, float, float],
+    symbol: str = "SPY",
+) -> list[dict[str, object]]:
+    """Rows with explicit ``(open, high, low, close)`` per bar for intrabar barrier tests
+    (``bar_rows`` only builds flat bars where open=high=low=close)."""
+    rows: list[dict[str, object]] = []
+    for index, (open_, high, low, close) in enumerate(bars):
+        rows.append(
+            {
+                "symbol": symbol,
+                "timestamp": ts(index),
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "available_at": ts(index),
+            }
+        )
+    return rows
+
+
 def target(
     decision_index: int,
     weight: float,
@@ -384,14 +406,75 @@ def test_new_different_target_clears_the_latch_and_reenters():
     assert result.path[5].gross_exposure == pytest.approx(0.5)
 
 
-def test_take_profit_flattens_on_favorable_move():
+def test_take_profit_flattens_at_the_level_not_the_close():
+    # Long with a 10% TP. The bar reaches 112 (high >= the 110 level), so the TP fires
+    # that bar — but it fills at the *level* (110), never granted the gap-favorable close
+    # at 112 (conservative; no gap-favorable bonus). Realized PnL is the 10% level move.
     rows = bar_rows(100.0, 100.0, 112.0, 112.0)
     decisions = [target(0, 1.0, risk_rule=RiskRule(take_profit=0.10))]
     result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
-    assert result.round_trips[0].realized_pnl == pytest.approx(INITIAL_EQUITY * 0.12)
+    assert result.round_trips[0].exit_mark == pytest.approx(110.0)
+    assert result.round_trips[0].realized_pnl == pytest.approx(INITIAL_EQUITY * 0.10)
+
+
+def test_stop_fires_on_intrabar_low_even_when_the_close_recovers():
+    # The core action-8 fix: a long with a 5% stop. At d2 the bar dips to a low of 94
+    # (pierces the 95 stop) but CLOSES back at 99. The close-only model would miss this;
+    # the intrabar model fires the stop at the 95 level (open 99 is above it, no gap).
+    rows = ohlc_rows(
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        (99.0, 99.0, 94.0, 99.0),
+        (99.0, 99.0, 99.0, 99.0),
+    )
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_time == ts(2)
+    assert result.round_trips[0].exit_reason == "stop_loss"
+    assert result.round_trips[0].exit_mark == pytest.approx(95.0)
+    assert result.round_trips[0].realized_pnl == pytest.approx(INITIAL_EQUITY * -0.05)
+
+
+def test_stop_gap_through_open_fills_at_the_worse_open():
+    # A long with a 5% stop (level 95). At d2 the bar GAPS down through the stop: it
+    # opens at 92 (already below 95) and trades to a low of 90. The fill is the worse
+    # open (92), not the stop level — gap risk the close-only model hid.
+    rows = ohlc_rows(
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        (92.0, 92.0, 90.0, 91.0),
+        (91.0, 91.0, 91.0, 91.0),
+    )
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_reason == "stop_loss"
+    assert result.round_trips[0].exit_mark == pytest.approx(92.0)
+    assert result.round_trips[0].realized_pnl == pytest.approx(INITIAL_EQUITY * -0.08)
+
+
+def test_same_bar_stop_and_target_resolves_to_the_adverse_stop():
+    # A long with both a 5% stop (95) and a 5% take-profit (105). At d2 the bar touches
+    # both (high 106 >= 105, low 94 <= 95). Intrabar order is unobservable, so the
+    # adverse stop wins the tie (conservative).
+    rows = ohlc_rows(
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 106.0, 94.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+    )
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05, take_profit=0.05))]
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_reason == "stop_loss"
+    assert result.round_trips[0].exit_mark == pytest.approx(95.0)
 
 
 # --------------------------------------------------------------------------------------
@@ -746,7 +829,7 @@ def test_closed_round_trips_counted_by_exit_time_per_subwindow():
 # --------------------------------------------------------------------------------------
 
 
-def test_build_foundation_emits_two_scenarios_and_utilization_fields():
+def test_build_foundation_emits_three_scenarios_and_utilization_fields():
     rows = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0)
     decisions = [target(0, 1.0)]
     foundation = build_portfolio_foundation(
@@ -758,7 +841,7 @@ def test_build_foundation_emits_two_scenarios_and_utilization_fields():
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5, cost_stress_multiplier=2.0),
     )
     payload = foundation.matrix_payload()
-    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
+    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress", "fill_stress"}
     full = payload["scenarios"]["realistic_costs"]["full_train"]
     for field in (
         "max_gross_utilization",
@@ -772,6 +855,47 @@ def test_build_foundation_emits_two_scenarios_and_utilization_fields():
     text = __import__("json").dumps(payload)
     for forbidden in ("period_return", "portfolio_value", "navs"):
         assert forbidden not in text
+
+
+def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic():
+    # A long stopped out at d3. The fill_stress scenario applies adverse slippage to the
+    # barrier exit, so its total_return is strictly worse than realistic_costs — while the
+    # realistic (climbed) path is identical whether the knob is set or zeroed out.
+    rows = ohlc_rows(
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        (96.0, 96.0, 94.0, 96.0),
+        (96.0, 96.0, 96.0, 96.0),
+    )
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
+    cost_model = CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0)
+    kwargs = {
+        "rows": rows,
+        "decisions": decisions,
+        "data": data_config(4),
+        "fill_model": FillModelConfig(price="close", entry_lag_bars=1),
+        "cost_model": cost_model,
+    }
+
+    stressed = build_portfolio_foundation(
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, fill_stress_fraction=0.01),
+        **kwargs,
+    ).matrix_payload()["scenarios"]
+    assert set(stressed) == {"realistic_costs", "cost_stress", "fill_stress"}
+    realistic_return = stressed["realistic_costs"]["full_train"]["total_return"]
+    fill_stress_return = stressed["fill_stress"]["full_train"]["total_return"]
+    assert fill_stress_return < realistic_return
+
+    # Opting the knob out drops the scenario and leaves the realistic path byte-identical.
+    opted_out = build_portfolio_foundation(
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, fill_stress_fraction=0.0),
+        **kwargs,
+    ).matrix_payload()["scenarios"]
+    assert set(opted_out) == {"realistic_costs", "cost_stress"}
+    assert opted_out["realistic_costs"]["full_train"]["total_return"] == pytest.approx(
+        realistic_return
+    )
 
 
 def test_build_foundation_reports_every_configured_subwindow_even_when_empty():

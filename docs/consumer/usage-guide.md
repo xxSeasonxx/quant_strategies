@@ -175,10 +175,12 @@ Notes that matter:
 - **A fired `RiskRule` latches the instrument flat** until you emit a new (different)
   target for it — otherwise a standing target would immediately re-enter and the
   stop would be useless.
-- **Exit thresholds are bar-sampled, not intrabar barriers.** `RiskRule` thresholds
-  are evaluated against the configured end-of-bar fill price (`close` or `quote`),
-  not as intrabar high/low barrier orders. Intrabar OHLC barrier fills are deferred
-  fill realism, not part of this contract.
+- **Exit thresholds are intrabar barriers.** `RiskRule` thresholds are evaluated against
+  the bar's intrabar range (high/low), so a stop pierced intrabar fires even if the close
+  recovered. The exit fills at the barrier level, worsened to the bar open on a gap-through
+  (`take_profit` takes no gap-favorable bonus); an adverse barrier wins a same-bar tie with
+  `take_profit`. A diagnostic `fill_stress` scenario applies extra adverse slippage to these
+  barrier exits — it never changes the climbed `realistic_costs` path.
 - **`observations` are evidence, not decoration.** Validation and evaluation audit
   that every declared observation is causally available (observation `timestamp`
   must be observable by `decision_time`). They default to requiring at least one

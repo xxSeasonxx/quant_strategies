@@ -33,7 +33,11 @@ signal-stacking is structurally inexpressible. Data/time-derivable exits are
 explicit `target=0` decisions; price-path exits are a declared `RiskRule`
 (stop-loss / take-profit / trailing) enforced by the engine on the net position,
 which latches the instrument flat until the strategy emits a new (different)
-target.
+target. `RiskRule` barriers are evaluated against the bar's **intrabar range**
+(high/low) and fill at the barrier level, worsened to the bar open on a gap-through
+(`take_profit` takes no gap-favorable bonus; an adverse barrier wins a same-bar tie).
+A diagnostic `fill_stress` scenario applies extra adverse barrier-exit slippage and
+never changes the climbed `realistic_costs` path.
 - **One netted-book accounting spine:** all three surfaces use one shared
 decision/spec kernel **and one shared causal netted portfolio book**
 (`netted_portfolio_book_v1`). A single bar-by-bar walk nets same-symbol exposure
@@ -123,6 +127,13 @@ must not be weaker than validation on decision lineage before portfolio metrics
 are trusted. hidden-lookahead replay proves point-in-time causal replay; it does
 not prove out-of-sample validity and it does not prove freedom from in-sample
 fitting.
+- **Causality scoreability gate:** `causality_check="off"` runs no look-ahead replay
+and is **non-scoreable by default** — the run fails closed with
+`failure_stage="causality"` rather than scoring on unverified look-ahead. Every mode
+that runs some replay (`micro`/`emitted`/`focused`/`strict`) remains scoreable, so
+`micro` stays the Train iteration mode. The override is the operator-frozen
+`[causality_policy] allow_unverified_scoring` (default `false`), never an
+agent-editable `[output]` key.
 - **Archive boundary:** ranked research handoff archives and search-loop records
 do not live in this repository. This repo keeps no pointer, symlink,
 compatibility path, or archive index for moved research records.

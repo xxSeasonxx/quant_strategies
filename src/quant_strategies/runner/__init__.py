@@ -105,10 +105,10 @@ class RunEvidence:
     row_contract: dict[str, object] | None = None
     causality: RunCausalityEvidence = RunCausalityEvidence()
     focused_causality: RunFocusedCausalityEvidence = RunFocusedCausalityEvidence()
-    # Reads the existing causality evidence (mode + verification): whether the run's
-    # causality check admitted scoring. This change surfaces the dimension; it does
-    # not change causality policy (whether off/micro should gate scoreability is an
-    # F6 follow-on per design).
+    # Whether the run's causality mode admits scoring under policy (review No. 6):
+    # any replay mode is admissible; ``off`` only when the operator-frozen
+    # ``[causality_policy] allow_unverified_scoring`` is set (otherwise the run fails
+    # closed at the causality stage). Mirrors the gate so the field is truthful.
     causality_admissible: bool = False
     warnings: tuple[str, ...] = ()
 
@@ -802,6 +802,7 @@ def _build_portfolio_foundation(
                     trial_count=config.output.foundation_trial_count,
                     benchmark_sharpe=config.output.foundation_benchmark_sharpe,
                     cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
+                    fill_stress_fraction=config.output.foundation_fill_stress_fraction,
                     max_gross_exposure=config.leverage_budget.max_gross_exposure,
                     max_net_exposure=config.leverage_budget.max_net_exposure,
                 ),
@@ -970,7 +971,19 @@ def _check_causality(
     execution: StrategyExecutionResult,
 ) -> LookaheadCheckResult:
     if config.output.causality_check == "off":
-        return LookaheadCheckResult(passed=True, mode="emitted", replay_scope="off")
+        if config.causality_policy.allow_unverified_scoring:
+            return LookaheadCheckResult(passed=True, mode="emitted", replay_scope="off")
+        return LookaheadCheckResult(
+            passed=False,
+            mode="emitted",
+            replay_scope="off",
+            violations=(
+                'causality_check_off_non_scoreable: causality_check="off" runs no '
+                "look-ahead replay, so its NAV path is not scoreable; choose a replay mode "
+                "(micro/emitted/focused/strict) or set "
+                "[causality_policy] allow_unverified_scoring=true to override",
+            ),
+        )
 
     try:
         if (
@@ -1192,16 +1205,17 @@ def _causality_admissible(
     config: config_module.RunConfig,
     quality: Mapping[str, object],
 ) -> bool:
-    """Read the existing causality evidence: does the causality dimension admit scoring?
+    """Does the causality dimension admit scoring under policy (review No. 6)?
 
-    Policy-neutral (design F6): current policy admits any mode that ran without a
-    rejection. ``off`` is admissible-but-unverified; verified strict/emitted replay is
-    admissible; a focused/micro pass that allowed scoring is admissible. This surfaces
-    the dimension on the result; it does not gate scoreability here.
+    A mode that ran some replay (``micro``/``emitted``/``focused``/``strict``) is
+    admissible; ``off`` ran no replay and is admissible only when the operator-frozen
+    ``[causality_policy] allow_unverified_scoring`` is set (otherwise the run already
+    fails closed at the causality stage). This mirrors the gate so the surfaced field is
+    truthful on both the scored and the failed path.
     """
     check = str(quality.get("causality_check", config.output.causality_check))
     if check == "off":
-        return True
+        return config.causality_policy.allow_unverified_scoring
     if bool(quality.get("causality_verified")) or bool(quality.get("emitted_replay_verified")):
         return True
     focused = quality.get("focused_causality")

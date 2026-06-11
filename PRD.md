@@ -324,8 +324,9 @@ lifecycle, position keeping against a broker, broker integration, real-time mark
 data, alerts, dashboards. None of these belong here. Modeling financing, margin, a
 leverage budget, and netting *inside the backtest book* is in scope as simulation
 realism (see G8) and is distinct from operating live risk limits or an
-order-management system: the book is evaluated end-of-bar on printed marks, not as
-a working-order lifecycle.
+order-management system: the book is evaluated end-of-bar on each printed bar (close
+for marks, the completed bar's high/low for declared `RiskRule` barriers), not as a
+working-order lifecycle.
 
 **NG5.** Legacy-compatibility code paths. When the contract changes, strategies and configs
 are updated and re-run. The foundation does not carry shims for old shapes.

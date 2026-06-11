@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import Field, StrictInt, ValidationError, ValidationInfo, field_validator
 
 from quant_strategies.core.config import (
+    CausalityPolicyConfig,
     CostModelConfig,
     DataConfig,
     FillModelConfig,
@@ -17,7 +18,10 @@ from quant_strategies.core.config import (
     default_repo_root,
 )
 from quant_strategies.core.errors import ConfigError
-from quant_strategies.core.portfolio_foundation import MAX_FOUNDATION_SUBWINDOWS
+from quant_strategies.core.portfolio_foundation import (
+    DEFAULT_FILL_STRESS_FRACTION,
+    MAX_FOUNDATION_SUBWINDOWS,
+)
 
 ArtifactProfile = Literal["diagnostic", "full", "summary"]
 CausalityCheck = Literal["off", "emitted", "strict", "focused", "micro"]
@@ -91,6 +95,9 @@ class OutputConfig(RunnerConfigModel):
     foundation_trial_count: StrictInt | None = Field(default=None, ge=1)
     foundation_benchmark_sharpe: float = 0.0
     foundation_cost_stress_multiplier: float = Field(default=2.0, ge=1.0)
+    foundation_fill_stress_fraction: float = Field(
+        default=DEFAULT_FILL_STRESS_FRACTION, ge=0.0, lt=1.0
+    )
     causality_check: CausalityCheck = "strict"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)
@@ -116,6 +123,7 @@ class OutputConfig(RunnerConfigModel):
     @field_validator(
         "foundation_benchmark_sharpe",
         "foundation_cost_stress_multiplier",
+        "foundation_fill_stress_fraction",
     )
     @classmethod
     def validate_foundation_floats(cls, value: float, info: ValidationInfo) -> float:
@@ -132,6 +140,7 @@ class RunConfig(RunnerConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
+    causality_policy: CausalityPolicyConfig = Field(default_factory=CausalityPolicyConfig)
     output: OutputConfig
 
     @field_validator("strategy_path")

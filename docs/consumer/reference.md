@@ -115,9 +115,12 @@ An optional declared price-path exit the engine enforces causally on the net
 position, flattening the instrument at the bar a threshold is crossed and **latching
 it flat** until the strategy emits a new (different) target. Thresholds are
 **fractions of the position's entry mark** (e.g. `stop_loss=0.05` = 5% adverse), not
-bps, and are evaluated against the configured end-of-bar fill price (`close` or
-`quote`), not as intrabar OHLC barrier orders. Data/time exits (signal reversal,
-fixed hold horizon) are expressed as explicit `target=0` decisions, not `RiskRule`s.
+bps, and are evaluated against the bar's **intrabar range** (high/low) — a barrier
+pierced intrabar fires even if the close recovered. The exit fills at the barrier level,
+worsened to the bar open on a gap-through; `take_profit` fills at the level with no
+gap-favorable bonus, and an adverse barrier (`stop_loss`/`trailing`) wins a same-bar tie
+with `take_profit`. Data/time exits (signal reversal, fixed hold horizon) are expressed
+as explicit `target=0` decisions, not `RiskRule`s.
 
 | Field | Type | Default | Rule |
 |---|---|---|---|
@@ -175,11 +178,13 @@ strategy_path, strategy_id            # top-level
 [fill_model] price, entry_lag_bars, exit_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
 [leverage_budget] max_gross_exposure, max_net_exposure
+[causality_policy] allow_unverified_scoring
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
          foundation_subwindows, foundation_trial_count,
-         foundation_benchmark_sharpe, foundation_cost_stress_multiplier
+         foundation_benchmark_sharpe, foundation_cost_stress_multiplier,
+         foundation_fill_stress_fraction
 ```
 
 `foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
@@ -197,6 +202,14 @@ engine request, evidence), `diagnostic` (compact + `diagnostics.json`), `summary
 resolved relative to the TOML file so candidate-local configs can use
 `strategy_path = "strategy.py"`. `output.results_dir` remains repo-root-relative
 and must live under ignored `results/`.
+
+**Causality scoreability gate.** A `causality_check` of `"off"` runs no look-ahead
+replay, so by default its NAV path is **non-scoreable** — the run fails closed with
+`failure_stage="causality"` rather than scoring on unverified look-ahead. Every mode that
+runs some replay (`micro`/`emitted`/`focused`/`strict`) remains scoreable. The override
+lives in the operator-frozen **`[causality_policy]`** section: `allow_unverified_scoring`
+(bool, default `false`) re-admits `off` to scoring for deliberate profiling/debugging. It
+is **not** an agent-editable `[output]` key, so a climbing agent cannot relax the gate.
 
 `causality_check` defaults to `"strict"` for backward compatibility. New
 Train/autoresearch iteration should use `"micro"`: it runs a tiny bounded replay
@@ -296,8 +309,9 @@ clamped, normalized, or collapsed into an untyped `None` on a breach.
 **`RunEvidence`**: `replayable_from_artifacts` (bool|None), `data_availability_status`
 (str|None), `availability_coverage` (dict|None), `row_contract` (dict|None),
 `causality` (`RunCausalityEvidence`), `focused_causality`
-(`RunFocusedCausalityEvidence`), `causality_admissible` (bool; reads existing
-causality evidence — surfaced, not yet a scoreability gate), `warnings` (tuple[str, …]).
+(`RunFocusedCausalityEvidence`), `causality_admissible` (bool; reads the causality
+evidence dimension — `off` is gated to non-scoreable unless `[causality_policy]
+allow_unverified_scoring` is set), `warnings` (tuple[str, …]).
 **`RunCausalityEvidence`**: `causality_check` (`off` / `emitted` / `strict` / `focused` / `micro`),
 `verified`, `deterministic_replay_verified`, `emitted_replay_verified`,
 `strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
@@ -354,8 +368,11 @@ Its NAV path is the single object Train scoring statistics derive from; it is no
 diagnostic side-channel. The book is mandatory, so it is populated on every completed,
 **feasible** run. It carries compact full-Train and per-subwindow metrics (over
 **at-risk bars**) plus the book walk (`ledger`) the derived per-trade attribution is
-reconstructed from. The default scenarios are `realistic_costs` and `cost_stress`;
-full per-period return traces are not included in default artifacts.
+reconstructed from. The default scenarios are `realistic_costs`, `cost_stress`, and
+`fill_stress` (the last applies adverse slippage to `RiskRule` barrier exits; it is a
+diagnostic — the loop climbs `realistic_costs` — and is dropped when
+`foundation_fill_stress_fraction = 0.0`). Full per-period return traces are not included
+in default artifacts.
 
 Top-level payload fields are `schema_version`
 (`quant_strategies.quick_run.portfolio_foundation/v2`), `basis`
@@ -374,7 +391,7 @@ Scenario payload fields:
 
 | Field | Type | Notes |
 |---|---|---|
-| `scenario_id` | `str` | `realistic_costs` or `cost_stress` |
+| `scenario_id` | `str` | `realistic_costs`, `cost_stress`, or `fill_stress` |
 | `cost_multiplier` | `float` | multiplier applied to configured fee + slippage bps |
 | `feasibility` | `dict` | typed verdict payload: `feasible`, `reason`, `observed_gross`, `observed_net`, `detail` |
 | `full_train` | `dict` | compact metric record for the full Train scoring path |

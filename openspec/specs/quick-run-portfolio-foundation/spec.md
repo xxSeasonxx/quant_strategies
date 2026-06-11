@@ -35,10 +35,18 @@ removed from the runner/agent-editable output configuration. Exceeding it SHALL
 yield the fail-closed feasibility verdict rather than permitting exposure up to a
 limit or raising into a swallowed failure.
 
-#### Scenario: Default scenarios include realistic and cost stress
+#### Scenario: Default scenarios include realistic, cost stress, and fill stress
 - **WHEN** a quick run completes with default foundation settings
 - **THEN** the foundation includes a realistic-cost scenario
 - **AND** the foundation includes a cost-stressed scenario
+- **AND** the foundation includes a fill-stress scenario applying adverse slippage to
+  `RiskRule` barrier exits
+- **AND** the fill-stress scenario is omitted when `foundation_fill_stress_fraction` is `0.0`
+
+#### Scenario: Fill stress is a diagnostic, not the climbed path
+- **WHEN** a quick run sets a non-zero `foundation_fill_stress_fraction`
+- **THEN** the fill-stress scenario's barrier exits fill more adversely than the realistic scenario
+- **AND** the `realistic_costs` scenario the loop climbs is unchanged by the knob
 
 #### Scenario: Subwindows are derived from the path
 - **WHEN** a quick run configures N foundation subwindows within the supported

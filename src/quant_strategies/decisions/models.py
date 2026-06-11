@@ -106,11 +106,14 @@ class RiskRule(DecisionModel):
 
     Each threshold is an optional positive fraction of the position's entry mark
     (for example ``stop_loss=0.05`` flattens after a 5% adverse move). The engine
-    evaluates them causally against the end-of-bar printed mark and flattens the
-    instrument at the bar a threshold is crossed; intrabar OHLC barrier fills are
-    deferred fill realism, not part of this contract. Exits derivable from data or
-    time (signal reversal, fixed hold horizon) are expressed as explicit target
-    decisions, not as ``RiskRule`` thresholds.
+    evaluates them causally against the bar's **intrabar range** (high/low), so a
+    barrier pierced intrabar fires even if the close recovered. The exit fills at the
+    barrier level, worsened to the bar's open on a gap-through (a long that opens below
+    its stop fills at the lower open); ``take_profit`` fills at the level and is never
+    granted a gap-favorable bonus. When a single bar touches both an adverse barrier
+    (``stop_loss``/``trailing``) and ``take_profit``, the adverse one wins, since intrabar
+    order is unobservable. Exits derivable from data or time (signal reversal, fixed hold
+    horizon) are expressed as explicit target decisions, not as ``RiskRule`` thresholds.
     """
 
     stop_loss: float | None = None

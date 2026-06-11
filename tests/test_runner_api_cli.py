@@ -193,6 +193,7 @@ def write_config(
     params_extra: str = "",
     data_extra: str = "",
     leverage_budget_extra: str = "",
+    causality_policy_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -269,7 +270,7 @@ entry_lag_bars = {entry_lag_bars}
 [cost_model]
 fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
-{leverage_budget_extra}
+{leverage_budget_extra}{causality_policy_extra}
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
@@ -566,28 +567,49 @@ def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
     assert diagnostics["evidence_quality"]["strict_no_emission_verified"] is False
 
 
-def test_run_config_off_policy_marks_replay_unverified_but_keeps_other_gates(
+def test_run_config_off_policy_is_non_scoreable_by_default(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    strategy = tmp_path / "strategies" / "demo.py"
-    strategy.parent.mkdir(parents=True, exist_ok=True)
-    strategy.write_text(
-        "from quant_strategies.decisions import InstrumentRef, TargetDecision\n"
-        "def generate_decisions(rows, params):\n"
-        "    as_of_row = rows[1]\n"
-        "    future_rows = [row for row in rows if row['timestamp'] > as_of_row['timestamp']]\n"
-        "    decision_id = 'future-visible' if future_rows else 'prefix-only'\n"
-        "    return [TargetDecision(\n"
-        "        decision_id=decision_id,\n"
-        "        strategy_id='demo',\n"
-        "        instrument=InstrumentRef(kind='equity_or_etf', symbol=as_of_row['symbol']),\n"
-        "        decision_time=as_of_row['timestamp'],\n"
-        "        as_of_time=as_of_row['timestamp'],\n"
-        "        target=1.0,\n"
-        "    )]\n"
-    )
+    # causality_check="off" runs no look-ahead replay, so by default its NAV path is
+    # non-scoreable: a typed "causality" failure before the book is scored, not a
+    # swallowed pass (review No. 6 / [causality_policy] allow_unverified_scoring=false).
+    write_strategy(tmp_path)
     config_path = write_config(tmp_path, artifact_profile="diagnostic", causality_check="off")
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0, 105.0)),
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "build_portfolio_foundation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("off must be rejected before the book is scored")
+        ),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "causality"
+    assert result.economics is None
+    assert "allow_unverified_scoring" in result.message
+
+
+def test_run_config_off_policy_scores_when_operator_allows_unverified(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The operator-frozen escape hatch re-admits off to scoring (unverified-but-scored),
+    # preserving the prior profiling/debugging behavior.
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="off",
+        causality_policy_extra="[causality_policy]\nallow_unverified_scoring = true\n",
+    )
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -1468,6 +1490,8 @@ def test_run_config_execution_buffer_fills_late_decision_exit(
         data_extra='load_end = "2024-01-06"\n',
         artifact_profile="diagnostic",
         causality_check="off",
+        # This test exercises buffer fills, not causality; allow off to score.
+        causality_policy_extra="[causality_policy]\nallow_unverified_scoring = true\n",
     )
     monkeypatch.setattr(
         execution,
@@ -1571,6 +1595,8 @@ def test_run_config_engine_artifacts_use_only_decision_window_decisions(
         data_extra='load_end = "2024-01-06"\n',
         artifact_profile="full",
         causality_check="off",
+        # This test exercises decision-window artifacts, not causality; allow off to score.
+        causality_policy_extra="[causality_policy]\nallow_unverified_scoring = true\n",
     )
     monkeypatch.setattr(
         execution,
@@ -1842,7 +1868,7 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
     payload = summary["portfolio_foundation"]
     assert payload["evidence_class"] == "quick_run_portfolio_foundation_diagnostic"
     assert payload["basis"] == "quick_run_netted_portfolio_book"
-    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress"}
+    assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress", "fill_stress"}
     realistic = payload["scenarios"]["realistic_costs"]
     assert realistic["full_train"]["window_id"] == "full_train"
     assert realistic["full_train"]["closed_trade_count"] == 1
@@ -2149,6 +2175,29 @@ def test_runner_config_rejects_unknown_foundation_max_gross_exposure_field(tmp_p
         config_path.read_text().replace(
             "[output]\n", "[output]\nfoundation_max_gross_exposure = 1.2\n"
         )
+    )
+
+    with pytest.raises(RunnerError):
+        config_module.load_config(config_path, repo_root=tmp_path)
+
+
+def test_runner_config_causality_policy_is_operator_frozen(tmp_path: Path):
+    # The causality scoreability policy is operator-frozen in the protocol set, never an
+    # agent-editable [output] field, so a climbing agent cannot relax the off gate (No. 6).
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+
+    config = config_module.load_config(config_path, repo_root=tmp_path)
+
+    assert config.causality_policy.allow_unverified_scoring is False
+    assert not hasattr(config.output, "allow_unverified_scoring")
+
+
+def test_runner_config_rejects_agent_editable_allow_unverified_scoring(tmp_path: Path):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace("[output]\n", "[output]\nallow_unverified_scoring = true\n")
     )
 
     with pytest.raises(RunnerError):
@@ -3623,9 +3672,7 @@ def test_data_readiness_allows_matching_decision_row_at_decision_time(
     config_path = write_config(tmp_path)
     # available_at == timestamp: point-in-time clean (not look-ahead) and ready
     # exactly at the decision boundary.
-    loaded_rows = rows(
-        100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(0)
-    )
+    loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(0))
     monkeypatch.setattr(
         execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
     )

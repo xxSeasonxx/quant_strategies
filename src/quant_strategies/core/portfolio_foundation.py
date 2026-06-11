@@ -19,6 +19,9 @@ FOUNDATION_EVIDENCE_CLASS = "quick_run_portfolio_foundation_diagnostic"
 INITIAL_EQUITY = 100.0
 MAX_FOUNDATION_SUBWINDOWS = 64
 DEFAULT_MIN_RETURN_SAMPLE = 2
+# Default adverse slippage (fraction of the barrier price) applied to RiskRule exit fills
+# in the diagnostic ``fill_stress`` scenario. 10 bps; the realistic scored path uses 0.0.
+DEFAULT_FILL_STRESS_FRACTION = 0.0010
 EULER_MASCHERONI = 0.5772156649015329
 DSR_FORMULA = "bailey_lopez_de_prado_expected_max_sharpe"
 
@@ -44,6 +47,7 @@ class PortfolioFoundationConfig:
     trial_count: int | None = None
     benchmark_sharpe: float = 0.0
     cost_stress_multiplier: float = 2.0
+    fill_stress_fraction: float = DEFAULT_FILL_STRESS_FRACTION
     max_gross_exposure: float = 1.0
     max_net_exposure: float = 1.0
     min_return_sample: int = DEFAULT_MIN_RETURN_SAMPLE
@@ -59,6 +63,10 @@ class PortfolioFoundationConfig:
             raise ValueError("foundation_benchmark_sharpe must be finite")
         if not math.isfinite(self.cost_stress_multiplier) or self.cost_stress_multiplier < 1.0:
             raise ValueError("foundation_cost_stress_multiplier must be >= 1")
+        if not math.isfinite(self.fill_stress_fraction) or not (
+            0.0 <= self.fill_stress_fraction < 1.0
+        ):
+            raise ValueError("foundation_fill_stress_fraction must be in [0, 1)")
         if not math.isfinite(self.max_gross_exposure) or self.max_gross_exposure < 1.0:
             raise ValueError("foundation_max_gross_exposure must be >= 1")
         if not math.isfinite(self.max_net_exposure) or self.max_net_exposure < 1.0:
@@ -400,11 +408,27 @@ def build_portfolio_foundation(
         cost_multiplier=config.cost_stress_multiplier,
         config=config,
     )
+    scenarios = [realistic, stress]
+    # Fill-price stress: realistic costs (1.0x bps) but barrier exits fill with adverse
+    # slippage beyond the level, isolating stop/gap-fill sensitivity from fee sensitivity.
+    # A diagnostic only — the loop climbs ``realistic_costs``. Opt out with fraction 0.0.
+    if config.fill_stress_fraction > 0.0:
+        fill_stress_scenario, _ = _build_scenario(
+            "fill_stress",
+            row_index=row_index,
+            decision_plan=decision_plan,
+            data=data,
+            cost_model=cost_model,
+            cost_multiplier=1.0,
+            fill_stress=config.fill_stress_fraction,
+            config=config,
+        )
+        scenarios.append(fill_stress_scenario)
     return RunPortfolioFoundation(
         schema_version=FOUNDATION_SCHEMA_VERSION,
         basis=FOUNDATION_BASIS,
         evidence_class=FOUNDATION_EVIDENCE_CLASS,
-        scenarios=(realistic, stress),
+        scenarios=tuple(scenarios),
         ledger=realistic_walk,
     )
 
@@ -554,6 +578,21 @@ class _RowIndex:
                 return value
         return _positive_float(close, f"missing_mark:{symbol}:{timestamp.isoformat()}")
 
+    def bar_at(self, symbol: str, timestamp: datetime) -> tuple[float, float, float, float]:
+        """Return the bar's ``(open, high, low, close)`` for intrabar barrier evaluation.
+
+        The row contract guarantees these fields are present, positive, and order-valid
+        (``high >= max(open, close, low)``), so a ``RiskRule`` can be evaluated against the
+        intrabar range rather than the close alone. Like :meth:`mark_at`, the failure-only
+        ``isoformat()`` keeps the happy path allocation-free."""
+        row = self.row_at(symbol, timestamp)
+        return (
+            _positive_row_field(row, "open", symbol, timestamp),
+            _positive_row_field(row, "high", symbol, timestamp),
+            _positive_row_field(row, "low", symbol, timestamp),
+            _positive_row_field(row, "close", symbol, timestamp),
+        )
+
 
 class _DecisionPlan:
     """Resolves each standing target to its effective fill bar (entry-lag honored).
@@ -608,6 +647,7 @@ def _build_scenario(
     data: DataConfig,
     cost_model: CostModelConfig,
     cost_multiplier: float,
+    fill_stress: float = 0.0,
     config: PortfolioFoundationConfig,
 ) -> tuple[FoundationScenarioResult, BookWalkResult]:
     per_side_cost_fraction = _cost_fraction(
@@ -617,6 +657,7 @@ def _build_scenario(
         row_index,
         decision_plan,
         per_side_cost_fraction=per_side_cost_fraction,
+        fill_stress=fill_stress,
         data_kind=data.kind,
         config=config,
     )
@@ -653,6 +694,7 @@ def _walk_book(
     decision_plan: _DecisionPlan,
     *,
     per_side_cost_fraction: float,
+    fill_stress: float = 0.0,
     data_kind: DataKind,
     config: PortfolioFoundationConfig,
 ) -> BookWalkResult:
@@ -671,23 +713,36 @@ def _walk_book(
         # 1. Funding/financing on the NET held position (single localized friction).
         cash += _apply_funding(row_index, positions, timestamp, funding_events)
 
-        # 2. RiskRule overlay on the printed mark BEFORE new entries this bar.
+        # 2. RiskRule overlay on the intrabar range BEFORE new entries this bar. Only a
+        # position carrying a RiskRule reads the intrabar range; a stop-less position has
+        # no barrier to evaluate, so it never needs more than the close used for marking.
         for symbol in tuple(positions):
             position = positions[symbol]
-            if position.is_flat:
+            if position.is_flat or position.risk_rule is None:
                 continue
-            mark = row_index.mark_at(symbol, timestamp)
-            _update_trailing(position, mark)
-            fired_reason = _risk_rule_fired(position, mark)
-            if fired_reason is not None:
+            bar_open, high, low, _close = row_index.bar_at(symbol, timestamp)
+            fired = _risk_rule_fired(position, high=high, low=low)
+            if fired is not None:
+                exit_reason, level = fired
+                fill_price = _barrier_fill_price(
+                    position, level, bar_open, exit_reason, fill_stress
+                )
                 cash += _flatten(
-                    position, mark, per_side_cost_fraction, timestamp, fired_reason, round_trips
+                    position,
+                    fill_price,
+                    per_side_cost_fraction,
+                    timestamp,
+                    exit_reason,
+                    round_trips,
                 )
                 # Latch the symbol flat at the standing weight that fired, so a
                 # standing target does not re-enter until a different target arrives.
                 latched[symbol] = position.target_weight
                 position.signed_qty = 0.0
                 position.risk_rule = None
+            else:
+                # Extend the trailing extremes only on a non-firing bar (prior-peak rule).
+                _update_trailing(position, high=high, low=low)
 
         # 3. Apply decisions effective at t against one pre-entry equity snapshot.
         planned = decision_plan.by_time.get(timestamp, ())
@@ -930,15 +985,18 @@ def _close_leg(
 
 def _flatten(
     position: _NetPosition,
-    mark: float,
+    fill_price: float,
     per_side_cost_fraction: float,
     timestamp: datetime,
     exit_reason: str,
     round_trips: list[RoundTrip],
 ) -> float:
-    """Flatten the net position at ``mark`` for a fired RiskRule; record round-trip."""
-    cost = abs(position.signed_qty * mark) * per_side_cost_fraction
-    return _close_leg(position, mark, timestamp, cost, exit_reason, round_trips) - cost
+    """Flatten the net position at ``fill_price`` for a fired RiskRule; record round-trip.
+
+    ``fill_price`` is the barrier fill from :func:`_barrier_fill_price` (level, gap-aware,
+    optionally fill-stressed), not the bar close; cost scales with the executed notional."""
+    cost = abs(position.signed_qty * fill_price) * per_side_cost_fraction
+    return _close_leg(position, fill_price, timestamp, cost, exit_reason, round_trips) - cost
 
 
 def _apply_funding(
@@ -982,45 +1040,89 @@ def _apply_funding(
     return cash_delta
 
 
-def _update_trailing(position: _NetPosition, mark: float) -> None:
-    if position.peak_mark is None or mark > position.peak_mark:
-        position.peak_mark = mark
-    if position.trough_mark is None or mark < position.trough_mark:
-        position.trough_mark = mark
+def _update_trailing(position: _NetPosition, *, high: float, low: float) -> None:
+    """Extend the trailing extremes with this bar's intrabar high/low.
+
+    Called only on a bar that did *not* fire (see :func:`_risk_rule_fired`), so the
+    trailing stop is always tested against the *prior* extreme — a single bar cannot both
+    set a new peak/trough and stop off it."""
+    if position.peak_mark is None or high > position.peak_mark:
+        position.peak_mark = high
+    if position.trough_mark is None or low < position.trough_mark:
+        position.trough_mark = low
 
 
-def _risk_rule_fired(position: _NetPosition, mark: float) -> str | None:
-    """Return the fired rule's exit reason (``stop_loss``/``take_profit``/``trailing``)
-    or ``None`` when no declared threshold is crossed at this bar's printed mark."""
+def _risk_rule_fired(
+    position: _NetPosition, *, high: float, low: float
+) -> tuple[str, float] | None:
+    """Return the fired rule's ``(exit_reason, barrier_level)`` or ``None``.
+
+    Thresholds are evaluated against the bar's intrabar range (high/low), not the close:
+    a barrier pierced intrabar fires even if the close recovered. Adverse barriers
+    (``stop_loss``, ``trailing``) are checked before ``take_profit``, so a bar that touches
+    both an adverse and a favorable level resolves to the adverse one — the conservative
+    same-bar assumption, since intrabar order is unobservable. Trailing is tested against
+    the *prior* peak/trough (the caller updates the extreme only after a non-firing bar)."""
     rule = position.risk_rule
     if rule is None or position.entry_mark is None:
         return None
     entry = position.entry_mark
     is_long = position.signed_qty > 0.0
     if rule.stop_loss is not None:
-        if is_long and mark <= entry * (1.0 - rule.stop_loss):
-            return "stop_loss"
-        if not is_long and mark >= entry * (1.0 + rule.stop_loss):
-            return "stop_loss"
-    if rule.take_profit is not None:
-        if is_long and mark >= entry * (1.0 + rule.take_profit):
-            return "take_profit"
-        if not is_long and mark <= entry * (1.0 - rule.take_profit):
-            return "take_profit"
+        if is_long:
+            level = entry * (1.0 - rule.stop_loss)
+            if low <= level:
+                return "stop_loss", level
+        else:
+            level = entry * (1.0 + rule.stop_loss)
+            if high >= level:
+                return "stop_loss", level
     if rule.trailing is not None:
-        if (
-            is_long
-            and position.peak_mark is not None
-            and mark <= position.peak_mark * (1.0 - rule.trailing)
-        ):
-            return "trailing"
-        if (
-            not is_long
-            and position.trough_mark is not None
-            and mark >= position.trough_mark * (1.0 + rule.trailing)
-        ):
-            return "trailing"
+        if is_long and position.peak_mark is not None:
+            level = position.peak_mark * (1.0 - rule.trailing)
+            if low <= level:
+                return "trailing", level
+        if not is_long and position.trough_mark is not None:
+            level = position.trough_mark * (1.0 + rule.trailing)
+            if high >= level:
+                return "trailing", level
+    if rule.take_profit is not None:
+        if is_long:
+            level = entry * (1.0 + rule.take_profit)
+            if high >= level:
+                return "take_profit", level
+        else:
+            level = entry * (1.0 - rule.take_profit)
+            if low <= level:
+                return "take_profit", level
     return None
+
+
+def _barrier_fill_price(
+    position: _NetPosition,
+    level: float,
+    bar_open: float,
+    exit_reason: str,
+    fill_stress: float,
+) -> float:
+    """Fill price for a fired barrier exit.
+
+    Adverse barriers (``stop_loss``/``trailing``) fill at the barrier level, but worsen to
+    the bar's open on a gap-through (a long that opened below its stop fills at the lower
+    open, not the level) — the gap risk the close-only model hid. ``take_profit`` fills at
+    the level and is never granted a gap-favorable bonus. ``fill_stress`` (in ``[0, 1)``)
+    then applies adverse slippage in the executed direction: closing a long sells (lower
+    fill), closing a short buys (higher fill). The realistic scenario passes ``0.0``."""
+    is_long = position.signed_qty > 0.0
+    if exit_reason == "take_profit":
+        base = level
+    elif is_long:
+        base = min(level, bar_open)
+    else:
+        base = max(level, bar_open)
+    if fill_stress > 0.0:
+        base *= (1.0 - fill_stress) if is_long else (1.0 + fill_stress)
+    return base
 
 
 def _check_intended_budget(
@@ -1883,6 +1985,18 @@ def _positive_float(value: object, message: str) -> float:
     if metric <= 0.0:
         raise ValueError(message)
     return metric
+
+
+def _positive_row_field(
+    row: Mapping[str, Any], field_name: str, symbol: str, timestamp: datetime
+) -> float:
+    """Positive OHLC field with a lazy failure message (allocation-free happy path)."""
+    value = row.get(field_name)
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        metric = float(value)
+        if metric > 0.0 and math.isfinite(metric):
+            return metric
+    return _positive_float(value, f"missing_{field_name}:{symbol}:{timestamp.isoformat()}")
 
 
 def _finite_float(value: object, message: str) -> float:
