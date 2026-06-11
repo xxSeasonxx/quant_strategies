@@ -22,21 +22,29 @@ not required because the upstream final funding boost is effectively disabled.
 
 Decision rule:
 Build completed hourly snapshots from rows available at or before the as-of
-timestamp. Emit a long or short target-weight decision when at least four of six
-votes agree: 12h momentum versus a dynamic volatility threshold, 6h momentum
-versus 0.5 of that threshold, EMA(12) versus EMA(26), RSI(8) versus 50,
-MACD(12,26,9) histogram sign, and Bollinger Band width percentile below 85 as a
-bidirectional volatility-regime vote. The exit policy uses ATR(24) * 5.5 as a
-trailing stop in basis points and no take-profit by default. The default 8%
-portfolio budget is split equally across configured symbols.
+timestamp. Walk each symbol's snapshots and emit a signed weight-of-NAV target
+when at least four of six votes agree: 12h momentum versus a dynamic volatility
+threshold, 6h momentum versus 0.5 of that threshold, EMA(12) versus EMA(26),
+RSI(8) versus 50, MACD(12,26,9) histogram sign, and Bollinger Band width
+percentile below 85 as a bidirectional volatility-regime vote. A long agreement
+emits a positive target, a short agreement a negative target, each carrying an
+ATR(24) * 5.5 trailing-stop RiskRule and no take-profit by default. The held
+position is closed by an explicit flat (zero) target scheduled max_hold_bars
+input-bars (hold_signal_bars snapshot steps) after entry, so the hold horizon is
+expressed on the target book itself rather than an engine hold field. The default
+8% portfolio budget is split equally across configured symbols.
 
 Assumptions:
 Input bars are sorted by causal availability through the runner's available_at
-field when present, hourly snapshots can be labeled by existing bar timestamps,
-and max_hold_bars is expressed in the runner's native input-bar cadence. The
-local engine has no explicit flat target or portfolio-aware state, so this port
-suppresses overlapping same-symbol entries until the assumed local hold window
-ends instead of reproducing upstream portfolio state or signal flips.
+field when present, hourly snapshots are labeled by existing bar timestamps, and
+max_hold_bars is expressed in the runner's native input-bar cadence. Each
+decision_time is the entry snapshot's timestamp plus decision_lag_minutes snapped
+forward to a real bar for that symbol, so it is never look-ahead. The single
+signed target per symbol nets by construction: the scheduled flat closes the
+position, and entry suppression (max(hold_signal_bars, cooldown_bars) + 1 steps)
+guarantees the next entry lands strictly after the flat, so flats never collide
+with a re-entry. A scheduled flat is a hold-horizon policy exit, not a data-driven
+signal, so it declares no observations.
 
 Falsifier:
 If decisions fail causal data audit, require overlapping same-symbol exposure to
@@ -44,6 +52,7 @@ work, or depend on unmodeled flat exits/signal flips for most return, reject
 this port before any promotion decision.
 """
 
+import bisect
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -51,11 +60,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    RiskRule,
+    TargetDecision,
 )
 
 __all__ = ["generate_decisions", "validate_params"]
@@ -207,7 +215,7 @@ def validate_params(params: Mapping[str, object]) -> dict[str, object]:
 def generate_decisions(
     bars: Sequence[Mapping[str, object]],
     params: Mapping[str, object],
-) -> list[StrategyDecision]:
+) -> list[TargetDecision]:
     if not bars:
         return []
 
@@ -216,11 +224,13 @@ def generate_decisions(
     rows_by_symbol = _rows_by_symbol(bars, parsed_params.symbols)
     required_history = _required_history_hours(parsed_params)
 
-    decisions: list[StrategyDecision] = []
+    decisions: list[TargetDecision] = []
+    seen_keys: set[tuple[str, datetime]] = set()
     for symbol in parsed_params.symbols:
         rows = rows_by_symbol.get(symbol, [])
         if not rows:
             continue
+        bar_timestamps = [row.timestamp for row in rows]
         snapshots = _hourly_snapshots(rows, parsed_params.decision_interval_minutes)
         if len(snapshots) < required_history:
             continue
@@ -245,20 +255,72 @@ def generate_decisions(
             if side is None:
                 continue
 
+            entry_snapshot = snapshots[index]
+            entry_decision_time = _snap_to_bar(
+                bar_timestamps,
+                entry_snapshot.timestamp + timedelta(minutes=parsed_params.decision_lag_minutes),
+            )
+            if entry_decision_time is None:
+                continue
+
             effective_target_weight = parsed_params.base_position_pct / len(parsed_params.symbols)
-            decision = _decision(
+            entry_decision = _entry_decision(
                 history=history,
                 indicators=indicators,
                 side=side,
                 parsed_params=parsed_params,
                 effective_target_weight=effective_target_weight,
+                decision_time=entry_decision_time,
             )
-            decisions.append(decision)
+            _append_unique(decisions, seen_keys, entry_decision)
+
+            flat_index = index + hold_signal_bars
+            if flat_index < len(snapshots):
+                flat_decision_time = _snap_to_bar(
+                    bar_timestamps,
+                    snapshots[flat_index].timestamp
+                    + timedelta(minutes=parsed_params.decision_lag_minutes),
+                )
+                if flat_decision_time is not None and flat_decision_time > entry_decision_time:
+                    _append_unique(
+                        decisions,
+                        seen_keys,
+                        TargetDecision(
+                            strategy_id=_DEFAULT_STRATEGY_ID,
+                            instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
+                            decision_time=flat_decision_time,
+                            as_of_time=entry_snapshot.timestamp,
+                            target=0.0,
+                        ),
+                    )
+
             next_allowed_index = index + max(hold_signal_bars, parsed_params.cooldown_bars) + 1
 
     return sorted(
         decisions, key=lambda decision: (decision.decision_time, decision.instrument.symbol)
     )
+
+
+def _append_unique(
+    decisions: list[TargetDecision],
+    seen_keys: set[tuple[str, datetime]],
+    decision: TargetDecision,
+) -> None:
+    key = (decision.instrument.symbol, decision.decision_time)
+    if key in seen_keys:
+        return
+    seen_keys.add(key)
+    decisions.append(decision)
+
+
+def _snap_to_bar(
+    bar_timestamps: Sequence[datetime],
+    target_time: datetime,
+) -> datetime | None:
+    index = bisect.bisect_left(bar_timestamps, target_time)
+    if index >= len(bar_timestamps):
+        return None
+    return bar_timestamps[index]
 
 
 def _parse_params(params: Mapping[str, object]) -> _Params:
@@ -608,18 +670,20 @@ def _entry_side(indicators: _Indicators, min_votes: int) -> str | None:
     return None
 
 
-def _decision(
+def _entry_decision(
     history: Sequence[_HourlySnapshot],
     indicators: _Indicators,
     side: str,
     parsed_params: _Params,
     effective_target_weight: float,
-) -> StrategyDecision:
+    decision_time: datetime,
+) -> TargetDecision:
     snapshot = history[-1]
-    decision_time = snapshot.timestamp + timedelta(minutes=parsed_params.decision_lag_minutes)
     trailing_stop_bps = indicators.atr_bps * parsed_params.atr_stop_mult
+    target = effective_target_weight if side == "long" else -effective_target_weight
     metadata: dict[str, Any] = {
         "signal_family": _SIGNAL_FAMILY,
+        "side": side,
         "long_votes": indicators.long_votes,
         "short_votes": indicators.short_votes,
         "vote_details": indicators.vote_details,
@@ -644,26 +708,19 @@ def _decision(
         "effective_target_weight": effective_target_weight,
         "stateful_rsi_exit_supported": False,
         "signal_flip_supported": False,
-        "same_symbol_overlap_policy": "suppress_until_assumed_hold_window_end",
+        "hold_horizon_exit_policy": "explicit_flat_target_after_max_hold_bars",
         "upstream_defaults": _UPSTREAM_DEFAULTS,
     }
     if snapshot.funding_rate is not None:
         metadata["latest_funding_rate"] = snapshot.funding_rate
 
-    return StrategyDecision(
+    return TargetDecision(
         strategy_id=_DEFAULT_STRATEGY_ID,
         instrument=InstrumentRef(kind="crypto_perp", symbol=snapshot.symbol),
         decision_time=decision_time,
         as_of_time=snapshot.timestamp,
-        target=PositionTarget(
-            direction=side,
-            sizing_kind="target_weight",
-            size=effective_target_weight,
-        ),
-        exit_policy=ExitPolicy(
-            max_hold_bars=parsed_params.max_hold_bars,
-            trailing_stop_bps=trailing_stop_bps,
-        ),
+        target=target,
+        risk_rule=RiskRule(trailing=trailing_stop_bps / 1e4),
         observations=_dedupe_observations(history),
         metadata=metadata,
     )

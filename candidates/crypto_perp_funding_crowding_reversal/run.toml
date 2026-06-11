@@ -34,11 +34,12 @@ entry_lag_bars = 1
 exit_lag_bars = 0
 
 [cost_model]
-fee_bps_per_side = 0.0
-slippage_bps_per_side = 0.0
+fee_bps_per_side = 5.0
+slippage_bps_per_side = 1.0
 
 [output]
 results_dir = "results"
+quick_checks = true
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5
 causality_check = "micro"

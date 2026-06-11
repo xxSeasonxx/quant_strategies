@@ -22,6 +22,7 @@ RowContractReason = Literal[
     "row_duplicate_symbol_timestamp",
     "row_invalid_available_at",
     "row_missing_available_at",
+    "row_available_at_before_timestamp",
     "row_missing_quote_field",
     "row_invalid_funding_fields",
 ]
@@ -267,6 +268,19 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
                 else:
                     normalized["available_at"] = parsed_available_at
                     valid_available_at += 1
+                    if parsed_timestamp is not None and parsed_available_at < parsed_timestamp:
+                        issues.append(
+                            _issue(
+                                "row_available_at_before_timestamp",
+                                "available_at",
+                                normalized,
+                                severity="error",
+                                message=(
+                                    "available_at must be on or after timestamp; "
+                                    "information cannot be available before its event time"
+                                ),
+                            )
+                        )
 
             if symbol is not None and "timestamp" in normalized:
                 key_timestamp = _duplicate_timestamp_key(

@@ -30,8 +30,12 @@ entry_zscore = 3.0
 min_abs_residual_bps = 0.5
 attribution_bars = 5
 crossing_only = true
-weight = 0.25
+weight = 0.1
 max_hold_bars = 10
+
+[leverage_budget]
+max_gross_exposure = 2.0
+max_net_exposure = 1.0
 
 [fill_model]
 price = "quote"
@@ -39,11 +43,12 @@ entry_lag_bars = 1
 exit_lag_bars = 0
 
 [cost_model]
-fee_bps_per_side = 0.0
-slippage_bps_per_side = 0.0
+fee_bps_per_side = 0.5
+slippage_bps_per_side = 0.5
 
 [output]
 results_dir = "results"
 artifact_profile = "diagnostic"
 diagnostic_sample_trades = 5
 causality_check = "micro"
+quick_checks = true

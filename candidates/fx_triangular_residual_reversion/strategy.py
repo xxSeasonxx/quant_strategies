@@ -19,13 +19,29 @@ Decision rule:
 Compute triangular log residuals from completed closes, score the current
 residual against prior residuals only, attribute the recent residual move to
 the largest aligned leg, and trade that leg toward residual mean reversion after
-the residual's as-of bar can be observed.
+the residual's as-of bar can be observed. Each attributed leg carries a small,
+fixed per-name signed weight of NAV (long for a positive net score, short for a
+negative one) as a standing target that holds until a scheduled flat or a
+superseding signal on the same symbol. The flat is an explicit zero target placed
+``max_hold_bars`` bars after the entry bar in that symbol's own bar series; it is
+suppressed when the next same-symbol entry's decision bar falls on or before the
+flat, so the newer target supersedes the hold-horizon exit rather than racing it.
+Several legs can be open at once, so the per-name weight is deliberately small and
+the operator leverage budget (gross 2.0, net 1.0) caps aggregate exposure;
+concurrent same-direction crowding beyond that budget is a fail-closed feasibility
+verdict, never silently scaled.
 
 Assumptions:
 Close prices and quote fields are sufficiently aligned across triangle legs;
 market data availability is represented by the runner's `available_at` field
-when present, and the next-bar quote fill is the earliest causal execution used
-by the runner config.
+(``timestamp + 1 minute`` for these contiguous one-minute bars), and the next-bar
+quote fill is the earliest causal execution used by the runner config. A synthetic
+decision time (the as-of bar plus the decision lag) is snapped forward to the first
+real bar at or after it in the symbol's series so ``decision_time`` always lands on
+an actually-traded bar and stays look-ahead-free. A scheduled flat is a hold-horizon
+policy exit, not a data-driven signal, so it declares no observations. Optional
+price-path exit thresholds are expressed as engine-enforced ``RiskRule`` fractions
+of the entry mark.
 
 Falsifier:
 If broad fixed-parameter residual signals do not produce positive gross return
@@ -35,17 +51,17 @@ before spread and slippage, reject this one-minute residual proxy before tuning.
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from statistics import fmean, pstdev
 from typing import Any
 
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    RiskRule,
+    TargetDecision,
 )
 
 __all__ = ["generate_decisions", "validate_params"]
@@ -125,7 +141,7 @@ def validate_params(params: Mapping[str, object]) -> dict[str, object]:
 def generate_decisions(
     bars: Sequence[Mapping[str, object]],
     params: Mapping[str, object],
-) -> list[StrategyDecision]:
+) -> list[TargetDecision]:
     if not bars:
         return []
     _require_fields(bars, _REQUIRED_FIELDS)
@@ -140,9 +156,12 @@ def generate_decisions(
     crossing_only = bool(parsed["crossing_only"])
     weight = float(parsed["weight"])
     max_hold_bars = int(parsed["max_hold_bars"])
-    exit_controls = {name: parsed[name] for name in _EXIT_CONTROL_KEYS if name in parsed}
+    risk_rule = _risk_rule_from_controls(
+        {name: parsed[name] for name in _EXIT_CONTROL_KEYS if name in parsed}
+    )
 
     close_by_key, timestamps, symbols = _close_table(bars)
+    bars_by_symbol = _symbol_bar_timestamps(bars)
 
     candidates: dict[tuple[str, datetime], list[dict[str, Any]]] = {}
     for triangle in _triangles_for(str(parsed["triangle_set"])):
@@ -162,41 +181,181 @@ def generate_decisions(
             candidates,
         )
 
-    decisions: list[StrategyDecision] = []
-    for symbol, as_of_time in sorted(candidates, key=lambda key: (key[1], key[0])):
-        entries = candidates[(symbol, as_of_time)]
-        score = sum(float(entry["signal"]) * float(entry["strength"]) for entry in entries)
+    entries = _build_entries(
+        candidates,
+        bars_by_symbol=bars_by_symbol,
+        weight=weight,
+        decision_lag_minutes=decision_lag_minutes,
+    )
+    return _walk_standing_targets(
+        entries,
+        bars_by_symbol=bars_by_symbol,
+        max_hold_bars=max_hold_bars,
+        risk_rule=risk_rule,
+    )
+
+
+def _build_entries(
+    candidates: dict[tuple[str, datetime], list[dict[str, Any]]],
+    *,
+    bars_by_symbol: Mapping[str, list[datetime]],
+    weight: float,
+    decision_lag_minutes: int,
+) -> list[dict[str, Any]]:
+    """Resolve each fired (symbol, as_of) candidate into a standing-target entry.
+
+    The residual/zscore/attribution logic is unchanged; this only turns the netted
+    per-key score into a signed standing target and snaps the synthetic decision time
+    to a real bar so ``decision_time`` is causal and tradeable.
+    """
+    lag = timedelta(minutes=decision_lag_minutes)
+    entries: list[dict[str, Any]] = []
+    for symbol, as_of_time in candidates:
+        rows = candidates[(symbol, as_of_time)]
+        score = sum(float(entry["signal"]) * float(entry["strength"]) for entry in rows)
         if abs(score) <= 1e-12:
             continue
-        representative = max(entries, key=lambda entry: abs(float(entry["strength"])))
+        bar_times = bars_by_symbol.get(symbol)
+        if not bar_times:
+            continue
+        entry_time = _first_bar_at_or_after(bar_times, as_of_time + lag)
+        if entry_time is None:
+            continue
+        representative = max(rows, key=lambda row: abs(float(row["strength"])))
         observations = _unique_observations(
-            observation for entry in entries for observation in entry["observations"]
+            observation for row in rows for observation in row["observations"]
         )
-        decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
-        decisions.append(
-            StrategyDecision(
-                strategy_id="fx_triangular_residual_reversion",
-                instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
-                decision_time=decision_time,
-                as_of_time=as_of_time,
-                target=PositionTarget(
-                    direction="long" if score > 0.0 else "short",
-                    sizing_kind="target_weight",
-                    size=weight,
-                ),
-                exit_policy=ExitPolicy(max_hold_bars=max_hold_bars, **exit_controls),
-                observations=observations,
-                metadata={
+        entries.append(
+            {
+                "symbol": symbol,
+                "as_of_time": as_of_time,
+                "decision_time": entry_time,
+                "target": weight if score > 0.0 else -weight,
+                "observations": observations,
+                "metadata": {
                     "residual_zscore": representative["residual_zscore"],
                     "residual_bps": representative["residual_bps"],
-                    "attribution_score": sum(
-                        float(entry["attribution_score"]) for entry in entries
-                    ),
+                    "attribution_score": sum(float(row["attribution_score"]) for row in rows),
                     "signal_family": "fx_triangular_residual_reversion",
                 },
-            )
+            }
         )
+    return entries
+
+
+def _walk_standing_targets(
+    entries: list[dict[str, Any]],
+    *,
+    bars_by_symbol: Mapping[str, list[datetime]],
+    max_hold_bars: int,
+    risk_rule: RiskRule | None,
+) -> list[TargetDecision]:
+    """Fold per-symbol entries into a standing-target walk with scheduled flats.
+
+    Per symbol, entries are processed in decision-time order. Each entry sets a signed
+    standing target (skipped if it equals the symbol's current standing target). Its
+    scheduled flat lands ``max_hold_bars`` bars after the entry bar in that symbol's
+    series; the flat is emitted only when the next same-symbol entry's decision bar is
+    strictly after it, otherwise the next entry supersedes the hold-horizon exit. The
+    last entry's flat is always emitted when a bar exists at the horizon. No duplicate
+    (symbol, decision_time) is emitted.
+    """
+    by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for entry in entries:
+        by_symbol.setdefault(entry["symbol"], []).append(entry)
+
+    decisions: list[TargetDecision] = []
+    for symbol in sorted(by_symbol):
+        symbol_entries = sorted(
+            by_symbol[symbol], key=lambda e: (e["decision_time"], e["as_of_time"])
+        )
+        bar_times = bars_by_symbol[symbol]
+        standing_target = 0.0
+        emitted_times: set[datetime] = set()
+        for index, entry in enumerate(symbol_entries):
+            decision_time = entry["decision_time"]
+            target = float(entry["target"])
+            if target == standing_target:
+                continue
+            if decision_time in emitted_times:
+                continue
+            decisions.append(
+                TargetDecision(
+                    strategy_id="fx_triangular_residual_reversion",
+                    instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
+                    decision_time=decision_time,
+                    as_of_time=entry["as_of_time"],
+                    target=target,
+                    risk_rule=risk_rule,
+                    observations=entry["observations"],
+                    metadata=entry["metadata"],
+                )
+            )
+            emitted_times.add(decision_time)
+            standing_target = target
+
+            flat_time = _bar_at_offset(bar_times, decision_time, max_hold_bars)
+            if flat_time is None:
+                continue
+            next_decision_time = (
+                symbol_entries[index + 1]["decision_time"]
+                if index + 1 < len(symbol_entries)
+                else None
+            )
+            superseded = next_decision_time is not None and next_decision_time <= flat_time
+            if superseded or flat_time in emitted_times:
+                continue
+            decisions.append(
+                TargetDecision(
+                    strategy_id="fx_triangular_residual_reversion",
+                    instrument=InstrumentRef(kind="fx_pair", symbol=symbol),
+                    decision_time=flat_time,
+                    as_of_time=entry["as_of_time"],
+                    target=0.0,
+                    risk_rule=None,
+                )
+            )
+            emitted_times.add(flat_time)
+            standing_target = 0.0
     return decisions
+
+
+def _risk_rule_from_controls(controls: Mapping[str, object]) -> RiskRule | None:
+    legs = {
+        "stop_loss": controls.get("stop_loss_bps"),
+        "take_profit": controls.get("take_profit_bps"),
+        "trailing": controls.get("trailing_stop_bps"),
+    }
+    present = {name: float(value) / 1e4 for name, value in legs.items() if value is not None}
+    if not present:
+        return None
+    return RiskRule(**present)
+
+
+def _symbol_bar_timestamps(
+    bars: Sequence[Mapping[str, object]],
+) -> dict[str, list[datetime]]:
+    by_symbol: dict[str, set[datetime]] = {}
+    for row in bars:
+        symbol = str(row["symbol"])
+        timestamp = _as_datetime(row["timestamp"])
+        by_symbol.setdefault(symbol, set()).add(timestamp)
+    return {symbol: sorted(times) for symbol, times in by_symbol.items()}
+
+
+def _first_bar_at_or_after(bar_times: Sequence[datetime], target: datetime) -> datetime | None:
+    position = bisect_left(bar_times, target)
+    if position >= len(bar_times):
+        return None
+    return bar_times[position]
+
+
+def _bar_at_offset(bar_times: Sequence[datetime], anchor: datetime, offset: int) -> datetime | None:
+    position = bisect_left(bar_times, anchor)
+    target_position = position + offset
+    if target_position >= len(bar_times):
+        return None
+    return bar_times[target_position]
 
 
 def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:

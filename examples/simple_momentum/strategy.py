@@ -13,12 +13,18 @@ Required observables:
 Symbol, timestamp, and close price for ordered bars.
 
 Decision rule:
-Emit the first long target decision at the current bar timestamp when the
-current close is greater than the previous close.
+While flat, go long a weight-of-NAV target on the first bar whose close exceeds
+the prior close, then declare an explicit flat (zero) target max_hold_bars bars
+later so the held position closes on the target book itself rather than an engine
+hold horizon. Re-arm once flat and repeat across the window so the NAV path
+carries enough at-risk return bars to score.
 
 Assumptions:
-The configured fill model enters after the decision bar, so a close-derived
-signal is not filled on the same close unless explicitly opted in.
+The signal is gated on each bar's available_at, not its timestamp: the long
+becomes actionable on the first bar at or after the signal bar's available_at, so
+decision_time always lands on a real, already-available bar and the configured
+fill model enters on the following bar. A scheduled flat declares no observation
+because it is a hold-horizon policy exit, not a data-driven signal.
 
 Falsifier:
 If the harness cannot evaluate this deterministic positive-momentum toy rule
@@ -31,11 +37,9 @@ import math
 from collections.abc import Mapping, Sequence
 
 from quant_strategies.decisions import (
-    ExitPolicy,
     InstrumentRef,
     ObservationRef,
-    PositionTarget,
-    StrategyDecision,
+    TargetDecision,
 )
 
 
@@ -52,49 +56,72 @@ def validate_params(params: Mapping[str, object]) -> dict[str, object]:
 def generate_decisions(
     bars: Sequence[Mapping[str, object]],
     params: Mapping[str, object],
-) -> list[StrategyDecision]:
+) -> list[TargetDecision]:
     validated = validate_params(params)
     weight = float(validated["weight"])
     max_hold_bars = int(validated["max_hold_bars"])
-    decisions: list[StrategyDecision] = []
+    decisions: list[TargetDecision] = []
 
-    for index in range(1, len(bars)):
-        previous_close = float(bars[index - 1]["close"])
-        current_close = float(bars[index]["close"])
-        if current_close > previous_close:
-            symbol = str(bars[index]["symbol"])
-            timestamp = bars[index]["timestamp"]
-            decisions.append(
-                StrategyDecision(
-                    strategy_id="simple_momentum",
-                    instrument=InstrumentRef(
-                        kind="equity_or_etf",
-                        symbol=symbol,
-                    ),
-                    decision_time=timestamp,
-                    as_of_time=timestamp,
-                    target=PositionTarget(
-                        direction="long",
-                        sizing_kind="target_weight",
-                        size=weight,
-                    ),
-                    exit_policy=ExitPolicy(max_hold_bars=max_hold_bars),
-                    observations=(
-                        ObservationRef(
-                            symbol=symbol,
-                            timestamp=bars[index - 1]["timestamp"],
-                            field="close",
-                            source="strategy_input",
-                        ),
-                        ObservationRef(
-                            symbol=symbol,
-                            timestamp=timestamp,
-                            field="close",
-                            source="strategy_input",
-                        ),
-                    ),
-                )
-            )
+    index = 1
+    while index < len(bars):
+        if float(bars[index]["close"]) <= float(bars[index - 1]["close"]):
+            index += 1
+            continue
+        symbol = str(bars[index]["symbol"])
+        signal_time = bars[index]["timestamp"]
+
+        # Act on the first real bar at or after the signal's availability, so
+        # decision_time lands on a bar and is never look-ahead.
+        entry_index = _first_bar_at_or_after(bars, index + 1, bars[index]["available_at"])
+        if entry_index is None:
+            break
+        exit_index = entry_index + max_hold_bars
+        if exit_index >= len(bars):
             break
 
+        decisions.append(
+            TargetDecision(
+                strategy_id="simple_momentum",
+                instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
+                decision_time=bars[entry_index]["timestamp"],
+                as_of_time=signal_time,
+                target=weight,
+                observations=(
+                    ObservationRef(
+                        symbol=symbol,
+                        timestamp=bars[index - 1]["timestamp"],
+                        field="close",
+                        source="strategy_input",
+                    ),
+                    ObservationRef(
+                        symbol=symbol,
+                        timestamp=signal_time,
+                        field="close",
+                        source="strategy_input",
+                    ),
+                ),
+            )
+        )
+        decisions.append(
+            TargetDecision(
+                strategy_id="simple_momentum",
+                instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
+                decision_time=bars[exit_index]["timestamp"],
+                as_of_time=bars[entry_index]["timestamp"],
+                target=0.0,
+            )
+        )
+        index = exit_index + 1
+
     return decisions
+
+
+def _first_bar_at_or_after(
+    bars: Sequence[Mapping[str, object]],
+    start: int,
+    available_at: object,
+) -> int | None:
+    for index in range(start, len(bars)):
+        if bars[index]["timestamp"] >= available_at:
+            return index
+    return None

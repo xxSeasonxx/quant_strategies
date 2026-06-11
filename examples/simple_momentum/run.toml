@@ -18,8 +18,8 @@ entry_lag_bars = 1
 exit_lag_bars = 0
 
 [cost_model]
-fee_bps_per_side = 0.0
-slippage_bps_per_side = 0.0
+fee_bps_per_side = 1.0
+slippage_bps_per_side = 0.5
 
 [output]
 results_dir = "results"

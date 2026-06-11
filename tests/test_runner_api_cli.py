@@ -3615,16 +3615,16 @@ def test_runner_structures_strategy_import_system_exit(tmp_path: Path):
     assert "strategy import exited: import exited" in summary["message"]
 
 
-@pytest.mark.parametrize("readiness_lag", [-timedelta(minutes=1), timedelta(0)])
-def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
+def test_data_readiness_allows_matching_decision_row_at_decision_time(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    readiness_lag: timedelta,
 ):
     write_strategy(tmp_path)
     config_path = write_config(tmp_path)
+    # available_at == timestamp: point-in-time clean (not look-ahead) and ready
+    # exactly at the decision boundary.
     loaded_rows = rows(
-        100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=readiness_lag
+        100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(0)
     )
     monkeypatch.setattr(
         execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
@@ -3636,6 +3636,31 @@ def test_data_readiness_allows_matching_decision_row_at_or_before_decision_time(
     assert result.result_dir is not None
     summary = read_summary(result.result_dir)
     assert summary["stage"] == "completed"
+
+
+def test_row_contract_rejects_available_at_before_timestamp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    # available_at before timestamp is look-ahead availability: information cannot
+    # become available before its event time, so it is a fail-closed row-contract
+    # error rather than a tolerated stamp.
+    loaded_rows = rows(
+        100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=-timedelta(minutes=1)
+    )
+    monkeypatch.setattr(
+        execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "request_build"
+    assert result.result_dir is not None
+    summary = read_summary(result.result_dir)
+    assert "row_available_at_before_timestamp" in summary["message"]
 
 
 def test_unavailable_decision_row_fails_causality_before_adapter(

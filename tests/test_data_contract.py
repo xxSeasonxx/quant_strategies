@@ -190,6 +190,42 @@ def test_invalid_available_at_is_error():
     assert normalized.row_contract_summary()["status"] == "failed"
 
 
+def test_available_at_before_timestamp_is_error():
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(available_at=TIMESTAMP - timedelta(seconds=1))],
+    )
+
+    assert [(issue.reason, issue.severity) for issue in normalized.issues] == [
+        ("row_available_at_before_timestamp", "error")
+    ]
+    assert normalized.row_contract_summary()["status"] == "failed"
+    assert normalized.row_contract_summary()["quant_data_feedback"] == [
+        "row_available_at_before_timestamp:available_at:1"
+    ]
+
+
+def test_available_at_equal_to_timestamp_passes():
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(available_at=TIMESTAMP)],
+    )
+
+    assert normalized.row_contract_summary()["status"] == "passed"
+    assert issue_reasons(normalized) == []
+
+
+def test_available_at_after_timestamp_passes():
+    # A legitimate publication delay (available_at > timestamp) stays valid.
+    normalized = NormalizedRows.from_rows(
+        config(),
+        [valid_row(available_at=TIMESTAMP + timedelta(minutes=5))],
+    )
+
+    assert normalized.row_contract_summary()["status"] == "passed"
+    assert issue_reasons(normalized) == []
+
+
 def test_quote_fill_missing_quote_field_emits_quote_issue():
     normalized = NormalizedRows.from_rows(
         config("forex_with_quotes", fill_price="quote"),
