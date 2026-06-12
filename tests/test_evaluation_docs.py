@@ -151,6 +151,33 @@ def test_consumer_docs_route_autoresearch_to_micro_causality():
     assert "advanced" in reference
 
 
+def test_active_docs_describe_current_strategy_author_contracts():
+    readme = read("README.md")
+    foundation = read("docs/foundation-surfaces.md")
+    docs = "\n".join(
+        [
+            readme,
+            foundation,
+            read("FOUNDATION_LOCK.md"),
+            read("docs/consumer/usage-guide.md"),
+        ]
+    )
+
+    assert "intrabar" in readme
+    assert "high/low" in readme
+    assert "same-bar" in readme
+    assert "available_at" in readme
+    assert "available_at <= decision_time" in readme
+    assert "end-of-bar fill-price sample" not in readme
+    assert "do not yet implement the target-book contract" not in foundation
+    assert "DSR inputs" not in docs
+    assert "dsr_inputs" not in docs
+    assert "min_dsr" not in docs
+    assert "median_dsr" not in docs
+    assert "PSR/DSR/PBO" in docs
+    assert "significance stays with the consumer" in docs
+
+
 def test_lock_todos_and_review_track_p1_annualized_metric_guards():
     for path in [
         "FOUNDATION_LOCK.md",

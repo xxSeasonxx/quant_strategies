@@ -196,14 +196,11 @@ strategy_path, strategy_id            # top-level
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
-         foundation_subwindows, foundation_trial_count,
-         foundation_benchmark_sharpe, foundation_cost_stress_multiplier,
+         foundation_subwindows, foundation_cost_stress_multiplier,
          foundation_fill_stress_fraction
 ```
 
-`foundation_subwindows` is bounded to 1-64. `foundation_trial_count` is optional;
-when omitted, foundation subwindow `dsr` values are null with a
-`missing_trial_count` warning.
+`foundation_subwindows` is bounded to 1-64.
 The portfolio **leverage budget (gross and net) lives in the operator-frozen
 `[leverage_budget]` section** (above), not an agent-editable `[output]` key — there
 is no `foundation_max_gross_exposure` field.
@@ -225,10 +222,9 @@ lives in the operator-frozen **`[causality_policy]`** section: `allow_unverified
 (bool, default `false`) re-admits `off` to scoring for deliberate profiling/debugging. It
 is **not** an agent-editable `[output]` key, so a climbing agent cannot relax the gate.
 
-`causality_check` defaults to `"strict"` for backward compatibility. New
-Train/autoresearch iteration should use `"micro"`: it runs a tiny bounded replay
-sample, records probe/timeout evidence, and never blocks quick-run scoring. Micro
-evidence is diagnostic and does not by itself make a quick run retainable; read
+`causality_check` defaults to `"micro"`: it runs a tiny bounded replay sample,
+records probe/timeout evidence, and never blocks quick-run scoring. Micro evidence
+is diagnostic and does not by itself make a quick run retainable; read
 `RunResult.retainable` before advancing evidence.
 Advanced callers may still set `"focused"` for source-hash replay,
 `"emitted"` for deterministic + emitted-decision replay without full row-grid
@@ -342,7 +338,9 @@ allow_unverified_scoring` is set), `warnings` (tuple[str, …]).
 `strict_no_emission_verified`, `strict_replay_capped`, `strict_probe_count`,
 `strict_probe_limit`, `skipped_probe_count`, `skipped_probe_reasons`,
 `replay_scope`, `candidate_probe_count`, `selected_probe_count`,
-`elapsed_seconds`, `timeout_seconds`, `timed_out`, and `replay_warning`.
+`elapsed_seconds` (nullable; micro quick-run artifacts leave wall-clock duration
+null to stay byte-deterministic), `timeout_seconds`, `timed_out`, and
+`replay_warning`.
 `verified` is true only when complete availability, emitted replay, and strict
 no-emission replay all passed. Emitted-only, capped-strict, and off-policy runs
 are usable only as explicitly labeled development evidence.
@@ -407,12 +405,9 @@ Top-level payload fields are `schema_version`
 reports a typed `feasibility` payload, compact `capacity` diagnostics, a compact
 `full_train` metric record, and subwindow metrics such as `return_sample_count`,
 `mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
-`sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, `dsr`, `total_return`,
+`sharpe_standard_error`, `skew`, `kurtosis`, `total_return`,
 `max_drawdown`, `closed_trade_count`, `max_symbol_concentration`, and the live
 `max/mean_gross_utilization` / `max/mean_net_utilization` exposure series.
-When trial-count metadata is missing, `dsr` is `None` and the subwindow warning
-list includes `missing_trial_count`. `dsr_inputs` includes a `formula` field so
-consumers can pin the DSR threshold convention.
 
 Scenario payload fields:
 
@@ -424,8 +419,6 @@ Scenario payload fields:
 | `capacity` | `dict` | execution event count, normalized/real turnover, impact cost, and max/mean bar and ADV participation |
 | `full_train` | `dict` | compact metric record for the full Train scoring path |
 | `subwindow_count` | `int` | configured `foundation_subwindows` |
-| `min_dsr` / `median_dsr` | `float \| None` | subwindow DSR aggregates; not the keep-rule score |
-| `dsr_available_count` / `dsr_null_count` | `int` | number of subwindows with / without DSR |
 | `min_closed_trade_count` | `int` | weakest subwindow closed-trade count |
 | `max_symbol_concentration` | `float` | maximum subwindow symbol concentration |
 | `warning_counts` | `dict[str, int]` | counts of subwindow statistic warnings |
@@ -449,10 +442,8 @@ Metric record fields (`full_train` and each subwindow):
 | `effective_sample_size` | `float \| None` | lag-one autocorrelation adjustment, capped to `[1, sample_count]` |
 | `sharpe` | `float \| None` | sample Sharpe = `mean_return / return_volatility`; not annualized |
 | `sharpe_standard_error` | `float \| None` | skew/kurtosis-adjusted Sharpe SE using effective sample size |
-| `skew` / `kurtosis` | `float \| None` | sample-shape inputs for Sharpe SE and DSR |
-| `dsr_inputs` | `dict \| None` | DSR provenance, including formula and deflated threshold |
-| `dsr` | `float \| None` | optional audit statistic; null when trial count or inputs are missing |
-| `warnings` | `list[str]` | statistic warnings such as `missing_trial_count` |
+| `skew` / `kurtosis` | `float \| None` | central-moment shape inputs for Sharpe SE |
+| `warnings` | `list[str]` | statistic warnings such as `insufficient_return_sample` |
 
 Consumer rules:
 
@@ -515,24 +506,9 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
         "sharpe_standard_error": 0.08,
         "skew": -0.1,
         "kurtosis": 3.2,
-        "dsr_inputs": {
-          "sample_length": 1440,
-          "effective_sample_size": 900.0,
-          "skew": -0.1,
-          "kurtosis": 3.2,
-          "trial_count": 25,
-          "benchmark_sharpe": 0.0,
-          "deflated_sharpe_threshold": 0.12,
-          "formula": "bailey_lopez_de_prado_expected_max_sharpe"
-        },
-        "dsr": 0.94,
         "warnings": []
       },
       "subwindow_count": 6,
-      "min_dsr": 0.94,
-      "median_dsr": 0.94,
-      "dsr_available_count": 6,
-      "dsr_null_count": 0,
       "min_closed_trade_count": 0,
       "max_symbol_concentration": 1.0,
       "warning_counts": {}
@@ -571,10 +547,6 @@ each scenario:
         "...": "same metric shape as summary"
       },
       "subwindow_count": 6,
-      "min_dsr": 0.94,
-      "median_dsr": 0.94,
-      "dsr_available_count": 6,
-      "dsr_null_count": 0,
       "min_closed_trade_count": 0,
       "max_symbol_concentration": 1.0,
       "warning_counts": {},
@@ -599,17 +571,6 @@ each scenario:
           "sharpe_standard_error": 0.08,
           "skew": -0.1,
           "kurtosis": 3.2,
-          "dsr_inputs": {
-            "sample_length": 240,
-            "effective_sample_size": 180.0,
-            "skew": -0.1,
-            "kurtosis": 3.2,
-            "trial_count": 25,
-            "benchmark_sharpe": 0.0,
-            "deflated_sharpe_threshold": 0.12,
-            "formula": "bailey_lopez_de_prado_expected_max_sharpe"
-          },
-          "dsr": 0.94,
           "warnings": []
         }
       ]

@@ -89,13 +89,13 @@ completed engine evaluation MAY leave the field `None`; a completed run MUST pop
 ### Requirement: Quick-run causality policy is configurable
 The public quick-run config SHALL allow callers to select the causality replay
 policy under `[output]` using `causality_check = "off" | "emitted" | "strict" | "focused" | "micro"`.
-The default SHALL be `strict` when the field is omitted. The public `run_config`
+The default SHALL be `micro` when the field is omitted. The public `run_config`
 Python signature SHALL remain unchanged.
 
-#### Scenario: Existing config keeps strict replay
+#### Scenario: Omitted config uses micro replay
 - **WHEN** a quick-run config omits `output.causality_check`
-- **THEN** `run_config` runs strict hidden-lookahead replay
-- **AND** existing strict evidence semantics are preserved
+- **THEN** `run_config` runs micro causality replay as non-blocking diagnostic evidence
+- **AND** engine scoring is controlled by request-building and engine-evaluation success, not by micro replay pass/fail status
 
 #### Scenario: Emitted replay mode is selected from config
 - **WHEN** a quick-run config sets `output.causality_check = "emitted"`
@@ -422,4 +422,3 @@ reading artifacts.
 - **WHEN** a quick run completes with impacted execution events
 - **THEN** the economics summary exposes total impact cost and impact share
 - **AND** by-symbol and by-exit-reason slices include impact-cost contribution
-

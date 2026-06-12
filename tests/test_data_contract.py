@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -452,6 +453,18 @@ def test_projection_rows_are_mapping_compatible_and_hash_ordering_is_stable():
     assert first.normalized_rows_sha256 == second.normalized_rows_sha256
     assert tuple(dict(row) for row in first.projection_rows()) == tuple(
         dict(row) for row in second.projection_rows()
+    )
+
+
+def test_normalized_rows_store_canonical_jsonl_bytes_for_hash_reuse():
+    normalized = NormalizedRows.from_rows(config(), [valid_row()])
+
+    canonical_lines = normalized._canonical_jsonl_lines
+
+    assert len(canonical_lines) == 1
+    assert canonical_lines[0].endswith(b"\n")
+    assert hashlib.sha256(b"".join(canonical_lines)).hexdigest() == (
+        normalized.normalized_rows_sha256
     )
 
 

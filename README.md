@@ -125,6 +125,10 @@ generate_decisions(rows, params) -> list[TargetDecision]
   observations for candidate-level evidence. Evaluation defaults to at least one
   observation and one observed symbol per decision; validation configs may also
   require specific observation fields.
+- **Causal row availability.** Every supplied row must carry a valid
+  timezone-aware `available_at`. Strategy logic should treat a row as observable
+  only when `available_at <= decision_time`; do not key observability off
+  `timestamp` alone.
 - **Data/time exits are decisions; price-path exits are a declared `RiskRule`.**
   Anything derivable from data or time is an explicit `target=0` (or new) decision
   the pure strategy emits; anything derivable only from the realized price path is
@@ -134,9 +138,10 @@ generate_decisions(rows, params) -> list[TargetDecision]
   fire.
 - **Engine-enforced threshold exits.** `RiskRule` stop-loss, take-profit, and
   trailing thresholds are fractions of the position's entry mark, evaluated on the
-  configured end-of-bar fill-price sample (`close` or `quote`), not intrabar
-  high/low barrier orders. A fired rule latches the instrument flat until the
-  strategy emits a new (different) target.
+  bar's intrabar high/low range. A barrier pierced intrabar fires even if the
+  close recovered; adverse barriers win same-bar ties, and gap-through exits are
+  filled no better than the bar open. A fired rule latches the instrument flat
+  until the strategy emits a new (different) target.
 - **Narrow default ontology.** Equities/ETFs, FX pairs, and crypto perps as a
   signed weight-of-NAV target. Futures, options, and multi-leg live behind
   explicit imports from `quant_strategies.decisions.extended_ontology`.

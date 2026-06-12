@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_left
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from statistics import NormalDist
 from typing import Any, cast
 
 from quant_strategies.core.config import (
@@ -28,8 +28,6 @@ DEFAULT_MIN_RETURN_SAMPLE = 2
 # Default adverse slippage (fraction of the barrier price) applied to RiskRule exit fills
 # in the diagnostic ``fill_stress`` scenario. 10 bps; the realistic scored path uses 0.0.
 DEFAULT_FILL_STRESS_FRACTION = 0.0010
-EULER_MASCHERONI = 0.5772156649015329
-DSR_FORMULA = "bailey_lopez_de_prado_expected_max_sharpe"
 
 # Asset classes whose financing is modeled inside the book. Holding net leverage
 # above 1.0 is only honestly scoreable when the financing of that leverage is
@@ -56,8 +54,6 @@ _EXPOSURE_TOLERANCE = 1e-9
 @dataclass(frozen=True)
 class PortfolioFoundationConfig:
     subwindows: int = 6
-    trial_count: int | None = None
-    benchmark_sharpe: float = 0.0
     cost_stress_multiplier: float = 2.0
     fill_stress_fraction: float = DEFAULT_FILL_STRESS_FRACTION
     max_gross_exposure: float = 1.0
@@ -69,10 +65,6 @@ class PortfolioFoundationConfig:
             raise ValueError("foundation_subwindows must be >= 1")
         if self.subwindows > MAX_FOUNDATION_SUBWINDOWS:
             raise ValueError(f"foundation_subwindows must be <= {MAX_FOUNDATION_SUBWINDOWS}")
-        if self.trial_count is not None and self.trial_count < 1:
-            raise ValueError("foundation_trial_count must be >= 1 when provided")
-        if not math.isfinite(self.benchmark_sharpe):
-            raise ValueError("foundation_benchmark_sharpe must be finite")
         if not math.isfinite(self.cost_stress_multiplier) or self.cost_stress_multiplier < 1.0:
             raise ValueError("foundation_cost_stress_multiplier must be >= 1")
         if not math.isfinite(self.fill_stress_fraction) or not (
@@ -126,21 +118,6 @@ class FeasibilityError(ValueError):
 
 
 @dataclass(frozen=True)
-class DsrInputs:
-    sample_length: int
-    effective_sample_size: float | None
-    skew: float | None
-    kurtosis: float | None
-    trial_count: int | None
-    benchmark_sharpe: float
-    deflated_sharpe_threshold: float | None
-    formula: str = DSR_FORMULA
-
-    def payload(self) -> dict[str, Any]:
-        return cast(dict[str, Any], json_safe_value(self.__dict__))
-
-
-@dataclass(frozen=True)
 class ReturnStatistics:
     return_sample_count: int
     mean_return: float | None
@@ -150,8 +127,6 @@ class ReturnStatistics:
     sharpe_standard_error: float | None
     skew: float | None
     kurtosis: float | None
-    dsr_inputs: DsrInputs | None
-    dsr: float | None
     warnings: tuple[str, ...] = ()
 
     def payload(self) -> dict[str, Any]:
@@ -164,8 +139,6 @@ class ReturnStatistics:
             "sharpe_standard_error": self.sharpe_standard_error,
             "skew": self.skew,
             "kurtosis": self.kurtosis,
-            "dsr_inputs": None if self.dsr_inputs is None else self.dsr_inputs.payload(),
-            "dsr": self.dsr,
             "warnings": list(self.warnings),
         }
         return cast(dict[str, Any], json_safe_value(payload))
@@ -303,7 +276,6 @@ class FoundationScenarioResult:
     capacity: Mapping[str, Any]
 
     def summary_payload(self) -> dict[str, Any]:
-        dsrs = [item.statistics.dsr for item in self.subwindows if item.statistics.dsr is not None]
         closed_counts = [item.closed_trade_count for item in self.subwindows]
         concentrations = [item.max_symbol_concentration for item in self.subwindows]
         warning_counts: dict[str, int] = defaultdict(int)
@@ -317,10 +289,6 @@ class FoundationScenarioResult:
             "full_train": self.full_train.payload(),
             "capacity": dict(self.capacity),
             "subwindow_count": len(self.subwindows),
-            "min_dsr": min(dsrs) if dsrs else None,
-            "median_dsr": _median(dsrs) if dsrs else None,
-            "dsr_available_count": len(dsrs),
-            "dsr_null_count": len(self.subwindows) - len(dsrs),
             "min_closed_trade_count": min(closed_counts) if closed_counts else 0,
             "max_symbol_concentration": max(concentrations) if concentrations else 0.0,
             "warning_counts": dict(sorted(warning_counts.items())),
@@ -490,7 +458,7 @@ def walk_portfolio_book(
 
     This is the lower-level entry beneath :func:`build_portfolio_foundation`: it is the
     same one causal, single-account, per-symbol-netted walk, but for exactly one cost
-    scenario (no internal cost-stress fan-out, no subwindow/DSR scoring, no zero-cost or
+    scenario (no internal cost-stress fan-out, no subwindow scoring, no zero-cost or
     insufficient-sample scoring gate). It is the book a heavy surface (evaluation) runs
     per ``(window, scenario)`` to derive that fold's NAV ``period_return`` series and the
     fold scalars — one model of money on every surface (design D9). A
@@ -614,12 +582,41 @@ class _RowIndex:
             symbol: {row["timestamp"]: index for index, row in enumerate(items)}
             for symbol, items in self.by_symbol.items()
         }
+        self.timestamps_by_symbol = {
+            symbol: tuple(row["timestamp"] for row in items)
+            for symbol, items in self.by_symbol.items()
+        }
+        self._adv_notional_prefix_by_symbol: dict[str, tuple[float, ...]] = {}
         self.by_key = by_key
         self.timestamps = tuple(sorted({row["timestamp"] for row in by_key.values()}))
         self.funding_events_by_apply_time = {
             timestamp: tuple(events)
             for timestamp, events in sorted(funding_events_by_apply_time.items())
         }
+
+    def _adv_notional_prefix(
+        self,
+        symbol: str,
+        rows: Sequence[Mapping[str, Any]],
+    ) -> tuple[float, ...]:
+        prefix = [0.0]
+        for row in rows:
+            timestamp = row["timestamp"]
+            notional = _row_notional_volume(
+                row,
+                fallback_price=_positive_row_field(row, "close", symbol, timestamp),
+                symbol=symbol,
+                timestamp=timestamp,
+            )
+            prefix.append(prefix[-1] + notional)
+        return tuple(prefix)
+
+    def _adv_notional_prefix_for(self, symbol: str) -> tuple[float, ...]:
+        prefix = self._adv_notional_prefix_by_symbol.get(symbol)
+        if prefix is None:
+            prefix = self._adv_notional_prefix(symbol, self.by_symbol.get(symbol, ()))
+            self._adv_notional_prefix_by_symbol[symbol] = prefix
+        return prefix
 
     def row_at(self, symbol: str, timestamp: datetime) -> Mapping[str, Any]:
         try:
@@ -662,32 +659,23 @@ class _RowIndex:
         lookback_bars: int,
         min_observations: int,
     ) -> float:
-        prior = [
-            row
-            for row in self.by_symbol.get(symbol, ())
-            if isinstance(row.get("timestamp"), datetime) and row["timestamp"] < timestamp
-        ][-lookback_bars:]
-        if len(prior) < min_observations:
+        timestamps = self.timestamps_by_symbol.get(symbol, ())
+        prior_count = bisect_left(timestamps, timestamp)
+        observation_count = min(lookback_bars, prior_count)
+        if observation_count < min_observations:
             raise FeasibilityError(
                 FeasibilityVerdict(
                     feasible=False,
                     reason=REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY,
                     detail=(
-                        f"capacity ADV history {len(prior)} < minimum {min_observations} "
+                        f"capacity ADV history {observation_count} < minimum {min_observations} "
                         f"for {symbol} before {timestamp.isoformat()}"
                     ),
                 )
             )
-        values = [
-            _row_notional_volume(
-                row,
-                fallback_price=_positive_row_field(row, "close", symbol, row["timestamp"]),
-                symbol=symbol,
-                timestamp=row["timestamp"],
-            )
-            for row in prior
-        ]
-        return sum(values) / len(values)
+        prefix = self._adv_notional_prefix_for(symbol)
+        start = prior_count - observation_count
+        return (prefix[prior_count] - prefix[start]) / observation_count
 
 
 class _DecisionPlan:
@@ -764,8 +752,6 @@ def _build_scenario(
         walk.path,
         walk.round_trips,
         subwindows=config.subwindows,
-        trial_count=config.trial_count,
-        benchmark_sharpe=config.benchmark_sharpe,
         min_return_sample=config.min_return_sample,
         data_start=data.start,
         data_end=data.end,
@@ -1116,7 +1102,7 @@ def _close_leg(
     ``cost_cash`` carries the entire reversal-bar cost and the reversed leg's eventual
     trip carries none of its own entry cost. The total cost across the two trips, and
     therefore NAV, is exact; only the per-trip split is approximate. ``cost_cash`` is
-    a derived diagnostic (D4), not a scored number, so this attribution skew never
+    a derived diagnostic (D4), not an independent score, so this attribution split never
     affects the authoritative NAV. The cash split (price proceeds, funding, total
     traded cost across open and close) is recorded so the derived per-trade ledger can
     expose reconciling gross/funding/cost returns.
@@ -1602,8 +1588,6 @@ def scenario_feasibility(
 def compute_return_statistics(
     returns: Iterable[float],
     *,
-    trial_count: int | None,
-    benchmark_sharpe: float,
     min_return_sample: int = DEFAULT_MIN_RETURN_SAMPLE,
 ) -> ReturnStatistics:
     values = [float(value) for value in returns if math.isfinite(float(value))]
@@ -1614,8 +1598,6 @@ def compute_return_statistics(
         return _insufficient_return_statistics(
             sample_count=sample_count,
             mean_return=mean_return,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
         )
 
     stdev = _sample_stdev(values)
@@ -1624,27 +1606,30 @@ def compute_return_statistics(
         sharpe = None
     else:
         sharpe = cast(float, mean_return) / stdev
-    skew, kurtosis = _shape(values, mean=cast(float, mean_return), stdev=stdev)
+    skew, kurtosis = _shape(values, mean=cast(float, mean_return))
     effective_n = _effective_sample_size(values)
-    return _return_statistics_with_dsr(
-        sample_count=sample_count,
+    sharpe_se = _sharpe_standard_error(
+        sharpe,
+        effective_sample_size=effective_n,
+        skew=skew,
+        kurtosis=kurtosis,
+    )
+    return ReturnStatistics(
+        return_sample_count=sample_count,
         mean_return=mean_return,
         return_volatility=stdev,
         effective_sample_size=effective_n,
         sharpe=sharpe,
+        sharpe_standard_error=sharpe_se,
         skew=skew,
         kurtosis=kurtosis,
-        trial_count=trial_count,
-        benchmark_sharpe=benchmark_sharpe,
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
 
 
 def _compute_return_statistics_from_chunks(
     chunks: Sequence[Sequence[float]],
     *,
-    trial_count: int | None,
-    benchmark_sharpe: float,
     min_return_sample: int,
 ) -> ReturnStatistics:
     sample_count, total = _return_count_and_sum(chunks)
@@ -1653,8 +1638,6 @@ def _compute_return_statistics_from_chunks(
         return _insufficient_return_statistics(
             sample_count=sample_count,
             mean_return=mean_return,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
         )
 
     mean = cast(float, mean_return)
@@ -1669,24 +1652,28 @@ def _compute_return_statistics_from_chunks(
         chunks,
         sample_count=sample_count,
         mean=mean,
-        stdev=stdev,
     )
     effective_n = _effective_sample_size_from_chunks(
         chunks,
         sample_count=sample_count,
         mean=mean,
     )
-    return _return_statistics_with_dsr(
-        sample_count=sample_count,
+    sharpe_se = _sharpe_standard_error(
+        sharpe,
+        effective_sample_size=effective_n,
+        skew=skew,
+        kurtosis=kurtosis,
+    )
+    return ReturnStatistics(
+        return_sample_count=sample_count,
         mean_return=mean_return,
         return_volatility=stdev,
         effective_sample_size=effective_n,
         sharpe=sharpe,
+        sharpe_standard_error=sharpe_se,
         skew=skew,
         kurtosis=kurtosis,
-        trial_count=trial_count,
-        benchmark_sharpe=benchmark_sharpe,
-        warnings=warnings,
+        warnings=tuple(warnings),
     )
 
 
@@ -1694,12 +1681,8 @@ def _insufficient_return_statistics(
     *,
     sample_count: int,
     mean_return: float | None,
-    trial_count: int | None,
-    benchmark_sharpe: float,
 ) -> ReturnStatistics:
     warnings = ["insufficient_return_sample"]
-    if trial_count is None:
-        warnings.append("missing_trial_count")
     return ReturnStatistics(
         return_sample_count=sample_count,
         mean_return=mean_return,
@@ -1709,72 +1692,6 @@ def _insufficient_return_statistics(
         sharpe_standard_error=None,
         skew=None,
         kurtosis=None,
-        dsr_inputs=DsrInputs(
-            sample_length=sample_count,
-            effective_sample_size=None,
-            skew=None,
-            kurtosis=None,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
-            deflated_sharpe_threshold=None,
-        ),
-        dsr=None,
-        warnings=tuple(warnings),
-    )
-
-
-def _return_statistics_with_dsr(
-    *,
-    sample_count: int,
-    mean_return: float | None,
-    return_volatility: float | None,
-    effective_sample_size: float | None,
-    sharpe: float | None,
-    skew: float | None,
-    kurtosis: float | None,
-    trial_count: int | None,
-    benchmark_sharpe: float,
-    warnings: list[str],
-) -> ReturnStatistics:
-    sharpe_se = _sharpe_standard_error(
-        sharpe,
-        effective_sample_size=effective_sample_size,
-        skew=skew,
-        kurtosis=kurtosis,
-    )
-    dsr = None
-    threshold = None
-    if trial_count is None:
-        warnings.append("missing_trial_count")
-    elif sharpe is None or sharpe_se is None or effective_sample_size is None:
-        warnings.append("missing_dsr_statistic")
-    else:
-        threshold = _deflated_sharpe_threshold(
-            benchmark_sharpe,
-            trial_count=trial_count,
-            sharpe_standard_error=sharpe_se,
-        )
-        dsr = _normal_cdf((sharpe - threshold) / sharpe_se)
-    dsr_inputs = DsrInputs(
-        sample_length=sample_count,
-        effective_sample_size=effective_sample_size,
-        skew=skew,
-        kurtosis=kurtosis,
-        trial_count=trial_count,
-        benchmark_sharpe=benchmark_sharpe,
-        deflated_sharpe_threshold=threshold,
-    )
-    return ReturnStatistics(
-        return_sample_count=sample_count,
-        mean_return=mean_return,
-        return_volatility=return_volatility,
-        effective_sample_size=effective_sample_size,
-        sharpe=sharpe,
-        sharpe_standard_error=sharpe_se,
-        skew=skew,
-        kurtosis=kurtosis,
-        dsr_inputs=dsr_inputs,
-        dsr=dsr,
         warnings=tuple(warnings),
     )
 
@@ -1784,8 +1701,6 @@ def _scenario_metrics(
     round_trips: Sequence[RoundTrip],
     *,
     subwindows: int,
-    trial_count: int | None,
-    benchmark_sharpe: float,
     min_return_sample: int,
     data_start: date,
     data_end: date,
@@ -1795,8 +1710,6 @@ def _scenario_metrics(
         full_train = _metric_from_accumulator(
             "full_train",
             _MetricAccumulator(start_time=default_start, end_time=default_end),
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         )
         return full_train, []
@@ -1810,8 +1723,6 @@ def _scenario_metrics(
         full_train = _metric_from_accumulator(
             "full_train",
             _MetricAccumulator(start_time=start_time, end_time=end_time),
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         )
         return full_train, []
@@ -1849,16 +1760,12 @@ def _scenario_metrics(
             "full_train",
             full_train_accumulator,
             return_chunks=tuple(accumulator.returns for accumulator in accumulators),
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         ),
         [
             _metric_from_accumulator(
                 f"train_{index + 1}",
                 accumulator,
-                trial_count=trial_count,
-                benchmark_sharpe=benchmark_sharpe,
                 min_return_sample=min_return_sample,
             )
             for index, accumulator in enumerate(accumulators)
@@ -1932,15 +1839,11 @@ def _metric_from_accumulator(
     *,
     returns: Iterable[float] | None = None,
     return_chunks: Sequence[Sequence[float]] | None = None,
-    trial_count: int | None,
-    benchmark_sharpe: float,
     min_return_sample: int,
 ) -> FoundationMetric:
     if return_chunks is not None:
         statistics = _compute_return_statistics_from_chunks(
             return_chunks,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         )
     elif returns is None:
@@ -1948,15 +1851,11 @@ def _metric_from_accumulator(
             raise ValueError("metric_returns_required")
         statistics = compute_return_statistics(
             accumulator.returns,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         )
     else:
         statistics = compute_return_statistics(
             returns,
-            trial_count=trial_count,
-            benchmark_sharpe=benchmark_sharpe,
             min_return_sample=min_return_sample,
         )
     return FoundationMetric(
@@ -2205,15 +2104,15 @@ def _sample_stdev_from_chunks(
     return math.sqrt(variance)
 
 
-def _shape(
-    values: Sequence[float], *, mean: float, stdev: float
-) -> tuple[float | None, float | None]:
-    if len(values) < 2 or stdev == 0.0:
+def _shape(values: Sequence[float], *, mean: float) -> tuple[float | None, float | None]:
+    if len(values) < 2:
         return None, None
-    centered = [(value - mean) / stdev for value in values]
-    skew = sum(value**3 for value in centered) / len(centered)
-    kurtosis = sum(value**4 for value in centered) / len(centered)
-    return skew, kurtosis
+    second = sum((value - mean) ** 2 for value in values) / len(values)
+    if second == 0.0:
+        return None, None
+    third = sum((value - mean) ** 3 for value in values) / len(values)
+    fourth = sum((value - mean) ** 4 for value in values) / len(values)
+    return third / (second**1.5), fourth / (second**2)
 
 
 def _shape_from_chunks(
@@ -2221,17 +2120,24 @@ def _shape_from_chunks(
     *,
     sample_count: int,
     mean: float,
-    stdev: float,
 ) -> tuple[float | None, float | None]:
-    if sample_count < 2 or stdev == 0.0:
+    if sample_count < 2:
         return None, None
-    skew_sum = 0.0
-    kurtosis_sum = 0.0
+    second = 0.0
+    third = 0.0
+    fourth = 0.0
     for value in _iter_finite_chunk_values(chunks):
-        centered = (value - mean) / stdev
-        skew_sum += centered**3
-        kurtosis_sum += centered**4
-    return skew_sum / sample_count, kurtosis_sum / sample_count
+        centered = value - mean
+        squared = centered**2
+        second += squared
+        third += squared * centered
+        fourth += squared**2
+    second /= sample_count
+    if second == 0.0:
+        return None, None
+    third /= sample_count
+    fourth /= sample_count
+    return third / (second**1.5), fourth / (second**2)
 
 
 def _effective_sample_size(values: Sequence[float]) -> float | None:
@@ -2248,13 +2154,6 @@ def _effective_sample_size(values: Sequence[float]) -> float | None:
 
 
 def _lag_one_autocorrelation(values: Sequence[float]) -> float | None:
-    # ``values`` is the at-risk return series, which is non-contiguous when the book
-    # goes flat between episodes. The lag-1 estimator treats it as contiguous, so the
-    # (last-of-episode-A, first-of-episode-B) pair enters the autocorrelation though
-    # the bars are not time-adjacent. The AR(1) effective-N formula is exact; only rho
-    # picks up (#episodes - 1) seam pairs, and effective-N is clamped to [1, n], so it
-    # cannot degenerate. Accepted approximation (quant #6); the chunked variant below
-    # has the same seam behavior.
     if len(values) < 3:
         return None
     mean = sum(values) / len(values)
@@ -2310,35 +2209,6 @@ def _sharpe_standard_error(
     if variance_term <= 0.0:
         return None
     return math.sqrt(variance_term / (effective_sample_size - 1.0))
-
-
-def _deflated_sharpe_threshold(
-    benchmark_sharpe: float,
-    *,
-    trial_count: int,
-    sharpe_standard_error: float,
-) -> float:
-    if trial_count <= 1:
-        return benchmark_sharpe
-    trial_count_float = float(trial_count)
-    expected_max_z = (
-        (1.0 - EULER_MASCHERONI) * NormalDist().inv_cdf(1.0 - (1.0 / trial_count_float))
-    ) + (EULER_MASCHERONI * NormalDist().inv_cdf(1.0 - (1.0 / (trial_count_float * math.e))))
-    return benchmark_sharpe + (sharpe_standard_error * expected_max_z)
-
-
-def _normal_cdf(value: float) -> float:
-    return 0.5 * (1.0 + math.erf(value / math.sqrt(2.0)))
-
-
-def _median(values: Sequence[float]) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    mid = len(ordered) // 2
-    if len(ordered) % 2:
-        return ordered[mid]
-    return (ordered[mid - 1] + ordered[mid]) / 2.0
 
 
 def _cost_fraction(value: float) -> float:

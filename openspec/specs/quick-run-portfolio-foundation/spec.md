@@ -68,8 +68,8 @@ limit or raising into a swallowed failure.
 
 Each foundation subwindow metric record SHALL report the foundation inputs needed
 by downstream Train scoring: return sample count, mean return, return volatility,
-effective sample size, Sharpe, Sharpe uncertainty inputs, skew, kurtosis, DSR
-inputs, DSR value when computable, total return, max drawdown, closed-trade count,
+effective sample size, Sharpe, Sharpe uncertainty inputs, skew, kurtosis,
+total return, max drawdown, closed-trade count,
 and max symbol concentration. These SHALL be computed from the single netted-book
 NAV path over at-risk bars; `closed_trade_count` SHALL count netted-book round
 trips (a net position returning to flat), not independent trade windows.
@@ -78,7 +78,7 @@ trips (a net position returning to flat), not independent trade windows.
 - **WHEN** a subwindow has finite observed at-risk portfolio returns
 - **THEN** its metric record includes `return_sample_count`,
   `mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
-  `sharpe_standard_error`, `skew`, `kurtosis`, `dsr_inputs`, and `dsr`
+  `sharpe_standard_error`, `skew`, and `kurtosis`
 
 #### Scenario: Subwindow metrics include gate inputs
 - **WHEN** a subwindow contains portfolio path and trade activity
@@ -111,26 +111,6 @@ a PSR score from foundation statistics.
 - **WHEN** a scenario contains Train portfolio path and trade activity
 - **THEN** its `full_train` record includes `total_return`, `max_drawdown`,
   `closed_trade_count`, and `max_symbol_concentration`
-
-### Requirement: DSR is explicit about missing inputs
-
-The foundation SHALL compute DSR only when the required inputs are present and
-valid. If attempted-trial count, benchmark Sharpe threshold, or statistical
-inputs are missing or invalid, the DSR value SHALL be `None` and the metric
-record SHALL include a warning reason.
-
-#### Scenario: Missing trial count yields null DSR
-- **WHEN** a quick run completes foundation metrics without an attempted-trial count
-- **THEN** each affected subwindow reports `dsr` as `None`
-- **AND** each affected subwindow reports a warning indicating missing trial count
-
-#### Scenario: Supplied trial count enables DSR
-- **WHEN** a quick run supplies attempted-trial count and benchmark Sharpe threshold
-- **AND** a subwindow has sufficient finite returns for DSR inputs
-- **THEN** that subwindow reports a finite DSR value
-- **AND** its `dsr_inputs` include the sample length, effective sample size,
-  skew, kurtosis, attempted-trial count, benchmark Sharpe threshold, and
-  formula identifier
 
 ### Requirement: Default artifacts stay compact and diagnostic
 
@@ -291,4 +271,3 @@ artifact profile later requires them.
 - **WHEN** a quick run fails because capacity is unpriced, unsupported, missing, insufficient, or breached
 - **THEN** the feasibility verdict names the capacity reason
 - **AND** `RunResult.succeeded` is false
-

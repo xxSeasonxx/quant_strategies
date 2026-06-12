@@ -16,6 +16,7 @@ from statistics import stdev
 
 import pytest
 
+import quant_strategies.core.portfolio_foundation as foundation_module
 from quant_strategies.core.config import (
     CapacityModelConfig,
     CostModelConfig,
@@ -178,7 +179,7 @@ def walk(
         per_side_cost_fraction=per_side_cost_fraction,
         data_kind=kind,
         capacity_model=capacity or capacity_model(),
-        config=config or PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=config or PortfolioFoundationConfig(subwindows=1),
     )
 
 
@@ -211,6 +212,30 @@ def test_capacity_impact_reduces_nav_and_records_execution_event():
     assert event.adv_participation == pytest.approx(0.005)
     assert event.impact_cost == pytest.approx(0.0025)
     assert event.total_cost == pytest.approx(0.0025)
+
+
+def test_adv_notional_lookup_uses_row_index_prefix_state(monkeypatch: pytest.MonkeyPatch):
+    rows = bar_rows(100.0, 110.0, 120.0, 130.0, 140.0)
+    row_index = _RowIndex(rows)
+    expected = row_index.adv_notional_before(
+        "SPY",
+        ts(4),
+        lookback_bars=3,
+        min_observations=2,
+    )
+
+    def fail_runtime_notional(*_args, **_kwargs):
+        raise AssertionError("ADV lookup should use _RowIndex prefix state")
+
+    monkeypatch.setattr(foundation_module, "_row_notional_volume", fail_runtime_notional)
+
+    assert row_index.adv_notional_before(
+        "SPY",
+        ts(4),
+        lookback_bars=3,
+        min_observations=2,
+    ) == pytest.approx(expected)
+    assert expected == pytest.approx((110_000.0 + 120_000.0 + 130_000.0) / 3.0)
 
 
 def test_capacity_off_traded_book_fails_closed():
@@ -288,13 +313,14 @@ def test_capacity_participation_breach_fails_closed():
 
 
 # --------------------------------------------------------------------------------------
-# compute_return_statistics — preserved Sharpe-SE / DSR math (reused, not deleted)
+# compute_return_statistics — quick-run descriptive statistics, no significance
 # --------------------------------------------------------------------------------------
 
 
-def test_compute_return_statistics_reports_dsr_inputs_and_missing_trial_warning():
+def test_compute_return_statistics_reports_descriptive_inputs_without_significance_fields():
     values = [0.01, -0.005, 0.02, 0.0]
-    stats = compute_return_statistics(values, trial_count=None, benchmark_sharpe=0.0)
+    stats = compute_return_statistics(values)
+    payload = stats.payload()
 
     assert stats.return_sample_count == 4
     assert stats.mean_return == pytest.approx(sum(values) / len(values))
@@ -302,28 +328,17 @@ def test_compute_return_statistics_reports_dsr_inputs_and_missing_trial_warning(
     assert stats.effective_sample_size is not None
     assert stats.sharpe is not None
     assert stats.sharpe_standard_error is not None
-    assert stats.dsr is None
-    assert "missing_trial_count" in stats.warnings
-
-
-def test_compute_return_statistics_computes_finite_dsr_when_inputs_exist():
-    stats = compute_return_statistics(
-        [0.01, -0.005, 0.02, 0.0, 0.006, -0.002],
-        trial_count=12,
-        benchmark_sharpe=0.0,
-    )
-    assert stats.dsr is not None
-    assert 0.0 <= stats.dsr <= 1.0
-    assert stats.dsr_inputs is not None
-    assert stats.dsr_inputs.trial_count == 12
+    assert stats.skew is not None
+    assert stats.kurtosis is not None
+    assert stats.warnings == ()
+    assert "dsr_inputs" not in payload
+    assert "dsr" not in payload
 
 
 def test_compute_return_statistics_min_sample_gate_blocks_finite_sharpe():
     # Three finite returns but a configured minimum of 5 -> non-scoreable, not a
     # Sharpe from sample count alone.
-    stats = compute_return_statistics(
-        [0.01, 0.02, -0.01], trial_count=5, benchmark_sharpe=0.0, min_return_sample=5
-    )
+    stats = compute_return_statistics([0.01, 0.02, -0.01], min_return_sample=5)
     assert stats.sharpe is None
     assert stats.return_sample_count == 3
     assert "insufficient_return_sample" in stats.warnings
@@ -339,7 +354,7 @@ def test_repeated_identical_target_is_idempotent_no_stacking():
     # target must net to a zero delta — no stacking to 1.0 gross.
     rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
     decisions = [target(0, 0.5), target(2, 0.5)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     # Gross exposure holds at 0.5 throughout the held bars, never 1.0.
     held = [point.gross_exposure for point in result.path]
@@ -353,7 +368,7 @@ def test_offsetting_target_nets_and_trades_only_the_delta():
     # reduction trades; gross drops to 0.4 with no extra round-trip (still long).
     rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
     decisions = [target(0, 1.0), target(2, 0.4)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert result.path[1].gross_exposure == pytest.approx(1.0)
     assert result.path[3].gross_exposure == pytest.approx(0.4)
@@ -364,7 +379,7 @@ def test_offsetting_target_nets_and_trades_only_the_delta():
 def test_target_to_zero_closes_the_net_position_as_one_round_trip():
     rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
     decisions = [target(0, 1.0), target(2, 0.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     trip = result.round_trips[0]
@@ -419,7 +434,7 @@ def quote_walk(
         per_side_cost_fraction=0.0,
         data_kind=kind,
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
 
 
@@ -470,7 +485,7 @@ def test_reversal_records_one_round_trip_and_reopens_short():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
 
     assert len(result.round_trips) == 1
@@ -490,7 +505,7 @@ def test_weight_to_quantity_sized_at_fill_bar_then_held_as_quantity():
     # Price then rises to 120 at d2: NAV = 100 + 1.0*(120-100) = 120 (held as qty).
     rows = bar_rows(100.0, 100.0, 120.0)
     decisions = [target(0, 1.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert result.path[0].portfolio_value == pytest.approx(INITIAL_EQUITY)
     assert result.path[1].portfolio_value == pytest.approx(INITIAL_EQUITY)
@@ -506,7 +521,7 @@ def test_same_bar_intended_gross_is_fill_order_independent():
     rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(50.0, 50.0, 50.0, symbol="BBB")
     forward = [target(0, 0.5, symbol="AAA"), target(0, 0.4, symbol="BBB")]
     reversed_order = [target(0, 0.4, symbol="BBB"), target(0, 0.5, symbol="AAA")]
-    cfg = PortfolioFoundationConfig(subwindows=1, trial_count=5)
+    cfg = PortfolioFoundationConfig(subwindows=1)
 
     result_a = walk(rows, forward, config=cfg)
     result_b = walk(rows, reversed_order, config=cfg)
@@ -526,7 +541,7 @@ def test_risk_rule_stop_loss_flattens_at_crossing_bar():
     # -> flattened that bar.
     rows = bar_rows(100.0, 100.0, 94.0, 94.0)
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -544,7 +559,7 @@ def test_standing_target_does_not_reenter_until_a_new_target_after_stop():
         target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
         target(4, 1.0, risk_rule=RiskRule(stop_loss=0.05)),  # identical -> suppressed
     ]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     # Exactly one round-trip; latched flat for the remainder.
     assert len(result.round_trips) == 1
@@ -557,7 +572,7 @@ def test_new_different_target_clears_the_latch_and_reenters():
         target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
         target(4, 0.5),  # different weight -> clears latch, re-enters
     ]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1  # only the stopped leg closed so far
     # Re-entered at d5 (fills the bar after the d4 decision) at weight 0.5.
@@ -570,7 +585,7 @@ def test_take_profit_flattens_at_the_level_not_the_close():
     # at 112 (conservative; no gap-favorable bonus). Realized PnL is the 10% level move.
     rows = bar_rows(100.0, 100.0, 112.0, 112.0)
     decisions = [target(0, 1.0, risk_rule=RiskRule(take_profit=0.10))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -589,7 +604,7 @@ def test_stop_fires_on_intrabar_low_even_when_the_close_recovers():
         (99.0, 99.0, 99.0, 99.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -609,7 +624,7 @@ def test_stop_gap_through_open_fills_at_the_worse_open():
         (91.0, 91.0, 91.0, 91.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_reason == "stop_loss"
@@ -628,7 +643,7 @@ def test_same_bar_stop_and_target_resolves_to_the_adverse_stop():
         (100.0, 100.0, 100.0, 100.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05, take_profit=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_reason == "stop_loss"
@@ -647,7 +662,7 @@ def test_flat_bars_do_not_inflate_effective_sample_size():
     # return as price is flat); d5+ are flat and excluded.
     rows = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0)
     decisions = [target(0, 1.0), target(3, 0.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
 
     at_risk = [point for point in result.path if point.at_risk]
     # At-risk intervals: d1->d2, d2->d3, and the exit-fill interval d3->d4. None of
@@ -672,12 +687,45 @@ def test_flat_tail_does_not_change_sample_count_vs_short_window():
             fill_model=FillModelConfig(price="close", entry_lag_bars=1),
             cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
             capacity_model=capacity_model(),
-            config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+            config=PortfolioFoundationConfig(subwindows=1),
         )
         full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
         return full["return_sample_count"]
 
     assert sample_count(short, 4) == sample_count(long_tail, 8)
+
+
+def test_foundation_payloads_do_not_emit_significance_fields():
+    foundation = build_portfolio_foundation(
+        rows=bar_rows(100.0, 100.0, 110.0, 121.0, 121.0),
+        decisions=[target(0, 1.0), target(3, 0.0)],
+        data=data_config(4),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
+        config=PortfolioFoundationConfig(subwindows=1),
+    )
+
+    matrix = foundation.matrix_payload()
+    summary = foundation.summary_payload()["scenarios"]["realistic_costs"]
+    full_train = matrix["scenarios"]["realistic_costs"]["full_train"]
+    subwindow = matrix["scenarios"]["realistic_costs"]["subwindows"][0]
+    forbidden = {
+        "dsr_inputs",
+        "dsr",
+        "min_dsr",
+        "median_dsr",
+        "dsr_available_count",
+        "dsr_null_count",
+    }
+
+    assert full_train["effective_sample_size"] is not None
+    assert full_train["sharpe_standard_error"] is not None
+    assert subwindow["effective_sample_size"] is not None
+    assert subwindow["sharpe_standard_error"] is not None
+    assert forbidden.isdisjoint(full_train)
+    assert forbidden.isdisjoint(subwindow)
+    assert forbidden.isdisjoint(summary)
 
 
 def test_degenerate_sample_gated_as_non_scoreable_verdict():
@@ -691,7 +739,7 @@ def test_degenerate_sample_gated_as_non_scoreable_verdict():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -713,7 +761,7 @@ def test_leverage_budget_breach_fails_closed_with_observed_gross():
             rows,
             decisions,
             config=PortfolioFoundationConfig(
-                subwindows=1, trial_count=5, max_gross_exposure=1.0, max_net_exposure=1.0
+                subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0
             ),
         )
     verdict = excinfo.value.verdict
@@ -731,7 +779,7 @@ def test_net_budget_breach_fails_closed_even_when_gross_allowed():
             rows,
             decisions,
             config=PortfolioFoundationConfig(
-                subwindows=1, trial_count=5, max_gross_exposure=1.5, max_net_exposure=1.0
+                subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0
             ),
         )
     assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
@@ -748,7 +796,7 @@ def test_offsetting_legs_pass_net_budget_but_count_gross():
         decisions,
         kind="crypto_perp_funding",
         config=PortfolioFoundationConfig(
-            subwindows=1, trial_count=5, max_gross_exposure=1.5, max_net_exposure=1.0
+            subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0
         ),
     )
     assert result.feasibility.feasible is True
@@ -800,7 +848,7 @@ def test_zero_cost_on_scoreable_run_is_non_scoreable():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -819,7 +867,7 @@ def test_unfinanced_leverage_fails_closed_when_budget_permits_net_above_one():
             decisions,
             kind="bars",
             config=PortfolioFoundationConfig(
-                subwindows=1, trial_count=5, max_gross_exposure=2.0, max_net_exposure=2.0
+                subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0
             ),
         )
     verdict = excinfo.value.verdict
@@ -837,7 +885,7 @@ def test_equity_fully_invested_with_costs_is_not_a_false_unfinanced_breach():
         [target(0, 1.0)],
         kind="bars",
         per_side_cost_fraction=0.01,
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, max_net_exposure=1.0),
+        config=PortfolioFoundationConfig(subwindows=1, max_net_exposure=1.0),
     )
     assert result.feasibility.feasible is True
     assert max(point.net_exposure for point in result.path) > 1.0  # marked drift exists
@@ -852,7 +900,7 @@ def test_crypto_perp_is_exempt_from_unfinanced_leverage_verdict():
         decisions,
         kind="crypto_perp_funding",
         config=PortfolioFoundationConfig(
-            subwindows=1, trial_count=5, max_gross_exposure=2.0, max_net_exposure=2.0
+            subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0
         ),
     )
     assert result.feasibility.feasible is True
@@ -871,7 +919,7 @@ def test_equity_net_above_one_intent_is_a_leverage_budget_breach_not_unfinanced(
             decisions,
             kind="bars",
             config=PortfolioFoundationConfig(
-                subwindows=1, trial_count=5, max_gross_exposure=1.0, max_net_exposure=1.0
+                subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0
             ),
         )
     assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
@@ -891,7 +939,7 @@ def test_funding_charged_on_net_held_position():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     # Entry filled d1 @100 (qty 1.0 NAV-unit = 1.0 contract). Funding at d2.
     assert result.path[2].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
@@ -908,7 +956,7 @@ def test_duplicate_funding_timestamps_deduped():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     # Funding applied once, not twice.
     assert result.path[-1].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
@@ -935,7 +983,7 @@ def test_nav_reconciles_with_ledger_single_round_trip_with_costs():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     _reconcile(result)
 
@@ -955,7 +1003,7 @@ def test_nav_reconciles_with_ledger_multi_symbol_and_funding():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.0005,
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     _reconcile(result)
 
@@ -968,7 +1016,7 @@ def test_nav_reconciles_after_reversal():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     assert len(result.round_trips) == 2
     _reconcile(result)
@@ -983,7 +1031,7 @@ def test_non_flat_ending_book_marks_open_winner_into_nav_not_into_ledger():
     result = walk(
         rows,
         [target(0, 1.0)],  # opens long (fills @100), never closed
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     # Not flat at the boundary, and no closed round-trip.
     assert result.path[-1].gross_exposure > 0.0
@@ -1015,7 +1063,7 @@ def test_closed_round_trips_counted_by_exit_time_per_subwindow():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=2, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     counts = [sub["closed_trade_count"] for sub in realistic["subwindows"]]
@@ -1038,7 +1086,7 @@ def test_build_foundation_emits_three_scenarios_and_utilization_fields():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, cost_stress_multiplier=2.0),
+        config=PortfolioFoundationConfig(subwindows=1, cost_stress_multiplier=2.0),
     )
     payload = foundation.matrix_payload()
     assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress", "fill_stress"}
@@ -1066,7 +1114,7 @@ def test_foundation_summary_reports_capacity_diagnostics():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(impact_coefficient_bps=100.0, portfolio_notional=1_000.0),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
 
     capacity = foundation.matrix_payload()["scenarios"]["realistic_costs"]["capacity"]
@@ -1100,7 +1148,7 @@ def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic()
     }
 
     stressed = build_portfolio_foundation(
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, fill_stress_fraction=0.01),
+        config=PortfolioFoundationConfig(subwindows=1, fill_stress_fraction=0.01),
         **kwargs,
     ).matrix_payload()["scenarios"]
     assert set(stressed) == {"realistic_costs", "cost_stress", "fill_stress"}
@@ -1110,7 +1158,7 @@ def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic()
 
     # Opting the knob out drops the scenario and leaves the realistic path byte-identical.
     opted_out = build_portfolio_foundation(
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5, fill_stress_fraction=0.0),
+        config=PortfolioFoundationConfig(subwindows=1, fill_stress_fraction=0.0),
         **kwargs,
     ).matrix_payload()["scenarios"]
     assert set(opted_out) == {"realistic_costs", "cost_stress"}
@@ -1128,7 +1176,7 @@ def test_build_foundation_reports_every_configured_subwindow_even_when_empty():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=4, trial_count=None),
+        config=PortfolioFoundationConfig(subwindows=4),
     )
     subwindows = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"]
     assert len(subwindows) == 4
@@ -1152,7 +1200,7 @@ def test_max_symbol_concentration_from_netted_book():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
     full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
     # Concentration = max leg notional / gross notional = 0.6 / 0.8 = 0.75.

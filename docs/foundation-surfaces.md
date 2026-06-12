@@ -353,9 +353,6 @@ authority.
 
 Primary config file: candidate-local `evaluation.toml`; see
 `examples/simple_momentum/evaluation.toml` for the config schema.
-(The checked-in `examples/` and `candidates/` strategy bundles do not yet implement
-the target-book contract end-to-end, so treat the documented schema here as
-authoritative rather than those files.)
 
 Important sections:
 

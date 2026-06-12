@@ -96,7 +96,7 @@ def foundation_for(
             impact_coefficient_bps=impact_coefficient_bps,
             impact_exponent=1.0,
         ),
-        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+        config=PortfolioFoundationConfig(subwindows=1),
     )
 
 

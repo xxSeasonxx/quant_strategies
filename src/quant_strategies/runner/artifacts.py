@@ -405,7 +405,7 @@ def assessment_status(
     return "quick_check_passed" if engine_run.feasible else "quick_check_failed"
 
 
-def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
+def completion_notes(config: RunConfig, engine_run: EngineRun, *, assessment_status: str) -> str:
     lines = [
         "# Run Complete",
         "",
@@ -419,7 +419,11 @@ def completion_notes(config: RunConfig, engine_run: EngineRun) -> str:
             "market robustness, or promotion evidence."
         )
     else:
-        quick_check_status = "passed" if engine_run.feasible else "failed"
+        quick_check_status = {
+            "quick_check_passed": "passed",
+            "quick_check_failed": "failed",
+            "quick_check_unverified": "unverified",
+        }[assessment_status]
         lines.append(f"quick_check_result: {quick_check_status}")
         interpretation = "runner quick checks only; not market robustness or promotion evidence."
     if config.data.kind == "crypto_perp_funding":

@@ -211,8 +211,6 @@ def _scenario_scoreability(
 ) -> FeasibilityVerdict:
     statistics = compute_return_statistics(
         at_risk_period_returns(walk.path),
-        trial_count=None,
-        benchmark_sharpe=0.0,
         min_return_sample=metrics.min_annualized_samples,
     )
     return scenario_feasibility(

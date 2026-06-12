@@ -284,11 +284,10 @@ with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`,
 when the quick-run evidence may be retained; `[output]` with `results_dir`,
 `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
-(`foundation_subwindows`, `foundation_trial_count`,
-`foundation_benchmark_sharpe`, `foundation_cost_stress_multiplier`), and (for the
+(`foundation_subwindows`, `foundation_cost_stress_multiplier`,
+`foundation_fill_stress_fraction`), and (for the
 diagnostic profile) `diagnostic_sample_trades`.
-`foundation_subwindows` accepts 1-64 windows; omit `foundation_trial_count` when
-you want DSR to stay null with an explicit missing-trial warning.
+`foundation_subwindows` accepts 1-64 windows.
 The **leverage budget (gross and net) is operator-frozen** in the
 `[leverage_budget]` section (`max_gross_exposure` / `max_net_exposure`, default
 `1.0/1.0`, `>= 1.0`) — it is not an agent-editable `[output]` key. Intended exposure
@@ -340,7 +339,7 @@ scalars/slices written to artifacts, even under `artifact_profile = "summary"`; 
 Completed, feasible quick runs expose the **authoritative scored portfolio book**
 on `result.foundation`. Its NAV path is the single object Train scoring statistics
 derive from; use it for full-Train and subwindow return statistics (computed over
-**at-risk bars**, with a minimum-sample gate), DSR inputs, drawdown, closed
+**at-risk bars**, with a minimum-sample gate), PSR inputs, drawdown, closed
 round-trip counts, concentration, gross/net utilization, total return, and
 cost-stressed foundation metrics. It remains quick-run diagnostic evidence, not
 promotion authority, and default artifacts write compact metrics rather than full
@@ -372,9 +371,6 @@ feasibility                 # typed verdict payload (feasible, reason, observed_
 full_train                  # one compact metric record for the full Train path
 capacity                    # turnover, impact cost, bar participation, ADV participation
 subwindow_count             # configured foundation_subwindows
-min_dsr / median_dsr        # DSR aggregates across subwindows only
-dsr_available_count
-dsr_null_count
 min_closed_trade_count
 max_symbol_concentration
 warning_counts
@@ -402,8 +398,6 @@ sharpe
 sharpe_standard_error
 skew
 kurtosis
-dsr_inputs
-dsr
 warnings
 ```
 
@@ -433,13 +427,10 @@ Important semantics for agents:
   with a typed warning rather than a finite Sharpe from sample count alone.
 - Subwindow `total_return` compounds the same endpoint-assigned return intervals
   used for that subwindow's return statistics.
-- DSR is an audit statistic that depends on `foundation_trial_count`. If that
-  count is omitted, `dsr` is `null` and `warnings` includes
-  `missing_trial_count`.
 - PSR and the final Train score are downstream policy. A downstream scorer can
   compute `PSR = NormalCDF((sharpe - SR_h) / sharpe_standard_error)` from
   foundation fields, then choose its own score/gates. `quant_strategies` does not
-  emit or optimize that score.
+  emit or optimize that score; significance stays with the consumer.
 - Compact artifacts do **not** include full NAV traces, `portfolio_value` arrays,
   `period_return` arrays, or per-period positions. Use evaluation for
   survivor-grade NAV/path traces.

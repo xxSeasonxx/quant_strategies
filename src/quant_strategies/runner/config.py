@@ -94,13 +94,11 @@ class OutputConfig(RunnerConfigModel):
     artifact_profile: ArtifactProfile = "diagnostic"
     diagnostic_sample_trades: int = Field(default=5, ge=1, le=20)
     foundation_subwindows: StrictInt = Field(default=6, ge=1, le=MAX_FOUNDATION_SUBWINDOWS)
-    foundation_trial_count: StrictInt | None = Field(default=None, ge=1)
-    foundation_benchmark_sharpe: float = 0.0
     foundation_cost_stress_multiplier: float = Field(default=2.0, ge=1.0)
     foundation_fill_stress_fraction: float = Field(
         default=DEFAULT_FILL_STRESS_FRACTION, ge=0.0, lt=1.0
     )
-    causality_check: CausalityCheck = "strict"
+    causality_check: CausalityCheck = "micro"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)
     focused_timeout_seconds: float = Field(default=60.0, ge=0.0)
@@ -123,7 +121,6 @@ class OutputConfig(RunnerConfigModel):
         return value
 
     @field_validator(
-        "foundation_benchmark_sharpe",
         "foundation_cost_stress_multiplier",
         "foundation_fill_stress_fraction",
     )

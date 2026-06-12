@@ -59,7 +59,7 @@ from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
 
 @dataclass(frozen=True)
 class RunCausalityEvidence:
-    causality_check: str = "strict"
+    causality_check: str = "micro"
     verified: bool = False
     deterministic_replay_verified: bool = False
     emitted_replay_verified: bool = False
@@ -499,7 +499,6 @@ def _prepare_micro_causality_evidence(
         replay_scope="micro",
         candidate_probe_count=micro.candidate_probe_count,
         selected_probe_count=micro.selected_probe_count,
-        elapsed_seconds=micro.elapsed_seconds,
         timeout_seconds=micro.timeout_seconds,
         timed_out=micro.timed_out,
         replay_warning=micro.replay_warning,
@@ -824,8 +823,6 @@ def _build_portfolio_foundation(
                 capacity_model=config.capacity_model,
                 config=PortfolioFoundationConfig(
                     subwindows=config.output.foundation_subwindows,
-                    trial_count=config.output.foundation_trial_count,
-                    benchmark_sharpe=config.output.foundation_benchmark_sharpe,
                     cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
                     fill_stress_fraction=config.output.foundation_fill_stress_fraction,
                     max_gross_exposure=config.leverage_budget.max_gross_exposure,
@@ -965,7 +962,11 @@ def _write_completion_artifacts(
                     ),
                 ),
             )
-        notes = artifacts.completion_notes(config, engine_run)
+        notes = artifacts.completion_notes(
+            config,
+            engine_run,
+            assessment_status=assessment_status,
+        )
         artifacts.write_notes(result_dir, notes)
         artifacts.write_run_manifest(
             result_dir,
@@ -1323,6 +1324,8 @@ def _causality_admissible(
     check = str(quality.get("causality_check", config.output.causality_check))
     if check == "off":
         return config.causality_policy.allow_unverified_scoring
+    if check == "micro":
+        return str(quality.get("data_availability_status")) == "complete"
     if bool(quality.get("causality_verified")) or bool(quality.get("emitted_replay_verified")):
         return True
     focused = quality.get("focused_causality")

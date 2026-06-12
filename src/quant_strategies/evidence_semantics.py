@@ -124,7 +124,7 @@ def validation_evidence_semantics() -> dict[str, object]:
 def causality_evidence_fields(
     data_availability_status: object,
     *,
-    causality_check: str = "strict",
+    causality_check: str = "micro",
     deterministic_replay_verified: bool | None = None,
     emitted_replay_verified: bool,
     strict_no_emission_verified: bool,

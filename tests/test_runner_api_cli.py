@@ -191,8 +191,6 @@ def write_config(
     micro_probe_limit: object | None = None,
     micro_timeout_seconds: object | None = None,
     foundation_subwindows: object | None = None,
-    foundation_trial_count: object | None = None,
-    foundation_benchmark_sharpe: object | None = None,
     foundation_cost_stress_multiplier: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
@@ -235,16 +233,6 @@ def write_config(
     foundation_subwindows_line = (
         f"foundation_subwindows = {foundation_subwindows}\n"
         if foundation_subwindows is not None
-        else ""
-    )
-    foundation_trial_count_line = (
-        f"foundation_trial_count = {foundation_trial_count}\n"
-        if foundation_trial_count is not None
-        else ""
-    )
-    foundation_benchmark_sharpe_line = (
-        f"foundation_benchmark_sharpe = {foundation_benchmark_sharpe}\n"
-        if foundation_benchmark_sharpe is not None
         else ""
     )
     foundation_cost_stress_multiplier_line = (
@@ -300,7 +288,7 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_subwindows_line}{foundation_trial_count_line}{foundation_benchmark_sharpe_line}{foundation_cost_stress_multiplier_line}
+			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_subwindows_line}{foundation_cost_stress_multiplier_line}
 				'''.lstrip()
     )
     return config_path
@@ -434,7 +422,7 @@ def assert_summary_economic_metrics(payload: dict[str, object]) -> dict[str, obj
 def test_runner_config_accepts_causality_policy_fields(tmp_path: Path):
     default_config = config_module.load_config(write_config(tmp_path), repo_root=tmp_path)
 
-    assert default_config.output.causality_check == "strict"
+    assert default_config.output.causality_check == "micro"
     assert default_config.output.strict_probe_limit is None
 
     for mode in ("off", "emitted", "strict", "focused", "micro"):
@@ -510,7 +498,7 @@ def test_runner_config_rejects_invalid_causality_policy_fields(
         config_module.load_config(config_path, repo_root=tmp_path)
 
 
-def test_run_config_routes_default_causality_policy_to_strict(
+def test_run_config_routes_default_causality_policy_to_micro(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -521,30 +509,40 @@ def test_run_config_routes_default_causality_policy_to_strict(
         "load_data",
         lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
     )
-    modes: list[str] = []
+    calls: list[tuple[int | None, float | None]] = []
 
-    def fake_check_hidden_lookahead(*args, mode="missing", **kwargs):
-        modes.append(mode)
+    def fake_check_micro_causality(*args, max_probes=None, timeout_seconds=None, **kwargs):
+        calls.append((max_probes, timeout_seconds))
         return LookaheadCheckResult(
             passed=True,
-            mode=mode,
-            deterministic_replay_verified=True,
-            emitted_replay_verified=True,
-            strict_suppression_verified=mode == "strict",
+            mode="strict",
+            replay_scope="micro",
+            candidate_probe_count=9,
+            selected_probe_count=5,
+            elapsed_seconds=0.01,
+            timeout_seconds=2.0,
         )
 
-    monkeypatch.setattr(runner_module, "check_hidden_lookahead", fake_check_hidden_lookahead)
+    monkeypatch.setattr(runner_module, "check_micro_causality", fake_check_micro_causality)
 
     result = run_config(config_path, repo_root=tmp_path)
 
     assert result.outcome.completed is True
-    assert modes == ["strict"]
-    assert result.evidence.causality.causality_check == "strict"
-    assert result.evidence.causality.deterministic_replay_verified is True
+    assert calls == [(5, 2.0)]
+    assert result.evidence.causality.causality_check == "micro"
+    assert result.evidence.causality.replay_scope == "micro"
+    assert result.evidence.causality.verified is False
+    assert result.evidence.causality.elapsed_seconds is None
+    assert result.evidence.causality_admissible is True
+    assert result.retainable is False
+    assert result.retainability.reason == "causality_not_retention_verified"
     summary = read_summary(result.result_dir)
-    assert summary["causality_check"] == "strict"
-    assert summary["deterministic_replay_verified"] is True
-    assert summary["strict_no_emission_verified"] is True
+    assert summary["causality_check"] == "micro"
+    assert summary["replay_scope"] == "micro"
+    assert summary["causality_verified"] is False
+    assert summary["deterministic_replay_verified"] is False
+    assert summary["strict_no_emission_verified"] is False
+    assert summary["elapsed_seconds"] is None
 
 
 def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
@@ -889,6 +887,7 @@ def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evid
     assert result.evidence.causality.causality_check == "micro"
     assert result.evidence.causality.verified is False
     assert result.evidence.causality.replay_scope == "micro"
+    assert result.evidence.causality.elapsed_seconds is None
     assert result.evidence.causality.timed_out is True
     assert result.evidence.causality.replay_warning == "micro_causality_timeout"
     summary = read_summary(result.result_dir)
@@ -896,6 +895,7 @@ def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evid
     assert summary["causality_check"] == "micro"
     assert summary["causality_verified"] is False
     assert summary["replay_scope"] == "micro"
+    assert summary["elapsed_seconds"] is None
     assert summary["timed_out"] is True
     assert "economic_metrics" in summary
     assert result.retainable is False
@@ -1840,8 +1840,8 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
         "available_at",
     ]
     assert summary["row_contract"]["quant_data_feedback"] == []
-    assert summary["causality_verified"] is True
-    assert summary["evidence_quality_warnings"] == []
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
     data_manifest = json.loads((result.result_dir / "data_manifest.json").read_text())
     assert data_manifest["replayable_from_artifacts"] is True
     assert LEGACY_REPLAYABILITY_METADATA_KEY not in data_manifest
@@ -1849,12 +1849,12 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
     assert data_manifest["data_availability_status"] == summary["data_availability_status"]
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
     assert data_manifest["row_contract"] == summary["row_contract"]
-    assert data_manifest["causality_verified"] is True
+    assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
     # The engine evidence packet (evidence.json) was retired with the per-trade scorer;
     # the authoritative book is the scored object.
     assert not (result.result_dir / "evidence.json").exists()
-    assert_assessment(result, summary, assessment_status="quick_check_passed")
+    assert_assessment(result, summary, assessment_status="quick_check_unverified")
     assert "runner quick checks only" in (result.result_dir / "notes.md").read_text()
 
 
@@ -1892,7 +1892,7 @@ def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: p
 
     summary = read_summary(result.result_dir)
     assert_assessment(
-        result, summary, assessment_status="quick_check_passed", artifact_profile="summary"
+        result, summary, assessment_status="quick_check_unverified", artifact_profile="summary"
     )
     assert summary["engine"]["feasible"] is True
     assert summary["engine"]["trade_count"] == 1
@@ -2007,7 +2007,6 @@ def test_run_config_surfaces_capacity_diagnostics_and_economic_impact(
         tmp_path,
         artifact_profile="diagnostic",
         foundation_subwindows=1,
-        foundation_trial_count=5,
         capacity_model_extra="""[capacity_model]
 mode = "adv_impact"
 portfolio_notional = 1000.0
@@ -2055,8 +2054,6 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
         tmp_path,
         artifact_profile="summary",
         foundation_subwindows=1,
-        foundation_trial_count=10,
-        foundation_benchmark_sharpe=0.0,
     )
     monkeypatch.setattr(
         execution,
@@ -2563,7 +2560,7 @@ foundation = build_portfolio_foundation(
         impact_coefficient_bps=0.0,
         impact_exponent=1.0,
     ),
-    config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    config=PortfolioFoundationConfig(subwindows=1),
 )
 build_run_economics(foundation)
 
@@ -2627,7 +2624,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     assert_assessment(
         result,
         summary,
-        assessment_status="quick_check_passed",
+        assessment_status="quick_check_unverified",
         artifact_profile="diagnostic",
     )
     assert "diagnostic_trades" not in summary["engine"]
@@ -2847,8 +2844,8 @@ def test_losing_but_feasible_run_keeps_completed_summary(
     assert summary["engine"]["trade_count"] == 1
     assert summary["engine"]["nav_attribution"]["sum_gross_return"] < 0
     assert summary["engine"]["nav_attribution"]["sum_net_return"] < 0
-    assert_assessment(result, summary, assessment_status="quick_check_passed")
-    assert "quick_check_result: passed" in (result.result_dir / "notes.md").read_text()
+    assert_assessment(result, summary, assessment_status="quick_check_unverified")
+    assert "quick_check_result: unverified" in (result.result_dir / "notes.md").read_text()
 
 
 def test_empty_decisions_under_quick_checks_fail_closed_without_retired_artifacts(
@@ -3073,14 +3070,14 @@ def test_run_config_marks_complete_available_at_coverage(
         "total": 4,
         "fraction": 1.0,
     }
-    assert summary["causality_verified"] is True
-    assert summary["evidence_quality_warnings"] == []
+    assert summary["causality_verified"] is False
+    assert summary["evidence_quality_warnings"] == ["runner_causality_not_verified"]
     assert data_manifest["data_availability_status"] == "complete"
     assert data_manifest["availability_coverage"] == summary["availability_coverage"]
-    assert data_manifest["causality_verified"] is True
+    assert data_manifest["causality_verified"] is False
     assert data_manifest["evidence_quality_warnings"] == summary["evidence_quality_warnings"]
-    assert result.outcome.assessment_status == "quick_check_passed"
-    assert summary["assessment_status"] == "quick_check_passed"
+    assert result.outcome.assessment_status == "quick_check_unverified"
+    assert summary["assessment_status"] == "quick_check_unverified"
 
 
 def test_run_config_reuses_execution_evidence_quality_after_causality(
@@ -3219,7 +3216,7 @@ def test_runner_catches_hidden_lookahead_before_request_build(
         "        target=size,\n"
         "    )]\n"
     )
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, causality_check="strict")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3339,7 +3336,7 @@ def test_runner_catches_peek_to_suppress_with_strict_replay(
         "        target=1.0,\n"
         "    )]\n"
     )
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, causality_check="strict")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -4015,7 +4012,7 @@ def test_unavailable_decision_row_fails_causality_before_adapter(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_config(tmp_path, causality_check="strict")
     monkeypatch.setattr(
         execution,
         "load_data",

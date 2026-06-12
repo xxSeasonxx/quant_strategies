@@ -159,6 +159,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     data_availability_status: str
     duplicate_key_count: int
     _storage: tuple[tuple[tuple[str, Any], ...], ...] = field(repr=False)
+    _canonical_jsonl_lines: tuple[bytes, ...] = field(repr=False)
     _range_items: tuple[tuple[str, tuple[tuple[str, Any], ...]], ...] = field(repr=False)
     _availability_coverage_items: tuple[tuple[str, Any], ...] = field(repr=False)
     _issue_reason_items: tuple[tuple[str, int], ...] = field(repr=False)
@@ -316,6 +317,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             normalized_rows.append(normalized)
 
         storage = tuple(_storage_row(row) for row in normalized_rows)
+        canonical_jsonl_lines = _canonical_jsonl_lines_from_storage(storage)
         total = len(normalized_rows)
         availability_status = _availability_status(
             total=total,
@@ -337,10 +339,11 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             required_fields=required_fields,
             issues=issues.sample(),
             issue_count=issues.issue_count,
-            normalized_rows_sha256=_normalized_rows_sha256_from_storage(storage),
+            normalized_rows_sha256=_normalized_rows_sha256_from_lines(canonical_jsonl_lines),
             data_availability_status=availability_status,
             duplicate_key_count=duplicate_key_count,
             _storage=storage,
+            _canonical_jsonl_lines=canonical_jsonl_lines,
             _range_items=_range_items(normalized_rows),
             _availability_coverage_items=tuple(availability_coverage.items()),
             _issue_reason_items=issues.issue_reason_items(),
@@ -429,7 +432,7 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     def evidence_quality(
         self,
         *,
-        causality_check: str = "strict",
+        causality_check: str = "micro",
         deterministic_replay_verified: bool | None = None,
         emitted_replay_verified: bool = False,
         strict_no_emission_verified: bool = False,
@@ -923,10 +926,10 @@ def _mapping_items(
     return tuple((key, tuple(value.items())) for key, value in mapping.items())
 
 
-def _normalized_rows_sha256_from_storage(
+def _canonical_jsonl_lines_from_storage(
     storage: Sequence[tuple[tuple[str, Any], ...]],
-) -> str:
-    digest = hashlib.sha256()
+) -> tuple[bytes, ...]:
+    lines: list[bytes] = []
     for row in storage:
         line = json.dumps(
             json_safe_value(dict(row)),
@@ -934,8 +937,14 @@ def _normalized_rows_sha256_from_storage(
             separators=(",", ":"),
             allow_nan=False,
         )
-        digest.update(line.encode("utf-8"))
-        digest.update(b"\n")
+        lines.append(line.encode("utf-8") + b"\n")
+    return tuple(lines)
+
+
+def _normalized_rows_sha256_from_lines(lines: Sequence[bytes]) -> str:
+    digest = hashlib.sha256()
+    for line in lines:
+        digest.update(line)
     return digest.hexdigest()
 
 
