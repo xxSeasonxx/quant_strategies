@@ -107,7 +107,7 @@ details, not promotion language.
 
 | Surface | Python status fields | Success condition | Failure interpretation |
 | --- | --- | --- | --- |
-| Quick run | `RunResult.succeeded`, `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status`, `RunResult.feasibility` | `result.succeeded` (**feasible and completed**) | `outcome.completed` is false or the book is infeasible; `outcome.failure_stage` names the failed stage (`feasibility` on an envelope breach), `RunResult.feasibility` carries the typed reason + observed exposure, and `outcome.assessment_status` stays diagnostic-only |
+| Quick run | `RunResult.succeeded`, `RunResult.retainable`, `RunResult.retainability`, `RunResult.outcome.completed`, `RunResult.outcome.failure_stage`, `RunResult.outcome.assessment_status`, `RunResult.feasibility` | `result.succeeded` (**feasible and completed**) for run completion; `result.retainable` for advancing quick-run evidence to validation/evaluation | `outcome.completed` is false or the book is infeasible; `outcome.failure_stage` names the failed stage (`feasibility` on an envelope breach), `RunResult.feasibility` carries the typed reason + observed exposure, and `RunResult.retainability` carries non-retainable causality/envelope reasons |
 | Validation run | `ValidationRunResult.succeeded`, `ValidationRunResult.run_completed`, `ValidationRunResult.failure_stage`, `ValidationRunResult.decision` | `result.succeeded`; `decision.decision` may still be `mechanical_fail` | advisory retained-candidate evidence only |
 | Evaluation run | `EvaluationRunResult.succeeded`, `EvaluationRunResult.run_completed`, `EvaluationRunResult.failure_stage`, `EvaluationRunResult.assessment_status` | `result.succeeded` | stateless frozen-candidate evidence only |
 
@@ -125,11 +125,12 @@ from quant_strategies.validation import run_validation
 from quant_strategies.evaluation import run_evaluation
 ```
 
-The supported success check is `result.succeeded` for quick run, validation,
-and evaluation; validation labels are advisory evidence, and `mechanical_fail`
-is not promotion logic. Artifacts are evidence and rerunnable; ranking,
-comparison, search memory, stopping rules, and promotion decisions remain
-outside this repo.
+The supported completion check is `result.succeeded` for quick run, validation,
+and evaluation. For quick-run evidence that may advance into retained-candidate
+validation/evaluation, also require `result.retainable`. validation labels are
+advisory evidence, and `mechanical_fail` is not promotion logic. Artifacts are
+evidence and rerunnable; ranking, comparison, search memory, stopping rules, and
+promotion decisions remain outside this repo.
 
 ## Quick Run
 
@@ -164,6 +165,7 @@ Important sections:
 - `[data]` loaded through `quant_data`;
 - `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
   `[leverage_budget]`;
+- `[envelope] operator_frozen = true` for retainable quick-run evidence;
 - `[output]` with repo-local generated `results_dir` under `results/`, artifact
 profile, and diagnostic sizing.
 
@@ -190,6 +192,11 @@ period-return traces. Full per-period return traces are not written by default.
 Failed or infeasible quick-run `summary.json` files set `run_completed` to `false`
 and `failure_stage` to the failed runner stage (`feasibility` on an envelope
 breach).
+
+Micro causality is fast Train/autoresearch diagnostic evidence. A micro quick run
+may complete and score, but micro evidence is not complete retention proof; use
+`RunResult.retainable` before advancing quick-run evidence to validation or
+evaluation.
 
 `RiskRule` stop-loss, take-profit, and trailing thresholds are declared as
 **fractions of the position's entry mark** and enforced by the engine on the net

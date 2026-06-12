@@ -280,7 +280,8 @@ print(result.foundation.feasible)            # authoritative scored NAV book on 
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`,
-`[capacity_model]`, `[leverage_budget]`; `[output]` with `results_dir`,
+`[capacity_model]`, `[leverage_budget]`; `[envelope] operator_frozen = true`
+when the quick-run evidence may be retained; `[output]` with `results_dir`,
 `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
 (`foundation_subwindows`, `foundation_trial_count`,
@@ -302,7 +303,10 @@ same NAV cash path and the book is never resized or split to fit a capacity limi
 traded book fails closed with `capacity_unpriced`. `forex_with_quotes` ADV impact
 fails with `capacity_unsupported_volume_semantics` until FX notional liquidity is
 calibrated.
-Use `causality_check = "micro"` for Train/autoresearch iteration.
+Use `causality_check = "micro"` for Train/autoresearch iteration. Micro replay is
+fast diagnostic evidence: it can score, but it is not complete retention proof.
+Require `result.retainable` before advancing quick-run evidence to validation or
+evaluation.
 Research candidates live as candidate-local bundles:
 `candidates/<candidate_id>/strategy.py` plus `run.toml` and optional
 `validation.toml` / `evaluation.toml`. In quick-run configs, `strategy_path`
@@ -477,13 +481,15 @@ The micro causality policy is the Train/autoresearch replay annotation. It runs 
 tiny bounded replay sample, records probe and timeout evidence, and never blocks
 quick-run scoring. If micro replay fails or times out, quick-run economics still
 complete when request building and engine evaluation succeed, and causality is
-marked unverified; downstream ranking should read that replay status explicitly.
+marked unverified; `RunResult.retainable` is false until retention-admissible
+causality evidence and envelope provenance are present.
 Survivor and audit evidence belongs in validation/evaluation. Low-level replay
 settings and focused source-hash replay are advanced controls documented in the
 reference; the strategy-writing LLM should not choose them during research
 iteration.
 
-**Reading it:** success is `result.succeeded`. On failure, `result.outcome
+**Reading it:** completion is `result.succeeded`. For quick-run evidence that may
+advance to validation/evaluation, also require `result.retainable`. On failure, `result.outcome
 .failure_stage` names the stage that failed and `summary.json` sets
 `run_completed=false`. `assessment_status` stays diagnostic — it never authorizes
 anything.
@@ -630,12 +636,14 @@ the consumer's job.
 
 ## Reading results programmatically
 
-All three result types expose `result.succeeded` — **use it as the success check.**
-It means the run completed and `failure_stage is None`.
+All three result types expose `result.succeeded` — use it as the completion check.
+It means the run completed and `failure_stage is None`. Quick-run evidence also
+exposes `result.retainable`; require it before advancing quick-run evidence to
+validation/evaluation.
 
 | Result | Success | Verdict / status field | On failure |
 |---|---|---|---|
-| `RunResult` | `result.succeeded` | `outcome.assessment_status` (diagnostic) | `outcome.failure_stage`; `evidence.warnings` |
+| `RunResult` | `result.succeeded`; for retained evidence also `result.retainable` | `outcome.assessment_status` (diagnostic), `retainability.reason` | `outcome.failure_stage`; `evidence.warnings`; `retainability` |
 | `ValidationRunResult` | `result.succeeded` | `decision.decision` (advisory; may be `mechanical_fail`) | `failure_stage`; config-load failure → `result_dir=None`, `failure_stage="config_load"` |
 | `EvaluationRunResult` | `result.succeeded` | `assessment_status` | `failure_stage` (`data_audit`, `preflight`, …); `evidence_quality_warnings` |
 
@@ -662,6 +670,8 @@ Each accepts `(config_path, *, repo_root=None, event_sink=None)`. Pass an
 
 For quick-run search loops, score on `RunResult.foundation` — the authoritative
 NAV book — and check `RunResult.feasibility` to interpret a non-scoreable run.
+Use `RunResult.retainable` as the boundary for advancing a quick-run result to
+retained-candidate validation/evaluation.
 `RunResult.economics.trades` is the derived per-trade attribution view of that same
 book (for alpha / IC slicing by time or symbol), not an independent scored number.
 Use `run_evaluation` for OOS portfolio/NAV evidence and survivor-grade trace

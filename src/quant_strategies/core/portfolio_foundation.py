@@ -43,6 +43,7 @@ REASON_LEVERAGE_BUDGET_BREACH = "leverage_budget_breach"
 REASON_ZERO_COST = "zero_cost"
 REASON_INSUFFICIENT_SAMPLES = "insufficient_samples"
 REASON_UNFINANCED_LEVERAGE = "unfinanced_leverage"
+REASON_UNPRICED_SHORT_FINANCING = "unpriced_short_financing"
 REASON_CAPACITY_UNPRICED = "capacity_unpriced"
 REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS = "capacity_unsupported_volume_semantics"
 REASON_CAPACITY_MISSING_VOLUME = "capacity_missing_volume"
@@ -1519,6 +1520,21 @@ def _check_intended_budget(
                 ),
             )
         )
+    if not financed:
+        short_symbols = sorted(symbol for symbol, weight in intended.items() if weight < 0.0)
+        if short_symbols:
+            raise FeasibilityError(
+                FeasibilityVerdict(
+                    feasible=False,
+                    reason=REASON_UNPRICED_SHORT_FINANCING,
+                    observed_gross=gross,
+                    observed_net=net,
+                    detail=(
+                        "short financing/carry is unpriced for data kind "
+                        f"{data_kind} at {timestamp.isoformat()}: {','.join(short_symbols)}"
+                    ),
+                )
+            )
     if not financed and net > 1.0 + _EXPOSURE_TOLERANCE:
         raise FeasibilityError(
             FeasibilityVerdict(

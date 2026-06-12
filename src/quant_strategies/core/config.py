@@ -177,6 +177,12 @@ class CausalityPolicyConfig(SharedConfigModel):
     allow_unverified_scoring: bool = False
 
 
+class EnvelopeConfig(SharedConfigModel):
+    """Operator provenance for the scoring envelope."""
+
+    operator_frozen: bool = False
+
+
 class CausalityReplayConfig(SharedConfigModel):
     scope: CausalityReplayScope = "complete"
     probe_limit: int = Field(default=64, ge=1)

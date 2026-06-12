@@ -33,6 +33,9 @@ slippage_bps_per_side = 0.5
 [capacity_model]
 mode = "off"
 
+[envelope]
+operator_frozen = true
+
 [output]
 results_dir = "results"
 quick_checks = true

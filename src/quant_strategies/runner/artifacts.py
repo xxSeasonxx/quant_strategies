@@ -317,6 +317,7 @@ def summary_payload(
     param_contract: str = "unknown",
     economic_metrics: Mapping[str, object] | None = None,
     portfolio_foundation: Mapping[str, object] | None = None,
+    retainability: Mapping[str, object] | None = None,
     generated_decision_count: int | None = None,
     excluded_decision_count: int | None = None,
 ) -> dict[str, object]:
@@ -343,6 +344,13 @@ def summary_payload(
         **semantics,
         **evidence_quality,
     }
+    retainability_payload = (
+        {"retainable": False, "reason": "run_not_completed", "detail": None}
+        if retainability is None
+        else dict(retainability)
+    )
+    payload["retainability"] = json_safe_value(retainability_payload)
+    payload["retainable"] = bool(retainability_payload.get("retainable"))
     if economic_metrics is not None:
         payload["economic_metrics"] = json_safe_value(dict(economic_metrics))
     if portfolio_foundation is not None:

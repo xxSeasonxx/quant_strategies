@@ -124,6 +124,20 @@ class RunOutcome:
 
 
 @dataclass(frozen=True)
+class RunRetainability:
+    retainable: bool = False
+    reason: str | None = "run_not_completed"
+    detail: str | None = None
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "retainable": self.retainable,
+            "reason": self.reason,
+            "detail": self.detail,
+        }
+
+
+@dataclass(frozen=True)
 class RunResult:
     result_dir: Path | None
     notes_path: Path | None
@@ -137,10 +151,15 @@ class RunResult:
     # populated verdict (reason + observed exposure) and maps to a ``feasibility``
     # failure_stage so ``succeeded`` is false (design D5).
     feasibility: FeasibilityVerdict | None = None
+    retainability: RunRetainability = RunRetainability()
 
     @property
     def succeeded(self) -> bool:
         return self.outcome.completed and self.outcome.failure_stage is None
+
+    @property
+    def retainable(self) -> bool:
+        return self.retainability.retainable
 
 
 def run_config(
@@ -282,6 +301,9 @@ def run_config(
         mode=_engine_mode(config),
         include_diagnostics=True,
     )
+    retainability = _quick_run_retainability(
+        config, evidence_quality, foundation.feasible_verdict()
+    )
     _write_execution_data_manifest(
         result_dir,
         config,
@@ -299,6 +321,7 @@ def run_config(
             engine_run,
             economics,
             foundation,
+            retainability,
             evidence_quality,
             repo_root=effective_repo_root,
             event_emitter=events,
@@ -330,6 +353,7 @@ def run_config(
         economics=economics,
         foundation=foundation,
         feasibility=foundation.feasible_verdict(),
+        retainability=retainability,
     )
 
 
@@ -845,6 +869,11 @@ def _feasibility_failure_result(
         feasible=False, reason="infeasible", detail="portfolio book infeasible"
     )
     message = _feasibility_message(effective_verdict)
+    retainability = RunRetainability(
+        retainable=False,
+        reason=effective_verdict.reason or "feasibility",
+        detail=effective_verdict.detail,
+    )
     failure = _failure_result(
         config,
         result_dir,
@@ -852,6 +881,7 @@ def _feasibility_failure_result(
         message,
         repo_root=repo_root,
         evidence_quality=evidence_quality,
+        retainability=retainability,
         event_emitter=event_emitter,
     )
     return replace(failure, feasibility=effective_verdict)
@@ -876,6 +906,7 @@ def _write_completion_artifacts(
     engine_run: _engine_runner.EngineRun,
     economics: RunEconomics,
     foundation: RunPortfolioFoundation | None,
+    retainability: RunRetainability,
     evidence_quality: dict[str, object],
     *,
     repo_root: Path,
@@ -956,11 +987,83 @@ def _write_completion_artifacts(
                 param_contract=execution.param_contract,
                 economic_metrics=economics.summary_payload(),
                 portfolio_foundation=(None if foundation is None else foundation.summary_payload()),
+                retainability=retainability.payload(),
                 generated_decision_count=len(execution.decisions),
                 excluded_decision_count=len(execution.decisions) - len(decision_window_decisions),
             ),
         )
     return assessment_status, notes.strip()
+
+
+def _quick_run_retainability(
+    config: config_module.RunConfig,
+    evidence_quality: Mapping[str, object],
+    verdict: FeasibilityVerdict,
+) -> RunRetainability:
+    if not verdict.feasible:
+        return RunRetainability(
+            retainable=False,
+            reason=verdict.reason or "feasibility",
+            detail=verdict.detail,
+        )
+
+    causality_reason = _causality_retainability_reason(config, evidence_quality)
+    if causality_reason is not None:
+        reason, detail = causality_reason
+        return RunRetainability(retainable=False, reason=reason, detail=detail)
+
+    envelope_reason = _envelope_retainability_reason(config)
+    if envelope_reason is not None:
+        reason, detail = envelope_reason
+        return RunRetainability(retainable=False, reason=reason, detail=detail)
+
+    return RunRetainability(retainable=True, reason=None, detail=None)
+
+
+def _causality_retainability_reason(
+    config: config_module.RunConfig,
+    evidence_quality: Mapping[str, object],
+) -> tuple[str, str | None] | None:
+    check = str(evidence_quality.get("causality_check", config.output.causality_check))
+    if bool(evidence_quality.get("timed_out")):
+        return ("causality_timeout", _optional_str(evidence_quality.get("replay_warning")))
+    warning = _optional_str(evidence_quality.get("replay_warning"))
+    if warning is not None:
+        return ("causality_replay_warning", warning)
+    if check != "strict":
+        return (
+            "causality_not_retention_verified",
+            f"{check} replay is not complete retention proof",
+        )
+    if not bool(evidence_quality.get("causality_verified")):
+        return ("causality_not_retention_verified", "strict replay was not fully verified")
+    if bool(evidence_quality.get("strict_replay_capped")):
+        return ("causality_not_retention_verified", "strict replay was capped")
+    return None
+
+
+def _envelope_retainability_reason(
+    config: config_module.RunConfig,
+) -> tuple[str, str | None] | None:
+    if not config.envelope.operator_frozen:
+        return ("envelope_not_operator_frozen", "set [envelope] operator_frozen = true")
+    if config.cost_model.fee_bps_per_side + config.cost_model.slippage_bps_per_side <= 0.0:
+        return ("envelope_zero_cost", "fee_bps_per_side + slippage_bps_per_side must be positive")
+    capacity = config.capacity_model
+    if capacity.mode == "adv_impact":
+        if (capacity.impact_coefficient_bps or 0.0) <= 0.0:
+            return (
+                "capacity_impact_unpriced",
+                "adv_impact requires positive impact_coefficient_bps",
+            )
+        if (capacity.max_bar_participation or 0.0) > 1.0 or (
+            capacity.max_adv_participation or 0.0
+        ) > 1.0:
+            return (
+                "capacity_participation_unbounded",
+                "max bar/ADV participation must be <= 1.0",
+            )
+    return None
 
 
 def _engine_mode(config: config_module.RunConfig) -> _engine_runner.EngineMode:
@@ -1120,6 +1223,7 @@ def _failure_result(
     *,
     repo_root: Path,
     evidence_quality: dict[str, object] | None = None,
+    retainability: RunRetainability | None = None,
     event_emitter: RunnerStageEmitter | None = None,
 ) -> RunResult:
     notes = artifacts.failure_notes(stage, message)
@@ -1146,6 +1250,7 @@ def _failure_result(
                     engine={"passed": None, "trade_count": None},
                     assessment_status="runner_failed",
                     evidence_quality=quality,
+                    retainability=(None if retainability is None else retainability.payload()),
                 ),
             )
     except OSError:
@@ -1162,6 +1267,7 @@ def _failure_result(
             assessment_status="runner_failed",
         ),
         evidence=_run_evidence(config, quality),
+        retainability=retainability or RunRetainability(),
     )
 
 

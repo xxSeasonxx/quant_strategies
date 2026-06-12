@@ -191,6 +191,7 @@ strategy_path, strategy_id            # top-level
                  max_bar_participation, max_adv_participation,
                  impact_coefficient_bps, impact_exponent
 [leverage_budget] max_gross_exposure, max_net_exposure
+[envelope] operator_frozen
 [causality_policy] allow_unverified_scoring
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
          causality_check, micro_probe_limit, micro_timeout_seconds,
@@ -226,7 +227,9 @@ is **not** an agent-editable `[output]` key, so a climbing agent cannot relax th
 
 `causality_check` defaults to `"strict"` for backward compatibility. New
 Train/autoresearch iteration should use `"micro"`: it runs a tiny bounded replay
-sample, records probe/timeout evidence, and never blocks quick-run scoring.
+sample, records probe/timeout evidence, and never blocks quick-run scoring. Micro
+evidence is diagnostic and does not by itself make a quick run retainable; read
+`RunResult.retainable` before advancing evidence.
 Advanced callers may still set `"focused"` for source-hash replay,
 `"emitted"` for deterministic + emitted-decision replay without full row-grid
 no-emission replay, `"strict"` for audit replay, or `"off"` for explicit
@@ -307,6 +310,8 @@ the run completed and `failure_stage is None`.
 | `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics); the book is mandatory, so this is populated on every completed, feasible run and is `None` only when the run failed before/at the book (e.g. a feasibility breach) |
 | `feasibility` | `FeasibilityVerdict \| None` | typed fail-closed verdict; `None` when the run failed before the book was built; on a breach carries `reason` + observed exposure and maps to a `feasibility` `failure_stage` |
 | `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` — i.e. **feasible and completed**; a feasibility breach sets `failure_stage="feasibility"` |
+| `retainability` | `RunRetainability` | typed quick-run retention verdict: `retainable`, `reason`, and `detail` |
+| `retainable` | `bool` (property) | true only when the quick-run evidence may advance to validation/evaluation |
 
 **`RunOutcome`**: `completed` (bool), `failure_stage` (str|None), `assessment_status`
 (str; diagnostic, e.g. `runner_failed` on failure), `promotion_eligible` (bool;
@@ -315,6 +320,7 @@ always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
 
 **`FeasibilityVerdict`**: `feasible` (bool), `reason` (str|None — one of
 `leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
+`unpriced_short_financing`,
 `capacity_unpriced`, `capacity_unsupported_volume_semantics`,
 `capacity_missing_volume`, `capacity_insufficient_adv_history`,
 `capacity_limit_breach`, `insufficient_samples`), `observed_gross` (float|None),

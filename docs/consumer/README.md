@@ -50,15 +50,17 @@ these rules. They are the difference between evidence and noise.
    tolerated warning.
 4. **`validate_params` is required for validation and evaluation**, optional for
    quick runs. Make invalid params raise.
-5. **Use `result.succeeded` as the success check** on all three surfaces. For a
+5. **Use `result.succeeded` as the completion check** on all three surfaces. For a
    quick run, `succeeded` now means **feasible and completed**: the portfolio book
    was built and passed the feasibility envelope. A breach of that envelope is a
    typed, fail-closed verdict on `RunResult.feasibility` (reason + observed
    exposure) that sets `succeeded = False` — read the verdict reason
    (`leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
-   `insufficient_samples`) to learn what to fix; it is not a clamp and not a silent
-   absence of evidence. Validation's advisory `decision` label — including
-   `mechanical_fail` — is evidence, not promotion logic.
+   `unpriced_short_financing`, `insufficient_samples`) to learn what to fix; it is
+   not a clamp and not a silent absence of evidence. For quick-run evidence that
+   may advance to validation/evaluation, also require `result.retainable`.
+   Validation's advisory `decision` label — including `mechanical_fail` — is
+   evidence, not promotion logic.
 6. **Build within the frozen envelope.** Costs, fills, the leverage ceiling (gross
    and net), asset universe, and window are operator-frozen — your strategy cannot
    relax them. Intended gross/net over the budget is non-scoreable, not silently
@@ -170,6 +172,19 @@ exit_lag_bars  = 0
 fee_bps_per_side = 1.0                # zero costs are a fail-closed `zero_cost` verdict
 slippage_bps_per_side = 0.5
 
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 390
+adv_min_observations = 1
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+
+[envelope]
+operator_frozen = true
+
 [output]
 results_dir = "results"
 artifact_profile = "diagnostic"
@@ -187,6 +202,8 @@ result = run_config("experiment.toml")
 if not result.succeeded:
     # an infeasible book sets result.feasibility (reason + observed exposure)
     raise SystemExit(f"{result.message} :: {result.feasibility}")
+if not result.retainable:
+    raise SystemExit(f"quick-run evidence is diagnostic only :: {result.retainability}")
 print(result.result_dir)        # where artifacts landed
 print(result.outcome.assessment_status)
 print(result.foundation.feasible)   # authoritative scored NAV book; True on a feasible run

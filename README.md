@@ -162,11 +162,14 @@ subwindow records, not survivor-grade evaluation evidence. Python callers receiv
 `RunResult`; status lives under `result.outcome`, while replayability,
 row-contract, causality, and warning fields live under `result.evidence`;
 trade economics live under `result.economics`, portfolio-foundation diagnostics
-under `result.foundation`, and the typed feasibility verdict under
-`result.feasibility`.
+under `result.foundation`, the typed feasibility verdict under
+`result.feasibility`, and the quick-run retention verdict under
+`result.retainability`.
 The runner API does not keep flat compatibility aliases for older result fields.
 Use `result.succeeded` (**feasible and completed**) as the preferred terminal
-success check.
+success check, and use `result.retainable` before advancing quick-run evidence to
+validation/evaluation. Micro replay can still score for Train iteration, but it is
+not complete retention proof.
 A runner-stage failure or a fail-closed envelope breach returns
 `result.outcome.completed is False`, sets `failure_stage` (`feasibility` on a
 breach), and writes `summary.json` with `run_completed: false`.
@@ -242,7 +245,8 @@ configured as bounded; result provenance records the replay scope.
   a silent absence of evidence. An `unfinanced_leverage` verdict keeps an
   unpriced-leverage book (an asset class whose financing is not yet modeled)
   non-scoreable; crypto-perp funding is modeled, so a perp book is not flagged by
-  that verdict.
+  that verdict. Short exposure in an asset class whose borrow/carry is unpriced
+  fails closed with `unpriced_short_financing`.
 - **Capacity is an operator-frozen scoring envelope.** Quick run, validation, and
   evaluation configs must declare `[capacity_model]`. Supported bars and
   crypto-perp runs with `mode = "adv_impact"` require positive row `volume`;
@@ -252,6 +256,10 @@ configured as bounded; result provenance records the replay scope.
   `capacity_unpriced`. `forex_with_quotes` ADV impact is unsupported until FX
   notional liquidity is calibrated and fails with
   `capacity_unsupported_volume_semantics`.
+- **Retainable quick-run evidence requires envelope provenance.** Quick-run configs
+  that may feed retained-candidate validation/evaluation declare `[envelope]
+  operator_frozen = true`. A completed run without that provenance can still be
+  useful diagnostic evidence, but `RunResult.retainable` is false.
 - **One funding model on every surface.** Funding is computed once, in the single
   shared netted book, as a NAV cashflow on the net held position. Fillable crypto
   perp windows with no funding events in the open interval accrue zero funding;

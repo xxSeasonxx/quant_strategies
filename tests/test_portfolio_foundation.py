@@ -31,6 +31,7 @@ from quant_strategies.core.portfolio_foundation import (
     REASON_INSUFFICIENT_SAMPLES,
     REASON_LEVERAGE_BUDGET_BREACH,
     REASON_UNFINANCED_LEVERAGE,
+    REASON_UNPRICED_SHORT_FINANCING,
     REASON_ZERO_COST,
     BookWalkResult,
     FeasibilityError,
@@ -403,6 +404,8 @@ def quote_bar_rows(
 def quote_walk(
     rows: list[dict[str, object]],
     decisions: list[TargetDecision],
+    *,
+    kind: str = "bars",
 ) -> BookWalkResult:
     row_index = _RowIndex(rows)
     plan = _DecisionPlan(
@@ -414,7 +417,7 @@ def quote_walk(
         row_index,
         plan,
         per_side_cost_fraction=0.0,
-        data_kind="bars",
+        data_kind=kind,
         capacity_model=capacity_model(),
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
@@ -431,7 +434,7 @@ def test_quote_fill_close_of_long_crosses_bid_not_ask():
         (110.0, 109.0, 111.0),  # d3 exit fill bar: bid 109
     )
     decisions = [target(0, 1.0, symbol="EURUSD", kind="fx_pair"), target(2, 0.0, symbol="EURUSD")]
-    result = quote_walk(rows, decisions)
+    result = quote_walk(rows, decisions, kind="crypto_perp_funding")
 
     assert len(result.round_trips) == 1
     trip = result.round_trips[0]
@@ -452,7 +455,7 @@ def test_quote_fill_reversal_short_leg_crosses_bid():
         target(0, 1.0, symbol="EURUSD", kind="fx_pair"),
         target(2, -1.0, symbol="EURUSD", kind="fx_pair"),
     ]
-    result = quote_walk(rows, decisions)
+    result = quote_walk(rows, decisions, kind="crypto_perp_funding")
 
     assert len(result.round_trips) == 1
     # The closed long leg exits by crossing the bid (the reversal sells).
@@ -463,7 +466,12 @@ def test_reversal_records_one_round_trip_and_reopens_short():
     rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
     # Long 1.0 (fills d1 @100), flip to short 1.0 at d2 (fills d3 @110).
     decisions = [target(0, 1.0), target(2, -1.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1, trial_count=5))
+    result = walk(
+        rows,
+        decisions,
+        kind="crypto_perp_funding",
+        config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
+    )
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].direction == "long"
@@ -731,13 +739,14 @@ def test_net_budget_breach_fails_closed_even_when_gross_allowed():
 
 
 def test_offsetting_legs_pass_net_budget_but_count_gross():
-    # Long AAA 0.6 + short BBB 0.6: gross 1.2, net 0.0. Allowed under net budget 1.0
-    # and gross budget 1.5 -> feasible (netting is economically correct).
+    # Long AAA 0.6 + short BBB 0.6: gross 1.2, net 0.0. When financing is modeled,
+    # this is allowed under net budget 1.0 and gross budget 1.5.
     rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(100.0, 100.0, 100.0, symbol="BBB")
     decisions = [target(0, 0.6, symbol="AAA"), target(0, -0.6, symbol="BBB")]
     result = walk(
         rows,
         decisions,
+        kind="crypto_perp_funding",
         config=PortfolioFoundationConfig(
             subwindows=1, trial_count=5, max_gross_exposure=1.5, max_net_exposure=1.0
         ),
@@ -745,6 +754,40 @@ def test_offsetting_legs_pass_net_budget_but_count_gross():
     assert result.feasibility.feasible is True
     assert result.path[1].gross_exposure == pytest.approx(1.2)
     assert result.path[1].net_exposure == pytest.approx(0.0)
+
+
+def test_unpriced_equity_short_financing_fails_closed():
+    rows = bar_rows(100.0, 100.0, 100.0)
+    decisions = [target(0, -0.5)]
+
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(rows, decisions)
+
+    verdict = excinfo.value.verdict
+    assert verdict.feasible is False
+    assert verdict.reason == REASON_UNPRICED_SHORT_FINANCING
+    assert verdict.observed_gross == pytest.approx(0.5)
+    assert verdict.observed_net == pytest.approx(0.5)
+
+
+def test_unpriced_fx_short_financing_fails_closed():
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="EURUSD")
+    decisions = [target(0, -0.5, symbol="EURUSD", kind="fx_pair")]
+
+    with pytest.raises(FeasibilityError) as excinfo:
+        walk(rows, decisions, kind="forex_with_quotes", capacity=capacity_model(mode="off"))
+
+    assert excinfo.value.verdict.reason == REASON_UNPRICED_SHORT_FINANCING
+
+
+def test_crypto_perp_short_is_not_rejected_by_short_financing_guard():
+    rows = bar_rows(100.0, 100.0, 100.0, symbol="BTC-PERP")
+    decisions = [target(0, -0.5, symbol="BTC-PERP", kind="crypto_perp")]
+
+    result = walk(rows, decisions, kind="crypto_perp_funding")
+
+    assert result.feasibility.feasible is True
+    assert result.path[1].gross_exposure == pytest.approx(0.5)
 
 
 def test_zero_cost_on_scoreable_run_is_non_scoreable():
@@ -890,6 +933,7 @@ def test_nav_reconciles_with_ledger_single_round_trip_with_costs():
     result = walk(
         rows,
         decisions,
+        kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )
@@ -922,6 +966,7 @@ def test_nav_reconciles_after_reversal():
     result = walk(
         rows,
         decisions,
+        kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
         config=PortfolioFoundationConfig(subwindows=1, trial_count=5),
     )

@@ -199,6 +199,7 @@ def write_config(
     leverage_budget_extra: str = "",
     capacity_model_extra: str | None = None,
     causality_policy_extra: str = "",
+    envelope_extra: str = "",
 ) -> Path:
     dataset_line = f'dataset = "{dataset}"\n' if dataset is not None else ""
     artifact_profile_line = (
@@ -294,8 +295,8 @@ entry_lag_bars = {entry_lag_bars}
 fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.0
 
-{capacity_model_block}
-{leverage_budget_extra}{causality_policy_extra}
+    {capacity_model_block}
+    {leverage_budget_extra}{causality_policy_extra}{envelope_extra}
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
@@ -303,6 +304,23 @@ slippage_bps_per_side = 0.0
 				'''.lstrip()
     )
     return config_path
+
+
+def trusted_envelope_section() -> str:
+    return "[envelope]\noperator_frozen = true\n"
+
+
+def priced_capacity_model_section(*, impact_coefficient_bps: float = 10.0) -> str:
+    return f"""[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.0
+max_adv_participation = 1.0
+impact_coefficient_bps = {impact_coefficient_bps}
+impact_exponent = 1.0
+"""
 
 
 def read_summary(result_dir: Path) -> dict[str, object]:
@@ -880,6 +898,10 @@ def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evid
     assert summary["replay_scope"] == "micro"
     assert summary["timed_out"] is True
     assert "economic_metrics" in summary
+    assert result.retainable is False
+    assert result.retainability.reason == "causality_timeout"
+    assert summary["retainable"] is False
+    assert summary["retainability"]["reason"] == "causality_timeout"
 
 
 @pytest.mark.parametrize(
@@ -957,6 +979,113 @@ def test_run_config_micro_policy_pass_or_failure_still_scores(
     assert summary["replay_scope"] == "micro"
     assert summary["selected_probe_count"] == 3
     assert "economic_metrics" in summary
+    assert result.retainable is False
+    assert result.retainability.reason == (
+        "causality_not_retention_verified" if warning is None else "causality_replay_warning"
+    )
+    assert summary["retainable"] is False
+    assert summary["retainability"]["reason"] == result.retainability.reason
+
+
+def test_run_config_strict_trusted_envelope_is_retainable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        causality_check="strict",
+        capacity_model_extra=priced_capacity_model_section(),
+        envelope_extra=trusted_envelope_section(),
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is True
+    assert result.retainable is True
+    assert result.retainability.reason is None
+    summary = read_summary(result.result_dir)
+    assert summary["retainable"] is True
+    assert summary["retainability"]["reason"] is None
+
+
+def test_run_config_missing_operator_envelope_scores_but_is_not_retainable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        causality_check="strict",
+        capacity_model_extra=priced_capacity_model_section(),
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is True
+    assert result.retainable is False
+    assert result.retainability.reason == "envelope_not_operator_frozen"
+    summary = read_summary(result.result_dir)
+    assert summary["retainable"] is False
+    assert summary["retainability"]["reason"] == "envelope_not_operator_frozen"
+
+
+@pytest.mark.parametrize(
+    ("capacity_block", "expected_reason"),
+    [
+        (priced_capacity_model_section(impact_coefficient_bps=0.0), "capacity_impact_unpriced"),
+        (
+            """[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000.0
+adv_lookback_bars = 3
+adv_min_observations = 1
+max_bar_participation = 1.5
+max_adv_participation = 1.0
+impact_coefficient_bps = 10.0
+impact_exponent = 1.0
+""",
+            "capacity_participation_unbounded",
+        ),
+    ],
+)
+def test_run_config_unrealistic_envelope_scores_but_is_not_retainable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capacity_block: str,
+    expected_reason: str,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        causality_check="strict",
+        capacity_model_extra=capacity_block,
+        envelope_extra=trusted_envelope_section(),
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is True
+    assert result.retainable is False
+    assert result.retainability.reason == expected_reason
 
 
 def test_run_config_focused_policy_failure_rejects_before_engine_scoring(
@@ -2029,9 +2158,46 @@ def test_run_config_leverage_breach_fails_closed_with_typed_verdict(
     assert result.feasibility.feasible is False
     assert result.feasibility.reason == "leverage_budget_breach"
     assert result.feasibility.observed_gross == pytest.approx(1.5)
+    assert result.retainable is False
+    assert result.retainability.reason == "leverage_budget_breach"
     summary = read_summary(result.result_dir)
     assert summary["status"] == "failed"
     assert summary["failure_stage"] == "feasibility"
+    assert summary["retainable"] is False
+    assert summary["retainability"]["reason"] == "leverage_budget_breach"
+
+
+def test_run_config_zero_cost_feasibility_failure_keeps_retainability_reason(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        capacity_model_extra=priced_capacity_model_section(),
+        envelope_extra=trusted_envelope_section(),
+    )
+    config_path.write_text(
+        config_path.read_text()
+        .replace("fee_bps_per_side = 1.0", "fee_bps_per_side = 0.0")
+        .replace("slippage_bps_per_side = 0.0", "slippage_bps_per_side = 0.0")
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.feasibility is not None
+    assert result.feasibility.reason == "zero_cost"
+    assert result.retainability.reason == "zero_cost"
+    summary = read_summary(result.result_dir)
+    assert summary["retainability"]["reason"] == "zero_cost"
 
 
 def write_perp_target_strategy(repo_root: Path, *, target: float) -> None:

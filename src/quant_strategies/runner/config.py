@@ -12,6 +12,7 @@ from quant_strategies.core.config import (
     CausalityPolicyConfig,
     CostModelConfig,
     DataConfig,
+    EnvelopeConfig,
     FillModelConfig,
     LeverageBudgetConfig,
     SharedConfigModel,
@@ -143,6 +144,7 @@ class RunConfig(RunnerConfigModel):
     capacity_model: CapacityModelConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     causality_policy: CausalityPolicyConfig = Field(default_factory=CausalityPolicyConfig)
+    envelope: EnvelopeConfig = Field(default_factory=EnvelopeConfig)
     output: OutputConfig
 
     @field_validator("strategy_path")
