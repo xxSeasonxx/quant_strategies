@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from quant_strategies.core.evidence_quality import EvidenceQualityPayload, compact_evidence_quality
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.evidence_semantics import replayable_from_artifacts_for_profile
 from quant_strategies.runner.config import RunConfig
@@ -33,7 +34,7 @@ def diagnostic_payload(
     config: RunConfig,
     engine: Mapping[str, Any],
     assessment_status: str,
-    evidence_quality: Mapping[str, Any],
+    evidence_quality: EvidenceQualityPayload,
     economic_slices: Mapping[str, Any] | None = None,
     portfolio_foundation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -49,7 +50,7 @@ def diagnostic_payload(
         "trade_count": engine.get("trade_count"),
         "nav_attribution": nav_attribution,
         "assessment_status": assessment_status,
-        "evidence_quality": json_safe_value(dict(evidence_quality)),
+        "evidence_quality": json_safe_value(compact_evidence_quality(evidence_quality)),
         "by_symbol": _group(trades, "symbol"),
         "by_direction": _group(trades, "side"),
         "by_exit_reason": _group(trades, "exit_reason"),

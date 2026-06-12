@@ -10,9 +10,9 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from quant_strategies.core.evidence_quality import CausalityVerification, EvidenceQuality
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
-from quant_strategies.evidence_semantics import causality_evidence_fields
 
 RowContractReason = Literal[
     "row_missing_required_field",
@@ -432,50 +432,14 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
     def evidence_quality(
         self,
         *,
-        causality_check: str = "micro",
-        deterministic_replay_verified: bool | None = None,
-        emitted_replay_verified: bool = False,
-        strict_no_emission_verified: bool = False,
-        strict_replay_capped: bool = False,
-        strict_probe_count: int | None = None,
-        strict_probe_limit: int | None = None,
-        skipped_probe_count: int = 0,
-        skipped_probe_reasons: tuple[str, ...] = (),
-        replay_scope: str | None = None,
-        candidate_probe_count: int | None = None,
-        selected_probe_count: int | None = None,
-        elapsed_seconds: float | None = None,
-        timeout_seconds: float | None = None,
-        timed_out: bool = False,
-        replay_warning: str | None = None,
-    ) -> dict[str, Any]:
-        payload = {
-            "data_availability_status": self.data_availability_status,
-            "availability_coverage": self.availability_coverage,
-            "row_contract": self.row_contract_summary(),
-        }
-        payload.update(
-            causality_evidence_fields(
-                self.data_availability_status,
-                causality_check=causality_check,
-                deterministic_replay_verified=deterministic_replay_verified,
-                emitted_replay_verified=emitted_replay_verified,
-                strict_no_emission_verified=strict_no_emission_verified,
-                strict_replay_capped=strict_replay_capped,
-                strict_probe_count=strict_probe_count,
-                strict_probe_limit=strict_probe_limit,
-                skipped_probe_count=skipped_probe_count,
-                skipped_probe_reasons=skipped_probe_reasons,
-                replay_scope=replay_scope,
-                candidate_probe_count=candidate_probe_count,
-                selected_probe_count=selected_probe_count,
-                elapsed_seconds=elapsed_seconds,
-                timeout_seconds=timeout_seconds,
-                timed_out=timed_out,
-                replay_warning=replay_warning,
-            )
+        causality: CausalityVerification | None = None,
+    ) -> EvidenceQuality:
+        return EvidenceQuality.from_rows(
+            data_availability_status=self.data_availability_status,
+            availability_coverage=self.availability_coverage,
+            row_contract=self.row_contract_summary(),
+            causality=causality,
         )
-        return payload
 
     def _timestamp_status(self) -> str:
         total = len(self)

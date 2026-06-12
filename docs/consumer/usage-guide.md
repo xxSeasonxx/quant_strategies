@@ -272,7 +272,7 @@ print(result.result_dir)
 print(result.outcome.assessment_status)      # diagnostic status, not a verdict
 print(result.feasibility)                     # None on a feasible run; typed verdict on a breach
 print(result.evidence.causality.replay_scope)
-print(result.evidence.causality.verified)    # false for micro failures/timeouts
+print(result.evidence.causality.verified)    # false for micro timeout/incomplete evidence
 print(result.evidence.causality.replay_warning)
 print(result.evidence.row_contract)          # row-contract summary
 print(result.foundation.feasible)            # authoritative scored NAV book on a completed run
@@ -303,7 +303,8 @@ traded book fails closed with `capacity_unpriced`. `forex_with_quotes` ADV impac
 fails with `capacity_unsupported_volume_semantics` until FX notional liquidity is
 calibrated.
 Use `causality_check = "micro"` for Train/autoresearch iteration. Micro replay is
-fast diagnostic evidence: it can score, but it is not complete retention proof.
+fast diagnostic evidence: detected causality violations fail closed, while timeout
+or incomplete probe evidence can still score but is not complete retention proof.
 Require `result.retainable` before advancing quick-run evidence to validation or
 evaluation.
 Research candidates live as candidate-local bundles:
@@ -469,11 +470,12 @@ else:
 ```
 
 The micro causality policy is the Train/autoresearch replay annotation. It runs a
-tiny bounded replay sample, records probe and timeout evidence, and never blocks
-quick-run scoring. If micro replay fails or times out, quick-run economics still
-complete when request building and engine evaluation succeed, and causality is
-marked unverified; `RunResult.retainable` is false until retention-admissible
-causality evidence and envelope provenance are present.
+tiny bounded replay sample and records probe and timeout evidence. A detected
+causality violation fails closed at `failure_stage="causality"`. Timeout or
+incomplete probe evidence may still complete when request building and engine
+evaluation succeed, but causality is marked unverified; `RunResult.retainable` is
+false until retention-admissible causality evidence and envelope provenance are
+present.
 Survivor and audit evidence belongs in validation/evaluation. Low-level replay
 settings and focused source-hash replay are advanced controls documented in the
 reference; the strategy-writing LLM should not choose them during research

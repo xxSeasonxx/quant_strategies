@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from quant_strategies.core.evidence_quality import CausalityVerification, EvidenceQuality
 from quant_strategies.data_contract import NormalizedRows
 
 TIMESTAMP = datetime(2024, 1, 1, 9, 30, tzinfo=UTC)
@@ -220,12 +221,84 @@ def test_missing_available_at_is_error():
     assert normalized.row_contract_summary()["quant_data_feedback"] == [
         "row_missing_available_at:available_at:1"
     ]
-    assert (
-        normalized.evidence_quality(emitted_replay_verified=True, strict_no_emission_verified=True)[
-            "causality_verified"
-        ]
-        is False
+    quality = normalized.evidence_quality(
+        causality=CausalityVerification.from_replay(
+            normalized.data_availability_status,
+            emitted_replay_verified=True,
+            strict_no_emission_verified=True,
+        ),
     )
+    assert isinstance(quality, EvidenceQuality)
+    assert quality.causality.verified is False
+    assert quality.to_payload()["causality_verified"] is False
+
+
+def test_evidence_quality_is_typed_and_serializes_to_flat_payload():
+    normalized = NormalizedRows.from_rows(config(), [valid_row()])
+
+    quality = normalized.evidence_quality(
+        causality=CausalityVerification.from_replay(
+            normalized.data_availability_status,
+            causality_check="strict",
+            emitted_replay_verified=True,
+            strict_no_emission_verified=True,
+            strict_probe_count=3,
+            strict_probe_limit=5,
+        ),
+    )
+
+    assert isinstance(quality, EvidenceQuality)
+    assert quality.data_availability_status == "complete"
+    assert quality.causality.causality_check == "strict"
+    assert quality.causality.verified is True
+    assert quality.causality.strict_probe_count == 3
+    assert quality.causality.strict_probe_limit == 5
+    payload = quality.to_payload()
+    assert payload["data_availability_status"] == "complete"
+    assert payload["causality_check"] == "strict"
+    assert payload["causality_verified"] is True
+    assert payload["strict_probe_count"] == 3
+    assert payload["strict_probe_limit"] == 5
+
+
+def test_evidence_quality_payloads_are_defensive_copies():
+    normalized = NormalizedRows.from_rows(config(), [valid_row()])
+    source_availability = dict(normalized.availability_coverage)
+    source_row_contract = normalized.row_contract_summary()
+
+    quality = EvidenceQuality.from_rows(
+        data_availability_status=normalized.data_availability_status,
+        availability_coverage=source_availability,
+        row_contract=source_row_contract,
+    ).with_focused_causality(
+        {
+            "status": "passed",
+            "nested": {"probes": [1]},
+        }
+    )
+
+    source_availability["present"] = 0
+    source_row_contract["status"] = "failed"
+    assert quality.availability_coverage["present"] == 1
+    assert quality.row_contract["status"] == "passed"
+
+    with pytest.raises(TypeError):
+        quality.availability_coverage["present"] = 0
+    with pytest.raises(TypeError):
+        quality.row_contract["status"] = "failed"
+    assert quality.focused_causality is not None
+    with pytest.raises(TypeError):
+        quality.focused_causality["status"] = "failed"
+
+    payload = quality.to_payload()
+    payload["availability_coverage"]["present"] = 0
+    payload["row_contract"]["status"] = "failed"
+    payload["focused_causality"]["nested"]["probes"].append(2)
+
+    fresh_payload = quality.to_payload()
+    assert fresh_payload["availability_coverage"]["present"] == 1
+    assert fresh_payload["row_contract"]["status"] == "passed"
+    assert fresh_payload["focused_causality"]["nested"]["probes"] == [1]
 
 
 def test_invalid_available_at_is_error():

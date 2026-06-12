@@ -10,7 +10,7 @@ from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
 from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.core.data_loader import load_data
 from quant_strategies.core.errors import RunnerError, StrategyLoadError
-from quant_strategies.core.evidence_quality import compact_evidence_quality
+from quant_strategies.core.evidence_quality import EvidenceQuality
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.decisions import (
     DecisionStrategyLoadError,
@@ -43,7 +43,7 @@ class StrategyExecutionResult:
     frozen_params: FrozenMapping
     decisions: list[TargetDecision]
     normalized_rows_sha256: str
-    evidence_quality: dict[str, Any]
+    evidence_quality: EvidenceQuality
     param_contract: str = "validated"
     execution_loaded_rows: Sequence[Mapping[str, Any]] | None = None
     execution_normalized_rows: NormalizedRows | None = None
@@ -58,7 +58,7 @@ class StrategyExecutionError(RunnerError):
         *,
         loaded_rows: Sequence[Mapping[str, Any]] | None = None,
         normalized_rows: NormalizedRows | None = None,
-        evidence_quality: dict[str, Any] | None = None,
+        evidence_quality: EvidenceQuality | None = None,
         violations: tuple[str, ...] = (),
         decision_count: int | None = None,
         execution_normalized_rows: NormalizedRows | None = None,
@@ -138,7 +138,7 @@ def execute_strategy_run(
         strategy_normalized_rows = NormalizedRows.from_rows(config, strategy_rows)
     rows = strategy_normalized_rows.projection_rows()
     row_hash = strategy_normalized_rows.normalized_rows_sha256
-    evidence = compact_evidence_quality(strategy_normalized_rows.evidence_quality())
+    evidence = strategy_normalized_rows.evidence_quality()
     row_contract = strategy_normalized_rows.row_contract_summary()
     if require_passed_row_contract and row_contract["status"] != "passed":
         raise StrategyExecutionError(

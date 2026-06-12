@@ -904,48 +904,9 @@ def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evid
     assert summary["retainability"]["reason"] == "causality_timeout"
 
 
-@pytest.mark.parametrize(
-    ("micro_result", "verified", "warning"),
-    [
-        (
-            LookaheadCheckResult(
-                passed=True,
-                mode="strict",
-                deterministic_replay_verified=True,
-                emitted_replay_verified=True,
-                strict_suppression_verified=True,
-                replay_scope="micro",
-                candidate_probe_count=9,
-                selected_probe_count=3,
-                elapsed_seconds=0.01,
-                timeout_seconds=2.0,
-            ),
-            False,
-            None,
-        ),
-        (
-            LookaheadCheckResult(
-                passed=False,
-                mode="strict",
-                violations=("hidden_lookahead_detected",),
-                replay_scope="micro",
-                candidate_probe_count=9,
-                selected_probe_count=3,
-                elapsed_seconds=0.01,
-                timeout_seconds=2.0,
-                replay_warning="hidden_lookahead_detected",
-            ),
-            False,
-            "hidden_lookahead_detected",
-        ),
-    ],
-)
-def test_run_config_micro_policy_pass_or_failure_still_scores(
+def test_run_config_micro_policy_pass_still_scores_without_retention_proof(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    micro_result: LookaheadCheckResult,
-    verified: bool,
-    warning: str | None,
 ):
     write_strategy(tmp_path)
     config_path = write_config(
@@ -960,6 +921,18 @@ def test_run_config_micro_policy_pass_or_failure_still_scores(
         "load_data",
         lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
     )
+    micro_result = LookaheadCheckResult(
+        passed=True,
+        mode="strict",
+        deterministic_replay_verified=True,
+        emitted_replay_verified=True,
+        strict_suppression_verified=True,
+        replay_scope="micro",
+        candidate_probe_count=9,
+        selected_probe_count=3,
+        elapsed_seconds=0.01,
+        timeout_seconds=2.0,
+    )
     monkeypatch.setattr(
         runner_module,
         "check_micro_causality",
@@ -970,21 +943,82 @@ def test_run_config_micro_policy_pass_or_failure_still_scores(
 
     assert result.outcome.completed is True
     assert result.economics is not None
-    assert result.evidence.causality.verified is verified
+    assert result.evidence.causality.verified is False
     assert result.evidence.causality.replay_scope == "micro"
     assert result.evidence.causality.selected_probe_count == 3
-    assert result.evidence.causality.replay_warning == warning
+    assert result.evidence.causality.replay_warning is None
     summary = read_summary(result.result_dir)
     assert summary["status"] == "completed"
     assert summary["replay_scope"] == "micro"
     assert summary["selected_probe_count"] == 3
     assert "economic_metrics" in summary
     assert result.retainable is False
-    assert result.retainability.reason == (
-        "causality_not_retention_verified" if warning is None else "causality_replay_warning"
-    )
+    assert result.retainability.reason == "causality_not_retention_verified"
     assert summary["retainable"] is False
     assert summary["retainability"]["reason"] == result.retainability.reason
+
+
+def test_run_config_micro_policy_detected_lookahead_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        causality_check="micro",
+        micro_probe_limit=3,
+        micro_timeout_seconds=2.0,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    micro_result = LookaheadCheckResult(
+        passed=False,
+        mode="strict",
+        violations=("hidden_lookahead_detected",),
+        replay_scope="micro",
+        candidate_probe_count=9,
+        selected_probe_count=3,
+        elapsed_seconds=0.01,
+        timeout_seconds=2.0,
+        replay_warning="hidden_lookahead_detected",
+    )
+    monkeypatch.setattr(
+        runner_module,
+        "check_micro_causality",
+        lambda *_args, **_kwargs: micro_result,
+    )
+    events: list[dict[str, object]] = []
+
+    result = run_config(config_path, repo_root=tmp_path, event_sink=events.append)
+
+    assert result.outcome.completed is False
+    assert result.outcome.failure_stage == "causality"
+    assert result.economics is None
+    assert result.foundation is None
+    assert result.evidence.causality.replay_scope == "micro"
+    assert result.evidence.causality.selected_probe_count == 3
+    assert result.evidence.causality.replay_warning == "hidden_lookahead_detected"
+    assert result.retainable is False
+    summary = read_summary(result.result_dir)
+    assert summary["status"] == "failed"
+    assert summary["failure_stage"] == "causality"
+    assert summary["replay_scope"] == "micro"
+    assert summary["selected_probe_count"] == 3
+    assert summary["replay_warning"] == "hidden_lookahead_detected"
+    assert "economic_metrics" not in summary
+    assert any(
+        event["stage"] == "causality_check"
+        and event["status"] == "failed"
+        and "hidden_lookahead_detected" in str(event["error"])
+        for event in events
+    )
+    assert not any(
+        event["stage"] == "causality_check" and event["status"] == "completed" for event in events
+    )
 
 
 def test_run_config_strict_trusted_envelope_is_retainable(

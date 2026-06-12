@@ -17,6 +17,7 @@ from quant_strategies.causality import (
 from quant_strategies.core.config import default_repo_root
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.decision_readiness import check_decision_readiness
+from quant_strategies.core.evidence_quality import compact_evidence_quality
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
@@ -316,7 +317,7 @@ def _data_window_payload(
         "availability_coverage": execution.normalized_rows.availability_coverage,
         "normalized_rows_sha256": execution.normalized_rows_sha256,
         "row_contract": row_contract,
-        "evidence_quality": execution.evidence_quality,
+        "evidence_quality": compact_evidence_quality(execution.evidence_quality),
         "decision_count": len(execution.decisions),
     }
 

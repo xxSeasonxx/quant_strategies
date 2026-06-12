@@ -216,16 +216,17 @@ and must live under ignored `results/`.
 
 **Causality scoreability gate.** A `causality_check` of `"off"` runs no look-ahead
 replay, so by default its NAV path is **non-scoreable** — the run fails closed with
-`failure_stage="causality"` rather than scoring on unverified look-ahead. Every mode that
-runs some replay (`micro`/`emitted`/`focused`/`strict`) remains scoreable. The override
+`failure_stage="causality"` rather than scoring on unverified look-ahead. Replay modes
+(`micro`/`emitted`/`focused`/`strict`) are scoreable only when replay does not detect a
+causality violation. The override
 lives in the operator-frozen **`[causality_policy]`** section: `allow_unverified_scoring`
 (bool, default `false`) re-admits `off` to scoring for deliberate profiling/debugging. It
 is **not** an agent-editable `[output]` key, so a climbing agent cannot relax the gate.
 
-`causality_check` defaults to `"micro"`: it runs a tiny bounded replay sample,
-records probe/timeout evidence, and never blocks quick-run scoring. Micro evidence
-is diagnostic and does not by itself make a quick run retainable; read
-`RunResult.retainable` before advancing evidence.
+`causality_check` defaults to `"micro"`: it runs a tiny bounded replay sample and
+records probe/timeout evidence. A detected causality violation fails closed; timeout
+or incomplete probe evidence may still score but does not make a quick run retainable.
+Read `RunResult.retainable` before advancing evidence.
 Advanced callers may still set `"focused"` for source-hash replay,
 `"emitted"` for deterministic + emitted-decision replay without full row-grid
 no-emission replay, `"strict"` for audit replay, or `"off"` for explicit

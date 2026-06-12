@@ -21,6 +21,7 @@ from quant_strategies.causality import (
 )
 from quant_strategies.core import engine_runner as _engine_runner
 from quant_strategies.core.errors import RunnerError
+from quant_strategies.core.evidence_quality import CausalityVerification, EvidenceQuality
 from quant_strategies.core.execution import (
     StrategyExecutionError,
     StrategyExecutionResult,
@@ -415,7 +416,7 @@ def _write_execution_data_manifest(
     *,
     rows: Sequence[Mapping[str, Any]],
     normalized_rows: NormalizedRows,
-    evidence_quality: dict[str, object] | None,
+    evidence_quality: EvidenceQuality | None,
     execution_normalized_rows: NormalizedRows | None = None,
 ) -> None:
     artifacts.write_data_manifest(
@@ -432,7 +433,7 @@ def _prepare_causality_evidence(
     config: config_module.RunConfig,
     execution: StrategyExecutionResult,
     event_emitter: RunnerStageEmitter,
-) -> tuple[LookaheadCheckResult, dict[str, object]]:
+) -> tuple[LookaheadCheckResult, EvidenceQuality]:
     if config.output.causality_check == "focused":
         return _prepare_focused_causality_evidence(config, execution, event_emitter)
     if config.output.causality_check == "micro":
@@ -446,24 +447,26 @@ def _prepare_causality_evidence(
         causality = _check_causality(config, execution)
         if not causality.passed:
             causality_event.fail(_causality_message(causality))
-    evidence_quality = artifacts.with_causality_verification(
-        execution.evidence_quality,
-        causality_check=config.output.causality_check,
-        deterministic_replay_verified=causality.deterministic_replay_verified,
-        emitted_replay_verified=causality.emitted_replay_verified,
-        strict_no_emission_verified=causality.strict_suppression_verified,
-        strict_replay_capped=causality.strict_replay_capped,
-        strict_probe_count=causality.strict_probe_count,
-        strict_probe_limit=causality.strict_probe_limit,
-        skipped_probe_count=causality.skipped_probe_count,
-        skipped_probe_reasons=causality.skipped_probe_reasons,
-        replay_scope=causality.replay_scope,
-        candidate_probe_count=causality.candidate_probe_count,
-        selected_probe_count=causality.selected_probe_count,
-        elapsed_seconds=causality.elapsed_seconds,
-        timeout_seconds=causality.timeout_seconds,
-        timed_out=causality.timed_out,
-        replay_warning=causality.replay_warning,
+    evidence_quality = execution.evidence_quality.with_causality(
+        CausalityVerification.from_replay(
+            execution.evidence_quality.data_availability_status,
+            causality_check=config.output.causality_check,
+            deterministic_replay_verified=causality.deterministic_replay_verified,
+            emitted_replay_verified=causality.emitted_replay_verified,
+            strict_no_emission_verified=causality.strict_suppression_verified,
+            strict_replay_capped=causality.strict_replay_capped,
+            strict_probe_count=causality.strict_probe_count,
+            strict_probe_limit=causality.strict_probe_limit,
+            skipped_probe_count=causality.skipped_probe_count,
+            skipped_probe_reasons=causality.skipped_probe_reasons,
+            replay_scope=causality.replay_scope,
+            candidate_probe_count=causality.candidate_probe_count,
+            selected_probe_count=causality.selected_probe_count,
+            elapsed_seconds=causality.elapsed_seconds,
+            timeout_seconds=causality.timeout_seconds,
+            timed_out=causality.timed_out,
+            replay_warning=causality.replay_warning,
+        )
     )
     return causality, evidence_quality
 
@@ -472,13 +475,13 @@ def _prepare_micro_causality_evidence(
     config: config_module.RunConfig,
     execution: StrategyExecutionResult,
     event_emitter: RunnerStageEmitter,
-) -> tuple[LookaheadCheckResult, dict[str, object]]:
+) -> tuple[LookaheadCheckResult, EvidenceQuality]:
     with event_emitter.stage(
         "causality_check",
         strategy_id=config.strategy_id,
         decision_count=len(execution.decisions),
         mode="micro",
-    ):
+    ) as causality_event:
         micro = check_micro_causality(
             execution.generate_decisions,
             rows=execution.normalized_rows,
@@ -488,21 +491,28 @@ def _prepare_micro_causality_evidence(
             max_probes=config.output.micro_probe_limit,
             timeout_seconds=config.output.micro_timeout_seconds,
         )
-    evidence_quality = artifacts.with_causality_verification(
-        execution.evidence_quality,
-        causality_check=config.output.causality_check,
-        deterministic_replay_verified=micro.passed and micro.deterministic_replay_verified,
-        emitted_replay_verified=False,
-        strict_no_emission_verified=False,
-        skipped_probe_count=micro.skipped_probe_count,
-        skipped_probe_reasons=micro.skipped_probe_reasons,
-        replay_scope="micro",
-        candidate_probe_count=micro.candidate_probe_count,
-        selected_probe_count=micro.selected_probe_count,
-        timeout_seconds=micro.timeout_seconds,
-        timed_out=micro.timed_out,
-        replay_warning=micro.replay_warning,
+        micro_failed_closed = not micro.passed and not micro.timed_out
+        if micro_failed_closed:
+            causality_event.fail(_causality_message(micro))
+    evidence_quality = execution.evidence_quality.with_causality(
+        CausalityVerification.from_replay(
+            execution.evidence_quality.data_availability_status,
+            causality_check=config.output.causality_check,
+            deterministic_replay_verified=micro.passed and micro.deterministic_replay_verified,
+            emitted_replay_verified=False,
+            strict_no_emission_verified=False,
+            skipped_probe_count=micro.skipped_probe_count,
+            skipped_probe_reasons=micro.skipped_probe_reasons,
+            replay_scope="micro",
+            candidate_probe_count=micro.candidate_probe_count,
+            selected_probe_count=micro.selected_probe_count,
+            timeout_seconds=micro.timeout_seconds,
+            timed_out=micro.timed_out,
+            replay_warning=micro.replay_warning,
+        )
     )
+    if micro_failed_closed:
+        return micro, evidence_quality
     return (
         LookaheadCheckResult(
             passed=True,
@@ -517,7 +527,7 @@ def _prepare_focused_causality_evidence(
     config: config_module.RunConfig,
     execution: StrategyExecutionResult,
     event_emitter: RunnerStageEmitter,
-) -> tuple[LookaheadCheckResult, dict[str, object]]:
+) -> tuple[LookaheadCheckResult, EvidenceQuality]:
     focused_config = FocusedCausalityConfig(
         max_probes=config.output.focused_probe_limit,
         timeout_seconds=config.output.focused_timeout_seconds,
@@ -548,15 +558,16 @@ def _prepare_focused_causality_evidence(
             causality_event.fail(focused.rejection_reason or f"focused_causality_{focused.status}")
 
     causality = _focused_result_as_lookahead(focused)
-    evidence_quality = artifacts.with_causality_verification(
-        execution.evidence_quality,
-        causality_check=config.output.causality_check,
-        deterministic_replay_verified=False,
-        emitted_replay_verified=False,
-        strict_no_emission_verified=False,
-        replay_scope="focused",
-    )
-    evidence_quality["focused_causality"] = _focused_causality_payload(focused)
+    evidence_quality = execution.evidence_quality.with_causality(
+        CausalityVerification.from_replay(
+            execution.evidence_quality.data_availability_status,
+            causality_check=config.output.causality_check,
+            deterministic_replay_verified=False,
+            emitted_replay_verified=False,
+            strict_no_emission_verified=False,
+            replay_scope="focused",
+        )
+    ).with_focused_causality(_focused_causality_payload(focused))
     return causality, evidence_quality
 
 
@@ -682,7 +693,7 @@ def _assert_engine_inputs_ready(
     result_dir: Path,
     execution: StrategyExecutionResult,
     decision_window_decisions: list[TargetDecision],
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQuality,
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
@@ -736,9 +747,9 @@ def _assert_engine_inputs_ready(
     return None
 
 
-def _assert_row_contract_allows_engine_request(evidence_quality: dict[str, object]) -> None:
-    row_contract = evidence_quality.get("row_contract")
-    if not isinstance(row_contract, Mapping) or row_contract.get("status") != "failed":
+def _assert_row_contract_allows_engine_request(evidence_quality: EvidenceQuality) -> None:
+    row_contract = evidence_quality.row_contract
+    if row_contract.get("status") != "failed":
         return
     raise RunnerError(_row_contract_failure_message(row_contract))
 
@@ -793,7 +804,7 @@ def _build_portfolio_foundation(
     result_dir: Path,
     execution: StrategyExecutionResult,
     decision_window_decisions: list[TargetDecision],
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQuality,
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
@@ -854,7 +865,7 @@ def _feasibility_failure_result(
     verdict: FeasibilityVerdict | None,
     *,
     repo_root: Path,
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQuality,
     event_emitter: RunnerStageEmitter,
 ) -> RunResult:
     """Map an infeasible book to a typed ``feasibility`` failure with the verdict.
@@ -904,7 +915,7 @@ def _write_completion_artifacts(
     economics: RunEconomics,
     foundation: RunPortfolioFoundation | None,
     retainability: RunRetainability,
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQuality,
     *,
     repo_root: Path,
     event_emitter: RunnerStageEmitter,
@@ -998,7 +1009,7 @@ def _write_completion_artifacts(
 
 def _quick_run_retainability(
     config: config_module.RunConfig,
-    evidence_quality: Mapping[str, object],
+    evidence_quality: EvidenceQuality,
     verdict: FeasibilityVerdict,
 ) -> RunRetainability:
     if not verdict.feasible:
@@ -1023,12 +1034,13 @@ def _quick_run_retainability(
 
 def _causality_retainability_reason(
     config: config_module.RunConfig,
-    evidence_quality: Mapping[str, object],
+    evidence_quality: EvidenceQuality,
 ) -> tuple[str, str | None] | None:
-    check = str(evidence_quality.get("causality_check", config.output.causality_check))
-    if bool(evidence_quality.get("timed_out")):
-        return ("causality_timeout", _optional_str(evidence_quality.get("replay_warning")))
-    warning = _optional_str(evidence_quality.get("replay_warning"))
+    causality = evidence_quality.causality
+    check = causality.causality_check or config.output.causality_check
+    if causality.timed_out:
+        return ("causality_timeout", causality.replay_warning)
+    warning = causality.replay_warning
     if warning is not None:
         return ("causality_replay_warning", warning)
     if check != "strict":
@@ -1036,9 +1048,9 @@ def _causality_retainability_reason(
             "causality_not_retention_verified",
             f"{check} replay is not complete retention proof",
         )
-    if not bool(evidence_quality.get("causality_verified")):
+    if not causality.verified:
         return ("causality_not_retention_verified", "strict replay was not fully verified")
-    if bool(evidence_quality.get("strict_replay_capped")):
+    if causality.strict_replay_capped:
         return ("causality_not_retention_verified", "strict replay was capped")
     return None
 
@@ -1202,17 +1214,19 @@ def _causality_message(result: LookaheadCheckResult) -> str:
 
 def _policy_evidence_quality(
     config: config_module.RunConfig,
-    evidence_quality: Mapping[str, object] | None,
-) -> dict[str, object] | None:
+    evidence_quality: EvidenceQuality | None,
+) -> EvidenceQuality | None:
     if evidence_quality is None:
         return None
-    return artifacts.with_causality_verification(
-        evidence_quality,
-        causality_check=config.output.causality_check,
-        deterministic_replay_verified=False,
-        emitted_replay_verified=False,
-        strict_no_emission_verified=False,
-        replay_scope=config.output.causality_check,
+    return evidence_quality.with_causality(
+        CausalityVerification.from_replay(
+            evidence_quality.data_availability_status,
+            causality_check=config.output.causality_check,
+            deterministic_replay_verified=False,
+            emitted_replay_verified=False,
+            strict_no_emission_verified=False,
+            replay_scope=config.output.causality_check,
+        )
     )
 
 
@@ -1223,7 +1237,7 @@ def _failure_result(
     message: str,
     *,
     repo_root: Path,
-    evidence_quality: dict[str, object] | None = None,
+    evidence_quality: EvidenceQuality | None = None,
     retainability: RunRetainability | None = None,
     event_emitter: RunnerStageEmitter | None = None,
 ) -> RunResult:
@@ -1274,44 +1288,45 @@ def _failure_result(
 
 def _run_evidence(
     config: config_module.RunConfig,
-    evidence_quality: dict[str, object] | None,
+    evidence_quality: EvidenceQuality | None,
 ) -> RunEvidence:
-    quality = evidence_quality or {}
+    quality = evidence_quality or artifacts.evidence_quality(config, [])
+    causality = quality.causality
     return RunEvidence(
         replayable_from_artifacts=replayable_from_artifacts_for_profile(
             config.output.artifact_profile
         ),
-        data_availability_status=_optional_str(quality.get("data_availability_status")),
-        availability_coverage=_optional_dict(quality.get("availability_coverage")),
-        row_contract=_optional_dict(quality.get("row_contract")),
+        data_availability_status=quality.data_availability_status,
+        availability_coverage=dict(quality.availability_coverage),
+        row_contract=dict(quality.row_contract),
         causality=RunCausalityEvidence(
-            causality_check=str(quality.get("causality_check", config.output.causality_check)),
-            verified=bool(quality.get("causality_verified")),
-            deterministic_replay_verified=bool(quality.get("deterministic_replay_verified")),
-            emitted_replay_verified=bool(quality.get("emitted_replay_verified")),
-            strict_no_emission_verified=bool(quality.get("strict_no_emission_verified")),
-            strict_replay_capped=bool(quality.get("strict_replay_capped")),
-            strict_probe_count=_optional_int(quality.get("strict_probe_count")),
-            strict_probe_limit=_optional_int(quality.get("strict_probe_limit")),
-            skipped_probe_count=int(quality.get("skipped_probe_count") or 0),
-            skipped_probe_reasons=_string_tuple(quality.get("skipped_probe_reasons")),
-            replay_scope=_optional_str(quality.get("replay_scope")),
-            candidate_probe_count=_optional_int(quality.get("candidate_probe_count")),
-            selected_probe_count=_optional_int(quality.get("selected_probe_count")),
-            elapsed_seconds=_optional_float(quality.get("elapsed_seconds")),
-            timeout_seconds=_optional_float(quality.get("timeout_seconds")),
-            timed_out=bool(quality.get("timed_out")),
-            replay_warning=_optional_str(quality.get("replay_warning")),
+            causality_check=causality.causality_check,
+            verified=causality.verified,
+            deterministic_replay_verified=causality.deterministic_replay_verified,
+            emitted_replay_verified=causality.emitted_replay_verified,
+            strict_no_emission_verified=causality.strict_no_emission_verified,
+            strict_replay_capped=causality.strict_replay_capped,
+            strict_probe_count=causality.strict_probe_count,
+            strict_probe_limit=causality.strict_probe_limit,
+            skipped_probe_count=causality.skipped_probe_count,
+            skipped_probe_reasons=causality.skipped_probe_reasons,
+            replay_scope=causality.replay_scope,
+            candidate_probe_count=causality.candidate_probe_count,
+            selected_probe_count=causality.selected_probe_count,
+            elapsed_seconds=causality.elapsed_seconds,
+            timeout_seconds=causality.timeout_seconds,
+            timed_out=causality.timed_out,
+            replay_warning=causality.replay_warning,
         ),
-        focused_causality=_run_focused_causality_evidence(quality.get("focused_causality")),
+        focused_causality=_run_focused_causality_evidence(quality.focused_causality),
         causality_admissible=_causality_admissible(config, quality),
-        warnings=_string_tuple(quality.get("evidence_quality_warnings")),
+        warnings=causality.warnings,
     )
 
 
 def _causality_admissible(
     config: config_module.RunConfig,
-    quality: Mapping[str, object],
+    quality: EvidenceQuality,
 ) -> bool:
     """Does the causality dimension admit scoring under policy (review No. 6)?
 
@@ -1321,22 +1336,18 @@ def _causality_admissible(
     fails closed at the causality stage). This mirrors the gate so the surfaced field is
     truthful on both the scored and the failed path.
     """
-    check = str(quality.get("causality_check", config.output.causality_check))
+    causality = quality.causality
+    check = causality.causality_check or config.output.causality_check
     if check == "off":
         return config.causality_policy.allow_unverified_scoring
     if check == "micro":
-        return str(quality.get("data_availability_status")) == "complete"
-    if bool(quality.get("causality_verified")) or bool(quality.get("emitted_replay_verified")):
+        return quality.data_availability_status == "complete"
+    if causality.verified or causality.emitted_replay_verified:
         return True
-    focused = quality.get("focused_causality")
+    focused = quality.focused_causality
     if isinstance(focused, Mapping) and bool(focused.get("scoring_allowed")):
         return True
     return False
-
-
-def _append_evidence_warning(evidence_quality: dict[str, object], warning: str) -> None:
-    existing = _string_tuple(evidence_quality.get("evidence_quality_warnings"))
-    evidence_quality["evidence_quality_warnings"] = (*existing, warning)
 
 
 def _run_focused_causality_evidence(value: object) -> RunFocusedCausalityEvidence:

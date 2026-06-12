@@ -113,8 +113,8 @@ details, not promotion language.
 
 Quick-run Python evidence is nested under `RunResult.evidence`, including
 `evidence.replayable_from_artifacts`, `evidence.row_contract`,
-`evidence.causality.verified`, and `evidence.warnings`. There are no flat
-compatibility aliases for the previous runner result fields.
+`evidence.causality.verified`, and `evidence.warnings`. Flat result-field aliases
+are unsupported.
 
 Downstream consumers such as `quant_autoresearch` should use only the public
 surface imports:
@@ -193,8 +193,9 @@ Failed or infeasible quick-run `summary.json` files set `run_completed` to `fals
 and `failure_stage` to the failed runner stage (`feasibility` on an envelope
 breach).
 
-Micro causality is fast Train/autoresearch diagnostic evidence. A micro quick run
-may complete and score, but micro evidence is not complete retention proof; use
+Micro causality is fast Train/autoresearch diagnostic evidence. A detected
+causality violation fails closed. Timeout or incomplete micro evidence may
+complete and score, but it is not complete retention proof; use
 `RunResult.retainable` before advancing quick-run evidence to validation or
 evaluation.
 

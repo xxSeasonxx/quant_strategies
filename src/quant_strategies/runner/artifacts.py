@@ -9,12 +9,17 @@ from pathlib import Path
 from typing import Any
 
 from quant_strategies.core.engine_runner import EngineRun
-from quant_strategies.core.evidence_quality import compact_evidence_quality, compact_row_contract
+from quant_strategies.core.evidence_quality import (
+    CausalityVerification,
+    EvidenceQuality,
+    EvidenceQualityPayload,
+    compact_evidence_quality,
+    compact_row_contract,
+)
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.engine import EVIDENCE_SCHEMA_VERSION
 from quant_strategies.evidence_semantics import (
-    causality_evidence_fields,
     replayable_from_artifacts_for_profile,
     runner_evidence_semantics,
     trade_result_metric_semantics,
@@ -62,88 +67,14 @@ def write_decision_records(result_dir: Path, decisions: list[Any]) -> None:
 def evidence_quality(
     config: RunConfig,
     rows: Sequence[Mapping[str, Any]] | NormalizedRows,
-    *,
-    deterministic_replay_verified: bool | None = None,
-    emitted_replay_verified: bool = False,
-    strict_no_emission_verified: bool = False,
-    strict_replay_capped: bool = False,
-    strict_probe_count: int | None = None,
-    strict_probe_limit: int | None = None,
-    skipped_probe_count: int = 0,
-    skipped_probe_reasons: tuple[str, ...] = (),
-    replay_scope: str | None = None,
-    candidate_probe_count: int | None = None,
-    selected_probe_count: int | None = None,
-    elapsed_seconds: float | None = None,
-    timeout_seconds: float | None = None,
-    timed_out: bool = False,
-    replay_warning: str | None = None,
-) -> dict[str, Any]:
-    return compact_evidence_quality(
-        _normalized_rows(config, rows).evidence_quality(
-            deterministic_replay_verified=deterministic_replay_verified,
-            emitted_replay_verified=emitted_replay_verified,
-            strict_no_emission_verified=strict_no_emission_verified,
+) -> EvidenceQuality:
+    normalized = _normalized_rows(config, rows)
+    return normalized.evidence_quality(
+        causality=CausalityVerification.from_replay(
+            normalized.data_availability_status,
             causality_check=config.output.causality_check,
-            strict_replay_capped=strict_replay_capped,
-            strict_probe_count=strict_probe_count,
-            strict_probe_limit=strict_probe_limit,
-            skipped_probe_count=skipped_probe_count,
-            skipped_probe_reasons=skipped_probe_reasons,
-            replay_scope=replay_scope,
-            candidate_probe_count=candidate_probe_count,
-            selected_probe_count=selected_probe_count,
-            elapsed_seconds=elapsed_seconds,
-            timeout_seconds=timeout_seconds,
-            timed_out=timed_out,
-            replay_warning=replay_warning,
-        )
+        ),
     )
-
-
-def with_causality_verification(
-    evidence_quality_payload: Mapping[str, Any],
-    *,
-    causality_check: str,
-    deterministic_replay_verified: bool,
-    emitted_replay_verified: bool,
-    strict_no_emission_verified: bool,
-    strict_replay_capped: bool = False,
-    strict_probe_count: int | None = None,
-    strict_probe_limit: int | None = None,
-    skipped_probe_count: int = 0,
-    skipped_probe_reasons: tuple[str, ...] = (),
-    replay_scope: str | None = None,
-    candidate_probe_count: int | None = None,
-    selected_probe_count: int | None = None,
-    elapsed_seconds: float | None = None,
-    timeout_seconds: float | None = None,
-    timed_out: bool = False,
-    replay_warning: str | None = None,
-) -> dict[str, Any]:
-    payload = compact_evidence_quality(evidence_quality_payload)
-    payload.update(
-        causality_evidence_fields(
-            payload.get("data_availability_status"),
-            causality_check=causality_check,
-            deterministic_replay_verified=deterministic_replay_verified,
-            emitted_replay_verified=emitted_replay_verified,
-            strict_no_emission_verified=strict_no_emission_verified,
-            strict_replay_capped=strict_replay_capped,
-            strict_probe_count=strict_probe_count,
-            strict_probe_limit=strict_probe_limit,
-            skipped_probe_count=skipped_probe_count,
-            skipped_probe_reasons=skipped_probe_reasons,
-            replay_scope=replay_scope,
-            candidate_probe_count=candidate_probe_count,
-            selected_probe_count=selected_probe_count,
-            elapsed_seconds=elapsed_seconds,
-            timeout_seconds=timeout_seconds,
-            timed_out=timed_out,
-            replay_warning=replay_warning,
-        )
-    )
-    return payload
 
 
 def row_contract_status(
@@ -160,7 +91,7 @@ def write_data_manifest(
     *,
     normalized_rows: NormalizedRows | None = None,
     execution_normalized_rows: NormalizedRows | None = None,
-    evidence_quality_payload: dict[str, Any] | None = None,
+    evidence_quality_payload: EvidenceQualityPayload | None = None,
 ) -> None:
     normalized = _normalized_rows(config, rows, normalized_rows=normalized_rows)
     quality = compact_evidence_quality(evidence_quality_payload or normalized.evidence_quality())
@@ -313,7 +244,7 @@ def summary_payload(
     message: str,
     engine: dict[str, object],
     assessment_status: str,
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQualityPayload,
     param_contract: str = "unknown",
     economic_metrics: Mapping[str, object] | None = None,
     portfolio_foundation: Mapping[str, object] | None = None,
@@ -323,6 +254,7 @@ def summary_payload(
 ) -> dict[str, object]:
     semantics = runner_evidence_semantics(config.data.kind)
     engine_payload = dict(engine)
+    quality = compact_evidence_quality(evidence_quality)
     payload = {
         "strategy_id": config.strategy_id,
         "quick_checks": config.output.quick_checks,
@@ -342,7 +274,7 @@ def summary_payload(
         # the quick-run still ran but its params were not schema-checked.
         "param_contract": param_contract,
         **semantics,
-        **evidence_quality,
+        **quality,
     }
     retainability_payload = (
         {"retainable": False, "reason": "run_not_completed", "detail": None}
@@ -396,11 +328,12 @@ def assessment_status(
     engine_run: EngineRun,
     *,
     quick_checks: bool,
-    evidence_quality: dict[str, object],
+    evidence_quality: EvidenceQualityPayload,
 ) -> str:
+    quality = compact_evidence_quality(evidence_quality)
     if not quick_checks:
         return "diagnostics_complete"
-    if engine_run.feasible and not evidence_quality.get("causality_verified"):
+    if engine_run.feasible and not quality.get("causality_verified"):
         return "quick_check_unverified"
     return "quick_check_passed" if engine_run.feasible else "quick_check_failed"
 

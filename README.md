@@ -153,10 +153,11 @@ generate_decisions(rows, params) -> list[TargetDecision]
 Loads rows, runs the pure strategy, validates the target-book decision contract,
 applies the configured causality replay policy, runs the candidate through the
 single causal netted portfolio book, and scores its NAV path for one strategy
-version. For Train/autoresearch iteration, `micro` replay is a cheap annotation
-that never blocks scoring; complete replay remains available through explicit
-strict replay and the later validation/evaluation surfaces. Completed, feasible
-quick-run summaries include `portfolio_foundation` metrics — the compact summary
+version. For Train/autoresearch iteration, `micro` replay is a cheap replay check:
+detected causality violations fail closed, while timeout or incomplete probe
+evidence can still score but is non-retainable. Complete replay remains available
+through explicit strict replay and the later validation/evaluation surfaces.
+Completed, feasible quick-run summaries include `portfolio_foundation` metrics — the compact summary
 of the authoritative scored NAV book, computed over **at-risk bars** with a
 minimum-sample gate — plus `economic_metrics`, the compact summary of the
 per-trade attribution ledger derived from the same book walk. The foundation is a
@@ -171,8 +172,8 @@ under `result.foundation`, the typed feasibility verdict under
 The runner result model is nested (`result.outcome` / `result.evidence`) with no
 flat field aliases. Use `result.succeeded` (**feasible and completed**) as the
 preferred terminal success check, and use `result.retainable` before advancing
-quick-run evidence to validation/evaluation. Micro replay is a Train-iteration
-scoring annotation, not complete retention proof.
+quick-run evidence to validation/evaluation. Micro timeout or incomplete replay
+evidence is a Train-iteration scoring annotation, not complete retention proof.
 A runner-stage failure or a fail-closed envelope breach returns
 `result.outcome.completed is False`, sets `failure_stage` (`feasibility` on a
 breach), and writes `summary.json` with `run_completed: false`.

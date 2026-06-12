@@ -139,9 +139,10 @@ not prove out-of-sample validity and it does not prove freedom from in-sample
 fitting.
 - **Causality scoreability gate:** `causality_check="off"` runs no look-ahead replay
 and is **non-scoreable by default** — the run fails closed with
-`failure_stage="causality"` rather than scoring on unverified look-ahead. Every mode
-that runs some replay (`micro`/`emitted`/`focused`/`strict`) remains scoreable, so
-`micro` stays the Train iteration mode. The override is the operator-frozen
+`failure_stage="causality"` rather than scoring on unverified look-ahead. Replay
+modes (`micro`/`emitted`/`focused`/`strict`) are scoreable only when replay does
+not detect a causality violation. In `micro`, timeout or incomplete probe evidence
+may still score but is non-retainable. The override is the operator-frozen
 `[causality_policy] allow_unverified_scoring` (default `false`), never an
 agent-editable `[output]` key.
 - **Archive boundary:** ranked research handoff archives and search-loop records

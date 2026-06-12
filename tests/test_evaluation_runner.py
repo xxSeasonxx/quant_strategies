@@ -532,6 +532,11 @@ def test_run_evaluation_writes_evidence_artifacts(tmp_path: Path, monkeypatch: p
     assert data_manifest["windows"][0]["row_count"] == 4
     assert len(data_manifest["windows"][0]["normalized_rows_sha256"]) == 64
     assert data_manifest["windows"][0]["row_contract"]["status"] == "passed"
+    evidence_quality = data_manifest["windows"][0]["evidence_quality"]
+    assert isinstance(evidence_quality, dict)
+    assert evidence_quality["causality_verified"] is False
+    assert evidence_quality["evidence_quality_warnings"] == ["runner_causality_not_verified"]
+    assert "EvidenceQuality(" not in json.dumps(evidence_quality)
     assert data_manifest["windows"][0]["decision_count"] == 1
     assert data_manifest["windows"][0]["causality_replay"]["replay_scope"] == "complete"
     assert data_manifest["windows"][0]["causality_replay"]["replay_mode"] == "strict"

@@ -122,7 +122,7 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     assert result.normalized_rows.normalized_rows_sha256 == result.normalized_rows_sha256
     assert result.decisions == [decision()]
     assert len(result.normalized_rows_sha256) == 64
-    assert result.evidence_quality["data_availability_status"] == "complete"
+    assert result.evidence_quality.data_availability_status == "complete"
 
 
 def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(
@@ -276,7 +276,7 @@ def test_execute_strategy_run_invalid_decision_output_carries_loaded_context(
     assert error.value.normalized_rows_sha256 is not None
     assert len(error.value.normalized_rows_sha256) == 64
     assert error.value.evidence_quality is not None
-    assert error.value.evidence_quality["data_availability_status"] == "complete"
+    assert error.value.evidence_quality.data_availability_status == "complete"
     assert error.value.violations == ("invalid_decision_output[0]",)
     assert error.value.decision_count == 0
 
@@ -332,7 +332,7 @@ def test_execute_strategy_run_accepts_valid_flat_decisions(
     assert result.loaded_rows == result.normalized_rows.projection_rows()
     assert result.decisions == [decision(target=0.0)]
     assert len(result.normalized_rows_sha256) == 64
-    assert result.evidence_quality["data_availability_status"] == "complete"
+    assert result.evidence_quality.data_availability_status == "complete"
 
 
 _SCHEMALESS_STRATEGY = (
