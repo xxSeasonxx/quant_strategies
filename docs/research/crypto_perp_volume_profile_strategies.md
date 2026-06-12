@@ -2,9 +2,8 @@
 
 Date: 2026-06-09
 
-Scope: crypto perpetual futures only. This file preserves the crypto side of
-the prior combined FX/perp note. No additional crypto research was added in this
-split; the FX research now lives in `fx_activity_profile_strategies.md`.
+Scope: crypto perpetual futures only. FX research lives in
+`fx_activity_profile_strategies.md`.
 
 ## Executive View
 

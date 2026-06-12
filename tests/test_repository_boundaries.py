@@ -214,10 +214,13 @@ def test_evaluation_constraints_pin_numeric_backend_versions():
 def test_review_archive_index_points_to_current_disposition_anchor():
     text = (ROOT / "docs" / "reviews" / "README.md").read_text()
 
-    assert "Current disposition anchor:" in text
+    # The archive index is governance only: the disposition log lives in
+    # HISTORY.md and the live contract anchor is FOUNDATION_LOCK.md, whose
+    # Review Protocol section owns finding classification.
+    assert "Disposition log" in text
+    assert "../../HISTORY.md" in text
     assert "../../FOUNDATION_LOCK.md" in text
-    assert "current tests/docs" in text
-    assert "Future foundation reviews should be disposition-aware delta reviews" in text
+    assert "Review Protocol" in text
 
 
 def test_review_archive_marks_historical_reviews_superseded_when_opted_in():
@@ -226,19 +229,21 @@ def test_review_archive_marks_historical_reviews_superseded_when_opted_in():
             "set RUN_REVIEW_ARCHIVE_CHECK=1 to run exact archive disposition maintenance checks"
         )
 
-    text = (ROOT / "docs" / "reviews" / "README.md").read_text()
+    text = (ROOT / "HISTORY.md").read_text()
 
-    expected_rows = [
-        "| `2026-06-02-foundation-codex.md` | Historical broad review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `2026-06-02-foundation-codex-p3.md` | Historical P3 follow-up review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `2026-06-03-foundation-claude-independent.md` | Historical independent review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `2026-06-03-foundation-claude-disposition.md` | Historical root-level Claude working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `2026-06-03-foundation-codex-delta.md` | Historical Codex delta review; superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
-        "| `2026-06-03-foundation-codex-disposition.md` | Historical root-level Codex working review copy; accepted findings are dispositioned and superseded by `../../FOUNDATION_LOCK.md` and current tests/docs. |",
+    # The disposition log enumerates every archived review and records that
+    # current contracts and tests supersede them.
+    expected_reviews = [
+        "2026-06-02-foundation-codex.md",
+        "2026-06-02-foundation-codex-p3.md",
+        "2026-06-03-foundation-claude-independent.md",
+        "2026-06-03-foundation-claude-disposition.md",
+        "2026-06-03-foundation-codex-delta.md",
+        "2026-06-03-foundation-codex-disposition.md",
     ]
-    for row in expected_rows:
-        assert row in text
-    assert "once its accepted findings are dispositioned" not in text
+    for name in expected_reviews:
+        assert name in text, name
+    assert "superseded by `FOUNDATION_LOCK.md`" in text
 
 
 def test_review_archive_artifacts_are_dated():

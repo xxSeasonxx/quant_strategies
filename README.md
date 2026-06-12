@@ -71,20 +71,18 @@ The design has one spine:
   book.
 - **One execution kernel.** Import → validate params → load rows (via `quant_data`)
   → freeze inputs → typed target decisions → strict causal replay.
-- **One model of money.** A single bar-by-bar walk nets same-symbol exposure to a
-  running per-symbol quantity, trades only the delta against one shared
-  cash/margin account through a market model (costs/fills/funding), and marks to
-  market to produce one NAV path. **The NAV path is the single scored object**, so
-  the number a human audits is the number every surface's decision is computed
-  from; the per-trade ledger is a derived attribution / information-coefficient
-  view of the same walk, kept first-class for alpha research but never an
-  independent scored number.
+- **One model of money.** A single bar-by-bar walk nets same-symbol exposure,
+  trades only the delta against one shared cash/margin account through a market
+  model (costs/fills/funding), and marks to market to produce one NAV path. **The
+  NAV path is the single scored object**; the per-trade ledger is a derived
+  attribution / information-coefficient view of the same walk, kept first-class for
+  alpha research but never an independent scored number.
 - **Feasibility fails closed.** An envelope breach — intended gross/net over the
-  operator-frozen leverage budget, unpriced, unsupported, or missing capacity
-  evidence, a capacity participation-limit breach, a zero-cost scoreable run,
-  unfinanced leverage, or a degenerate sample — yields a typed feasibility verdict
-  that makes the run non-scoreable with an actionable reason. It is never clamped
-  and never collapsed into a silent `None`; `succeeded` is gated on it.
+  operator-frozen leverage budget, unpriced/unsupported/insufficient capacity,
+  unfinanced leverage, a zero-cost scoreable run, or a degenerate sample — yields a
+  typed verdict that makes the run non-scoreable with an actionable reason, never a
+  clamp and never a silent `None`; `succeeded` is gated on it. The full verdict
+  contract and reason set live in `FOUNDATION_LOCK.md`.
 - **Three implemented public surfaces today.** A fast *quick run* for diagnostic
   evidence, an *advisory validation run* for retained-candidate mechanical
   evidence, and a stateless *evaluation run* for frozen-candidate portfolio,
@@ -170,11 +168,11 @@ trade economics live under `result.economics`, portfolio-foundation diagnostics
 under `result.foundation`, the typed feasibility verdict under
 `result.feasibility`, and the quick-run retention verdict under
 `result.retainability`.
-The runner API does not keep flat compatibility aliases for older result fields.
-Use `result.succeeded` (**feasible and completed**) as the preferred terminal
-success check, and use `result.retainable` before advancing quick-run evidence to
-validation/evaluation. Micro replay can still score for Train iteration, but it is
-not complete retention proof.
+The runner result model is nested (`result.outcome` / `result.evidence`) with no
+flat field aliases. Use `result.succeeded` (**feasible and completed**) as the
+preferred terminal success check, and use `result.retainable` before advancing
+quick-run evidence to validation/evaluation. Micro replay is a Train-iteration
+scoring annotation, not complete retention proof.
 A runner-stage failure or a fail-closed envelope breach returns
 `result.outcome.completed is False`, sets `failure_stage` (`feasibility` on a
 breach), and writes `summary.json` with `run_completed: false`.
@@ -279,8 +277,8 @@ configured as bounded; result provenance records the replay scope.
   point-in-time causal replay; it does not prove out-of-sample validity and it
   does not prove freedom from in-sample fitting.
 - **Research archives live outside this repo.** Search-loop archives, ranks, and
-  handoff records do not live in the active foundation context. Regenerate or
-  rerun evidence instead of relying on historical outputs.
+  handoff records are not kept here; regenerate or rerun evidence rather than
+  relying on stored outputs. See `FOUNDATION_LOCK.md` (Archive boundary).
 
 ## Usage
 

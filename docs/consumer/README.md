@@ -95,11 +95,8 @@ in consumer code.
 
 Write one pure strategy file declaring a **target book** and a small config, then
 run it. The strategy below sets a signed weight-of-NAV target per instrument and
-closes by setting the target back to `0`.
-
-> The checked-in `examples/` and `candidates/` strategy files do not yet implement
-> this target-book contract end-to-end; use the inline example below as the
-> authoritative shape, not those files.
+closes by setting the target back to `0`; `examples/simple_momentum/strategy.py`
+and the `candidates/` strategy files follow the same shape.
 
 ```python
 # my_strategy.py — a pure strategy file
@@ -267,7 +264,7 @@ trading. Those live in `quant_autoresearch` and human review — never here.
 | **[README.md](README.md)** (this) | *Where do I start? What are the rules and boundaries?* | everyone, first |
 | **[usage-guide.md](usage-guide.md)** | *How do I write a strategy and run quick-run / validation / evaluation?* | strategy authors, agents |
 | **[reference.md](reference.md)** | *What is the exact API, decision schema, config key, result field, exit code?* | lookups |
-| **[MIGRATION-portfolio-book-spine.md](MIGRATION-portfolio-book-spine.md)** | *What changed to the target-book contract / NAV-scored unit / fail-closed feasibility, and what must `quant_autoresearch` update?* | consumers migrating off the retired open-ticket contract |
+| **[migration.md](migration.md)** | *What contract must I emit/consume, what must `quant_autoresearch` reflect, and how do older decision shapes map across?* | consumers wiring a loop into this repo |
 
 Deeper internal contracts (for maintainers, not consumers) live in
 [`docs/foundation-surfaces.md`](../foundation-surfaces.md), [`FOUNDATION_LOCK.md`](../../FOUNDATION_LOCK.md),

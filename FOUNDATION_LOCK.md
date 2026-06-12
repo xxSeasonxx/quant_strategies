@@ -99,10 +99,10 @@ sample makes the run infeasible / non-scoreable with an actionable typed reason
 `unfinanced_leverage`, `insufficient_samples`); a benign data gap and an internal
 error remain distinguishable verdicts. `RunResult.succeeded` is gated on the
 verdict, and a breach sets `failure_stage`.
-- **Capacity/ADV/market impact status:** O15 is implemented for supported bars and
+- **Capacity/ADV/market impact:** ADV capacity is enforced for supported bars and
 crypto-perp data through the operator-frozen `[capacity_model]` envelope. ADV
 impact charges the single NAV cash path and emits compact quick-run diagnostics
-plus evaluation `execution_events` traces. `forex_with_quotes` remains explicitly
+plus evaluation `execution_events` traces. `forex_with_quotes` is explicitly
 unsupported for ADV impact because FX `volume` is tick-count activity, not
 calibrated notional liquidity.
 - **At-risk-bar statistics:** foundation return statistics are computed over the

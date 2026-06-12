@@ -179,9 +179,10 @@ def test_active_docs_describe_current_strategy_author_contracts():
 
 
 def test_lock_todos_and_review_track_p1_annualized_metric_guards():
+    # FOUNDATION_LOCK.md owns the full annualized-metric guard (including the
+    # min_annualized_samples floor); the dated review records it historically.
     for path in [
         "FOUNDATION_LOCK.md",
-        "TODOS.md",
         "docs/reviews/2026-06-03-foundation-claude-disposition.md",
     ]:
         text = read(path)
@@ -189,6 +190,13 @@ def test_lock_todos_and_review_track_p1_annualized_metric_guards():
         assert "annualized/risk metrics" in text, path
         assert "annualization cadence" in text, path
         assert "minimum return-sample floor" in text, path
+
+    # TODOS.md tracks the guard at a summary level without restating the owner's
+    # detail token.
+    todos = read("TODOS.md")
+    assert "annualized/risk metrics" in todos
+    assert "annualization cadence" in todos
+    assert "minimum return-sample floor" in todos
 
 
 def test_prd_owns_product_intent_not_evaluate_command_schema():

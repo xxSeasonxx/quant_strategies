@@ -1,11 +1,10 @@
 # PRD — `quant_strategies`
 
-**Status:** Draft v1
 **Owner:** Season Yang
-**Last updated:** 2026-06-10
 **Companion documents:** `README.md` (short current-state orientation),
-`FOUNDATION_LOCK.md` (locked contracts and review disposition),
+`FOUNDATION_LOCK.md` (locked contracts, accepted debt, deferred triggers),
 `docs/foundation-surfaces.md` (current command/API/artifact reference),
+`HISTORY.md` (development chronology and review disposition),
 and `AGENTS.md` (agent operating contract).
 
 This PRD is the source of truth for **why** `quant_strategies` exists and **what** it must
@@ -332,8 +331,8 @@ order-management system: the book is evaluated end-of-bar on each printed bar (c
 for marks, the completed bar's high/low for declared `RiskRule` barriers), not as a
 working-order lifecycle.
 
-**NG5.** Legacy-compatibility code paths. When the contract changes, strategies and configs
-are updated and re-run. The foundation does not carry shims for old shapes.
+**NG5.** Legacy-compatibility code paths. When the contract changes, strategies, configs,
+and artifacts are regenerated and re-run. The foundation carries no shims for old shapes.
 
 **NG6.** A pluggable strategy IDE, notebook integration, or browser UI.
 
@@ -361,9 +360,9 @@ research evaluation without learning implementation vocabulary first.
 - **NFR-ROOT-CAUSE.** When a bug is fixed, the fix lands at the boundary or contract that
 produced it. Wrappers, guards, adapters, and "the new code path" are anti-patterns
 unless explicitly justified.
-- **NFR-NO-LEGACY.** Old strategies, configs, and artifacts that depend on retired
-shapes are re-generated, not back-compat'd. Migration documents live in the relevant
-decision records, not in code.
+- **NFR-NO-LEGACY.** Old strategies, configs, and artifacts are regenerated when a
+contract changes, not back-compat'd. The foundation carries no compatibility
+shims, dual code paths, or optional tolerance for replaced fields.
 - **NFR-OBSERVABILITY.** Structured logging is emitted at stage boundaries. Stage names
 match artifact taxonomy.
 - **NFR-AGENT-FRIENDLY.** Strategy and config shapes are LLM-friendly (small,
@@ -463,4 +462,4 @@ details out of this PRD unless they define durable product intent.
 PRD; if they conflict, the more specific instruction wins (per `CLAUDE.md` global
 policy).
 
-*End of PRD v1.*
+*End of PRD.*
