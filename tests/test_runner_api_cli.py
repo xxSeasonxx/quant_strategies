@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -2115,7 +2116,7 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
     assert result.foundation.summary_payload() == summary["portfolio_foundation"]
     payload = summary["portfolio_foundation"]
     assert payload["evidence_class"] == "quick_run_portfolio_foundation_diagnostic"
-    assert payload["basis"] == "quick_run_netted_portfolio_book"
+    assert payload["basis"] == "netted_portfolio_book_v1"
     assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress", "fill_stress"}
     realistic = payload["scenarios"]["realistic_costs"]
     assert realistic["full_train"]["window_id"] == "full_train"
@@ -2136,6 +2137,36 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
         "navs",
     ):
         assert forbidden not in payload_text
+
+
+def test_run_config_writes_data_manifest_once_on_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_low_sample_config(
+        tmp_path,
+        artifact_profile="summary",
+        foundation_subwindows=1,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 103.0, 102.0, 104.0, 105.0)),
+    )
+    original_write = artifacts.write_data_manifest
+    calls: list[Path] = []
+
+    def record_manifest_write(*args, **kwargs):
+        calls.append(args[0])
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(artifacts, "write_data_manifest", record_manifest_write)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.outcome.completed is True
+    assert len(calls) == 1
 
 
 def test_run_config_pre_engine_failure_leaves_foundation_none(
@@ -2673,6 +2704,16 @@ if loaded:
         cwd=Path(__file__).resolve().parents[1],
         capture_output=True,
         text=True,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join(
+                (
+                    str(Path(__file__).resolve().parents[1]),
+                    str(Path(__file__).resolve().parents[1] / "src"),
+                    os.environ.get("PYTHONPATH", ""),
+                )
+            ),
+        },
         check=False,
     )
 

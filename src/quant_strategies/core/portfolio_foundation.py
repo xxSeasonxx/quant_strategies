@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, cast
 
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.config import (
     CapacityModelConfig,
     CostModelConfig,
@@ -20,7 +21,7 @@ from quant_strategies.decisions import RiskRule, TargetDecision
 from quant_strategies.funding import funding_rates_match
 
 FOUNDATION_SCHEMA_VERSION = "quant_strategies.quick_run.portfolio_foundation/v2"
-FOUNDATION_BASIS = "quick_run_netted_portfolio_book"
+FOUNDATION_BASIS = SHARED_ACCOUNTING_MODEL
 FOUNDATION_EVIDENCE_CLASS = "quick_run_portfolio_foundation_diagnostic"
 INITIAL_EQUITY = 100.0
 MAX_FOUNDATION_SUBWINDOWS = 64

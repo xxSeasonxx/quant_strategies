@@ -22,16 +22,14 @@ import math
 from collections.abc import Sequence
 from typing import Any
 
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.portfolio_foundation import (
     BookWalkResult,
     ExecutionEvent,
     FundingEvent,
     RoundTrip,
 )
-from quant_strategies.evaluation.metrics import (
-    SHARED_ACCOUNTING_MODEL,
-    MetricValue,
-)
+from quant_strategies.evaluation.metrics import MetricValue
 from quant_strategies.evaluation.results import PortfolioMetricPayload, PortfolioTraceTables
 
 INITIAL_EQUITY = 100.0

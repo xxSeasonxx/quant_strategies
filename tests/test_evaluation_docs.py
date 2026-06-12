@@ -290,3 +290,17 @@ def test_consumer_reference_matches_quick_run_outcome_fields_and_failure_stages(
         "portfolio_foundation",
     ]:
         assert f"`{stage}`" in reference
+
+
+def test_active_docs_use_shared_netted_book_identity():
+    docs = "\n".join(
+        read(path)
+        for path in [
+            "README.md",
+            "docs/foundation-surfaces.md",
+            "docs/consumer/reference.md",
+        ]
+    )
+
+    assert "`netted_portfolio_book_v1`" in docs
+    assert "quick_run_netted_portfolio_book" not in docs

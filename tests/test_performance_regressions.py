@@ -13,8 +13,8 @@ import pytest
 from engine_helpers import decision_for
 from quant_strategies.causality import check_hidden_lookahead
 from quant_strategies.core import execution
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.data_loader import LoadedData
-from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.runner import run_config
 
 

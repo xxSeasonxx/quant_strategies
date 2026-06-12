@@ -10,6 +10,7 @@ fail-closed feasibility verdict, and NAV<->round-trip-ledger reconciliation.
 from __future__ import annotations
 
 import math
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from statistics import stdev
@@ -250,6 +251,16 @@ def test_capacity_off_flat_book_is_allowed():
 
     assert result.final_nav == INITIAL_EQUITY
     assert result.execution_events == ()
+
+
+def test_open_position_requires_mark_on_every_shared_multi_symbol_timestamp():
+    rows = [
+        *bar_rows(100.0, 101.0, symbol="SPY"),
+        bar_rows(200.0, symbol="QQQ")[0] | {"timestamp": ts(2), "available_at": ts(2)},
+    ]
+
+    with pytest.raises(ValueError, match=re.escape(f"missing_mark:SPY:{ts(2).isoformat()}")):
+        walk(rows, [target(0, 0.5)], config=PortfolioFoundationConfig(subwindows=1))
 
 
 def test_forex_capacity_impact_is_unsupported():

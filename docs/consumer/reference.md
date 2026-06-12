@@ -402,7 +402,7 @@ in default artifacts.
 
 Top-level payload fields are `schema_version`
 (`quant_strategies.quick_run.portfolio_foundation/v2`), `basis`
-(`quick_run_netted_portfolio_book`), `evidence_class`, and `scenarios`. Each scenario
+(`netted_portfolio_book_v1`), `evidence_class`, and `scenarios`. Each scenario
 reports a typed `feasibility` payload, compact `capacity` diagnostics, a compact
 `full_train` metric record, and subwindow metrics such as `return_sample_count`,
 `mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
@@ -464,7 +464,7 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
 ```json
 {
   "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
-  "basis": "quick_run_netted_portfolio_book",
+  "basis": "netted_portfolio_book_v1",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
   "scenarios": {
     "realistic_costs": {
@@ -528,7 +528,7 @@ each scenario:
 ```json
 {
   "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
-  "basis": "quick_run_netted_portfolio_book",
+  "basis": "netted_portfolio_book_v1",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
   "scenarios": {
     "realistic_costs": {

@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
+import quant_strategies.validation.engine_backend as engine_backend_module
 from quant_strategies.core.config import (
     CapacityModelConfig,
     CostModelConfig,
@@ -13,7 +14,7 @@ from quant_strategies.core.config import (
 from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision
 from quant_strategies.validation.backends import BackendMetrics
 from quant_strategies.validation.config import ScenarioRunConfig
-from quant_strategies.validation.engine_backend import EngineBackend, SpineBackend
+from quant_strategies.validation.engine_backend import SpineBackend
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
 
@@ -106,10 +107,8 @@ def scenario_config(
     )
 
 
-def test_engine_backend_alias_is_the_spine_backend():
-    # The public backend name stayed ``engine`` when the per-trade scorer was retired
-    # for the netted-book spine; the alias keeps configs/artifacts unchanged.
-    assert EngineBackend is SpineBackend
+def test_validation_engine_backend_exposes_only_spine_backend():
+    assert not hasattr(engine_backend_module, "EngineBackend")
     assert SpineBackend().name == "engine"
 
 

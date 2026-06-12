@@ -11,12 +11,12 @@ import pytest
 
 import quant_strategies.evaluation._pipeline as evaluation_runner
 from quant_strategies.causality import LookaheadCheckResult
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.data_loader import LoadedData
 from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
 from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
-from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.evaluation.results import PortfolioEvaluationResult, PortfolioTraceTables
 
 AS_OF = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)

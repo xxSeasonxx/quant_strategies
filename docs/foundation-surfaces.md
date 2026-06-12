@@ -179,7 +179,7 @@ Common artifacts include `config.toml`, `strategy_snapshot.py`,
 full-profile artifacts. Completed, feasible quick-run `summary.json` files include
 `economic_metrics`, a compact summary of the per-trade attribution ledger derived
 from the book walk, and `portfolio_foundation`, the compact summary of the
-authoritative scored NAV book (schema `v2`, basis `quick_run_netted_portfolio_book`)
+authoritative scored NAV book (schema `v2`, basis `netted_portfolio_book_v1`)
 for Train scoring. The economics summary includes impact-cost attribution, and
 each portfolio-foundation scenario includes compact capacity diagnostics: execution
 event count, normalized/real turnover, impact cost, and max/mean bar and ADV

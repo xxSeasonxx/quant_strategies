@@ -31,10 +31,14 @@ Implemented since review:
   override, `exit_lag_bars` is removed and rejected, chunked return stats use the
   single statistics path, loader DI is explicit lazy accessors, and consumer docs
   match current `RunOutcome`/failure-stage fields.
+- **Core P3 / F7, F8, F11, F12, F14:** implemented in the current cleanup
+  change. The validation backend registry and `EngineBackend` alias are removed,
+  the happy-path quick-run manifest writes once, multi-symbol missing marks are
+  covered by a fail-closed regression test, validation policy defaults no longer
+  mutate a frozen model, and quick run/evaluation share `netted_portfolio_book_v1`.
 
-Remaining open items are P3 / opportunistic unless re-prioritized: F7, F8,
-F10-F12, and F14. F13 remains deferred until profiling justifies an
-artifact-free quick-run mode.
+Remaining open items are F10's FX capacity/financing follow-on and F13's
+artifact-free quick-run mode, which remains deferred until profiling justifies it.
 
 ---
 
@@ -248,6 +252,8 @@ typing across the whole runner.
 Severity = impact on the locked objective. Action class per the review skill.
 Disposition reconciles with `FOUNDATION_LOCK.md`'s protocol (New / Accepted-debt /
 Deferred). Full action map with priorities in §11.
+Finding bodies preserve original review evidence from the reviewed state; the
+current status is owned by §0 and §11.
 
 ### F1 — Micro causality scores a book whose lookahead probe *detected* a violation
 - **Severity:** High · **Action:** Refactor (or deliberate Add: document) · **Disposition:** New · **Root cause:** contract/boundary (gate semantics)
@@ -553,8 +559,8 @@ Deferred). Full action map with priorities in §11.
 ## 11. Prioritized Action Map
 
 Priority: P1 = address soon; P2 = should fix; P3 = nice-to-have / opportunistic.
-Status reflects implementation progress as of `37bde41` and `bd8c2e4`. Verify
-the named tests before any remaining refactor.
+Status reflects implementation progress through the Core P3 cleanup. Verify the
+named tests before any remaining refactor.
 
 | No. | Status | Priority | Action | Finding | Evidence anchor |
 |---|---|---|---|---|---|
@@ -564,17 +570,17 @@ the named tests before any remaining refactor.
 | F4 | Implemented (`bd8c2e4`) | P2 | Retire (delete) | `exit_lag_bars` dead config field | `core/config.py:71` |
 | F5 | Implemented (`bd8c2e4`) | P2 | Simplify | Duplicated return-statistics (`*_from_chunks`) ~110 LOC | `portfolio_foundation.py:1588/1630,2107/2118` |
 | F6 | Implemented (`bd8c2e4`) | P2 | Simplify | `_LazyLoaderProxy` heavyweight DI for 4 sites + test seam | `core/data_loader.py:15-53` |
-| F7 | Open | P3 | Simplify / Preserve | Trim `get_backend` string registry + `EngineBackend` alias; keep Protocol | `validation/backends.py:208`; `engine_backend.py:87` |
-| F8 | Open | P3 | Simplify | Redundant `data_manifest.json` write on happy path | `runner/__init__.py:242,307` |
+| F7 | Implemented (Core P3) | P3 | Simplify / Preserve | Trim `get_backend` string registry + `EngineBackend` alias; keep Protocol | `validation/backends.py:208`; `engine_backend.py:87` |
+| F8 | Implemented (Core P3) | P3 | Simplify | Redundant `data_manifest.json` write on happy path | `runner/__init__.py:242,307` |
 | F9 | Implemented (`bd8c2e4`) | P2 | Retire/Add (doc) | `reference.md` stale: `promotion_eligible`, `engine_evaluation` stage | `docs/consumer/reference.md:316,668-671` |
 | F10 | Accepted-debt / Open (configs) | P3 | Add (hygiene) | FX candidates categorically unscoreable (financing coverage + capacity-off) | `portfolio_foundation.py:36,1525,1198` |
-| F11 | Open | P3 | Add (test) | Multi-symbol missing-mark fail-closed but untested | `portfolio_foundation.py:817,625` |
-| F12 | Open | P3 | Simplify | Frozen-model `object.__setattr__` in validation policy | `validation/policy.py:44-57` |
+| F11 | Implemented (Core P3) | P3 | Add (test) | Multi-symbol missing-mark fail-closed but untested | `portfolio_foundation.py:817,625` |
+| F12 | Implemented (Core P3) | P3 | Simplify | Frozen-model `object.__setattr__` in validation policy | `validation/policy.py:44-57` |
 | F13 | Deferred | P3 | Preserve (defer) | No in-process artifact-free run mode (don't build until profiled) | `runner/__init__.py:194-196` |
-| F14 | Open | P3 | Simplify (doc/naming) | Two "one book" identifiers | `portfolio_foundation.py:23`; `evaluation/metrics.py:13` |
+| F14 | Implemented (Core P3) | P3 | Simplify (doc/naming) | Two "one book" identifiers | `portfolio_foundation.py:23`; `evaluation/metrics.py:13` |
 
-**P1 outcome:** F1 and F2 are implemented. The remaining open items are P3 or
-accepted/deferred follow-ons unless Season re-prioritizes them.
+**Outcome:** P1, P2, and the selected Core P3 bundle are implemented. F10 remains
+accepted debt / config hygiene, and F13 remains deferred.
 
 ---
 

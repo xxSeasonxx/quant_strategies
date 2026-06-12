@@ -203,11 +203,3 @@ class ValidationBackend(Protocol):
         config: ScenarioRunConfig,
     ) -> BackendRunResult:
         raise NotImplementedError
-
-
-def get_backend(name: str) -> ValidationBackend:
-    if name == "engine":
-        from quant_strategies.validation.engine_backend import SpineBackend
-
-        return SpineBackend()
-    raise ValueError(f"unsupported validation backend: {name}")

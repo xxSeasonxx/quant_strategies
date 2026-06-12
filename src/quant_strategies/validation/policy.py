@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -41,20 +41,20 @@ class ValidationPolicyDecision(BaseModel):
         }
     )
 
-    @model_validator(mode="after")
-    def default_advisory_fields(self) -> ValidationPolicyDecision:
-        if self.advisory_decision is None:
-            object.__setattr__(self, "advisory_decision", self.decision)
+    @model_validator(mode="before")
+    @classmethod
+    def default_advisory_fields(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping):
+            return data
+        values = dict(data)
+        if values.get("advisory_decision") is None:
+            values["advisory_decision"] = values.get("decision")
         semantics = validation_evidence_semantics()
-        object.__setattr__(self, "evidence_class", str(semantics["evidence_class"]))
-        object.__setattr__(self, "paper_trade_eligible", bool(semantics["paper_trade_eligible"]))
-        object.__setattr__(self, "live_eligible", bool(semantics["live_eligible"]))
-        object.__setattr__(
-            self,
-            "requires_manual_approval",
-            bool(semantics["requires_manual_approval"]),
-        )
-        return self
+        values["evidence_class"] = str(semantics["evidence_class"])
+        values["paper_trade_eligible"] = bool(semantics["paper_trade_eligible"])
+        values["live_eligible"] = bool(semantics["live_eligible"])
+        values["requires_manual_approval"] = bool(semantics["requires_manual_approval"])
+        return values
 
 
 def _validated_backend_metrics(

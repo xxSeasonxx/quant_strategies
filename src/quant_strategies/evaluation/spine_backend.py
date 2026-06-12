@@ -16,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
 
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.config import CapacityModelConfig, DataConfig, LeverageBudgetConfig
 from quant_strategies.core.portfolio_foundation import (
     REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
@@ -36,7 +37,6 @@ from quant_strategies.evaluation.dependencies import (
     EvaluationDependencyError,
     require_pandas_dependency,
 )
-from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.evaluation.results import (
     PortfolioEvaluationResult,
     PreparedPortfolioInputs,

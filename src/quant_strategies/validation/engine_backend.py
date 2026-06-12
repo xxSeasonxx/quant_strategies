@@ -81,12 +81,6 @@ class SpineBackend:
         )
 
 
-# The verdict source was the per-trade ``screen()`` kernel before the netted-book
-# spine retired it; the public backend name stays ``engine`` (the single verdict
-# source) so configs and artifacts are unchanged.
-EngineBackend = SpineBackend
-
-
 def _ledger_metrics(walk: BookWalkResult) -> dict[str, float | int]:
     """Scalar backend metrics from the single walk's authoritative NAV path.
 

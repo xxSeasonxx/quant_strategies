@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
@@ -8,7 +10,6 @@ from quant_strategies.validation.backends import (
     BackendRunResult,
     ScenarioBackendRunResult,
     backend_metric_semantics,
-    get_backend,
 )
 from quant_strategies.validation.config import MechanicalThresholdsConfig
 from quant_strategies.validation.policy import ValidationPolicyDecision, classify_validation
@@ -210,20 +211,20 @@ def test_backend_metric_semantics_declares_tolerance_and_asymmetry():
     assert_backend_metric_semantics(backend_metric_semantics())
 
 
-def test_get_backend_rejects_unknown_backend_name():
-    try:
-        get_backend("missing")
-    except ValueError as exc:
-        assert "unsupported validation backend" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
+def test_validation_backends_module_does_not_expose_runtime_registry():
+    import quant_strategies.validation.backends as backends
+
+    assert not hasattr(backends, "get_backend")
 
 
-def test_get_backend_exposes_only_engine_backend():
-    assert get_backend("engine").name == "engine"
-    for name in ("fake", "unknown"):
-        with pytest.raises(ValueError, match="unsupported validation backend"):
-            get_backend(name)
+def test_policy_decision_defaults_without_mutating_frozen_model():
+    import quant_strategies.validation.policy as policy
+
+    assert "object.__setattr__" not in inspect.getsource(policy.ValidationPolicyDecision)
+
+    decision = ValidationPolicyDecision(decision="mechanical_complete")
+
+    assert_advisory_only(decision)
 
 
 def test_policy_mechanical_fail_for_data_failure():

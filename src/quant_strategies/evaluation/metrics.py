@@ -4,13 +4,11 @@ import math
 from numbers import Real
 from typing import Any
 
-MetricValue = float | int | str | bool | None
+from quant_strategies.core.accounting_model import (
+    SHARED_ACCOUNTING_MODEL as _SHARED_ACCOUNTING_MODEL,
+)
 
-# The single shared accounting/funding model identity reported by every completed
-# evaluation scenario. Evaluation runs the one causal netted portfolio book on every
-# surface (design D9); the retired per-asset-class ``project_perp_ledger_v1`` model
-# name no longer appears in the metric contract.
-SHARED_ACCOUNTING_MODEL = "netted_portfolio_book_v1"
+MetricValue = float | int | str | bool | None
 
 
 def finite_metric_or_none(value: Any) -> float | None:
@@ -35,7 +33,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
     returns_base = "full-grid periodic portfolio returns, including flat/no-position bars"
     trades_base = "portfolio round-trip ledger derived from the netted book"
     backend = (
-        f"{SHARED_ACCOUNTING_MODEL} (the single causal netted portfolio book on every surface)"
+        f"{_SHARED_ACCOUNTING_MODEL} (the single causal netted portfolio book on every surface)"
     )
     cost_scope = (
         "net of configured fees/slippage; includes funding cashflows for crypto_perp_funding; "
@@ -207,7 +205,7 @@ def evaluation_metric_semantics() -> dict[str, dict[str, object]]:
             "aggregation": "scenario label",
             "backend": backend,
             "not_authority": not_authority,
-            "null_when": f"never for completed scenarios; always {SHARED_ACCOUNTING_MODEL}",
+            "null_when": f"never for completed scenarios; always {_SHARED_ACCOUNTING_MODEL}",
         },
         "benchmark_symbol": {
             "unit": "label",

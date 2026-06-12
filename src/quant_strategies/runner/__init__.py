@@ -305,14 +305,6 @@ def run_config(
     retainability = _quick_run_retainability(
         config, evidence_quality, foundation.feasible_verdict()
     )
-    _write_execution_data_manifest(
-        result_dir,
-        config,
-        rows=execution.loaded_rows,
-        normalized_rows=execution.normalized_rows,
-        execution_normalized_rows=execution.execution_normalized_rows,
-        evidence_quality=evidence_quality,
-    )
     try:
         assessment_status, notes = _write_completion_artifacts(
             config,

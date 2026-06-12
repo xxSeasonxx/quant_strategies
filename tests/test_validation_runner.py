@@ -998,30 +998,10 @@ selection_rule = "manual shortlist"
     )
 
 
-def test_run_validation_records_backend_selection_failure_details(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    candidate = write_candidate(tmp_path)
+def test_validation_pipeline_does_not_use_backend_registry():
+    import quant_strategies.validation._pipeline as pipeline
 
-    def fail_backend_selection(name: str):
-        raise RuntimeError("backend registry down")
-
-    monkeypatch.setattr("quant_strategies.validation._pipeline.get_backend", fail_backend_selection)
-
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
-
-    assert result.decision.decision == "mechanical_fail"
-    assert result.decision.reasons == ("backend_selection_failed",)
-    assert result.result_dir is not None
-    decision_payload = json.loads((result.result_dir / "validation_decision.json").read_text())
-    assert decision_payload["failure_details"] == [
-        {
-            "stage": "backend_selection",
-            "type": "RuntimeError",
-            "message": "backend registry down",
-        }
-    ]
+    assert not hasattr(pipeline, "get_backend")
 
 
 def test_run_validation_ignores_unconfigured_manifest_next_to_config(

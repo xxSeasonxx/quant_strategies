@@ -36,13 +36,13 @@ from quant_strategies.validation.backends import (
     BackendRunResult,
     ScenarioBackendRunResult,
     ValidationBackend,
-    get_backend,
 )
 from quant_strategies.validation.config import (
     ScenarioRunConfig,
     load_validation_config,
     resolve_validation_config_path,
 )
+from quant_strategies.validation.engine_backend import SpineBackend
 from quant_strategies.validation.errors import ValidationConfigError
 from quant_strategies.validation.events import ValidationEventSink, ValidationStageEmitter
 from quant_strategies.validation.manifest import write_validation_manifest
@@ -146,29 +146,9 @@ def _run_validation(
         )
 
     state = _ValidationState()
-    backend_name = config.verdict_source
-
-    try:
-        with events.stage("backend_selection", backend=config.verdict_source):
-            selected_backend = backend or get_backend(config.verdict_source)
-            backend_name = _backend_name(selected_backend, config.verdict_source)
-    except Exception as exc:
-        return _failure_result(
-            result_dir=result_dir,
-            repo_root=root,
-            path_base=path_base,
-            config=config,
-            config_path=resolved_config_path,
-            backend_name=backend_name,
-            decisions=state.all_decisions,
-            data_audits=state.data_audits,
-            data_provenance=state.data_provenance,
-            backend_results=state.backend_results,
-            reason="backend_selection_failed",
-            failure_stage="backend_selection",
-            failure_details=[_failure_detail("backend_selection", exc)],
-            event_emitter=events,
-        )
+    with events.stage("backend_selection", backend=config.verdict_source):
+        selected_backend = backend if backend is not None else SpineBackend()
+        backend_name = str(selected_backend.name)
 
     # Strict replay is always on (Phase 1); mechanical_thresholds governs only the
     # mechanical gates.
@@ -877,11 +857,6 @@ def _write_window_rows(
     path = write_text_artifact(result_dir, artifact_name, payload)
     written_payload = payload if payload.endswith("\n") else f"{payload}\n"
     return path.relative_to(result_dir).as_posix(), text_sha256(written_payload)
-
-
-def _backend_name(backend: ValidationBackend, fallback: str) -> str:
-    name = getattr(backend, "name", fallback)
-    return str(name) if name else fallback
 
 
 def _failed_backend_result(backend_name: str, warning: str) -> BackendRunResult:

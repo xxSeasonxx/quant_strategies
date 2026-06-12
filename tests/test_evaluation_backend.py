@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.config import CapacityModelConfig, CostModelConfig, FillModelConfig
 from quant_strategies.core.portfolio_foundation import (
     REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
@@ -20,7 +21,6 @@ from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.evaluation._spine_metrics import spine_metric_payload, spine_trace_tables
 from quant_strategies.evaluation.backends import EvaluationBackend, PreparedEvaluationBackend
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
-from quant_strategies.evaluation.metrics import SHARED_ACCOUNTING_MODEL
 from quant_strategies.evaluation.scenarios import EvaluationScenario
 from quant_strategies.evaluation.spine_backend import SpineEvaluationBackend
 
@@ -385,6 +385,12 @@ def test_finite_metric_or_none_rejects_nan_inf_and_booleans():
     assert finite_metric_or_none(-math.inf) is None
     assert finite_metric_or_none(True) is None
     assert finite_metric_or_none("1.0") is None
+
+
+def test_evaluation_metrics_module_does_not_own_shared_accounting_identity():
+    import quant_strategies.evaluation.metrics as metrics
+
+    assert not hasattr(metrics, "SHARED_ACCOUNTING_MODEL")
 
 
 # --- spine -> metric projection ----------------------------------------------

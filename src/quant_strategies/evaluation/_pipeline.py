@@ -14,6 +14,7 @@ from quant_strategies.causality import (
     check_bounded_causality,
     check_hidden_lookahead,
 )
+from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
 from quant_strategies.core.config import default_repo_root
 from quant_strategies.core.data_audit import audit_decision_rows
 from quant_strategies.core.decision_readiness import check_decision_readiness
@@ -54,10 +55,7 @@ from quant_strategies.evaluation.fold_returns import (
     split_portfolio_path_by_scenario,
     window_id_for_scenario,
 )
-from quant_strategies.evaluation.metrics import (
-    SHARED_ACCOUNTING_MODEL,
-    evaluation_metric_semantics,
-)
+from quant_strategies.evaluation.metrics import evaluation_metric_semantics
 from quant_strategies.evaluation.results import EvaluationRunResult, PortfolioEvaluationResult
 from quant_strategies.evaluation.scenarios import expand_evaluation_scenarios
 from quant_strategies.evaluation.spine_backend import SpineEvaluationBackend
