@@ -23,6 +23,7 @@ from typing import Any
 
 import numpy as np
 
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
 from quant_strategies.evaluation.metrics import MetricValue, finite_metric_or_none
 
 
@@ -63,6 +64,10 @@ class FoldScenarioMetrics:
     trade_count: int | None
     return_sample_count: int | None
     causal_ok: bool
+    scoreability_bearing: bool = True
+    feasibility: FeasibilityVerdict = field(
+        default_factory=lambda: FeasibilityVerdict(feasible=True)
+    )
     provenance: Mapping[str, str] = field(default_factory=dict)
 
 
@@ -136,6 +141,8 @@ def fold_metrics_from_scenario(
     *,
     provenance: Mapping[str, str],
     causal_ok: bool,
+    scoreability_bearing: bool = True,
+    feasibility: FeasibilityVerdict | None = None,
 ) -> FoldScenarioMetrics:
     return FoldScenarioMetrics(
         window_id=window_id,
@@ -148,6 +155,8 @@ def fold_metrics_from_scenario(
         trade_count=_optional_int(metrics_map.get("trade_count")),
         return_sample_count=_optional_int(metrics_map.get("return_sample_count")),
         causal_ok=causal_ok,
+        scoreability_bearing=scoreability_bearing,
+        feasibility=FeasibilityVerdict(feasible=True) if feasibility is None else feasibility,
         provenance=dict(provenance),
     )
 

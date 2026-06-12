@@ -502,9 +502,7 @@ def walk_portfolio_book(
     """
     row_index = _RowIndex(rows)
     decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
-    per_side_cost_fraction = _cost_fraction(
-        cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side
-    )
+    per_side_cost_fraction = cost_model_per_side_fraction(cost_model)
     return _walk_book(
         row_index,
         decision_plan,
@@ -512,6 +510,23 @@ def walk_portfolio_book(
         data_kind=data.kind,
         capacity_model=capacity_model,
         config=config,
+    )
+
+
+def at_risk_period_returns(path: Sequence[PortfolioPathPoint]) -> tuple[float, ...]:
+    """Return the scoreable at-risk period returns from a book NAV path."""
+    return tuple(
+        point.period_return for index, point in enumerate(path) if index > 0 and point.at_risk
+    )
+
+
+def cost_model_per_side_fraction(
+    cost_model: CostModelConfig,
+    *,
+    cost_multiplier: float = 1.0,
+) -> float:
+    return _cost_fraction(
+        (cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side) * cost_multiplier
     )
 
 
@@ -732,8 +747,9 @@ def _build_scenario(
     fill_stress: float = 0.0,
     config: PortfolioFoundationConfig,
 ) -> tuple[FoundationScenarioResult, BookWalkResult]:
-    per_side_cost_fraction = _cost_fraction(
-        (cost_model.fee_bps_per_side + cost_model.slippage_bps_per_side) * cost_multiplier
+    per_side_cost_fraction = cost_model_per_side_fraction(
+        cost_model,
+        cost_multiplier=cost_multiplier,
     )
     walk = _walk_book(
         row_index,
@@ -754,7 +770,7 @@ def _build_scenario(
         data_start=data.start,
         data_end=data.end,
     )
-    verdict = _scenario_feasibility(
+    verdict = scenario_feasibility(
         walk.feasibility,
         full_train.statistics,
         per_side_cost_fraction=per_side_cost_fraction,
@@ -1550,7 +1566,7 @@ def _check_intended_budget(
         )
 
 
-def _scenario_feasibility(
+def scenario_feasibility(
     walk_verdict: FeasibilityVerdict,
     full_train_statistics: ReturnStatistics,
     *,

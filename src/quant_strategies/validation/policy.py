@@ -112,6 +112,7 @@ def classify_validation(
 
     scenario_results = tuple(_scenario_result(item) for item in backend_results)
     required_results = tuple(item for item in scenario_results if item.required)
+    scoreability_results = tuple(item for item in required_results if item.scoreability_bearing)
     required_gate = _required_scenario_gate(
         required_results,
         required_scenario_count=required_scenario_count,
@@ -120,13 +121,17 @@ def classify_validation(
     if required_gate is not None:
         return finish(required_gate)
 
-    backend_gate = _backend_execution_gate(required_results, min_trades=min_trades)
+    backend_gate = _backend_execution_gate(
+        required_results,
+        scoreability_results=scoreability_results,
+        min_trades=min_trades,
+    )
     if backend_gate.decision != "mechanical_complete":
         return finish(backend_gate)
 
     return finish(
         _mechanical_thresholds_decision(
-            required_results,
+            scoreability_results,
             min_trades=min_trades,
             mechanical_thresholds=mechanical_thresholds,
             base_passed_gates=backend_gate.passed_gates,
@@ -248,6 +253,7 @@ def _required_scenario_gate(
 def _backend_execution_gate(
     required_results: tuple[ScenarioBackendRunResult, ...],
     *,
+    scoreability_results: tuple[ScenarioBackendRunResult, ...],
     min_trades: int,
 ) -> ValidationPolicyDecision:
     for item in required_results:
@@ -260,10 +266,23 @@ def _backend_execution_gate(
                 details={"required_backend_completed": f"{item.scenario_id} failed"},
             )
 
+    non_scoreable = [item for item in scoreability_results if not item.result.feasibility.feasible]
+    if non_scoreable:
+        details = "; ".join(
+            f"{item.scenario_id}:{item.result.feasibility.reason or 'infeasible'}"
+            for item in non_scoreable
+        )
+        return _decision(
+            "mechanical_fail",
+            reasons=("non_scoreable_required_scenario",),
+            failed=("required_scenario_scoreability",),
+            details={"required_scenario_scoreability": details},
+        )
+
     invalid_metrics = False
     insufficient_trades = False
     total_required_trades = 0
-    for item in required_results:
+    for item in scoreability_results:
         result = item.result
         if result.status != "completed":
             continue

@@ -264,6 +264,9 @@ Common artifacts include `validation_config.toml`, `strategy_snapshot.py`,
 trade-ledger JSONL files, `cost_fill_sensitivity.json`,
 `validation_decision.json`, `validation_manifest.json`, `environment.json`, and
 `validation_report.md`. There is one verdict backend (the netted-book spine).
+Each backend scenario payload records `scoreability_bearing` and the shared-book
+`feasibility` verdict; non-scoreability-bearing diagnostics do not satisfy
+scoreable evidence gates.
 
 CLI exit codes:
 
@@ -386,8 +389,8 @@ Control artifacts:
 | `evaluation_config.toml`   | copied evaluation config                                                                                                   |
 | `strategy_snapshot.py`     | copied strategy file                                                                                                       |
 | `data_manifest.json`       | per-window data config, row-contract summary, data-audit payload, row counts/ranges, normalized row hash, evidence quality, decision count, and audit artifact links |
-| `evaluation_metrics.json`  | metric semantics, annualization cadence, evidence-quality warnings, and per-scenario portfolio metrics, including return-sample coverage |
-| `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, and unsupported semantics                                                   |
+| `evaluation_metrics.json`  | metric semantics, annualization cadence, evidence-quality warnings, and per-scenario portfolio metrics, including return-sample coverage, `required`, `scoreability_bearing`, and `feasibility` |
+| `scenario_summary.json`    | scenario counts, statuses, coverage, warnings, unsupported semantics, `required`, `scoreability_bearing`, and `feasibility` |
 | `evaluation_manifest.json` | hashes, scenario coverage, annualization cadence, audit metadata, table metadata, metric semantics, replayability, provenance, and artifact inventory |
 | `audit/input_rows/{safe_window}-{hash}.parquet` | normalized strategy input rows for each evaluation window that reaches strategy execution          |
 | `audit/decision_records/{safe_window}-{hash}.jsonl` | typed strategy decisions for each evaluation window that reaches strategy execution             |

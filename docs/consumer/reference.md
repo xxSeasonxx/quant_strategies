@@ -277,7 +277,8 @@ strategy_path, strategy_id                     # top-level
 [causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [readiness]?                                    # optional; defaults to >=1 obs + >=1 symbol per decision
 [benchmark]?  symbol                            # must also be in data.symbols; passive evidence only
-[[scenarios]]?  id, labels, required (bool), [scenarios.cost_model]?, [scenarios.fill_model]?
+[[scenarios]]?  id, labels, required (bool), scoreability_bearing (bool),
+                 [scenarios.cost_model]?, [scenarios.fill_model]?
 [output] results_dir
 ```
 
@@ -287,6 +288,8 @@ provenance. In bounded replay, `probe_limit` caps representative row-anchor
 probes; emitted-decision replay is still included.
 
 No `[[scenarios]]` ⇒ default fixed six-scenario cost/fill matrix per window.
+Default zero-cost scenarios are diagnostic (`scoreability_bearing=false`);
+realistic, stressed-cost, and fill-lag scenarios are scoreability-bearing.
 `annualization_periods_per_year` must match bar cadence (e.g. minute bars
 `525949`, daily `252`). Config paths resolve relative to the config directory.
 
@@ -651,8 +654,7 @@ each scenario:
 | `returns_for(window_id, scenario_id)` | `FoldReturnSeries \| None` | typed OOS return series for one fold |
 | `metrics_for(window_id, scenario_id)` | `FoldScenarioMetrics \| None` | typed summary scalars for one fold |
 
-The new fields are **additive** (all defaulted); existing programmatic consumers and
-`succeeded` are unaffected. They let an in-process consumer read each fold's OOS return
+The per-fold accessors let an in-process consumer read each fold's OOS return
 series without scraping `tables/portfolio_path.parquet`. No significance statistics
 (PSR/DSR/PBO) are added — significance stays with the consumer.
 
@@ -685,6 +687,8 @@ insufficient return sample), exactly as the artifact metrics.
 | `max_drawdown` / `worst_period_return` | `float \| None` | core economics |
 | `trade_count` / `return_sample_count` | `int \| None` | — |
 | `causal_ok` | `bool` | per-fold Tier-0 integrity (`True` for completed scenarios) |
+| `scoreability_bearing` | `bool` | whether the scenario counts as scoreable filter evidence |
+| `feasibility` | `FeasibilityVerdict` | shared-book scoreability verdict for the scenario |
 | `provenance` | `Mapping[str, str]` | data-snapshot + version identity (FR-I1) |
 
 ---
@@ -715,8 +719,8 @@ Artifacts are evidence to inspect, not truth by construction. Generated roots
 | Surface | Always written | Notable extras |
 |---|---|---|
 | Quick run | `config.toml`, `strategy_snapshot.py`, `run_manifest.json`, `summary.json` (with `economic_metrics` and optional compact `portfolio_foundation`), `notes.md`, `environment.json`, `data_manifest.json` (when data loads) | `diagnostics.json` (`diagnostic`, includes `economic_slices` and portfolio-foundation matrix); decision records + evidence + engine request + strategy input rows (`full`) |
-| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | one verdict backend (the netted-book spine) |
-| Evaluation | `evaluation_config.toml`, `strategy_snapshot.py`, `data_manifest.json`, `evaluation_metrics.json`, `scenario_summary.json`, `evaluation_manifest.json`, `environment.json`, `notes.md` | Parquet traces under `tables/` (requires `pyarrow`); `audit/` input rows + decision records; `evaluation_failure.json` on failure |
+| Validation | `validation_config.toml`, `strategy_snapshot.py`, `decision_records.jsonl`, `data_audit.json`, `backend_runs/summary.json`, trade-ledger JSONL, `cost_fill_sensitivity.json`, `validation_decision.json`, `validation_manifest.json`, `environment.json`, `validation_report.md` | one verdict backend (the netted-book spine); backend scenario payloads include `scoreability_bearing` and `feasibility` |
+| Evaluation | `evaluation_config.toml`, `strategy_snapshot.py`, `data_manifest.json`, `evaluation_metrics.json`, `scenario_summary.json`, `evaluation_manifest.json`, `environment.json`, `notes.md` | Parquet traces under `tables/` (requires `pyarrow`); `audit/` input rows + decision records; per-scenario payloads include `required`, `scoreability_bearing`, and `feasibility`; `evaluation_failure.json` on failure |
 
 The exhaustive artifact inventory (per-window/per-scenario tables and their
 schemas) lives in [`docs/foundation-surfaces.md`](../foundation-surfaces.md).

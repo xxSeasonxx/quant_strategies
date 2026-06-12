@@ -253,6 +253,30 @@ def test_spine_backend_leverage_breach_is_typed_unsupported_not_clamped():
     assert any("feasibility:" in warning for warning in result.warnings)
 
 
+def test_spine_backend_carries_zero_cost_feasibility_verdict():
+    result = SpineBackend().run(
+        decisions=long_round_trip(),
+        rows=rows(),
+        config=scenario_config(fee_bps=0.0, slippage_bps=0.0),
+    )
+
+    assert result.status == "completed"
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "zero_cost"
+
+
+def test_spine_backend_carries_insufficient_sample_feasibility_verdict():
+    result = SpineBackend().run(
+        decisions=[target(0, 1.0)],
+        rows=rows()[:2],
+        config=scenario_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "insufficient_samples"
+
+
 def test_spine_backend_returns_failed_on_unfillable_decision():
     # A decision whose entry-lagged fill bar is past the available rows -> the spine
     # raises a structured ValueError; the backend reports it as a failed run.

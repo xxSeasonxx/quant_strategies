@@ -12,6 +12,7 @@ import pytest
 import quant_strategies.evaluation._pipeline as evaluation_runner
 from quant_strategies.causality import LookaheadCheckResult
 from quant_strategies.core.data_loader import LoadedData
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
 from quant_strategies.evaluation._pipeline import _run_evaluation as run_evaluation
 from quant_strategies.evaluation.benchmarks import benchmark_metrics_for_rows
 from quant_strategies.evaluation.dependencies import EvaluationDependencyError
@@ -816,6 +817,168 @@ required = false
     )
 
 
+def test_run_evaluation_fails_required_scoreability_bearing_infeasible_scenario(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class NonScoreableRealisticBackend(FakeBackend):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+            capacity_model: Any = None,
+            leverage_budget: Any = None,
+        ):
+            result = super().run(
+                decisions=decisions,
+                rows=rows,
+                scenario=scenario,
+                metrics=metrics,
+                data_kind=data_kind,
+                capacity_model=capacity_model,
+                leverage_budget=leverage_budget,
+            )
+            if scenario.scenario_id.endswith("/realistic_costs/base_fill"):
+                return result.model_copy(
+                    update={
+                        "feasibility": FeasibilityVerdict(
+                            feasible=False,
+                            reason="insufficient_samples",
+                            detail="at-risk return sample 1 < minimum 2",
+                        )
+                    }
+                )
+            return result
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=NonScoreableRealisticBackend(),
+    )
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.fold_returns == ()
+    assert "insufficient_samples" in result.message
+    failure_payload = json.loads((result.result_dir / "evaluation_failure.json").read_text())
+    scenario_payload = next(
+        item
+        for item in failure_payload["scenario_summary"]["scenarios"]
+        if item["scenario_id"] == "eval_2026_h1/realistic_costs/base_fill"
+    )
+    assert scenario_payload["status"] == "failed"
+    assert scenario_payload["feasibility"]["reason"] == "insufficient_samples"
+    assert any(
+        "non_scoreable:insufficient_samples" in item for item in scenario_payload["warnings"]
+    )
+
+
+def test_run_evaluation_fails_real_spine_required_insufficient_sample_scenario(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_evaluation(candidate / "evaluation.toml", repo_root=tmp_path)
+
+    assert result.run_completed is False
+    assert result.failure_stage == "portfolio_evaluation"
+    assert result.fold_returns == ()
+    assert "insufficient_samples" in result.message
+    failure_payload = json.loads((result.result_dir / "evaluation_failure.json").read_text())
+    scenario_payload = next(
+        item
+        for item in failure_payload["scenario_summary"]["scenarios"]
+        if item["scenario_id"] == "eval_2026_h1/realistic_costs/base_fill"
+    )
+    assert scenario_payload["status"] == "failed"
+    assert scenario_payload["scoreability_bearing"] is True
+    assert scenario_payload["feasibility"]["reason"] == "insufficient_samples"
+    assert any(
+        "non_scoreable:insufficient_samples" in item for item in scenario_payload["warnings"]
+    )
+
+
+def test_run_evaluation_keeps_non_scoreability_bearing_zero_cost_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class ZeroCostDiagnosticBackend(FakeBackend):
+        def run(
+            self,
+            *,
+            decisions: Sequence[Any],
+            rows: Sequence[dict[str, Any]],
+            scenario: Any,
+            metrics: Any,
+            data_kind: str = "bars",
+            capacity_model: Any = None,
+            leverage_budget: Any = None,
+        ):
+            result = super().run(
+                decisions=decisions,
+                rows=rows,
+                scenario=scenario,
+                metrics=metrics,
+                data_kind=data_kind,
+                capacity_model=capacity_model,
+                leverage_budget=leverage_budget,
+            )
+            if scenario.cost_scenario == "zero_costs":
+                return result.model_copy(
+                    update={
+                        "feasibility": FeasibilityVerdict(
+                            feasible=False,
+                            reason="zero_cost",
+                            detail="zero cost on a scoreable run is below the operator cost floor",
+                        )
+                    }
+                )
+            return result
+
+    candidate = write_candidate(tmp_path)
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_evaluation(
+        candidate / "evaluation.toml",
+        repo_root=tmp_path,
+        backend=ZeroCostDiagnosticBackend(),
+    )
+
+    assert result.run_completed is True
+    assert result.failure_stage is None
+    zero_metrics = result.metrics_for("eval_2026_h1", "eval_2026_h1/zero_costs/base_fill")
+    assert zero_metrics is not None
+    assert zero_metrics.scoreability_bearing is False
+    assert zero_metrics.feasibility.reason == "zero_cost"
+    metrics_payload = json.loads((result.result_dir / "evaluation_metrics.json").read_text())
+    zero_payload = next(
+        item
+        for item in metrics_payload["scenarios"]
+        if item["scenario_id"] == "eval_2026_h1/zero_costs/base_fill"
+    )
+    assert zero_payload["required"] is True
+    assert zero_payload["scoreability_bearing"] is False
+    assert zero_payload["feasibility"]["reason"] == "zero_cost"
+
+
 def test_run_evaluation_fails_when_backend_returns_wrong_scenario_id_with_expected_set(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1348,7 +1511,11 @@ def test_run_evaluation_supports_crypto_perp_funding_through_the_spine_book(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    candidate = write_candidate(tmp_path, data_kind="crypto_perp_funding")
+    candidate = write_candidate(
+        tmp_path,
+        data_kind="crypto_perp_funding",
+        extra_config="min_annualized_samples = 2\n",
+    )
     events: list[dict[str, object]] = []
     funding_rows = rows()
     funding_rows[3] = {
@@ -1372,7 +1539,22 @@ def test_run_evaluation_supports_crypto_perp_funding_through_the_spine_book(
             "funding_timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
             "funding_rate": 0.0003,
             "has_funding_event": True,
-        }
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+            "open": 105.0,
+            "high": 105.0,
+            "low": 105.0,
+            "close": 105.0,
+            "volume": 1_000.0,
+            "vwap": 105.0,
+            "num_trades": 100,
+            "funding_timestamp": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+            "funding_rate": 0.0003,
+            "has_funding_event": True,
+        },
     ]
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
@@ -1416,7 +1598,11 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    candidate = write_candidate(tmp_path, data_kind="crypto_perp_funding")
+    candidate = write_candidate(
+        tmp_path,
+        data_kind="crypto_perp_funding",
+        extra_config="min_annualized_samples = 2\n",
+    )
     no_event_rows = rows() + [
         {
             "symbol": "BTC-PERP",
@@ -1430,7 +1616,20 @@ def test_run_evaluation_allows_crypto_perp_funding_without_active_window_funding
             "vwap": 104.0,
             "num_trades": 100,
             "has_funding_event": False,
-        }
+        },
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+            "available_at": datetime(2026, 1, 1, 0, 5, tzinfo=UTC),
+            "open": 105.0,
+            "high": 105.0,
+            "low": 105.0,
+            "close": 105.0,
+            "volume": 1_000.0,
+            "vwap": 105.0,
+            "num_trades": 100,
+            "has_funding_event": False,
+        },
     ]
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",

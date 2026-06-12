@@ -18,7 +18,6 @@ from quant_strategies.core.execution import (
     StrategyExecutionError,
     execute_strategy_run,
 )
-from quant_strategies.core.exposure import exposure_admissibility_violations
 from quant_strategies.core.portfolio_foundation import RoundTrip
 from quant_strategies.core.serialization import canonical_rows_jsonl, normalized_rows_sha256
 from quant_strategies.data_contract import NormalizedRows
@@ -439,19 +438,6 @@ def _audit_window_execution(
                 state.failure_stage = "validation_readiness"
             audit_payload["passed"] = False
             audit_payload["violations"] = list(audit.violations) + list(readiness_violations)
-    if audit_payload["passed"]:
-        exposure_violations = _scenario_exposure_admissibility_violations(
-            context,
-            window,
-            execution_spec,
-            execution,
-        )
-        if exposure_violations:
-            state.failure_reasons.append("exposure_admissibility_failed")
-            if state.failure_stage is None:
-                state.failure_stage = "exposure_admissibility"
-            audit_payload["passed"] = False
-            audit_payload["violations"] = list(audit.violations) + list(exposure_violations)
     return audit_payload
 
 
@@ -486,35 +472,6 @@ def _configured_causality_violations(scope: str, lookahead: Any) -> tuple[str, .
             violations.append(f"bounded_probe_skipped: {lookahead.skipped_probe_reasons[0]}")
         return tuple(dict.fromkeys(violations))
     return causality_completeness_violations(lookahead)
-
-
-def _scenario_exposure_admissibility_violations(
-    context: _ValidationContext,
-    window: Any,
-    execution_spec: Any,
-    execution: _StrategyExecutionResult,
-) -> tuple[str, ...]:
-    violations: list[str] = []
-    scenarios = expand_validation_matrix(
-        window_id=window.id,
-        base_costs=_plain_mapping(context.config.cost_model),
-        base_fill=_plain_mapping(context.config.fill_model),
-    )
-    for scenario in scenarios:
-        if not scenario.required:
-            continue
-        scenario_config = _scenario_config(
-            config=context.config,
-            scenario=scenario,
-            data=execution_spec.data,
-        )
-        for violation in exposure_admissibility_violations(
-            execution.decisions,
-            execution.normalized_rows,
-            scenario_config.fill_model,
-        ):
-            violations.append(f"{scenario.id}:{violation}")
-    return tuple(dict.fromkeys(violations))
 
 
 def _lookahead_audit_payload(lookahead: Any, *, replay_scope: str) -> dict[str, Any]:
@@ -631,7 +588,8 @@ def _run_scenario_backend(
         required=scenario.required,
         result=backend_result,
         scenario_kind=scenario.kind,
-        diagnostic_only=not scenario.required,
+        scoreability_bearing=scenario.scoreability_bearing,
+        diagnostic_only=not scenario.scoreability_bearing,
         decision_count=len(scenario_decisions),
         decision_records_path=decision_records_path,
         decision_records_sha256=decision_records_sha256,

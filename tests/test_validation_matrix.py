@@ -26,9 +26,21 @@ def test_expand_validation_matrix_includes_required_v1_scenarios():
     assert "validation_2026_h1/fill_lag_plus_1" in names
     assert not any("param_" in name for name in names)
     assert _scenario_by_id(scenarios, "validation_2026_h1/base").required is True
+    assert _scenario_by_id(scenarios, "validation_2026_h1/base").scoreability_bearing is False
     assert _scenario_by_id(scenarios, "validation_2026_h1/realistic_costs").required is True
+    assert (
+        _scenario_by_id(scenarios, "validation_2026_h1/realistic_costs").scoreability_bearing
+        is True
+    )
     assert _scenario_by_id(scenarios, "validation_2026_h1/stressed_costs").required is True
+    assert (
+        _scenario_by_id(scenarios, "validation_2026_h1/stressed_costs").scoreability_bearing is True
+    )
     assert _scenario_by_id(scenarios, "validation_2026_h1/fill_lag_plus_1").required is True
+    assert (
+        _scenario_by_id(scenarios, "validation_2026_h1/fill_lag_plus_1").scoreability_bearing
+        is True
+    )
 
 
 def test_base_scenario_uses_no_cost_baseline():

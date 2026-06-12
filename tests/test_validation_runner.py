@@ -317,7 +317,8 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
         "scenario_id": "validation_2026_h1/base",
         "scenario_kind": "base",
         "required": True,
-        "diagnostic_only": False,
+        "scoreability_bearing": False,
+        "diagnostic_only": True,
         "decision_count": 1,
         "decision_records_path": base_decision_path,
         "decision_records_sha256": file_sha256(base_decision_file),
@@ -329,6 +330,13 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
             "metrics": {"net_return": 0.02, "trade_count": 20},
             "warnings": [],
             "unsupported_semantics": [],
+            "feasibility": {
+                "feasible": True,
+                "reason": None,
+                "observed_gross": None,
+                "observed_net": None,
+                "detail": None,
+            },
         },
     }
     base_decision_line = base_decision_file.read_text().splitlines()[0]
@@ -1516,10 +1524,77 @@ def test_run_validation_default_engine_backend_accepts_flat_target_as_zero_activ
     assert base_result["result"]["metrics"]["trade_count"] == 0
 
 
-def test_run_validation_fails_before_backend_on_leveraged_target_weight(
+def test_run_validation_reports_budget_breach_from_spine_for_leveraged_target_weight(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
+    config_path = candidate / "validation.toml"
+    config_path.write_text(config_path.read_text().replace("weight = 1.0", "weight = 1.01"))
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "mechanical_fail"
+    assert result.decision.reasons == ("non_scoreable_required_scenario",)
+    assert result.decision.failed_gates == ("required_scenario_scoreability",)
+    assert (
+        "leverage_budget_breach" in result.decision.gate_details["required_scenario_scoreability"]
+    )
+    assert result.failure_stage is None
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert {item["result"]["feasibility"]["reason"] for item in backend_summary["results"]} == {
+        "leverage_budget_breach"
+    }
+
+
+def test_run_validation_fails_scoreability_bearing_insufficient_samples_from_spine(
+    tmp_path: Path, monkeypatch
+):
+    candidate = write_candidate(tmp_path)
+    (candidate / "strategy.py").write_text(
+        "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"
+        "def validate_params(params):\n"
+        "    return dict(params)\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [TargetDecision(\n"
+        "        strategy_id='demo',\n"
+        "        instrument=InstrumentRef(kind='crypto_perp', symbol='BTC-PERP'),\n"
+        "        decision_time=rows[0]['timestamp'],\n"
+        "        as_of_time=rows[0]['timestamp'],\n"
+        "        target=0.25,\n"
+        "        observations=(ObservationRef(symbol='BTC-PERP', timestamp=rows[0]['timestamp'], field='close', source='strategy_input'),),\n"
+        "    )]\n"
+    )
+    monkeypatch.setattr(
+        "quant_strategies.core.execution.load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows()),
+    )
+
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
+
+    assert result.decision.decision == "mechanical_fail"
+    assert result.decision.reasons == ("non_scoreable_required_scenario",)
+    assert result.decision.failed_gates == ("required_scenario_scoreability",)
+    assert "insufficient_samples" in result.decision.gate_details["required_scenario_scoreability"]
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    realistic = next(item for item in backend_summary["results"] if item["scenario_kind"] == "cost")
+    assert realistic["scoreability_bearing"] is True
+    assert realistic["result"]["status"] == "completed"
+    assert realistic["result"]["feasibility"]["reason"] == "insufficient_samples"
+
+
+def test_run_validation_lets_configured_leveraged_book_reach_backend(tmp_path: Path, monkeypatch):
+    candidate = write_candidate(
+        tmp_path,
+        extra_config="""
+[leverage_budget]
+max_gross_exposure = 2.0
+max_net_exposure = 2.0
+""",
+    )
     config_path = candidate / "validation.toml"
     config_path.write_text(config_path.read_text().replace("weight = 1.0", "weight = 1.01"))
     monkeypatch.setattr(
@@ -1530,24 +1605,18 @@ def test_run_validation_fails_before_backend_on_leveraged_target_weight(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_fail"
-    assert result.decision.reasons == ("exposure_admissibility_failed",)
-    assert result.failure_stage == "exposure_admissibility"
-    assert backend.calls == 0
-    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert data_audit["windows"][0]["passed"] is False
-    assert any(
-        "portfolio_target_weight_exceeds_one" in item
-        for item in data_audit["windows"][0]["violations"]
-    )
+    assert result.failure_stage is None
+    assert backend.calls == 4
+    assert {config.leverage_budget.max_gross_exposure for config in backend.configs} == {2.0}
+    assert all(weights == [1.01] for _, weights in backend.decision_sizes_by_scenario)
 
 
-def test_run_validation_fails_before_backend_on_cross_symbol_gross_exposure(
+def test_run_validation_reports_budget_breach_from_spine_for_cross_symbol_gross_exposure(
     tmp_path: Path, monkeypatch
 ):
     # Same-symbol targets net by construction, so over-gross is only reachable across
     # distinct instruments: two simultaneous 0.6 standing targets are an intended gross
-    # of 1.2 > 1.0, which the exposure admissibility advisory flags before the backend.
+    # of 1.2 > 1.0. The shared book owns that budget verdict.
     candidate = write_candidate(tmp_path)
     (candidate / "validation.toml").write_text(
         (candidate / "validation.toml")
@@ -1586,22 +1655,23 @@ def test_run_validation_fails_before_backend_on_cross_symbol_gross_exposure(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=loaded_rows),
     )
-    backend = RecordingBackend()
 
-    result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
+    result = run_validation(candidate / "validation.toml", repo_root=tmp_path)
 
     assert result.decision.decision == "mechanical_fail"
-    assert result.decision.reasons == ("exposure_admissibility_failed",)
-    assert result.failure_stage == "exposure_admissibility"
-    assert backend.calls == 0
-    data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert any(
-        "portfolio_target_weight_exceeds_one" in item
-        for item in data_audit["windows"][0]["violations"]
+    assert result.decision.reasons == ("non_scoreable_required_scenario",)
+    assert result.decision.failed_gates == ("required_scenario_scoreability",)
+    assert (
+        "leverage_budget_breach" in result.decision.gate_details["required_scenario_scoreability"]
     )
+    assert result.failure_stage is None
+    backend_summary = json.loads((result.result_dir / "backend_runs" / "summary.json").read_text())
+    assert {item["result"]["feasibility"]["reason"] for item in backend_summary["results"]} == {
+        "leverage_budget_breach"
+    }
 
 
-def test_run_validation_checks_exposure_against_required_scenario_fill_models(
+def test_run_validation_does_not_preflight_exposure_against_scenario_fill_models(
     tmp_path: Path, monkeypatch
 ):
     candidate = write_candidate(tmp_path)
@@ -1663,15 +1733,10 @@ def test_run_validation_checks_exposure_against_required_scenario_fill_models(
 
     result = run_validation(candidate / "validation.toml", repo_root=tmp_path, backend=backend)
 
-    assert result.decision.decision == "mechanical_fail"
-    assert result.decision.reasons == ("exposure_admissibility_failed",)
-    assert result.failure_stage == "exposure_admissibility"
-    assert backend.calls == 0
+    assert result.failure_stage is None
+    assert backend.calls == 4
     data_audit = json.loads((result.result_dir / "data_audit.json").read_text())
-    assert any(
-        "validation_2026_h1/fill_lag_plus_1:portfolio_target_weight_exceeds_one" in item
-        for item in data_audit["windows"][0]["violations"]
-    )
+    assert data_audit["windows"][0]["passed"] is True
 
 
 def test_run_validation_gates_on_each_required_matrix_scenario(tmp_path: Path, monkeypatch):

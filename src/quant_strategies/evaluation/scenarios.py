@@ -21,6 +21,7 @@ class EvaluationScenario(BaseModel):
     cost_model: CostModelConfig
     fill_model: FillModelConfig
     required: bool = True
+    scoreability_bearing: bool = True
 
 
 def expand_evaluation_scenarios(
@@ -43,6 +44,7 @@ def expand_evaluation_scenarios(
                 cost_model=item.cost_model if item.cost_model is not None else base_costs,
                 fill_model=item.fill_model if item.fill_model is not None else base_fill,
                 required=item.required,
+                scoreability_bearing=item.scoreability_bearing,
             )
             for scenario_id, item in zip(scenario_ids, configured_scenarios, strict=True)
         )
@@ -73,6 +75,7 @@ def expand_evaluation_scenarios(
             fill_scenario=fill_name,
             cost_model=cost_model,
             fill_model=fill_model,
+            scoreability_bearing=(cost_name != "zero_costs"),
         )
         for fill_name, fill_model in fill_scenarios
         for cost_name, cost_model in cost_scenarios

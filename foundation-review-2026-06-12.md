@@ -229,6 +229,11 @@ pure strategy.py
 ### 2. P0 - Required validation/evaluation scenarios do not consistently carry quick-run scoreability verdicts
 
 - **Action class**: Refactor
+- **Status**: Addressed. Validation and evaluation scenario results carry the
+  shared-book `FeasibilityVerdict`, scenarios expose `scoreability_bearing`, and
+  required scoreability-bearing infeasible scenarios fail closed. Zero-cost
+  diagnostics remain required for coverage but are non-scoreability-bearing, so
+  they do not satisfy scoreable evidence gates.
 - **Evidence**:
   - Quick run fails when `foundation is None or not foundation.feasible`
     (`src/quant_strategies/runner/__init__.py:257`, `:268`).
@@ -259,6 +264,9 @@ pure strategy.py
 - **Verify**: Add tests where zero-cost or insufficient-sample books cannot yield a
   successful required validation/evaluation result without explicit diagnostic
   labeling.
+- **Disposition verification**: Focused validation/evaluation tests cover typed
+  zero-cost and insufficient-sample verdicts, scoreability-bearing fail-closed
+  policy, diagnostic zero-cost completion, and artifact payload metadata.
 
 ### 3. P0 - The operator-frozen envelope is underbounded and lacks provenance
 
@@ -312,6 +320,10 @@ pure strategy.py
 ### 5. P1 - Validation has a hard-coded gross > 1.0 preflight that bypasses the leverage budget
 
 - **Action class**: Refactor
+- **Status**: Addressed. Validation no longer runs a fixed gross-exposure
+  preflight before the backend. Gross/net exposure feasibility is owned by the
+  shared portfolio book and reported through typed `leverage_budget_breach`
+  verdicts.
 - **Evidence**:
   - `exposure_admissibility_violations` flags gross over 1.0 without reading
     `LeverageBudgetConfig` (`src/quant_strategies/core/exposure.py:13`).
@@ -331,6 +343,9 @@ pure strategy.py
   leverage budget; prefer letting the spine emit the typed verdict.
 - **Verify**: Validation test where gross > 1.0 but within configured crypto-perp
   budget reaches the spine; breach still fails with `leverage_budget_breach`.
+- **Disposition verification**: Focused validation runner tests cover a leveraged
+  book within configured budget reaching the spine, a cross-symbol budget breach
+  surfacing the book verdict, and the removed preflight path.
 
 ### 6. P1 - Quick-run hot path carries avoidable performance and significance weight
 
@@ -424,10 +439,10 @@ pure strategy.py
 | No. | Status | Priority | Action class | Finding / recommendation | Rationale | Verify |
 |---:|---|---|---|---|---|---|
 | 1 | Addressed | P0 | Refactor | Resolve the quick-run micro retention contract: hard violations gate, or micro scores are explicitly non-retainable. | Implemented `RunResult.retainable` / `RunResult.retainability`; micro can score for diagnostics but is non-retainable when it is not complete retention proof or records replay warnings/timeouts. | Focused quick-run tests assert micro warning/timeout results have `retainable=False`. |
-| 2 | Open | P0 | Refactor | Carry `FeasibilityVerdict` consistently through required validation/evaluation scenarios. | Same book is not enough; same scoreability semantics are required. | Zero-cost/flat required scenarios cannot silently succeed as scoreable evidence. |
+| 2 | Addressed | P0 | Refactor | Carry `FeasibilityVerdict` consistently through required validation/evaluation scenarios. | Validation/evaluation scenario results now expose typed feasibility and explicit `scoreability_bearing`; required scoreability-bearing infeasible scenarios fail closed while zero-cost diagnostics stay non-bearing. | Focused tests cover typed verdicts, scoreability gates, diagnostic zero-cost scenarios, and artifact payload metadata. |
 | 3 | Addressed | P0 | Add | Add envelope realism floors and operator provenance. | Implemented `[envelope] operator_frozen = true` plus quick-run retainability checks for missing provenance, zero costs, zero ADV impact coefficient, and participation limits above `1.0`. | Focused quick-run tests assert unrealistic/untrusted envelopes score only as non-retainable diagnostics. |
 | 4 | Addressed | P0 | Add | Fail closed or price shorts for asset classes without borrow/carry modeling. | Implemented typed `unpriced_short_financing` fail-closed verdict in the shared book for non-financed data kinds; crypto-perp funding remains exempt. | Focused book tests assert equity shorts fail and crypto-perp shorts remain financed. |
-| 5 | Open | P1 | Refactor | Remove or budget-parameterize validation's hard gross > 1.0 preflight. | The spine should own leverage-budget feasibility. | Leveraged financed book reaches spine; breach returns typed verdict. |
+| 5 | Addressed | P1 | Refactor | Remove or budget-parameterize validation's hard gross > 1.0 preflight. | Validation now lets the shared book own leverage-budget feasibility and returns typed `leverage_budget_breach` verdicts. | Focused validation runner tests cover gross > 1.0 within budget reaching the spine and above-budget exposure failing with the book verdict. |
 | 6 | Open | P1 | Simplify | Trim quick-run hot-path weight: bounded replay default, ADV prefix sums, cheaper row hash, DSR outside default spine. | G6 depends on lean Train iteration. | Runtime-budget tests and DSR/stat tests if retained. |
 | 7 | Open | P1 | Retire | Fix stale active docs: RiskRule semantics, example/candidate caveat, `available_at` authoring guidance. | Wrong docs create wrong strategies. | Doc grep/tests for current semantics. |
 
@@ -461,7 +476,7 @@ pure strategy.py
   pure ergonomics items.
 - **Not verified**: full test suite, real `quant_data` runtime, absolute 1M-row
   wall-clock, and downstream `quant_autoresearch` config behavior.
-- **Phase 1 status**: recommendations No. 1, No. 3, and No. 4 are addressed for
-  quick-run retainability. Recommendation No. 2 remains Phase 2 filter parity.
-- **Residual risk**: until filter parity is resolved, validation/evaluation may
-  still interpret scoreability differently from quick run.
+- **Phase status**: recommendations No. 1, No. 2, No. 3, No. 4, and No. 5 are
+  addressed for quick-run retainability and filter scoreability parity.
+- **Residual risk**: recommendations No. 6 and No. 7 remain open for quick-run
+  hot-path weight and active documentation cleanup.

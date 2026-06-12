@@ -21,7 +21,12 @@ from quant_strategies.core.portfolio_foundation import (
     REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     BookWalkResult,
     FeasibilityError,
+    FeasibilityVerdict,
     PortfolioFoundationConfig,
+    at_risk_period_returns,
+    compute_return_statistics,
+    cost_model_per_side_fraction,
+    scenario_feasibility,
     walk_portfolio_book,
 )
 from quant_strategies.decisions import TargetDecision
@@ -103,6 +108,8 @@ class SpineEvaluationBackend:
                 backend=self.name,
                 status="unavailable",
                 warnings=(str(exc),),
+                required=scenario.required,
+                scoreability_bearing=scenario.scoreability_bearing,
             )
         try:
             walk = _walk_for_scenario(prepared, scenario)
@@ -119,6 +126,9 @@ class SpineEvaluationBackend:
                 status="unsupported" if unsupported else "failed",
                 unsupported_semantics=unsupported,
                 warnings=() if unsupported else (_feasibility_warning(verdict),),
+                required=scenario.required,
+                scoreability_bearing=scenario.scoreability_bearing,
+                feasibility=verdict,
             )
         except ValueError as exc:
             return PortfolioEvaluationResult(
@@ -126,8 +136,11 @@ class SpineEvaluationBackend:
                 backend=self.name,
                 status="failed",
                 warnings=(str(exc),),
+                required=scenario.required,
+                scoreability_bearing=scenario.scoreability_bearing,
             )
         try:
+            feasibility = _scenario_scoreability(walk, scenario, metrics)
             payload = spine_metric_payload(
                 walk,
                 annualization_periods_per_year=metrics.annualization_periods_per_year,
@@ -140,6 +153,8 @@ class SpineEvaluationBackend:
                 backend=self.name,
                 status="failed",
                 warnings=(str(exc),),
+                required=scenario.required,
+                scoreability_bearing=scenario.scoreability_bearing,
             )
         return PortfolioEvaluationResult(
             scenario_id=scenario.scenario_id,
@@ -147,6 +162,9 @@ class SpineEvaluationBackend:
             status="completed",
             metrics=payload.metrics,
             warnings=payload.warnings,
+            required=scenario.required,
+            scoreability_bearing=scenario.scoreability_bearing,
+            feasibility=feasibility,
             tables=tables,
         )
 
@@ -183,6 +201,25 @@ def _data_config(data_kind: str, rows: Sequence[Mapping[str, Any]]) -> DataConfi
         symbols=symbols,
         start=_PLACEHOLDER_DATE,
         end=_PLACEHOLDER_DATE,
+    )
+
+
+def _scenario_scoreability(
+    walk: BookWalkResult,
+    scenario: EvaluationScenario,
+    metrics: EvaluationMetricsConfig,
+) -> FeasibilityVerdict:
+    statistics = compute_return_statistics(
+        at_risk_period_returns(walk.path),
+        trial_count=None,
+        benchmark_sharpe=0.0,
+        min_return_sample=metrics.min_annualized_samples,
+    )
+    return scenario_feasibility(
+        walk.feasibility,
+        statistics,
+        per_side_cost_fraction=cost_model_per_side_fraction(scenario.cost_model),
+        min_return_sample=metrics.min_annualized_samples,
     )
 
 

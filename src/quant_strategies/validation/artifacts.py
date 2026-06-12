@@ -103,6 +103,8 @@ def scenario_classification_reasons(item: ScenarioBackendRunResult) -> tuple[str
         return ("backend_unavailable",)
     if result.status == "unsupported" or result.unsupported_semantics:
         return ("unsupported_semantics",)
+    if result.status == "completed" and not result.feasibility.feasible:
+        return ("non_scoreable",)
     return ()
 
 
@@ -115,6 +117,7 @@ def backend_runs_payload(backend_results: list[ScenarioBackendRunResult]) -> dic
                 "scenario_id": item.scenario_id,
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
+                "scoreability_bearing": item.scoreability_bearing,
                 "diagnostic_only": item.diagnostic_only,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
@@ -142,6 +145,7 @@ def cost_fill_sensitivity_payload(
                 "scenario_id": item.scenario_id,
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
+                "scoreability_bearing": item.scoreability_bearing,
                 "diagnostic_only": item.diagnostic_only,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
@@ -153,6 +157,7 @@ def cost_fill_sensitivity_payload(
                 "metrics": item.result.metrics,
                 "warnings": item.result.warnings,
                 "unsupported_semantics": item.result.unsupported_semantics,
+                "feasibility": item.result.feasibility.payload(),
                 "classification_reasons": scenario_classification_reasons(item),
             }
             for item in backend_results

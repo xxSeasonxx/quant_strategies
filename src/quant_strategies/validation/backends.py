@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from quant_strategies.core.portfolio_foundation import RoundTrip
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict, RoundTrip
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.validation.config import ScenarioRunConfig
 
@@ -165,6 +165,9 @@ class BackendRunResult(BaseModel):
     metrics: dict[str, MetricValue]
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
+    feasibility: FeasibilityVerdict = Field(
+        default_factory=lambda: FeasibilityVerdict(feasible=True)
+    )
     # Netted-book round-trip ledger backing the scalar metrics. Excluded from
     # model_dump so the backend_runs summary stays scalar; it is written to its own
     # JSONL artifact (the gated net_return is recomputable as sum(round_trip.net)).
@@ -178,6 +181,7 @@ class ScenarioBackendRunResult:
     required: bool
     result: BackendRunResult
     scenario_kind: str = "unknown"
+    scoreability_bearing: bool = True
     diagnostic_only: bool = False
     decision_count: int = 0
     decision_records_path: str | None = None

@@ -32,6 +32,14 @@ def test_expand_evaluation_scenarios_uses_fixed_cross_product():
     assert scenarios[3].fill_model.entry_lag_bars == 2
     assert all(item.window_id == "eval_2026_h1" for item in scenarios)
     assert all(item.required is True for item in scenarios)
+    assert [item.scoreability_bearing for item in scenarios] == [
+        False,
+        True,
+        True,
+        False,
+        True,
+        True,
+    ]
 
 
 def test_expand_evaluation_scenarios_preserves_fill_fields_except_entry_lag():
@@ -70,6 +78,7 @@ def test_expand_evaluation_scenarios_uses_configured_matrix_when_present():
                 cost_scenario="stress_custom",
                 fill_scenario="delayed_custom",
                 required=False,
+                scoreability_bearing=False,
                 cost_model=CostModelConfig(fee_bps_per_side=3.0, slippage_bps_per_side=4.0),
                 fill_model=FillModelConfig(price="close", entry_lag_bars=3, exit_lag_bars=1),
             ),
@@ -91,3 +100,4 @@ def test_expand_evaluation_scenarios_uses_configured_matrix_when_present():
     assert scenarios[1].fill_model.entry_lag_bars == 3
     assert scenarios[1].fill_model.exit_lag_bars == 1
     assert scenarios[1].required is False
+    assert scenarios[1].scoreability_bearing is False

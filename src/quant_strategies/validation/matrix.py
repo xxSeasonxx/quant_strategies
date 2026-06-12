@@ -22,6 +22,7 @@ class MatrixScenario(BaseModel):
     id: str = Field(min_length=1)
     kind: ScenarioKind
     required: bool = True
+    scoreability_bearing: bool = True
     cost_model: Mapping[str, Any] = Field(default_factory=dict)
     fill_model: Mapping[str, Any] = Field(default_factory=dict)
 
@@ -44,6 +45,7 @@ def expand_validation_matrix(
         MatrixScenario(
             id=f"{window_id}/base",
             kind="base",
+            scoreability_bearing=False,
             cost_model={"fee_bps_per_side": 0.0, "slippage_bps_per_side": 0.0},
         ),
         MatrixScenario(id=f"{window_id}/realistic_costs", kind="cost", cost_model=base_costs),

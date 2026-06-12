@@ -241,6 +241,54 @@ def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breac
     assert result.tables is None
 
 
+def test_spine_backend_carries_zero_cost_feasibility_verdict_on_diagnostic_scenario():
+    zero_cost = scenario(
+        scenario_id="w/zero_costs/base_fill",
+        cost_scenario="zero_costs",
+        cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
+        scoreability_bearing=False,
+    )
+    decisions = [
+        TargetDecision(
+            strategy_id="demo",
+            instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+            decision_time=AS_OF,
+            as_of_time=AS_OF,
+            target=1.0,
+        ),
+        flat(when=datetime(2026, 1, 1, 0, 3, tzinfo=UTC)),
+    ]
+    extended_rows = [
+        *rows(),
+        {
+            "symbol": "BTC-PERP",
+            "timestamp": datetime(2026, 1, 1, 0, 4, tzinfo=UTC),
+            "close": 104.0,
+            "volume": 1_000.0,
+            "vwap": 104.0,
+            "num_trades": 100,
+            "has_funding_event": False,
+        },
+    ]
+
+    result = SpineEvaluationBackend().run(
+        decisions=decisions,
+        rows=extended_rows,
+        scenario=zero_cost,
+        metrics=EvaluationMetricsConfig(
+            annualization_periods_per_year=252,
+            min_annualized_samples=2,
+        ),
+        capacity_model=capacity_model(),
+    )
+
+    assert result.status == "completed"
+    assert result.scoreability_bearing is False
+    assert result.feasibility.feasible is False
+    assert result.feasibility.reason == "zero_cost"
+    assert result.tables is not None
+
+
 def test_spine_backend_models_funding_for_crypto_perp_kind():
     funding_rows = rows()
     funding_rows.append(

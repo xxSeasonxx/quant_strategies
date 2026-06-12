@@ -99,6 +99,7 @@ class EvaluationScenarioConfig(EvaluationConfigModel):
     cost_scenario: str = Field(default="custom", min_length=1)
     fill_scenario: str = Field(default="custom", min_length=1)
     required: bool = True
+    scoreability_bearing: bool = True
     cost_model: CostModelConfig | None = None
     fill_model: FillModelConfig | None = None
 

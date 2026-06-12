@@ -8,6 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from quant_strategies.core.config import CapacityModelConfig, LeverageBudgetConfig
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.metrics import MetricValue
@@ -57,6 +58,11 @@ class PortfolioEvaluationResult(BaseModel):
     metrics: dict[str, MetricValue] = Field(default_factory=dict)
     warnings: tuple[str, ...] = ()
     unsupported_semantics: tuple[str, ...] = ()
+    required: bool = True
+    scoreability_bearing: bool = True
+    feasibility: FeasibilityVerdict = Field(
+        default_factory=lambda: FeasibilityVerdict(feasible=True)
+    )
     tables: PortfolioTraceTables | None = None
 
 

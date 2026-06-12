@@ -87,6 +87,7 @@ def _backend_summary(
                 "scenario_id": item.scenario_id,
                 "scenario_kind": item.scenario_kind,
                 "required": item.required,
+                "scoreability_bearing": item.scoreability_bearing,
                 "diagnostic_only": item.diagnostic_only,
                 "decision_count": item.decision_count,
                 "decision_records_path": item.decision_records_path,
@@ -97,6 +98,7 @@ def _backend_summary(
                 "backend": item.result.backend,
                 "status": status,
                 "unsupported_semantics": list(item.result.unsupported_semantics),
+                "feasibility": item.result.feasibility.payload(),
             }
         )
     return {
@@ -111,7 +113,10 @@ def _verdict_replayable(backend_results: list[ScenarioBackendRunResult]) -> bool
     required_completed = [
         item
         for item in backend_results
-        if item.required and not item.diagnostic_only and item.result.status == "completed"
+        if item.required
+        and item.scoreability_bearing
+        and not item.diagnostic_only
+        and item.result.status == "completed"
     ]
     return bool(required_completed) and all(
         _scenario_replayable(item) for item in required_completed

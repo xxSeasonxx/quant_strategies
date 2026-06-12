@@ -33,10 +33,9 @@ class SpineBackend:
     unfinanced leverage for an unmodelled asset class) raises mid-walk and surfaces
     as ``status="unsupported"`` carrying the typed reason — never a clamped score.
     The spine's non-raising scoring guards (``zero_cost`` on the no-cost reference
-    scenario, ``insufficient_samples`` on thin evidence) are NOT mechanical
-    infeasibilities: the netted-book walk and its ledger are valid, so the metrics
-    are reported ``completed`` and validation's mechanical gates (min trades,
-    positive activity, stressed/fill-lag floors) judge the evidence.
+    scenario, ``insufficient_samples`` on thin evidence) keep the netted-book walk
+    and ledger reportable, but their typed verdict is carried on the result so
+    validation can fail scoreability-bearing scenarios without parsing warnings.
     """
 
     name = "engine"
@@ -78,6 +77,7 @@ class SpineBackend:
             status="completed",
             metrics=_ledger_metrics(foundation.ledger),
             round_trips=foundation.ledger.round_trips,
+            feasibility=foundation.feasible_verdict(),
         )
 
 
@@ -126,4 +126,5 @@ def _infeasible_result(backend: str, verdict: FeasibilityVerdict) -> BackendRunR
         metrics={},
         warnings=(f"feasibility:{detail}",),
         unsupported_semantics=(reason,),
+        feasibility=verdict,
     )

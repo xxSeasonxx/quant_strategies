@@ -675,6 +675,7 @@ def _run_portfolio_scenario(
                 leverage_budget=context.config.leverage_budget,
             )
         )
+        scenario_result = _with_scenario_metadata(scenario_result, scenario)
         if scenario_result.status == "completed":
             scenario_result = _with_benchmark_metrics(scenario_result, benchmark_metrics)
         id_mismatch_failure = _scenario_id_mismatch_failure(scenario, scenario_result)
@@ -707,11 +708,27 @@ def _run_portfolio_scenario(
                 status,
                 message,
             )
+        scoreability_failure = _completed_scoreability_failure(scenario_result)
+        if scoreability_failure is not None:
+            failed_result = _failed_scenario_result(scenario_result, scoreability_failure)
+            if not scenario.required:
+                state.backend_results.append(_strip_trace_tables(failed_result))
+                _record_optional_scenario_failure(state, scenario, scoreability_failure)
+                return None
+            state.backend_results.append(_strip_trace_tables(failed_result))
+            scenario_event.fail(scoreability_failure, backend_status=scenario_result.status)
+            return _failure_result(
+                context,
+                state,
+                "portfolio_evaluation",
+                "portfolio_evaluation_failed",
+                scoreability_failure,
+            )
         metric_failure = _completed_metric_failure(scenario_result)
         if metric_failure is not None:
             if not scenario.required:
                 state.backend_results.append(
-                    _strip_trace_tables(_failed_optional_result(scenario_result, metric_failure))
+                    _strip_trace_tables(_failed_scenario_result(scenario_result, metric_failure))
                 )
                 _record_optional_scenario_failure(state, scenario, metric_failure)
                 return None
@@ -727,7 +744,7 @@ def _run_portfolio_scenario(
             message = f"{scenario_result.scenario_id}: completed backend emitted no trace tables"
             if not scenario.required:
                 state.backend_results.append(
-                    _strip_trace_tables(_failed_optional_result(scenario_result, message))
+                    _strip_trace_tables(_failed_scenario_result(scenario_result, message))
                 )
                 _record_optional_scenario_failure(state, scenario, message)
                 return None
@@ -744,7 +761,7 @@ def _run_portfolio_scenario(
             message = f"{scenario_result.scenario_id}: missing trace table: {missing_trace_table}"
             if not scenario.required:
                 state.backend_results.append(
-                    _strip_trace_tables(_failed_optional_result(scenario_result, message))
+                    _strip_trace_tables(_failed_scenario_result(scenario_result, message))
                 )
                 _record_optional_scenario_failure(state, scenario, message)
                 return None
@@ -769,7 +786,19 @@ def _scenario_id_mismatch_failure(scenario: Any, result: PortfolioEvaluationResu
     )
 
 
-def _failed_optional_result(
+def _with_scenario_metadata(
+    result: PortfolioEvaluationResult,
+    scenario: Any,
+) -> PortfolioEvaluationResult:
+    return result.model_copy(
+        update={
+            "required": bool(scenario.required),
+            "scoreability_bearing": bool(scenario.scoreability_bearing),
+        }
+    )
+
+
+def _failed_scenario_result(
     result: PortfolioEvaluationResult, message: str
 ) -> PortfolioEvaluationResult:
     return result.model_copy(
@@ -846,6 +875,9 @@ def _write_completion_artifacts(
                 "scenario_id": item.scenario_id,
                 "backend": item.backend,
                 "status": item.status,
+                "required": item.required,
+                "scoreability_bearing": item.scoreability_bearing,
+                "feasibility": item.feasibility.payload(),
                 "metrics": item.metrics,
                 "warnings": list(item.warnings),
                 "unsupported_semantics": list(item.unsupported_semantics),
@@ -937,7 +969,7 @@ def _build_fold_outputs(
     are keyed by `(window_id, scenario_id)`; the window id is resolved from the
     scenario id against the known window ids.
     """
-    metrics_by_scenario = {result.scenario_id: result.metrics for result in metric_results}
+    result_by_scenario = {result.scenario_id: result for result in metric_results}
     fold_returns: list[FoldReturnSeries] = []
     scenario_metrics: list[FoldScenarioMetrics] = []
     for result in trace_results:
@@ -956,13 +988,18 @@ def _build_fold_outputs(
                     periods_per_year=periods_per_year,
                 )
             )
+            metric_result = result_by_scenario.get(scenario_id)
             scenario_metrics.append(
                 fold_metrics_from_scenario(
                     window_id,
                     scenario_id,
-                    metrics_by_scenario.get(scenario_id, {}),
+                    {} if metric_result is None else metric_result.metrics,
                     provenance=provenance,
                     causal_ok=True,
+                    scoreability_bearing=(
+                        True if metric_result is None else metric_result.scoreability_bearing
+                    ),
+                    feasibility=None if metric_result is None else metric_result.feasibility,
                 )
             )
     return tuple(fold_returns), tuple(scenario_metrics)
@@ -1272,6 +1309,20 @@ def _backend_failure_message(result: PortfolioEvaluationResult) -> str:
     return ": ".join(parts)
 
 
+def _completed_scoreability_failure(result: PortfolioEvaluationResult) -> str | None:
+    if (
+        result.status != "completed"
+        or not result.scoreability_bearing
+        or result.feasibility.feasible
+    ):
+        return None
+    reason = result.feasibility.reason or "infeasible"
+    parts = [f"{result.scenario_id}: non_scoreable:{reason}"]
+    if result.feasibility.detail:
+        parts.append(str(result.feasibility.detail))
+    return ": ".join(parts)
+
+
 def _completed_metric_failure(result: PortfolioEvaluationResult) -> str | None:
     for name in _REQUIRED_COMPLETED_FLOAT_METRICS:
         if _finite_float_metric(result.metrics.get(name)) is None:
@@ -1434,6 +1485,9 @@ def _scenario_summary(
                 "scenario_id": result.scenario_id,
                 "backend": result.backend,
                 "status": result.status,
+                "required": result.required,
+                "scoreability_bearing": result.scoreability_bearing,
+                "feasibility": result.feasibility.payload(),
                 "metric_count": len(result.metrics),
                 "warnings": list(result.warnings),
                 "unsupported_semantics": list(result.unsupported_semantics),

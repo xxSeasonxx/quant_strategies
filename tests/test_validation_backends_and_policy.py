@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
 from quant_strategies.validation.backends import (
     BackendMetrics,
     BackendRunResult,
@@ -254,6 +255,80 @@ def test_policy_mechanical_fail_for_required_unsupported_semantics():
 
     assert decision.decision == "mechanical_fail"
     assert "unsupported_semantics" in decision.reasons
+    assert_advisory_only(decision)
+
+
+def test_policy_mechanical_fail_for_required_non_scoreable_feasibility_verdict():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/realistic_costs",
+                required=True,
+                scenario_kind="cost",
+                result=BackendRunResult(
+                    backend="fake",
+                    status="completed",
+                    metrics={"net_return": 0.03, "trade_count": 20},
+                    warnings=(),
+                    unsupported_semantics=(),
+                    feasibility=FeasibilityVerdict(
+                        feasible=False,
+                        reason="zero_cost",
+                        detail="zero cost on a scoreable run is below the operator cost floor",
+                    ),
+                ),
+            )
+        ],
+        min_trades=10,
+        mechanical_thresholds=MechanicalThresholdsConfig(enabled=False),
+    )
+
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("non_scoreable_required_scenario",)
+    assert decision.failed_gates == ("required_scenario_scoreability",)
+    assert "zero_cost" in decision.gate_details["required_scenario_scoreability"]
+    assert_advisory_only(decision)
+
+
+def test_policy_mechanical_fail_with_typed_feasibility_reason_for_unsupported_result():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/realistic_costs",
+                required=True,
+                scenario_kind="cost",
+                result=BackendRunResult(
+                    backend="engine",
+                    status="unsupported",
+                    metrics={},
+                    warnings=("feasibility:intended gross 1.5 exceeds max 1.0",),
+                    unsupported_semantics=("leverage_budget_breach",),
+                    feasibility=FeasibilityVerdict(
+                        feasible=False,
+                        reason="leverage_budget_breach",
+                        observed_gross=1.5,
+                        observed_net=1.5,
+                        detail="intended gross 1.5 exceeds max 1.0",
+                    ),
+                ),
+            )
+        ],
+        min_trades=10,
+        mechanical_thresholds=MechanicalThresholdsConfig(enabled=False),
+    )
+
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("non_scoreable_required_scenario",)
+    assert decision.failed_gates == ("required_scenario_scoreability",)
+    assert "leverage_budget_breach" in decision.gate_details["required_scenario_scoreability"]
+    assert (
+        "validation_2026_h1/realistic_costs"
+        in decision.gate_details["required_scenario_scoreability"]
+    )
     assert_advisory_only(decision)
 
 
@@ -664,6 +739,42 @@ def test_policy_rejects_missing_required_scenario_id_even_when_count_matches():
 
     assert decision.decision == "mechanical_fail"
     assert "missing_required_scenarios" in decision.reasons
+    assert_advisory_only(decision)
+
+
+def test_policy_still_requires_non_scoreability_bearing_diagnostics_for_coverage():
+    decision = classify_validation(
+        data_passed=True,
+        backend_results=[
+            ScenarioBackendRunResult(
+                window_id="validation_2026_h1",
+                scenario_id="validation_2026_h1/base",
+                scenario_kind="base",
+                required=True,
+                scoreability_bearing=False,
+                diagnostic_only=True,
+                result=BackendRunResult(
+                    backend="fake",
+                    status="failed",
+                    metrics={},
+                    warnings=("diagnostic backend failed",),
+                    unsupported_semantics=(),
+                ),
+            ),
+            completed_scenario(
+                "validation_2026_h1",
+                "cost",
+                net_return=0.03,
+                trade_count=50,
+            ),
+        ],
+        min_trades=10,
+        mechanical_thresholds=MechanicalThresholdsConfig(enabled=False),
+    )
+
+    assert decision.decision == "mechanical_fail"
+    assert decision.reasons == ("fake_failed",)
+    assert decision.failed_gates == ("required_backend_completed",)
     assert_advisory_only(decision)
 
 

@@ -69,7 +69,8 @@ per-`(window, scenario)` out-of-sample return series typed and in-process —
 `fold_returns` (`FoldReturnSeries`: numpy `timestamps`/`values`,
 `periods_per_year`, `per_symbol`), `scenario_metrics` (`FoldScenarioMetrics`:
 undeflated `sharpe`/`sortino`/`calmar`/`max_drawdown`/`worst_period_return`/
-`trade_count`/`return_sample_count` + `causal_ok` + `provenance`),
+`trade_count`/`return_sample_count` + `causal_ok` + `scoreability_bearing` +
+`feasibility` + `provenance`),
 `causal_replay_passed`, `provenance`, and the `returns_for`/`metrics_for`/
 `window_ids`/`scenario_ids_for` helpers. This lets consumers read per-fold OOS
 returns without scraping `tables/portfolio_path.parquet`; the `values` reuse the
