@@ -157,10 +157,11 @@ version. For Train/autoresearch iteration, `micro` replay is a cheap replay chec
 detected causality violations fail closed, while timeout or incomplete probe
 evidence can still score but is non-retainable. Complete replay remains available
 through explicit strict replay and the later validation/evaluation surfaces.
-Completed, feasible quick-run summaries include `portfolio_foundation` metrics — the compact summary
-of the authoritative scored NAV book, computed over **at-risk bars** with a
-minimum-sample gate — plus `economic_metrics`, the compact summary of the
-per-trade attribution ledger derived from the same book walk. The foundation is a
+Completed, feasible quick-run summaries include `portfolio_foundation` metrics —
+the compact summary of the authoritative scored NAV book, computed over
+**at-risk bars** with a default 20-return minimum-sample gate — plus
+`economic_metrics`, the compact summary of the per-trade attribution ledger
+derived from the same book walk. The foundation is a
 dependency-light quick-run portfolio-return matrix with compact full-Train and
 subwindow records, not survivor-grade evaluation evidence. Python callers receive
 `RunResult`; status lives under `result.outcome`, while replayability,

@@ -192,6 +192,7 @@ def write_config(
     micro_timeout_seconds: object | None = None,
     foundation_subwindows: object | None = None,
     foundation_cost_stress_multiplier: object | None = None,
+    foundation_min_return_sample: object | None = None,
     params_extra: str = "",
     data_extra: str = "",
     leverage_budget_extra: str = "",
@@ -238,6 +239,11 @@ def write_config(
     foundation_cost_stress_multiplier_line = (
         f"foundation_cost_stress_multiplier = {foundation_cost_stress_multiplier}\n"
         if foundation_cost_stress_multiplier is not None
+        else ""
+    )
+    foundation_min_return_sample_line = (
+        f"foundation_min_return_sample = {foundation_min_return_sample}\n"
+        if foundation_min_return_sample is not None
         else ""
     )
     capacity_model_block = (
@@ -288,10 +294,16 @@ slippage_bps_per_side = 0.0
 [output]
 	results_dir = "results"
 	quick_checks = {str(quick_checks).lower()}
-			{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_subwindows_line}{foundation_cost_stress_multiplier_line}
-				'''.lstrip()
+		{artifact_profile_line}{diagnostic_sample_trades_line}{causality_check_line}{strict_probe_limit_line}{focused_probe_limit_line}{focused_timeout_seconds_line}{micro_probe_limit_line}{micro_timeout_seconds_line}{foundation_subwindows_line}{foundation_cost_stress_multiplier_line}{foundation_min_return_sample_line}
+					'''.lstrip()
     )
     return config_path
+
+
+def write_low_sample_config(repo_root: Path, **kwargs: object) -> Path:
+    """Write a config for short synthetic fixtures that explicitly lower the sample floor."""
+    kwargs.setdefault("foundation_min_return_sample", 2)
+    return write_config(repo_root, **kwargs)
 
 
 def trusted_envelope_section() -> str:
@@ -503,7 +515,7 @@ def test_run_config_routes_default_causality_policy_to_micro(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, artifact_profile="diagnostic")
+    config_path = write_low_sample_config(tmp_path, artifact_profile="diagnostic")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -568,7 +580,7 @@ def test_run_config_emitted_policy_completes_without_strict_suppression_replay(
         "        target=1.0,\n"
         "    )]\n"
     )
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="emitted",
@@ -647,7 +659,7 @@ def test_run_config_off_policy_scores_when_operator_allows_unverified(
     # The operator-frozen escape hatch re-admits off to scoring (unverified-but-scored),
     # preserving the prior profiling/debugging behavior.
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="off",
@@ -716,7 +728,7 @@ def test_run_config_capped_strict_replay_records_incomplete_strict_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="strict",
@@ -757,7 +769,7 @@ def test_run_config_focused_policy_pass_allows_scoring_and_writes_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -817,7 +829,7 @@ def test_run_config_focused_policy_real_replay_keeps_low_level_flags_unverified(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -851,7 +863,7 @@ def test_run_config_micro_policy_timeout_still_scores_and_writes_unverified_evid
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="micro",
@@ -909,7 +921,7 @@ def test_run_config_micro_policy_pass_still_scores_without_retention_proof(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="micro",
@@ -1026,7 +1038,7 @@ def test_run_config_strict_trusted_envelope_is_retainable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="summary",
         causality_check="strict",
@@ -1054,7 +1066,7 @@ def test_run_config_missing_operator_envelope_scores_but_is_not_retainable(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="summary",
         causality_check="strict",
@@ -1102,7 +1114,7 @@ def test_run_config_unrealistic_envelope_scores_but_is_not_retainable(
     expected_reason: str,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="summary",
         causality_check="strict",
@@ -1225,7 +1237,7 @@ def test_run_config_focused_policy_pass_cache_skips_replay(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -1316,7 +1328,7 @@ def test_run_config_focused_policy_profile_version_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -1360,7 +1372,7 @@ def test_run_config_focused_policy_source_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -1403,14 +1415,14 @@ def test_run_config_focused_policy_probe_limit_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    first_config = write_config(
+    first_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-small.toml",
         artifact_profile="diagnostic",
         causality_check="focused",
         focused_probe_limit=1,
     )
-    second_config = write_config(
+    second_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-large.toml",
         artifact_profile="diagnostic",
@@ -1455,7 +1467,7 @@ def test_run_config_focused_policy_row_hash_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         causality_check="focused",
@@ -1500,14 +1512,14 @@ def test_run_config_focused_policy_params_hash_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    first_config = write_config(
+    first_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-param-a.toml",
         artifact_profile="diagnostic",
         causality_check="focused",
         params_extra="threshold = 1\n",
     )
-    second_config = write_config(
+    second_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-param-b.toml",
         artifact_profile="diagnostic",
@@ -1550,14 +1562,14 @@ def test_run_config_focused_policy_timeout_budget_change_invalidates_cache(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    first_config = write_config(
+    first_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-timeout-a.toml",
         artifact_profile="diagnostic",
         causality_check="focused",
         focused_timeout_seconds=30.0,
     )
-    second_config = write_config(
+    second_config = write_low_sample_config(
         tmp_path,
         relative_path="focused-timeout-b.toml",
         artifact_profile="diagnostic",
@@ -1618,7 +1630,7 @@ def test_run_config_strategy_and_replay_do_not_see_execution_buffer_rows(
         "        target=1.0,\n"
         "    )]\n"
     )
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         end="2024-01-04",
         data_extra='load_end = "2024-01-06"\n',
@@ -1674,7 +1686,7 @@ def test_run_config_execution_buffer_fills_late_decision_exit(
         "        ),\n"
         "    ]\n"
     )
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         end="2024-01-04",
         data_extra='load_end = "2024-01-06"\n',
@@ -1779,7 +1791,7 @@ def test_run_config_engine_artifacts_use_only_decision_window_decisions(
         "        ))\n"
         "    return decisions\n"
     )
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         end="2024-01-04",
         data_extra='load_end = "2024-01-06"\n',
@@ -1809,7 +1821,7 @@ def test_run_config_engine_artifacts_use_only_decision_window_decisions(
 
 def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -1894,7 +1906,7 @@ def test_run_config_success_writes_artifacts(tmp_path: Path, monkeypatch: pytest
 
 def test_summary_profile_writes_compact_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, artifact_profile="summary")
+    config_path = write_low_sample_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -1979,7 +1991,7 @@ def test_run_config_exposes_typed_in_process_economics(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2013,7 +2025,7 @@ def test_run_config_economics_summary_matches_summary_json(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, artifact_profile="summary")
+    config_path = write_low_sample_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2037,7 +2049,7 @@ def test_run_config_surfaces_capacity_diagnostics_and_economic_impact(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="diagnostic",
         foundation_subwindows=1,
@@ -2084,7 +2096,7 @@ def test_run_config_exposes_portfolio_foundation_and_summary_json(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="summary",
         foundation_subwindows=1,
@@ -2203,7 +2215,7 @@ def test_run_config_zero_cost_feasibility_failure_keeps_retainability_reason(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile="summary",
         capacity_model_extra=priced_capacity_model_section(),
@@ -2270,7 +2282,7 @@ def test_operator_leverage_budget_above_one_admits_within_budget_book(
     # 1.5 that the conservative default 1.0 would reject -- proving the operator knob
     # threads into the book (design D6).
     write_perp_target_strategy(tmp_path, target=1.5)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         kind="crypto_perp_funding",
         symbol="BTC-PERP",
@@ -2393,7 +2405,7 @@ def test_run_config_reference_target_book_with_risk_rule_e2e(
     # declared stop-loss the book enforces on the net position. The authoritative book
     # is the scored object; the derived per-trade ledger reconciles with NAV.
     write_risk_rule_strategy(tmp_path)
-    config_path = write_config(tmp_path, artifact_profile="diagnostic")
+    config_path = write_low_sample_config(tmp_path, artifact_profile="diagnostic")
     # enter long at fill bar (idx1=100), hold one flat bar (idx2=100), then a >5% drop
     # at idx3 trips the stop and flattens -> two at-risk return bars, one stop round trip.
     monkeypatch.setattr(
@@ -2428,6 +2440,55 @@ def test_runner_config_rejects_unbounded_foundation_subwindows(tmp_path: Path):
 
     with pytest.raises(RunnerError, match="foundation_subwindows"):
         config_module.load_config(config_path, repo_root=tmp_path)
+
+
+def test_run_config_passes_foundation_min_return_sample_to_book(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="diagnostic",
+        foundation_min_return_sample=7,
+    )
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+    captured: list[int] = []
+
+    def fail_after_capture(*args, config: object, **kwargs):
+        captured.append(config.min_return_sample)
+        raise ValueError("stop after config capture")
+
+    monkeypatch.setattr(runner_module, "build_portfolio_foundation", fail_after_capture)
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert captured == [7]
+    assert result.outcome.failure_stage == "portfolio_foundation"
+
+
+def test_run_config_uses_default_foundation_sample_floor_for_short_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(rows=rows(100.0, 101.0, 102.0, 104.0)),
+    )
+
+    result = run_config(config_path, repo_root=tmp_path)
+
+    assert result.succeeded is False
+    assert result.outcome.failure_stage == "feasibility"
+    assert result.feasibility is not None
+    assert result.feasibility.reason == "insufficient_samples"
 
 
 def test_runner_config_has_no_agent_editable_leverage_budget(tmp_path: Path):
@@ -2490,7 +2551,7 @@ def test_run_config_economics_are_profile_independent(
 
     economics_by_profile = []
     for profile in ("summary", "diagnostic", "full"):
-        config_path = write_config(
+        config_path = write_low_sample_config(
             tmp_path, relative_path=f"{profile}.toml", artifact_profile=profile
         )
         result = run_config(config_path, repo_root=tmp_path)
@@ -2623,7 +2684,7 @@ def test_default_quick_run_writes_diagnostics_without_full_replay_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path,
         artifact_profile=None,
         diagnostic_sample_trades=1,
@@ -2720,7 +2781,7 @@ def test_summary_profile_does_not_build_full_evidence_json(
     # The engine evidence packet (evidence.json) was retired with the per-trade scorer;
     # no artifact profile serializes it. The authoritative book is the scored object.
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, artifact_profile="summary")
+    config_path = write_low_sample_config(tmp_path, artifact_profile="summary")
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2738,7 +2799,7 @@ def test_diagnostics_completion_is_not_validation_pass(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, quick_checks=False)
+    config_path = write_low_sample_config(tmp_path, quick_checks=False)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2825,7 +2886,7 @@ def test_run_artifacts_preserve_exit_reason_and_decision_metadata(
         "        },\n"
         "    )]\n"
     )
-    config_path = write_config(tmp_path, quick_checks=False, artifact_profile="full")
+    config_path = write_low_sample_config(tmp_path, quick_checks=False, artifact_profile="full")
     # Enter long at the fill bar (idx2=100); a +0.3% move at idx3 stays under the 0.5%
     # take-profit, and the +0.6% move at idx4 trips it -> two at-risk return bars, one
     # take_profit round trip (clears the min_return_sample=2 gate).
@@ -2859,7 +2920,7 @@ def test_losing_but_feasible_run_keeps_completed_summary(
     # Feasibility is the quick check on the spine: a losing-but-feasible book still
     # completes and passes (negative return is a feasible NAV path, not a gate failure).
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path, quick_checks=True)
+    config_path = write_low_sample_config(tmp_path, quick_checks=True)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3083,7 +3144,7 @@ def test_run_config_marks_complete_available_at_coverage(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3119,7 +3180,7 @@ def test_run_config_reuses_execution_evidence_quality_after_causality(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -3631,7 +3692,7 @@ def test_run_config_rejects_invalid_funding_indicator_before_engine_request(
 
 def test_completed_run_writes_minimal_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
     monkeypatch.setattr(
         execution, "load_data", lambda config, **_kwargs: LoadedData(rows=loaded_rows)
@@ -3698,7 +3759,7 @@ def test_full_profile_accepts_nonfinite_research_fields_in_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
     loaded_rows[0]["research_nan"] = float("nan")
     loaded_rows[0]["research_decimal"] = Decimal("1.25")
@@ -3725,7 +3786,7 @@ def test_full_profile_strategy_input_rows_hash_matches_normalized_projection(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0)
     for loaded_row in loaded_rows:
         timestamp = loaded_row["timestamp"]
@@ -4000,7 +4061,7 @@ def test_data_readiness_allows_matching_decision_row_at_decision_time(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     # available_at == timestamp: point-in-time clean (not look-ahead) and ready
     # exactly at the decision boundary.
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True, readiness_lag=timedelta(0))
@@ -4338,7 +4399,7 @@ def test_crypto_perp_funding_notes_label_returns_as_funding_aware(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(
+    config_path = write_low_sample_config(
         tmp_path, kind="crypto_perp_funding", symbol="BTC-PERP", dataset=None
     )
     funding_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
@@ -4410,7 +4471,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
     candidate_dir = repo_root / "candidates" / "demo"
     candidate_dir.mkdir(parents=True)
     (candidate_dir / "strategy.py").write_text((repo_root / "strategies" / "demo.py").read_text())
-    config_path = write_config(
+    config_path = write_low_sample_config(
         repo_root,
         relative_path="candidates/demo/run.toml",
         strategy_path="strategy.py",
@@ -4431,7 +4492,7 @@ def test_run_config_resolves_relative_config_path_against_repo_root_from_other_c
 
 def test_run_config_emits_structured_stage_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -4475,7 +4536,7 @@ def test_cli_run_accepts_explicit_repo_root_from_other_cwd(
     candidate_dir = repo_root / "candidates" / "demo"
     candidate_dir.mkdir(parents=True)
     (candidate_dir / "strategy.py").write_text((repo_root / "strategies" / "demo.py").read_text())
-    write_config(
+    write_low_sample_config(
         repo_root,
         relative_path="candidates/demo/run.toml",
         strategy_path="strategy.py",
@@ -4502,7 +4563,7 @@ def test_cli_run_events_jsonl_writes_events_to_stderr(
     import quant_strategies.cli as cli
 
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         execution,
@@ -4534,7 +4595,7 @@ def test_cli_quick_run_uses_runner_and_prints_result_dir(
     import quant_strategies.cli as cli
 
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(config_module, "default_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         execution,
@@ -4606,7 +4667,7 @@ def test_repeated_runner_artifacts_are_byte_deterministic(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     loaded_rows = rows(100.0, 101.0, 102.0, 104.0, research_fields=True)
 
     def load_data(config, **_kwargs):
@@ -4681,7 +4742,7 @@ def test_run_config_completion_write_failure_returns_structured_result(
     import quant_strategies.runner as runner_pkg
 
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -4725,7 +4786,7 @@ def test_run_config_flags_unvalidated_passthrough_on_quick_run(
     # The default demo strategy defines no validate_params: the quick run completes
     # but is visibly flagged as exploratory (params not schema-checked).
     write_strategy(tmp_path)
-    config_path = write_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path)
     monkeypatch.setattr(
         execution,
         "load_data",

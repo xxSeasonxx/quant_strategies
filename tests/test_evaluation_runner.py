@@ -178,7 +178,6 @@ weight = 0.25
 [fill_model]
 price = "close"
 entry_lag_bars = 1
-exit_lag_bars = 0
 
 [cost_model]
 fee_bps_per_side = 0.5
@@ -657,7 +656,6 @@ slippage_bps_per_side = 5.0
 [scenarios.fill_model]
 price = "close"
 entry_lag_bars = 2
-exit_lag_bars = 0
 """
     )
     backend = PreparedFakeBackend()

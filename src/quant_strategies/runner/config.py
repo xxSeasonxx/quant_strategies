@@ -22,6 +22,7 @@ from quant_strategies.core.config import (
 from quant_strategies.core.errors import ConfigError
 from quant_strategies.core.portfolio_foundation import (
     DEFAULT_FILL_STRESS_FRACTION,
+    DEFAULT_MIN_RETURN_SAMPLE,
     MAX_FOUNDATION_SUBWINDOWS,
 )
 
@@ -98,6 +99,7 @@ class OutputConfig(RunnerConfigModel):
     foundation_fill_stress_fraction: float = Field(
         default=DEFAULT_FILL_STRESS_FRACTION, ge=0.0, lt=1.0
     )
+    foundation_min_return_sample: StrictInt = Field(default=DEFAULT_MIN_RETURN_SAMPLE, ge=2)
     causality_check: CausalityCheck = "micro"
     strict_probe_limit: StrictInt | None = Field(default=None, ge=0)
     focused_probe_limit: StrictInt = Field(default=64, ge=1)

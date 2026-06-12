@@ -157,7 +157,7 @@ Common sections, then per-surface differences. Dates are ISO strings
 | `load_start` / `load_end` | `str` (date, optional) | **quick run only** — wider execution/load window; must cover `start`/`end`; omitted means same as decision window |
 
 **`[fill_model]`** — `price` (`"close"` or `"quote"`; use `quote` for
-`forex_with_quotes`), `entry_lag_bars` (int), `exit_lag_bars` (int).
+`forex_with_quotes`), `entry_lag_bars` (int).
 
 **`[cost_model]`** — `fee_bps_per_side` (float), `slippage_bps_per_side` (float).
 
@@ -185,7 +185,7 @@ the ceiling.
 strategy_path, strategy_id            # top-level
 [data]   kind, dataset, symbols, start, end
 [params] …
-[fill_model] price, entry_lag_bars, exit_lag_bars
+[fill_model] price, entry_lag_bars
 [cost_model] fee_bps_per_side, slippage_bps_per_side
 [capacity_model] mode, portfolio_notional, adv_lookback_bars, adv_min_observations,
                  max_bar_participation, max_adv_participation,
@@ -197,10 +197,11 @@ strategy_path, strategy_id            # top-level
          causality_check, micro_probe_limit, micro_timeout_seconds,
          focused_probe_limit, focused_timeout_seconds, strict_probe_limit,
          foundation_subwindows, foundation_cost_stress_multiplier,
-         foundation_fill_stress_fraction
+         foundation_fill_stress_fraction, foundation_min_return_sample
 ```
 
-`foundation_subwindows` is bounded to 1-64.
+`foundation_subwindows` is bounded to 1-64. `foundation_min_return_sample`
+defaults to 20 and may be set to any integer >= 2 for explicit diagnostics.
 The portfolio **leverage budget (gross and net) lives in the operator-frozen
 `[leverage_budget]` section** (above), not an agent-editable `[output]` key — there
 is no `foundation_max_gross_exposure` field.
@@ -313,10 +314,9 @@ the run completed and `failure_stage is None`.
 | `retainability` | `RunRetainability` | typed quick-run retention verdict: `retainable`, `reason`, and `detail` |
 | `retainable` | `bool` (property) | true only when the quick-run evidence may advance to validation/evaluation |
 
-**`RunOutcome`**: `completed` (bool), `failure_stage` (str|None), `assessment_status`
-(str; diagnostic, e.g. `runner_failed` on failure), `promotion_eligible` (bool;
-always `False`), `param_contract` (`validated` / `unvalidated_passthrough` /
-`unknown`).
+**`RunOutcome`**: `completed` (bool), `failure_stage` (str|None),
+`assessment_status` (str; diagnostic, e.g. `runner_failed` on failure),
+`param_contract` (`validated` / `unvalidated_passthrough` / `unknown`).
 
 **`FeasibilityVerdict`**: `feasible` (bool), `reason` (str|None — one of
 `leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
@@ -668,8 +668,8 @@ Stages treated as **data failures** (CLI exit `3`): `data_load`, `data_readiness
 
 Other quick-run stages you may see in `failure_stage`: `config_load`,
 `artifact_initialization`, `strategy_execution` (sub-stage `decision_generation`),
-`causality`, `request_build`, `engine_evaluation`, `feasibility` (a fail-closed
-envelope breach; read `RunResult.feasibility`), `artifact_write`.
+`causality`, `request_build`, `portfolio_foundation`, `feasibility` (a
+fail-closed envelope breach; read `RunResult.feasibility`), `artifact_write`.
 
 ---
 

@@ -84,7 +84,7 @@ def scenario_config(
     dataset = "demo_bars" if data_kind == "bars" else None
     return ScenarioRunConfig(
         scenario_id="realistic",
-        fill_model=FillModelConfig(price="close", entry_lag_bars=entry_lag_bars, exit_lag_bars=0),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=entry_lag_bars),
         cost_model=CostModelConfig(fee_bps_per_side=fee_bps, slippage_bps_per_side=slippage_bps),
         capacity_model=CapacityModelConfig(
             mode="adv_impact",
@@ -254,9 +254,11 @@ def test_spine_backend_leverage_breach_is_typed_unsupported_not_clamped():
 
 
 def test_spine_backend_carries_zero_cost_feasibility_verdict():
+    long_rows = [bar(minute, 100.0 + minute) for minute in range(23)]
+    long_hold = [target(0, 1.0), target(21, 0.0)]
     result = SpineBackend().run(
-        decisions=long_round_trip(),
-        rows=rows(),
+        decisions=long_hold,
+        rows=long_rows,
         config=scenario_config(fee_bps=0.0, slippage_bps=0.0),
     )
 

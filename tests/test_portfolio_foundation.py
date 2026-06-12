@@ -319,7 +319,7 @@ def test_capacity_participation_breach_fails_closed():
 
 def test_compute_return_statistics_reports_descriptive_inputs_without_significance_fields():
     values = [0.01, -0.005, 0.02, 0.0]
-    stats = compute_return_statistics(values)
+    stats = compute_return_statistics(values, min_return_sample=2)
     payload = stats.payload()
 
     assert stats.return_sample_count == 4
@@ -434,7 +434,7 @@ def quote_walk(
         per_side_cost_fraction=0.0,
         data_kind=kind,
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
 
 
@@ -485,7 +485,7 @@ def test_reversal_records_one_round_trip_and_reopens_short():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
 
     assert len(result.round_trips) == 1
@@ -703,7 +703,7 @@ def test_foundation_payloads_do_not_emit_significance_fields():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
 
     matrix = foundation.matrix_payload()
@@ -728,6 +728,39 @@ def test_foundation_payloads_do_not_emit_significance_fields():
     assert forbidden.isdisjoint(summary)
 
 
+def test_chunked_full_train_statistics_use_single_return_statistics_path(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    calls: list[list[float]] = []
+    original = foundation_module.compute_return_statistics
+
+    def recording_statistics(returns, *, min_return_sample: int):
+        values = list(returns)
+        calls.append(values)
+        return original(values, min_return_sample=min_return_sample)
+
+    monkeypatch.setattr(foundation_module, "compute_return_statistics", recording_statistics)
+    accumulator = foundation_module._FullTrainAccumulator(
+        start_time=ts(0),
+        end_time=ts(3),
+        first_nav=100.0,
+        last_nav=102.0,
+        max_drawdown=0.0,
+    )
+    chunks = ((0.01, math.nan), (math.inf, -0.02, 0.03))
+
+    metric = foundation_module._metric_from_accumulator(
+        "full_train",
+        accumulator,
+        return_chunks=chunks,
+        min_return_sample=2,
+    )
+
+    expected = original([0.01, -0.02, 0.03], min_return_sample=2).payload()
+    assert calls == [[0.01, -0.02, 0.03]]
+    assert metric.statistics.payload() == expected
+
+
 def test_degenerate_sample_gated_as_non_scoreable_verdict():
     # One at-risk interval only -> below the default minimum of 2 -> insufficient.
     rows = bar_rows(100.0, 100.0, 110.0)
@@ -739,7 +772,7 @@ def test_degenerate_sample_gated_as_non_scoreable_verdict():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -848,7 +881,7 @@ def test_zero_cost_on_scoreable_run_is_non_scoreable():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False

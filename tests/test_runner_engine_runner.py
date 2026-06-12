@@ -78,7 +78,7 @@ def _foundation(rows, decisions, *, end_index: int):
             impact_coefficient_bps=0.0,
             impact_exponent=1.0,
         ),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
     )
 
 

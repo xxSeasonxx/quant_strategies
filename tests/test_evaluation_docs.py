@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
+
+from quant_strategies.runner import RunOutcome
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -271,3 +274,19 @@ def test_active_docs_do_not_present_engine_as_user_api():
     assert "quant_strategies.engine" in active_text
     assert "internal execution kernel" in active_text
     assert "not a fourth public" in active_text
+
+
+def test_consumer_reference_matches_quick_run_outcome_fields_and_failure_stages():
+    reference = read("docs/consumer/reference.md")
+
+    for field in fields(RunOutcome):
+        assert f"`{field.name}`" in reference
+
+    assert "promotion_eligible" not in reference
+    assert "engine_evaluation" not in reference
+    for stage in [
+        "observation_audit",
+        "data_readiness",
+        "portfolio_foundation",
+    ]:
+        assert f"`{stage}`" in reference

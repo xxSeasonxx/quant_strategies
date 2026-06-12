@@ -68,7 +68,6 @@ class DataConfig(WindowedDataConfig):
 class FillModelConfig(SharedConfigModel):
     price: Literal["open", "close", "quote"] = "close"
     entry_lag_bars: int = Field(default=1, ge=1)
-    exit_lag_bars: int = Field(default=0, ge=0)
 
 
 class CostModelConfig(SharedConfigModel):

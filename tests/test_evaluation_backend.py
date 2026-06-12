@@ -98,7 +98,7 @@ def scenario(**overrides: Any) -> EvaluationScenario:
         "cost_scenario": "realistic_costs",
         "fill_scenario": "base_fill",
         "cost_model": CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=2.0),
-        "fill_model": FillModelConfig(price="close", entry_lag_bars=1, exit_lag_bars=0),
+        "fill_model": FillModelConfig(price="close", entry_lag_bars=1),
     }
     base.update(overrides)
     return EvaluationScenario(**base)

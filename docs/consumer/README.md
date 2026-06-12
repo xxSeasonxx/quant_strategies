@@ -163,7 +163,6 @@ weight = 0.25
 [fill_model]
 price = "close"
 entry_lag_bars = 1
-exit_lag_bars  = 0
 
 [cost_model]                          # a scoreable run needs non-zero costs;
 fee_bps_per_side = 1.0                # zero costs are a fail-closed `zero_cost` verdict

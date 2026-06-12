@@ -15,7 +15,7 @@ def test_expand_validation_matrix_includes_required_v1_scenarios():
     scenarios = expand_validation_matrix(
         window_id="validation_2026_h1",
         base_costs={"fee_bps_per_side": 0.5, "slippage_bps_per_side": 0.5},
-        base_fill={"entry_lag_bars": 1, "exit_lag_bars": 0},
+        base_fill={"entry_lag_bars": 1},
     )
 
     names = {scenario.id for scenario in scenarios}
@@ -95,14 +95,13 @@ def test_fill_lag_preserves_base_fill_keys_and_increments_entry_lag():
     scenarios = expand_validation_matrix(
         window_id="validation_2026_h1",
         base_costs={},
-        base_fill={"entry_lag_bars": 1, "exit_lag_bars": 0, "fill_price": "next_open"},
+        base_fill={"entry_lag_bars": 1, "fill_price": "next_open"},
     )
 
     fill_lag = _scenario_by_id(scenarios, "validation_2026_h1/fill_lag_plus_1")
 
     assert fill_lag.fill_model == {
         "entry_lag_bars": 2,
-        "exit_lag_bars": 0,
         "fill_price": "next_open",
     }
 

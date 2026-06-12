@@ -188,7 +188,10 @@ participation. Diagnostic-profile runs additionally write `diagnostics.json` wit
 scenario carries a typed `feasibility` payload plus a compact `full_train` metric
 record and configured subwindow records — computed over at-risk bars — so
 downstream scoring can combine full-window and weakest-window evidence without raw
-period-return traces. Full per-period return traces are not written by default.
+period-return traces. The quick-run foundation sample floor defaults to 20
+at-risk returns and may be set lower only by an explicit
+`[output].foundation_min_return_sample >= 2` diagnostic config. Full per-period
+return traces are not written by default.
 Failed or infeasible quick-run `summary.json` files set `run_completed` to `false`
 and `failure_stage` to the failed runner stage (`feasibility` on an envelope
 breach).

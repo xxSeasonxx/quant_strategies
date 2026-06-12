@@ -838,6 +838,7 @@ def _build_portfolio_foundation(
                     fill_stress_fraction=config.output.foundation_fill_stress_fraction,
                     max_gross_exposure=config.leverage_budget.max_gross_exposure,
                     max_net_exposure=config.leverage_budget.max_net_exposure,
+                    min_return_sample=config.output.foundation_min_return_sample,
                 ),
             )
     except FeasibilityError as exc:

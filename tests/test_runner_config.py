@@ -86,7 +86,6 @@ weight = 1.0
 [fill_model]
 price = "{fill_price}"
 entry_lag_bars = {entry_lag_bars}
-exit_lag_bars = 0
 {fill_model_extra}
 
 [cost_model]
@@ -118,6 +117,28 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.data.load_end is None
     assert config.capacity_model.mode == "adv_impact"
     assert config.capacity_model.portfolio_notional == 1_000_000.0
+    assert config.output.foundation_min_return_sample == 20
+
+
+def test_output_foundation_min_return_sample_accepts_override(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    config = load_config(
+        write_config(tmp_path, output_extra="foundation_min_return_sample = 7\n"),
+        repo_root=tmp_path,
+    )
+
+    assert config.output.foundation_min_return_sample == 7
+
+
+def test_output_foundation_min_return_sample_rejects_below_two(tmp_path: Path):
+    write_strategy(tmp_path)
+
+    with pytest.raises(ConfigError, match="foundation_min_return_sample"):
+        load_config(
+            write_config(tmp_path, output_extra="foundation_min_return_sample = 1\n"),
+            repo_root=tmp_path,
+        )
 
 
 def test_relative_strategy_path_resolves_from_config_directory(tmp_path: Path):
@@ -410,6 +431,19 @@ def test_removed_same_bar_close_fill_flag_is_rejected_as_unknown(tmp_path: Path)
             write_config(tmp_path, fill_model_extra=f"{removed_flag} = true\n"),
             repo_root=tmp_path,
         )
+
+
+def test_removed_exit_lag_bars_is_rejected_as_unknown(tmp_path: Path):
+    write_strategy(tmp_path)
+    config_path = write_config(tmp_path)
+    text = config_path.read_text()
+    if "exit_lag_bars" not in text:
+        config_path.write_text(
+            text.replace("entry_lag_bars = 1\n", "entry_lag_bars = 1\nexit_lag_bars = 0\n")
+        )
+
+    with pytest.raises(ConfigError, match="exit_lag_bars"):
+        load_config(config_path, repo_root=tmp_path)
 
 
 def test_removed_data_strict_toggle_is_rejected_as_unknown(tmp_path: Path):

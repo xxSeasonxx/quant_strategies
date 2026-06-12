@@ -226,7 +226,7 @@ All three surfaces share these sections (full key list in
 ```toml
 [data]              # kind, dataset (bars only), symbols; start/end for quick run
 [params]            # passed verbatim to your strategy's validate_params/generate_decisions
-[fill_model]        # price = "close"|"quote"; entry_lag_bars; exit_lag_bars
+[fill_model]        # price = "close"|"quote"; entry_lag_bars
 [cost_model]        # fee_bps_per_side; slippage_bps_per_side
 [capacity_model]    # mode = "adv_impact"|"off"; portfolio_notional + ADV/impact limits
 [leverage_budget]   # max_gross_exposure; max_net_exposure
@@ -285,9 +285,10 @@ when the quick-run evidence may be retained; `[output]` with `results_dir`,
 `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
 (`foundation_subwindows`, `foundation_cost_stress_multiplier`,
-`foundation_fill_stress_fraction`), and (for the
+`foundation_fill_stress_fraction`, `foundation_min_return_sample`), and (for the
 diagnostic profile) `diagnostic_sample_trades`.
-`foundation_subwindows` accepts 1-64 windows.
+`foundation_subwindows` accepts 1-64 windows. `foundation_min_return_sample`
+defaults to 20 and accepts integers >= 2 for explicit diagnostics.
 The **leverage budget (gross and net) is operator-frozen** in the
 `[leverage_budget]` section (`max_gross_exposure` / `max_net_exposure`, default
 `1.0/1.0`, `>= 1.0`) — it is not an agent-editable `[output]` key. Intended exposure

@@ -24,7 +24,7 @@ FOUNDATION_BASIS = "quick_run_netted_portfolio_book"
 FOUNDATION_EVIDENCE_CLASS = "quick_run_portfolio_foundation_diagnostic"
 INITIAL_EQUITY = 100.0
 MAX_FOUNDATION_SUBWINDOWS = 64
-DEFAULT_MIN_RETURN_SAMPLE = 2
+DEFAULT_MIN_RETURN_SAMPLE = 20
 # Default adverse slippage (fraction of the barrier price) applied to RiskRule exit fills
 # in the diagnostic ``fill_stress`` scenario. 10 bps; the realistic scored path uses 0.0.
 DEFAULT_FILL_STRESS_FRACTION = 0.0010
@@ -1627,56 +1627,6 @@ def compute_return_statistics(
     )
 
 
-def _compute_return_statistics_from_chunks(
-    chunks: Sequence[Sequence[float]],
-    *,
-    min_return_sample: int,
-) -> ReturnStatistics:
-    sample_count, total = _return_count_and_sum(chunks)
-    mean_return = (total / sample_count) if sample_count else None
-    if sample_count < max(2, min_return_sample):
-        return _insufficient_return_statistics(
-            sample_count=sample_count,
-            mean_return=mean_return,
-        )
-
-    mean = cast(float, mean_return)
-    stdev = _sample_stdev_from_chunks(chunks, sample_count=sample_count, mean=mean)
-    if stdev == 0.0:
-        warnings = ["zero_return_volatility"]
-        sharpe = None
-    else:
-        warnings = []
-        sharpe = mean / stdev
-    skew, kurtosis = _shape_from_chunks(
-        chunks,
-        sample_count=sample_count,
-        mean=mean,
-    )
-    effective_n = _effective_sample_size_from_chunks(
-        chunks,
-        sample_count=sample_count,
-        mean=mean,
-    )
-    sharpe_se = _sharpe_standard_error(
-        sharpe,
-        effective_sample_size=effective_n,
-        skew=skew,
-        kurtosis=kurtosis,
-    )
-    return ReturnStatistics(
-        return_sample_count=sample_count,
-        mean_return=mean_return,
-        return_volatility=stdev,
-        effective_sample_size=effective_n,
-        sharpe=sharpe,
-        sharpe_standard_error=sharpe_se,
-        skew=skew,
-        kurtosis=kurtosis,
-        warnings=tuple(warnings),
-    )
-
-
 def _insufficient_return_statistics(
     *,
     sample_count: int,
@@ -1842,8 +1792,8 @@ def _metric_from_accumulator(
     min_return_sample: int,
 ) -> FoundationMetric:
     if return_chunks is not None:
-        statistics = _compute_return_statistics_from_chunks(
-            return_chunks,
+        statistics = compute_return_statistics(
+            _iter_finite_chunk_values(return_chunks),
             min_return_sample=min_return_sample,
         )
     elif returns is None:
@@ -2081,29 +2031,6 @@ def _iter_finite_chunk_values(chunks: Sequence[Sequence[float]]) -> Iterable[flo
                 yield metric
 
 
-def _return_count_and_sum(chunks: Sequence[Sequence[float]]) -> tuple[int, float]:
-    count = 0
-    total = 0.0
-    for value in _iter_finite_chunk_values(chunks):
-        count += 1
-        total += value
-    return count, total
-
-
-def _sample_stdev_from_chunks(
-    chunks: Sequence[Sequence[float]],
-    *,
-    sample_count: int,
-    mean: float,
-) -> float:
-    if sample_count < 2:
-        return 0.0
-    variance = sum((value - mean) ** 2 for value in _iter_finite_chunk_values(chunks)) / (
-        sample_count - 1
-    )
-    return math.sqrt(variance)
-
-
 def _shape(values: Sequence[float], *, mean: float) -> tuple[float | None, float | None]:
     if len(values) < 2:
         return None, None
@@ -2112,31 +2039,6 @@ def _shape(values: Sequence[float], *, mean: float) -> tuple[float | None, float
         return None, None
     third = sum((value - mean) ** 3 for value in values) / len(values)
     fourth = sum((value - mean) ** 4 for value in values) / len(values)
-    return third / (second**1.5), fourth / (second**2)
-
-
-def _shape_from_chunks(
-    chunks: Sequence[Sequence[float]],
-    *,
-    sample_count: int,
-    mean: float,
-) -> tuple[float | None, float | None]:
-    if sample_count < 2:
-        return None, None
-    second = 0.0
-    third = 0.0
-    fourth = 0.0
-    for value in _iter_finite_chunk_values(chunks):
-        centered = value - mean
-        squared = centered**2
-        second += squared
-        third += squared * centered
-        fourth += squared**2
-    second /= sample_count
-    if second == 0.0:
-        return None, None
-    third /= sample_count
-    fourth /= sample_count
     return third / (second**1.5), fourth / (second**2)
 
 
@@ -2164,34 +2066,6 @@ def _lag_one_autocorrelation(values: Sequence[float]) -> float | None:
         (values[index] - mean) * (values[index - 1] - mean) for index in range(1, len(values))
     )
     return numerator / denominator
-
-
-def _effective_sample_size_from_chunks(
-    chunks: Sequence[Sequence[float]],
-    *,
-    sample_count: int,
-    mean: float,
-) -> float | None:
-    if sample_count < 2:
-        return None
-    if sample_count < 3:
-        return float(sample_count)
-    denominator = 0.0
-    numerator = 0.0
-    previous_centered: float | None = None
-    for value in _iter_finite_chunk_values(chunks):
-        centered = value - mean
-        denominator += centered**2
-        if previous_centered is not None:
-            numerator += centered * previous_centered
-        previous_centered = centered
-    if denominator == 0.0:
-        return float(sample_count)
-    rho = numerator / denominator
-    if rho <= 0.0:
-        return float(sample_count)
-    effective_n = float(sample_count) * (1.0 - rho) / (1.0 + rho)
-    return max(1.0, min(float(sample_count), effective_n))
 
 
 def _sharpe_standard_error(

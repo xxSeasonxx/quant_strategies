@@ -112,7 +112,6 @@ weight = 1.0
 [fill_model]
 price = "close"
 entry_lag_bars = 1
-exit_lag_bars = 0
 
 [cost_model]
 fee_bps_per_side = 0.5
@@ -224,6 +223,24 @@ def test_load_validation_config_resolves_paths_from_config_directory(tmp_path: P
     assert config.mechanical_thresholds.max_fill_lag_activity_loss == -0.02
     assert config.search_pressure.prior_search == "none"
     assert config.capacity_model.portfolio_notional == 1_000_000.0
+
+
+def test_load_validation_config_rejects_removed_exit_lag_bars(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    text = config_path.read_text()
+    if "exit_lag_bars" not in text:
+        config_path.write_text(
+            text.replace(
+                "entry_lag_bars = 1\n",
+                "entry_lag_bars = 1\nexit_lag_bars = 0\n",
+            )
+        )
+
+    with pytest.raises(ValidationConfigError, match="exit_lag_bars"):
+        load_validation_config(config_path)
 
 
 def test_load_validation_config_accepts_mechanical_thresholds_overrides(tmp_path: Path):
