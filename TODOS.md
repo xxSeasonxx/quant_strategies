@@ -167,7 +167,7 @@ Preserve these contained residuals unless they become active work:
 - **Restore the `researched/` archive-boundary test** once Season's active work in
   `researched/` settles (or relocate the artifacts). The repo currently does not
   enforce that boundary; the other repository-boundary tests (loop-memory markers,
-  archive-pointer scan) are unchanged. Background: `HISTORY.md`.
+  archive-pointer scan) are unchanged.
 - The other deferred-until-trigger items (mid-pipeline artifact I/O, independent
   netted-book cross-check, validation/evaluation source output paths) are owned by
   `FOUNDATION_LOCK.md`.

@@ -7,52 +7,20 @@ Active contracts and current state live elsewhere and stay history-free:
 `PRD.md` (intent), `FOUNDATION_LOCK.md` (locked invariants, accepted debt,
 deferred triggers), `README.md` (orientation), `docs/foundation-surfaces.md`
 (surface I/O reference), `docs/consumer/` (consumer docs), and `TODOS.md`
-(current open work). Entries below are newest-first.
+(current open work). Entries below are newest-first and record **material
+contract or behavior changes** only; routine refactors, test maintenance, and
+review bookkeeping stay out — the review disposition index at the end is the one
+exception.
 
 ---
 
 ## 2026-06-13 — Slippage cost floor (R4)
 
-The scored cost floor now requires **positive per-side slippage**, not just
-`fee + slippage > 0`: a `fee>0, slippage=0` config previously scored stop/`RiskRule`
-barrier exits filling at the barrier level with no execution slippage — more
-favorably than any taker order fills. A new fail-closed `zero_slippage` feasibility
-verdict sits beside `zero_cost` in the one `scenario_feasibility` function, so it
-applies uniformly to quick run, validation, and evaluation. Rejected alternatives:
-a model-level `slippage>0` validator (would break evaluation's intentional
-zero-cost `zero_costs` diagnostic scenario), a retainability-only check (would leave
-the scored NAV the autoresearch loop climbs optimistic), and a stop-specific
-intrabar slippage fill model (deferred — the post-trigger intrabar path is
-unobservable at bar granularity, so extra stop slippage stays the `fill_stress`
-diagnostic). The current contract is in `FOUNDATION_LOCK.md`; R4 was removed from
-`TODOS.md`.
-
-## 2026-06-12 — Foundation review (Codex)
-
-Source-grounded foundation review of root docs, `docs/`, and `src/`, with quick
-run end-to-end as the priority path. Archived at
-`docs/reviews/2026-06-12-foundation-codex.md`. Disposition: a delta review
-against `docs/reviews/2026-06-11-foundation-claude.md`; accepted findings flow
-into `TODOS.md` open work and `FOUNDATION_LOCK.md`; the file is the dated
-artifact, not active policy.
-
-## 2026-06-11 — `researched/` archive-boundary test removed
-
-A repository-boundary test asserted `researched/` must not exist (stale-artifact
-concern from review No. 17). It was removed because Season is actively working in
-`researched/`; the repo no longer enforces that boundary. The other
-repository-boundary tests (loop-memory markers, archive-pointer scan) are
-unchanged. The forward-looking item — restore the test or relocate the artifacts
-once that work settles — is tracked in `TODOS.md`.
-
-## 2026-06-11 — Live-trade-feasibility review retired
-
-The `2026-06-10-live-trade-feasibility-review.md` working review was folded into
-`TODOS.md` (market-model follow-ons and residuals) and `FOUNDATION_LOCK.md`, then
-removed as a file; its full text remains in git history. Accepted findings
-shipped via the portfolio-book-spine migration and reviews No. 6/8/11/20.
-Remaining work (capacity No. 3, asset-class frictions No. 7, `researched/`
-No. 17) lives in `TODOS.md`.
+The scored cost floor now requires positive per-side slippage — a new fail-closed
+`zero_slippage` feasibility verdict beside `zero_cost`. A `fee>0, slippage=0`
+config (previously scored with stop/barrier exits filling at the level with no
+execution slippage) is now non-scoreable, uniformly across quick run, validation,
+and evaluation. Current contract in `FOUNDATION_LOCK.md`.
 
 ## 2026-06-10 — Portfolio-book-spine migration
 
@@ -102,44 +70,20 @@ fail-open `foundation=None` on breach (replaced by the typed fail-closed verdict
 a separate per-surface or per-data-kind money model (replaced by the one shared
 netted book).
 
-## 2026-06-10 — Intrabar OHLC stop fills shipped (review No. 8)
+## 2026-06-10 — Intrabar OHLC stop fills
 
-`RiskRule` stop / take-profit / trailing now trigger on the bar's intrabar
-high/low and fill at the barrier level (worsened to the bar open on a gap-through;
-adverse barrier wins a same-bar tie). A diagnostic `fill_stress` scenario
-(`foundation_fill_stress_fraction`, default 10 bps) applies extra adverse
-barrier-exit slippage; the climbed `realistic_costs` path is unaffected by the
-knob. The current contract is in `FOUNDATION_LOCK.md`.
+`RiskRule` stop / take-profit / trailing trigger on the bar's intrabar high/low
+and fill at the barrier level (worsened to the bar open on a gap-through; adverse
+barrier wins a same-bar tie). A diagnostic `fill_stress` scenario adds extra
+adverse barrier-exit slippage without changing the climbed `realistic_costs`
+path. Current contract in `FOUNDATION_LOCK.md`.
 
-## Causality replay performance investigation (focused-replay timeouts)
+## Causality micro-default for quick-run scoring
 
-Downstream `quant_autoresearch` full-baseline runs were blocked by focused
-causality cost on large panels. The resolution adopted micro causality for
-quick-run iteration so scoring is not blocked by replay timeout, while
-validation/evaluation own complete or explicitly bounded replay evidence.
-
-Observed failures:
-
-- Full 2024-01-01 to 2025-12-31 baseline with `causality_check="focused"`,
-  `focused_probe_limit=100`, `focused_timeout_seconds=60.0` crashed at the
-  causality stage before engine scoring: `focused_causality_timeout`,
-  `candidate_probe_count=5,265,156`, `selected_probe_count=100`, ~584.9s elapsed.
-- A second full-baseline run with `focused_probe_limit=10`,
-  `focused_timeout_seconds=180.0` also crashed at the causality stage:
-  `focused_causality_timeout`, `candidate_probe_count=5,265,156`,
-  `selected_probe_count=10`, ~699.7s elapsed.
-- In both runs no score or trades were logged because failure happened before
-  engine scoring.
-
-Root cause:
-
-- Probe count alone does not control runtime on full-panel runs.
-- Each selected focused probe can still replay strategy generation on a large row
-  prefix; strategies that rebuild large per-symbol indexes per replay make a small
-  selected-probe count expensive.
-- Focused causality cost stays coupled to full scoring-panel size in this path.
-- The research loop should receive scored baseline evidence under micro replay
-  even when replay times out or records unverified causality.
+Quick-run iteration uses micro causality so scoring is never blocked by replay
+timeout (focused replay timed out on full-panel baselines); validation and
+evaluation own complete or explicitly bounded replay evidence. Current contract
+in `FOUNDATION_LOCK.md`.
 
 ## Review disposition log
 
