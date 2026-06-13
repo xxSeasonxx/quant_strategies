@@ -15,7 +15,7 @@ on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**: the
 netted single-account portfolio NAV path is the single authoritative scored unit,
 and the per-trade ledger is a derived attribution view of the same walk. An
 envelope breach (over the operator-frozen leverage budget, unpriced, unsupported,
-or missing capacity evidence, a capacity participation-limit breach, zero-cost on a
+or missing capacity evidence, a capacity participation-limit breach, zero-cost or zero-slippage on a
 scoreable run, unfinanced leverage, or a degenerate sample) is a typed
 **fail-closed** feasibility verdict that makes `succeeded=False` — never clamped,
 never a silent `None`. See `PRD.md` G8 and `AGENTS.md`.
@@ -90,13 +90,15 @@ but never an independent scored number.
 - **Feasibility verdict:** an envelope breach is a typed, **fail-closed**
 feasibility verdict, not a clamp and not a silent `None`. Intended gross/net over
 the operator-frozen leverage budget, unpriced, unsupported, or missing capacity
-evidence, a capacity participation-limit breach, a zero-cost scoreable run,
-unfinanced leverage on an unmodeled asset class, or a statistically degenerate
+evidence, a capacity participation-limit breach, a zero-cost or zero-slippage
+scoreable run, unfinanced leverage on an unmodeled asset class, or a statistically
+degenerate
 sample makes the run infeasible / non-scoreable with an actionable typed reason
 (`leverage_budget_breach` + observed gross, `capacity_unpriced`,
 `capacity_unsupported_volume_semantics`, `capacity_missing_volume`,
 `capacity_insufficient_adv_history`, `capacity_limit_breach`, `zero_cost`,
-`unfinanced_leverage`, `insufficient_samples`); a benign data gap and an internal
+`zero_slippage`, `unfinanced_leverage`, `insufficient_samples`); a benign data gap
+and an internal
 error remain distinguishable verdicts. `RunResult.succeeded` is gated on the
 verdict, and a breach sets `failure_stage`.
 - **Capacity/ADV/market impact:** ADV capacity is enforced for supported bars and

@@ -11,6 +11,22 @@ deferred triggers), `README.md` (orientation), `docs/foundation-surfaces.md`
 
 ---
 
+## 2026-06-13 — Slippage cost floor (R4)
+
+The scored cost floor now requires **positive per-side slippage**, not just
+`fee + slippage > 0`: a `fee>0, slippage=0` config previously scored stop/`RiskRule`
+barrier exits filling at the barrier level with no execution slippage — more
+favorably than any taker order fills. A new fail-closed `zero_slippage` feasibility
+verdict sits beside `zero_cost` in the one `scenario_feasibility` function, so it
+applies uniformly to quick run, validation, and evaluation. Rejected alternatives:
+a model-level `slippage>0` validator (would break evaluation's intentional
+zero-cost `zero_costs` diagnostic scenario), a retainability-only check (would leave
+the scored NAV the autoresearch loop climbs optimistic), and a stop-specific
+intrabar slippage fill model (deferred — the post-trigger intrabar path is
+unobservable at bar granularity, so extra stop slippage stays the `fill_stress`
+diagnostic). The current contract is in `FOUNDATION_LOCK.md`; R4 was removed from
+`TODOS.md`.
+
 ## 2026-06-12 — Foundation review (Codex)
 
 Source-grounded foundation review of root docs, `docs/`, and `src/`, with quick

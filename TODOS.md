@@ -67,6 +67,22 @@ public APIs changed.
 
 ## 2. Current Open Work
 
+Open items are prioritized feasibility-first: an item is high priority when it
+closes a path by which a quick run can score evidence that is not genuinely
+tradeable, and lower when it only widens which strategies can be scored (an
+unpriced or under-contracted class already fails closed). In order:
+
+1. **§2.2 data-contract gate (in-repo half) — highest.** It is unwired today, so a
+   strategy that needs a stronger data contract than the dataset provides
+   (survivorship-free, complete corporate-action events) is scored with no
+   fail-closed verdict. Wiring it removes a class of biased-but-passing evidence;
+   the need is sharpest once equity research is active.
+2. **§2.1 market-model follow-ons and §2.3 data-coverage — coverage, not
+   correctness.** Every unpriced class already fails closed (`unfinanced_leverage`,
+   `unpriced_short_financing`, `capacity_unsupported_volume_semantics`), so pull a
+   class forward only when it becomes an active research direction; §2.3 items also
+   need upstream backfill first.
+
 ### 2.1 Market-Model Follow-Ons
 
 The netted book prices crypto-perp funding and the operator-frozen ADV
@@ -75,7 +91,7 @@ capacity/market-impact envelope today. The remaining asset-class frictions are
 integrity contracts, and add a localized market-model term per `DataKind`
 (mirroring `funding.py`). Every loader and integrity enum exists; where an item is
 blocked it is on upstream **data coverage** (a `blocked`/empty dataset), tracked in
-§2.2. Read `quant_data.catalog.DATASET_STATUS[dataset]["status"]` at runtime —
+§2.3. Read `quant_data.catalog.DATASET_STATUS[dataset]["status"]` at runtime —
 never hand-copy.
 
 Until a class is priced, a net exposure > 1.0 for it stays a fail-closed
@@ -87,14 +103,14 @@ Until a class is priced, a net exposure > 1.0 for it stays a fail-closed
   `split_dividend_adjusted`, so do **not** re-add dividends on adjusted prices
   (double-count); model explicit dividend cashflows only for the short side or
   raw-price use.
-- **Equity short-borrow — modeling ready, data-coverage blocked (§2.2).**
+- **Equity short-borrow — modeling ready, data-coverage blocked (§2.3).**
   `load_equity_borrow_rates` returns `borrow_fee_rate, availability_status,
   shares_available, notional_available, source`, but `equity_borrow_rates` is
   `blocked` (no rows).
-- **FX rollover/carry — modeling ready, data-coverage blocked (§2.2).**
+- **FX rollover/carry — modeling ready, data-coverage blocked (§2.3).**
   `load_forex_rollover_rates` (`long_base_rate`/`short_base_rate`, roll dates);
   `forex_rollover_rates` is `blocked`.
-- **Margin financing on gross > 1 — modeling ready, data-coverage blocked (§2.2).**
+- **Margin financing on gross > 1 — modeling ready, data-coverage blocked (§2.3).**
   `load_margin_reference_rates` returns an annualized reference `rate`; the broker
   spread, compounding, and margin policy are this repo's operator-frozen envelope.
   `margin_reference_rates` is `blocked`.
@@ -145,13 +161,6 @@ Preserve these contained residuals unless they become active work:
 - **R1** `_is_true_flag` coercion.
 - **R2** `not_evaluated` soft-stop.
 - **R3** causality's missing-`available_at` fallback.
-- **R4** Barrier-exit slippage on the climbed path is the uniform
-  `slippage_bps_per_side`; the `zero_cost` floor guarantees only `fee+slippage > 0`,
-  not `slippage > 0`, so a `fee>0, slippage=0` config is scoreable with stops filling
-  at the level/gap-open and no slippage. Stop-specific extra slippage is modeled only
-  in the `fill_stress` diagnostic, not the scored number (standard bar-granularity
-  limit; the post-trigger intrabar path is unobservable). Optional tightening: require
-  `slippage_bps > 0` in the cost floor (uniform, affects all fills) — Season-owned.
 
 ## 5. Deferred Work
 

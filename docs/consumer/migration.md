@@ -30,6 +30,7 @@ the linked owning sections; this guide does not restate them in full.
   `result.succeeded == False`, `failure_stage="feasibility"`, and a typed
   `result.feasibility.reason` + observed exposure. Read the reason and respond
   (`leverage_budget_breach` → reduce intended gross; `zero_cost` → configure costs;
+  `zero_slippage` → set positive `slippage_bps_per_side`;
   `unfinanced_leverage` → unpriced leverage for the asset class;
   `insufficient_samples` → too few at-risk bars). Never climb past it as a worst
   score.

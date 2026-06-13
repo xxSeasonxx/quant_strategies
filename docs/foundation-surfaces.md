@@ -10,8 +10,9 @@ instrument); the engine folds it into one netted, financed, marked book on every
 surface (`netted_portfolio_book_v1`) and scores its **NAV path**. The per-trade
 ledger is a derived attribution view of that same walk. An envelope breach (over
 the operator-frozen leverage budget, unpriced, unsupported, or missing capacity
-evidence, a capacity participation-limit breach, zero-cost on a scoreable run,
-unfinanced leverage, degenerate sample) is a typed **fail-closed** feasibility
+evidence, a capacity participation-limit breach, zero-cost or zero-slippage on a
+scoreable run, unfinanced leverage, degenerate sample) is a typed **fail-closed**
+feasibility
 verdict that makes `succeeded=False` — never clamped, never a silent `None`. See
 `PRD.md` G8.
 

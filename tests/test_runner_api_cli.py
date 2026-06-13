@@ -288,7 +288,7 @@ entry_lag_bars = {entry_lag_bars}
 
 [cost_model]
 fee_bps_per_side = 1.0
-slippage_bps_per_side = 0.0
+slippage_bps_per_side = 0.5
 
     {capacity_model_block}
     {leverage_budget_extra}{causality_policy_extra}{envelope_extra}
@@ -2255,7 +2255,7 @@ def test_run_config_zero_cost_feasibility_failure_keeps_retainability_reason(
     config_path.write_text(
         config_path.read_text()
         .replace("fee_bps_per_side = 1.0", "fee_bps_per_side = 0.0")
-        .replace("slippage_bps_per_side = 0.0", "slippage_bps_per_side = 0.0")
+        .replace("slippage_bps_per_side = 0.5", "slippage_bps_per_side = 0.0")
     )
     monkeypatch.setattr(
         execution,
@@ -2675,7 +2675,7 @@ foundation = build_portfolio_foundation(
         end=(start + timedelta(days=3)).date(),
     ),
     fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-    cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+    cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
     capacity_model=CapacityModelConfig(
         mode="adv_impact",
         portfolio_notional=1000.0,

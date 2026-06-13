@@ -35,6 +35,7 @@ from quant_strategies.core.portfolio_foundation import (
     REASON_UNFINANCED_LEVERAGE,
     REASON_UNPRICED_SHORT_FINANCING,
     REASON_ZERO_COST,
+    REASON_ZERO_SLIPPAGE,
     BookWalkResult,
     FeasibilityError,
     PortfolioFoundationConfig,
@@ -897,6 +898,25 @@ def test_zero_cost_on_scoreable_run_is_non_scoreable():
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
     assert realistic["feasibility"]["reason"] == REASON_ZERO_COST
+
+
+def test_zero_slippage_on_scoreable_run_is_non_scoreable():
+    # Positive fee but zero slippage still models taker fills (including stop/barrier
+    # exits) with no execution slippage, which is below the operator cost floor.
+    rows = bar_rows(100.0, 100.0, 110.0, 121.0)
+    decisions = [target(0, 1.0)]
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=decisions,
+        data=data_config(3),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        capacity_model=capacity_model(),
+        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+    )
+    realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
+    assert realistic["feasibility"]["feasible"] is False
+    assert realistic["feasibility"]["reason"] == REASON_ZERO_SLIPPAGE
 
 
 def test_unfinanced_leverage_fails_closed_when_budget_permits_net_above_one():

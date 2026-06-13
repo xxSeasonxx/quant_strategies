@@ -67,7 +67,7 @@ entry_lag_bars = 1
 
 [cost_model]
 fee_bps_per_side = 1.0
-slippage_bps_per_side = 0.0
+slippage_bps_per_side = 0.5
 
 [capacity_model]
 mode = "adv_impact"

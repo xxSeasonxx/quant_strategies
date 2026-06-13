@@ -18,7 +18,8 @@ the foundation folds it into one netted, financed, marked book and scores that
 **NAV path**. The contract is two-sided: you can express any complete, tradeable
 portfolio in `strategy.py`, and a strategy that passes Train evidence is genuinely
 feasible to trade — an envelope breach (over the frozen leverage budget, zero-cost,
-unfinanced leverage, degenerate sample) is a typed **fail-closed** verdict that
+zero-slippage, unfinanced leverage, degenerate sample) is a typed **fail-closed**
+verdict that
 makes the run non-scoreable, never a clamp and never a silent `None`.
 
 ---
@@ -55,7 +56,7 @@ these rules. They are the difference between evidence and noise.
    was built and passed the feasibility envelope. A breach of that envelope is a
    typed, fail-closed verdict on `RunResult.feasibility` (reason + observed
    exposure) that sets `succeeded = False` — read the verdict reason
-   (`leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
+   (`leverage_budget_breach`, `zero_cost`, `zero_slippage`, `unfinanced_leverage`,
    `unpriced_short_financing`, `insufficient_samples`) to learn what to fix; it is
    not a clamp and not a silent absence of evidence. For quick-run evidence that
    may advance to validation/evaluation, also require `result.retainable`.
@@ -164,8 +165,8 @@ weight = 0.25
 price = "close"
 entry_lag_bars = 1
 
-[cost_model]                          # a scoreable run needs non-zero costs;
-fee_bps_per_side = 1.0                # zero costs are a fail-closed `zero_cost` verdict
+[cost_model]                          # a scoreable run needs positive fee + slippage;
+fee_bps_per_side = 1.0                # zero cost or zero slippage is a fail-closed verdict
 slippage_bps_per_side = 0.5
 
 [capacity_model]

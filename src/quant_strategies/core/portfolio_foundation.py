@@ -40,6 +40,7 @@ FeasibilityReason = str  # one of the constants below
 
 REASON_LEVERAGE_BUDGET_BREACH = "leverage_budget_breach"
 REASON_ZERO_COST = "zero_cost"
+REASON_ZERO_SLIPPAGE = "zero_slippage"
 REASON_INSUFFICIENT_SAMPLES = "insufficient_samples"
 REASON_UNFINANCED_LEVERAGE = "unfinanced_leverage"
 REASON_UNPRICED_SHORT_FINANCING = "unpriced_short_financing"
@@ -499,6 +500,14 @@ def cost_model_per_side_fraction(
     )
 
 
+def cost_model_slippage_per_side_fraction(
+    cost_model: CostModelConfig,
+    *,
+    cost_multiplier: float = 1.0,
+) -> float:
+    return _cost_fraction(cost_model.slippage_bps_per_side * cost_multiplier)
+
+
 @dataclass
 class _NetPosition:
     """Running signed quantity for one symbol on the shared account.
@@ -761,6 +770,9 @@ def _build_scenario(
         walk.feasibility,
         full_train.statistics,
         per_side_cost_fraction=per_side_cost_fraction,
+        slippage_per_side_fraction=cost_model_slippage_per_side_fraction(
+            cost_model, cost_multiplier=cost_multiplier
+        ),
         min_return_sample=config.min_return_sample,
     )
     return (
@@ -1558,12 +1570,14 @@ def scenario_feasibility(
     full_train_statistics: ReturnStatistics,
     *,
     per_side_cost_fraction: float,
+    slippage_per_side_fraction: float,
     min_return_sample: int,
 ) -> FeasibilityVerdict:
     """Combine the walk verdict with cost-floor and sample-gate verdicts.
 
     Precedence (most fundamental first): leverage/unfinanced (raised mid-walk) >
-    zero-cost on a scoreable run > insufficient at-risk samples.
+    zero-cost on a scoreable run > zero per-side slippage on a scoreable run >
+    insufficient at-risk samples.
     """
     if not walk_verdict.feasible:
         return walk_verdict
@@ -1573,6 +1587,16 @@ def scenario_feasibility(
             feasible=False,
             reason=REASON_ZERO_COST,
             detail="zero cost on a scoreable run is below the operator cost floor",
+        )
+    if scoreable and slippage_per_side_fraction <= 0.0:
+        return FeasibilityVerdict(
+            feasible=False,
+            reason=REASON_ZERO_SLIPPAGE,
+            detail=(
+                "zero per-side slippage on a scoreable run is below the operator "
+                "cost floor: taker fills (including stop/barrier exits) cannot be "
+                "modeled without slippage"
+            ),
         )
     if not scoreable:
         return FeasibilityVerdict(

@@ -319,7 +319,7 @@ the run completed and `failure_stage is None`.
 `param_contract` (`validated` / `unvalidated_passthrough` / `unknown`).
 
 **`FeasibilityVerdict`**: `feasible` (bool), `reason` (str|None — one of
-`leverage_budget_breach`, `zero_cost`, `unfinanced_leverage`,
+`leverage_budget_breach`, `zero_cost`, `zero_slippage`, `unfinanced_leverage`,
 `unpriced_short_financing`,
 `capacity_unpriced`, `capacity_unsupported_volume_semantics`,
 `capacity_missing_volume`, `capacity_insufficient_adv_history`,

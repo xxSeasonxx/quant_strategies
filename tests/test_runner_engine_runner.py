@@ -67,7 +67,7 @@ def _foundation(rows, decisions, *, end_index: int):
         decisions=decisions,
         data=_data_config(end_index),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
-        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
         capacity_model=CapacityModelConfig(
             mode="adv_impact",
             portfolio_notional=1_000.0,

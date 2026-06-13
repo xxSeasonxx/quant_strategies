@@ -27,6 +27,7 @@ from quant_strategies.core.portfolio_foundation import (
     at_risk_period_returns,
     compute_return_statistics,
     cost_model_per_side_fraction,
+    cost_model_slippage_per_side_fraction,
     scenario_feasibility,
     walk_portfolio_book,
 )
@@ -217,6 +218,7 @@ def _scenario_scoreability(
         walk.feasibility,
         statistics,
         per_side_cost_fraction=cost_model_per_side_fraction(scenario.cost_model),
+        slippage_per_side_fraction=cost_model_slippage_per_side_fraction(scenario.cost_model),
         min_return_sample=metrics.min_annualized_samples,
     )
 

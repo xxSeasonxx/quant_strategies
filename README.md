@@ -79,7 +79,8 @@ The design has one spine:
   alpha research but never an independent scored number.
 - **Feasibility fails closed.** An envelope breach — intended gross/net over the
   operator-frozen leverage budget, unpriced/unsupported/insufficient capacity,
-  unfinanced leverage, a zero-cost scoreable run, or a degenerate sample — yields a
+  unfinanced leverage, a zero-cost or zero-slippage scoreable run, or a degenerate
+  sample — yields a
   typed verdict that makes the run non-scoreable with an actionable reason, never a
   clamp and never a silent `None`; `succeeded` is gated on it. The full verdict
   contract and reason set live in `FOUNDATION_LOCK.md`.
