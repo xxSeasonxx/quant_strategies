@@ -45,6 +45,9 @@ entry_lag_bars = 1
 fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
+# FX quote runs are diagnostic only: mode = "off" makes traded books fail
+# closed with capacity_unpriced. FX ADV impact remains unsupported until
+# calibrated notional liquidity exists.
 [capacity_model]
 mode = "off"
 

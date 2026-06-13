@@ -37,7 +37,7 @@ Implemented since review:
   covered by a fail-closed regression test, validation policy defaults no longer
   mutate a frozen model, and quick run/evaluation share `netted_portfolio_book_v1`.
 
-Remaining open items are F10's FX capacity/financing follow-on and F13's
+Remaining open items are F10's FX financing/liquidity-model follow-on and F13's
 artifact-free quick-run mode, which remains deferred until profiling justifies it.
 
 ---
@@ -426,7 +426,7 @@ current status is owned by §0 and §11.
   the documented `RunOutcome` fields match the dataclass.
 
 ### F10 — FX coverage gap: committed FX candidates are categorically unscoreable (fail-closed)
-- **Severity:** Low · **Action:** Add (config hygiene) / Accepted-debt (engine financing) · **Disposition:** financing = Accepted-debt; configs = New · **Root cause:** financing model is crypto-perp-only + capacity-off configs
+- **Severity:** Low · **Action:** Add (config hygiene) / Accepted-debt (engine financing) · **Disposition:** Accepted-debt / Documented diagnostic configs · **Root cause:** financing model is crypto-perp-only + capacity-off configs
 - **Evidence:** `_FINANCED_DATA_KINDS = {"crypto_perp_funding"}`
   (`portfolio_foundation.py:36`); any short on a non-financed kind →
   `unpriced_short_financing` (`:1525-1539`); a traded book with capacity `mode=off`
@@ -435,14 +435,17 @@ current status is owned by §0 and §11.
   short-emitting strategies, so they can never produce a feasible scored run.
 - **Why it matters:** this is the *safe* direction (nothing infeasible is scored),
   and the financing coverage gap is already booked as accepted debt in
-  `FOUNDATION_LOCK.md`. The new observation is that the committed FX configs are
-  effectively dead for scoring — which can surprise an author whose clean FX
-  strategy "always fails feasibility." `candidates/` is out of primary scope, so
-  this is a hygiene note, not an engine defect.
+  `FOUNDATION_LOCK.md`. The committed FX configs now declare that FX quote runs
+  are diagnostic only: `capacity_model.mode="off"` makes traded books fail closed
+  with `capacity_unpriced`. FX ADV impact remains fail-closed with
+  `capacity_unsupported_volume_semantics` until calibrated notional liquidity
+  exists. `candidates/` is out of primary scope, so this is a hygiene note, not an
+  engine defect.
 - **Recommendation:** (engine) leave FX/equity financing as the named follow-on
-  (upstream `quant_data` coverage-gated). (configs) either give the FX candidates a
-  real `adv_impact` capacity envelope or mark them known-unscoreable; ensure the
-  verdict messages make "why this FX strategy fails" obvious.
+  (upstream `quant_data` coverage-gated). (configs) keep the FX candidates marked
+  known-unscoreable until calibrated notional liquidity can support a real
+  `adv_impact` capacity envelope; ensure the verdict messages make "why this FX
+  strategy fails" obvious.
 
 ### F11 — Multi-symbol missing-mark path is fail-closed but untested
 - **Severity:** Low · **Action:** Add (test) · **Disposition:** New · **Root cause:** missing test coverage + implicit alignment contract
@@ -573,14 +576,15 @@ named tests before any remaining refactor.
 | F7 | Implemented (Core P3) | P3 | Simplify / Preserve | Trim `get_backend` string registry + `EngineBackend` alias; keep Protocol | `validation/backends.py:208`; `engine_backend.py:87` |
 | F8 | Implemented (Core P3) | P3 | Simplify | Redundant `data_manifest.json` write on happy path | `runner/__init__.py:242,307` |
 | F9 | Implemented (`bd8c2e4`) | P2 | Retire/Add (doc) | `reference.md` stale: `promotion_eligible`, `engine_evaluation` stage | `docs/consumer/reference.md:316,668-671` |
-| F10 | Accepted-debt / Open (configs) | P3 | Add (hygiene) | FX candidates categorically unscoreable (financing coverage + capacity-off) | `portfolio_foundation.py:36,1525,1198` |
+| F10 | Accepted-debt / Documented diagnostic configs | P3 | Add (hygiene) | FX candidates categorically unscoreable (financing coverage + capacity-off) | `portfolio_foundation.py:36,1525,1198` |
 | F11 | Implemented (Core P3) | P3 | Add (test) | Multi-symbol missing-mark fail-closed but untested | `portfolio_foundation.py:817,625` |
 | F12 | Implemented (Core P3) | P3 | Simplify | Frozen-model `object.__setattr__` in validation policy | `validation/policy.py:44-57` |
 | F13 | Deferred | P3 | Preserve (defer) | No in-process artifact-free run mode (don't build until profiled) | `runner/__init__.py:194-196` |
 | F14 | Implemented (Core P3) | P3 | Simplify (doc/naming) | Two "one book" identifiers | `portfolio_foundation.py:23`; `evaluation/metrics.py:13` |
 
 **Outcome:** P1, P2, and the selected Core P3 bundle are implemented. F10 remains
-accepted debt / config hygiene, and F13 remains deferred.
+accepted debt for financing and FX liquidity modeling, with committed FX configs
+marked diagnostic/unscoreable. F13 remains deferred.
 
 ---
 
@@ -602,7 +606,7 @@ accepted debt / config hygiene, and F13 remains deferred.
 ## 13. NOT in Scope
 
 - `candidates/`, `researched/`, `results/` content (changeable; touched only as
-  evidence — F10's config note is advisory).
+  evidence, except F10's diagnostic config comments).
 - `quant_data` internals and real data coverage (upstream; out of scope by C-2/NG2).
 - `quant_autoresearch` loop logic — ranking, search memory, stopping, promotion,
   significance statistics (PSR/DSR/PBO) — which the foundation correctly leaves to
