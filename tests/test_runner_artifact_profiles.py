@@ -190,6 +190,11 @@ max_adv_participation = 1.0
 impact_coefficient_bps = 0.0
 impact_exponent = 1.0
 
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+
 [output]
 results_dir = "results"
 quick_checks = true

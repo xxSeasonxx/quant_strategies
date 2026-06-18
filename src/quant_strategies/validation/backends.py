@@ -7,7 +7,11 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from quant_strategies.core.portfolio_foundation import FeasibilityVerdict, RoundTrip
+from quant_strategies.core.portfolio_foundation import (
+    FeasibilityVerdict,
+    PortfolioSizingReport,
+    RoundTrip,
+)
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.validation.config import ScenarioRunConfig
 
@@ -168,6 +172,7 @@ class BackendRunResult(BaseModel):
     feasibility: FeasibilityVerdict = Field(
         default_factory=lambda: FeasibilityVerdict(feasible=True)
     )
+    sizing_report: PortfolioSizingReport | None = None
     # Netted-book round-trip ledger backing the scalar metrics. Excluded from
     # model_dump so the backend_runs summary stays scalar; it is written to its own
     # JSONL artifact (the gated net_return is recomputable as sum(round_trip.net)).

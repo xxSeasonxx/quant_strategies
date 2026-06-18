@@ -7,6 +7,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.core.engine_runner import EngineRun, evaluate_foundation
 from quant_strategies.core.portfolio_foundation import (
@@ -17,6 +18,11 @@ from quant_strategies.decisions import InstrumentRef, TargetDecision
 from quant_strategies.runner.economic_metrics import build_run_economics
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
+RISK_BUDGET = RiskBudgetConfig(
+    mode="fixed_scale",
+    annualization_periods_per_year=252,
+    book_scale=1.0,
+)
 
 
 def _rows(*closes: float) -> list[dict[str, object]]:
@@ -78,7 +84,11 @@ def _foundation(rows, decisions, *, end_index: int):
             impact_coefficient_bps=0.0,
             impact_exponent=1.0,
         ),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=PortfolioFoundationConfig(
+            risk_budget=RISK_BUDGET,
+            subwindows=1,
+            min_return_sample=2,
+        ),
     )
 
 

@@ -606,6 +606,7 @@ def _prepare_portfolio_inputs(
                     rows=projection_rows,
                     data_kind=context.config.data.kind,
                     capacity_model=context.config.capacity_model,
+                    risk_budget=context.config.risk_budget,
                     leverage_budget=context.config.leverage_budget,
                 )
                 if isinstance(context.selected_backend, PreparedEvaluationBackend)
@@ -671,6 +672,7 @@ def _run_portfolio_scenario(
                 metrics=context.config.metrics,
                 data_kind=context.config.data.kind,
                 capacity_model=context.config.capacity_model,
+                risk_budget=context.config.risk_budget,
                 leverage_budget=context.config.leverage_budget,
             )
         )
@@ -877,6 +879,9 @@ def _write_completion_artifacts(
                 "required": item.required,
                 "scoreability_bearing": item.scoreability_bearing,
                 "feasibility": item.feasibility.payload(),
+                "sizing_report": (
+                    None if item.sizing_report is None else item.sizing_report.payload()
+                ),
                 "metrics": item.metrics,
                 "warnings": list(item.warnings),
                 "unsupported_semantics": list(item.unsupported_semantics),
@@ -999,6 +1004,7 @@ def _build_fold_outputs(
                         True if metric_result is None else metric_result.scoreability_bearing
                     ),
                     feasibility=None if metric_result is None else metric_result.feasibility,
+                    sizing_report=None if metric_result is None else metric_result.sizing_report,
                 )
             )
     return tuple(fold_returns), tuple(scenario_metrics)

@@ -15,6 +15,7 @@ from quant_strategies.core.config import (
     EnvelopeConfig,
     FillModelConfig,
     LeverageBudgetConfig,
+    RiskBudgetConfig,
     SharedConfigModel,
     StrategyExecutionSpec,
     default_repo_root,
@@ -141,6 +142,7 @@ class RunConfig(RunnerConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     causality_policy: CausalityPolicyConfig = Field(default_factory=CausalityPolicyConfig)
     envelope: EnvelopeConfig = Field(default_factory=EnvelopeConfig)
@@ -168,6 +170,7 @@ class RunConfig(RunnerConfigModel):
             fill_model=self.fill_model,
             cost_model=self.cost_model,
             capacity_model=self.capacity_model,
+            risk_budget=self.risk_budget,
             leverage_budget=self.leverage_budget,
         )
 

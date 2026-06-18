@@ -14,6 +14,49 @@ exception.
 
 ---
 
+## 2026-06-18 — Repair-aware mark frames for position marking
+
+The portfolio foundation now values open positions against a dedicated, valuation-only
+mark frame separate from the raw signal/execution frame. `load_data` loads the mark frame
+from the base OHLCV dataset under the signal frame (e.g. `crypto_perp_1min` for
+`crypto_perp_funding`) via the upstream repair-aware loader
+`quant_data.contract_loaders.load_strategy_universe_mark_frame` (strict, same load window),
+and carries it plus a compact repair summary through `StrategyExecutionResult` to
+`build_portfolio_foundation`. In `_RowIndex`, `mark_at`/`bar_at` resolve through the
+observed signal bar, else the repair-aware mark, else a fail-closed `missing_mark`;
+`row_at` (fills, capacity, funding) stays strictly signal-only so a `tradable=False`,
+`volume=0` repaired row never reaches execution. The foundation emits an `is_repaired`
+audit of every synthetic mark consumed in scored P&L.
+
+This fixes the prior `missing_mark` crash when a position is held across a per-symbol data
+gap that the walk still visits (a bar another symbol observed). An unrepairable gap fails
+closed at the data-load stage; repair stays entirely upstream in `quant_data`. The mark
+dataset is the base dataset, not the derived join — the strict loader's freshness
+validation only supports base datasets, and base bars are a superset of the derived signal
+grid. Threading the mark frame through the validation/evaluation backends is deferred; they
+default to no mark frame and behave as before, so a gap-spanning fold still fails closed at
+the Evaluate/Validate gate — Train (quick-run) and Evaluate can diverge on gap handling
+until the backends are threaded; this fails closed, so it is not a silent regression. Rejected: in-engine carry-forward (no
+gap-size guardrail, loses provenance) and repairing the signal frame (corrupts
+signals/fills/funding/volume). Verified over the 2025-08-29 crypto-perp outage:
+`DOGE-PERP @ 06:18` is marked from the repaired close and audited.
+
+## 2026-06-16 — Risk-budget sizing contract
+
+Strategy-emitted `TargetDecision.target` values became base target-book shape
+scalars. The foundation now normalizes the emitted standing book by maximum
+intended raw gross exposure, applies the required operator `[risk_budget]`, and
+scores the final executable book. Train quick runs can calibrate to a requested
+annualized volatility and record a `PortfolioSizingReport`; validation and
+evaluation consume the recorded positive `book_scale` with `fixed_scale` and do
+not recalibrate per evidence window.
+
+This migration removed the scale-search loophole where a strategy could encode
+economic size in emitted target magnitudes. There is no compatibility mode for
+treating emitted targets as final deployable weights; configs, fixtures,
+strategies, and artifacts are regenerated against the shape-plus-risk-budget
+contract.
+
 ## 2026-06-13 — Slippage cost floor (R4)
 
 The scored cost floor now requires positive per-side slippage — a new fail-closed
@@ -27,7 +70,7 @@ and evaluation. Current contract in `FOUNDATION_LOCK.md`.
 This is the migration that made the **target book** the strategy contract and the
 **single causal netted portfolio book** the one scored model of money on every
 surface. The current contract is owned by `FOUNDATION_LOCK.md`; the consumer
-integration steps are in `docs/consumer/migration.md`. Recorded here: what
+integration steps are in `docs/consumer/integration.md`. Recorded here: what
 changed, what was deleted, and the rejected alternatives.
 
 **What changed (consumer-visible contract):**
@@ -57,6 +100,19 @@ changed, what was deleted, and the rejected alternatives.
 - **One accounting model everywhere.** Quick run, validation, and evaluation run
   the same pure book (`netted_portfolio_book_v1`); evaluation adds only Parquet
   trace serialization.
+
+**Older-shape migration mapping:**
+
+| Older shape | Current shape |
+| --- | --- |
+| `StrategyDecision` / `PositionTarget` / `ExitPolicy` / `DecisionIntent` | `TargetDecision` (signed base shape; `0` = flat/close) |
+| `Direction` / `SizingKind` / `DecisionAction` | sign + magnitude of the `TargetDecision` target |
+| data/time exit as an exit object | explicit `target=0` decision |
+| price-path exit inferred downstream | declared `RiskRule` on the `TargetDecision` |
+| `foundation=None` / fail-open on breach | typed `result.feasibility` verdict, `succeeded=False` |
+| `foundation_max_gross_exposure` `[output]` key | operator-frozen leverage budget |
+| per-trade-sum "return" as the scored number | NAV-path total return (`result.foundation`) |
+| alternate / `project_perp_ledger_v1` evaluation backend | one `netted_portfolio_book_v1` on every surface (`verdict_source="engine"`) |
 
 **Deleted with no shim:** `StrategyDecision`, `PositionTarget`, `ExitPolicy`,
 `DecisionIntent`, `Direction`, `SizingKind`, `DecisionAction`; the alternate

@@ -20,6 +20,11 @@ _default_engine_value: object = _UNSET
 class LoadedData:
     rows: Sequence[Mapping[str, Any]]
     normalized_rows: NormalizedRows | None = None
+    # Valuation-only mark frame: observed bars plus upstream policy-bounded
+    # ``previous_close_mark`` repairs (``is_repaired=True``). Empty when the signal
+    # dataset has no regular-series repair policy. Never feeds signals/fills/funding.
+    mark_rows: Sequence[Mapping[str, Any]] = ()
+    mark_repair: Mapping[str, Any] | None = None
 
 
 def load_strategy_bars(*args: Any, **kwargs: Any) -> Any:
@@ -46,6 +51,12 @@ def load_fx_bars_with_quotes(*args: Any, **kwargs: Any) -> Any:
     return upstream(*args, **kwargs)
 
 
+def load_strategy_universe_mark_frame(*args: Any, **kwargs: Any) -> Any:
+    from quant_data.contract_loaders import load_strategy_universe_mark_frame as upstream
+
+    return upstream(*args, **kwargs)
+
+
 def load_data(
     config: StrategyExecutionSpec,
     *,
@@ -54,6 +65,9 @@ def load_data(
     db_engine = engine if engine is not None else _default_engine()
     try:
         rows = _load_rows(config, db_engine)
+        # Load the valuation mark frame over the same window. An unrepairable gap
+        # raises here and surfaces as a fail-closed data-load failure, before any walk.
+        mark_rows, mark_repair = _load_mark_rows(config, db_engine)
     except DataLoadError:
         raise
     except Exception as exc:
@@ -61,7 +75,12 @@ def load_data(
     if not rows:
         raise DataLoadError("data load returned no rows")
     normalized_rows = NormalizedRows.from_rows(config, rows)
-    return LoadedData(rows=normalized_rows.projection_rows(), normalized_rows=normalized_rows)
+    return LoadedData(
+        rows=normalized_rows.projection_rows(),
+        normalized_rows=normalized_rows,
+        mark_rows=mark_rows,
+        mark_repair=mark_repair,
+    )
 
 
 def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, Any]]:
@@ -120,6 +139,55 @@ def _load_rows(config: StrategyExecutionSpec, engine: object) -> list[dict[str, 
         return rows
 
     raise DataLoadError(f"unsupported data kind: {data.kind}")
+
+
+def _mark_dataset(config: StrategyExecutionSpec) -> str | None:
+    """Resolve the repair-aware mark dataset for a run, or ``None`` when none applies.
+
+    The mark dataset is the base OHLCV dataset underlying the signal frame: the strict
+    mark loader validates the window via a freshness lookup that only supports base
+    datasets, not derived joins. Base bars are a superset of the derived signal grid (the
+    join adds columns, not bar timestamps), so the mark grid covers the signal grid.
+    Kinds/datasets without a repair policy have no mark frame; a within-window gap there
+    stays a hard failure.
+    """
+    data = config.data
+    if data.kind == "crypto_perp_funding":
+        candidate: str | None = "crypto_perp_1min"
+    elif data.kind == "bars":
+        candidate = data.dataset
+    else:
+        candidate = None
+    if candidate is None:
+        return None
+    from quant_data.dataset_policy import datasets_with_regular_series_repair
+
+    return candidate if candidate in datasets_with_regular_series_repair() else None
+
+
+def _load_mark_rows(
+    config: StrategyExecutionSpec, engine: object
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    dataset = _mark_dataset(config)
+    if dataset is None:
+        return [], None
+    data = config.data
+    frame, summary = load_strategy_universe_mark_frame(
+        engine,
+        list(data.symbols),
+        dataset,
+        data.effective_load_start,
+        data.effective_load_end,
+        strict=True,
+        return_summary=True,
+    )
+    mark_repair = {
+        "dataset": summary.dataset,
+        "repaired_row_count": summary.repaired_row_count,
+        "affected_symbols": list(summary.affected_symbols),
+        "classification_counts": dict(summary.classification_counts),
+    }
+    return _rows_from_frame(frame), mark_repair
 
 
 def _rows_from_frame(frame: object) -> list[dict[str, Any]]:

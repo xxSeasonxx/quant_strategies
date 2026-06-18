@@ -4,7 +4,7 @@ import math
 from bisect import bisect_left
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, cast
 
@@ -15,12 +15,15 @@ from quant_strategies.core.config import (
     DataConfig,
     DataKind,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.core.serialization import json_safe_value
+from quant_strategies.datetime_utils import parse_aware_datetime
 from quant_strategies.decisions import RiskRule, TargetDecision
 from quant_strategies.funding import funding_rates_match
 
 FOUNDATION_SCHEMA_VERSION = "quant_strategies.quick_run.portfolio_foundation/v2"
+SIZING_REPORT_SCHEMA_VERSION = "quant_strategies.portfolio_sizing/v1"
 FOUNDATION_BASIS = SHARED_ACCOUNTING_MODEL
 FOUNDATION_EVIDENCE_CLASS = "quick_run_portfolio_foundation_diagnostic"
 INITIAL_EQUITY = 100.0
@@ -51,10 +54,13 @@ REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY = "capacity_insufficient_adv_history"
 REASON_CAPACITY_LIMIT_BREACH = "capacity_limit_breach"
 
 _EXPOSURE_TOLERANCE = 1e-9
+_CALIBRATION_ITERATIONS = 24
+_VOLATILITY_TOLERANCE_FRACTION = 1e-4
 
 
 @dataclass(frozen=True)
 class PortfolioFoundationConfig:
+    risk_budget: RiskBudgetConfig
     subwindows: int = 6
     cost_stress_multiplier: float = 2.0
     fill_stress_fraction: float = DEFAULT_FILL_STRESS_FRACTION
@@ -117,6 +123,72 @@ class FeasibilityError(ValueError):
     def __init__(self, verdict: FeasibilityVerdict) -> None:
         self.verdict = verdict
         super().__init__(verdict.reason or "infeasible")
+
+
+@dataclass(frozen=True)
+class NormalizedShapeMetadata:
+    method: str
+    raw_gross_normalization_scalar: float
+    raw_max_gross: float
+    raw_max_net: float
+    normalized_max_gross: float
+    normalized_max_net: float
+    decision_count: int
+
+    def payload(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            json_safe_value(
+                {
+                    "method": self.method,
+                    "raw_gross_normalization_scalar": self.raw_gross_normalization_scalar,
+                    "raw_max_gross": self.raw_max_gross,
+                    "raw_max_net": self.raw_max_net,
+                    "normalized_max_gross": self.normalized_max_gross,
+                    "normalized_max_net": self.normalized_max_net,
+                    "decision_count": self.decision_count,
+                }
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class PortfolioSizingReport:
+    schema_version: str
+    mode: str
+    shape: NormalizedShapeMetadata
+    annualization_periods_per_year: int
+    book_scale: float
+    target_volatility: float | None
+    deployed_volatility: float | None
+    max_feasible_volatility: float | None
+    capacity_bound: bool
+    max_feasible_book_scale: float | None
+    binding_dimensions: tuple[str, ...]
+    final_max_intended_gross: float
+    final_max_intended_net: float
+
+    def payload(self) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            json_safe_value(
+                {
+                    "schema_version": self.schema_version,
+                    "mode": self.mode,
+                    "shape": self.shape.payload(),
+                    "annualization_periods_per_year": self.annualization_periods_per_year,
+                    "book_scale": self.book_scale,
+                    "target_volatility": self.target_volatility,
+                    "deployed_volatility": self.deployed_volatility,
+                    "max_feasible_volatility": self.max_feasible_volatility,
+                    "capacity_bound": self.capacity_bound,
+                    "max_feasible_book_scale": self.max_feasible_book_scale,
+                    "binding_dimensions": list(self.binding_dimensions),
+                    "final_max_intended_gross": self.final_max_intended_gross,
+                    "final_max_intended_net": self.final_max_intended_net,
+                }
+            ),
+        )
 
 
 @dataclass(frozen=True)
@@ -308,12 +380,18 @@ class RunPortfolioFoundation:
     schema_version: str
     basis: str
     evidence_class: str
+    sizing_report: PortfolioSizingReport
     scenarios: tuple[FoundationScenarioResult, ...]
     # The realistic-cost scenario's single causal walk. Its NAV ``path`` is the
     # authoritative scored object and its ``round_trips`` are the derived attribution
     # ledger the per-trade economics view is reconstructed from (design D4) — one
     # model of money, never an independent summation.
     ledger: BookWalkResult
+    # Repair-aware mark audit: the upstream repair summary plus the synthetic marks the
+    # scored walk actually consumed in P&L. ``None`` only when no repair was available in
+    # the window and none was consumed; non-``None`` (with ``consumed_repaired_mark_count``
+    # possibly 0) when the upstream summary reported repaired rows.
+    mark_repair: Mapping[str, Any] | None = None
 
     @property
     def feasible(self) -> bool:
@@ -337,10 +415,12 @@ class RunPortfolioFoundation:
                     "schema_version": self.schema_version,
                     "basis": self.basis,
                     "evidence_class": self.evidence_class,
+                    "sizing_report": self.sizing_report.payload(),
                     "scenarios": {
                         scenario.scenario_id: scenario.summary_payload()
                         for scenario in self.scenarios
                     },
+                    **({"mark_repair": self.mark_repair} if self.mark_repair else {}),
                 }
             ),
         )
@@ -353,6 +433,7 @@ class RunPortfolioFoundation:
                     "schema_version": self.schema_version,
                     "basis": self.basis,
                     "evidence_class": self.evidence_class,
+                    "sizing_report": self.sizing_report.payload(),
                     "scenarios": {
                         scenario.scenario_id: scenario.matrix_payload()
                         for scenario in self.scenarios
@@ -378,6 +459,7 @@ class BookWalkResult:
     realized_pnl: float
     execution_events: tuple[ExecutionEvent, ...] = ()
     funding_events: tuple[FundingEvent, ...] = ()
+    sizing_report: PortfolioSizingReport | None = None
 
 
 def build_portfolio_foundation(
@@ -389,6 +471,8 @@ def build_portfolio_foundation(
     cost_model: CostModelConfig,
     capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
+    mark_rows: Sequence[Mapping[str, Any]] = (),
+    mark_repair: Mapping[str, Any] | None = None,
 ) -> RunPortfolioFoundation:
     """Build the authoritative scored portfolio book over the two cost scenarios.
 
@@ -398,8 +482,20 @@ def build_portfolio_foundation(
     Infeasible scenarios raise :class:`FeasibilityError` carrying the typed verdict;
     the caller (Phase 1b) gates ``RunResult.succeeded`` on it.
     """
-    row_index = _RowIndex(rows)
-    decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    row_index = _RowIndex(rows, mark_rows)
+    raw_decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    decision_plan, sizing_report = _sized_decision_plan(
+        row_index=row_index,
+        raw_decision_plan=raw_decision_plan,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+    )
+    # Isolate the audit to the scored walk: sizing/calibration walks above share this
+    # index and may have read repaired marks; clear so the set captures only the
+    # authoritative realistic-costs scenario (the ledger), not unscored sizing/stress walks.
+    row_index.consumed_repaired_marks.clear()
     realistic, realistic_walk = _build_scenario(
         "realistic_costs",
         row_index=row_index,
@@ -410,6 +506,9 @@ def build_portfolio_foundation(
         cost_multiplier=1.0,
         config=config,
     )
+    scored_consumed_marks = set(row_index.consumed_repaired_marks)
+    sizing_report = _completed_sizing_report(sizing_report, realistic_walk)
+    realistic_walk = replace(realistic_walk, sizing_report=sizing_report)
     stress, _ = _build_scenario(
         "cost_stress",
         row_index=row_index,
@@ -441,9 +540,28 @@ def build_portfolio_foundation(
         schema_version=FOUNDATION_SCHEMA_VERSION,
         basis=FOUNDATION_BASIS,
         evidence_class=FOUNDATION_EVIDENCE_CLASS,
+        sizing_report=sizing_report,
         scenarios=tuple(scenarios),
         ledger=realistic_walk,
+        mark_repair=_mark_repair_audit(mark_repair, scored_consumed_marks),
     )
+
+
+def _mark_repair_audit(
+    summary: Mapping[str, Any] | None,
+    consumed: set[tuple[str, datetime]],
+) -> dict[str, Any] | None:
+    """Compact repair audit: the upstream repair summary plus the synthetic marks the
+    scored walk actually consumed in P&L. ``None`` when nothing was repaired or used."""
+    if not consumed and not (summary and summary.get("repaired_row_count")):
+        return None
+    audit: dict[str, Any] = dict(summary) if summary else {}
+    audit["consumed_repaired_mark_count"] = len(consumed)
+    audit["consumed_repaired_marks"] = [
+        {"symbol": symbol, "timestamp": timestamp.isoformat()}
+        for symbol, timestamp in sorted(consumed)
+    ]
+    return audit
 
 
 def walk_portfolio_book(
@@ -455,6 +573,7 @@ def walk_portfolio_book(
     cost_model: CostModelConfig,
     capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
+    mark_rows: Sequence[Mapping[str, Any]] = (),
 ) -> BookWalkResult:
     """Run the single causal book once over ``rows`` at one cost/fill configuration.
 
@@ -470,10 +589,18 @@ def walk_portfolio_book(
     are intentionally not applied here, so a legitimate zero-cost evaluation scenario
     is not spuriously infeasible.
     """
-    row_index = _RowIndex(rows)
-    decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    row_index = _RowIndex(rows, mark_rows)
+    raw_decision_plan = _DecisionPlan(row_index, decisions, fill_model=fill_model)
+    decision_plan, sizing_report = _sized_decision_plan(
+        row_index=row_index,
+        raw_decision_plan=raw_decision_plan,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+    )
     per_side_cost_fraction = cost_model_per_side_fraction(cost_model)
-    return _walk_book(
+    walk = _walk_book(
         row_index,
         decision_plan,
         per_side_cost_fraction=per_side_cost_fraction,
@@ -481,6 +608,8 @@ def walk_portfolio_book(
         capacity_model=capacity_model,
         config=config,
     )
+    sizing_report = _completed_sizing_report(sizing_report, walk)
+    return replace(walk, sizing_report=sizing_report)
 
 
 def at_risk_period_returns(path: Sequence[PortfolioPathPoint]) -> tuple[float, ...]:
@@ -553,7 +682,11 @@ class _PlannedDecision:
 
 
 class _RowIndex:
-    def __init__(self, rows: Sequence[Mapping[str, Any]]) -> None:
+    def __init__(
+        self,
+        rows: Sequence[Mapping[str, Any]],
+        mark_rows: Sequence[Mapping[str, Any]] = (),
+    ) -> None:
         by_symbol: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
         by_key: dict[tuple[str, datetime], Mapping[str, Any]] = {}
         funding_rates_by_key: dict[tuple[str, datetime], float] = {}
@@ -603,6 +736,21 @@ class _RowIndex:
             timestamp: tuple(events)
             for timestamp, events in sorted(funding_events_by_apply_time.items())
         }
+        # Valuation-only mark index: observed + policy-bounded repaired rows. Consulted
+        # only when the signal index lacks a bar for a held symbol (a data gap). Never
+        # read by fills, capacity, or funding — those stay strictly on ``by_key``.
+        mark_by_key: dict[tuple[str, datetime], Mapping[str, Any]] = {}
+        for row in mark_rows:
+            symbol = row.get("symbol")
+            # Normalize the mark timestamp through the same parser the signal frame uses
+            # (``NormalizedRows`` → ``parse_aware_datetime``), so the mark index keys
+            # identically to ``by_key`` and the gap lookup cannot miss on a representation
+            # difference between the two loaders.
+            timestamp, _ = parse_aware_datetime(row.get("timestamp"))
+            if isinstance(symbol, str) and timestamp is not None:
+                mark_by_key[(symbol, timestamp)] = row
+        self.mark_by_key = mark_by_key
+        self.consumed_repaired_marks: set[tuple[str, datetime]] = set()
 
     def _adv_notional_prefix(
         self,
@@ -634,8 +782,25 @@ class _RowIndex:
         except KeyError as exc:
             raise ValueError(f"missing_mark:{symbol}:{timestamp.isoformat()}") from exc
 
+    def _valuation_row(self, symbol: str, timestamp: datetime) -> Mapping[str, Any]:
+        """Resolve a valuation row: the observed signal bar, else the repair-aware mark.
+
+        Observed bars carry the same close in both frames, so the signal lookup is a
+        trivially-equal fast path; the mark index is consulted only on a signal gap.
+        A repaired mark consumed here is recorded for the ``is_repaired`` audit trail.
+        A bar absent from both frames is a fail-closed ``missing_mark``."""
+        row = self.by_key.get((symbol, timestamp))
+        if row is not None:
+            return row
+        mark_row = self.mark_by_key.get((symbol, timestamp))
+        if mark_row is None:
+            raise ValueError(f"missing_mark:{symbol}:{timestamp.isoformat()}")
+        if mark_row.get("is_repaired") is True:
+            self.consumed_repaired_marks.add((symbol, timestamp))
+        return mark_row
+
     def mark_at(self, symbol: str, timestamp: datetime) -> float:
-        row = self.row_at(symbol, timestamp)
+        row = self._valuation_row(symbol, timestamp)
         close = row.get("close")
         # Happy path runs once per open position per bar; keep it allocation-free.
         # The error string (with isoformat) is built only on the failure branch, so a
@@ -651,9 +816,11 @@ class _RowIndex:
 
         The row contract guarantees these fields are present, positive, and order-valid
         (``high >= max(open, close, low)``), so a ``RiskRule`` can be evaluated against the
-        intrabar range rather than the close alone. Like :meth:`mark_at`, the failure-only
+        intrabar range rather than the close alone. Resolves through the valuation row, so
+        a repaired flat bar (``open=high=low=close``) cannot fire a barrier and the rule
+        resolves on the next observed bar. Like :meth:`mark_at`, the failure-only
         ``isoformat()`` keeps the happy path allocation-free."""
-        row = self.row_at(symbol, timestamp)
+        row = self._valuation_row(symbol, timestamp)
         return (
             _positive_row_field(row, "open", symbol, timestamp),
             _positive_row_field(row, "high", symbol, timestamp),
@@ -731,6 +898,423 @@ class _DecisionPlan:
             )
         self.by_time = {timestamp: tuple(items) for timestamp, items in sorted(by_time.items())}
         self.symbols = tuple(sorted({item.instrument.symbol for item in decisions}))
+
+    def scaled(self, scale: float) -> _DecisionPlan:
+        plan = object.__new__(_DecisionPlan)
+        plan.by_time = {
+            timestamp: tuple(
+                replace(item, signed_weight=item.signed_weight * scale) for item in items
+            )
+            for timestamp, items in self.by_time.items()
+        }
+        plan.symbols = self.symbols
+        return plan
+
+
+@dataclass(frozen=True)
+class _FrontierResult:
+    book_scale: float
+    binding_dimensions: tuple[str, ...]
+
+
+def _sized_decision_plan(
+    *,
+    row_index: _RowIndex,
+    raw_decision_plan: _DecisionPlan,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+) -> tuple[_DecisionPlan, PortfolioSizingReport]:
+    normalized_plan, shape = _normalized_shape_plan(raw_decision_plan)
+    risk_budget = config.risk_budget
+    if risk_budget.mode == "fixed_scale":
+        book_scale = cast(float, risk_budget.book_scale)
+        report = _sizing_report(
+            risk_budget,
+            shape=shape,
+            book_scale=book_scale,
+            deployed_volatility=None,
+            max_feasible_volatility=None,
+            capacity_bound=False,
+            max_feasible_book_scale=None,
+            binding_dimensions=(),
+        )
+        return normalized_plan.scaled(book_scale), report
+
+    target_volatility = cast(float, risk_budget.target_volatility)
+    if shape.normalized_max_gross <= _EXPOSURE_TOLERANCE:
+        report = _sizing_report(
+            risk_budget,
+            shape=shape,
+            book_scale=0.0,
+            deployed_volatility=None,
+            max_feasible_volatility=None,
+            capacity_bound=False,
+            max_feasible_book_scale=0.0,
+            binding_dimensions=(),
+        )
+        return normalized_plan.scaled(0.0), report
+
+    frontier = _feasible_frontier(
+        row_index=row_index,
+        normalized_plan=normalized_plan,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+        shape=shape,
+    )
+    if frontier.book_scale <= 0.0:
+        report = _sizing_report(
+            risk_budget,
+            shape=shape,
+            book_scale=0.0,
+            deployed_volatility=0.0,
+            max_feasible_volatility=0.0,
+            capacity_bound=True,
+            max_feasible_book_scale=0.0,
+            binding_dimensions=frontier.binding_dimensions,
+        )
+        return normalized_plan.scaled(0.0), report
+
+    frontier_walk = _priced_candidate_walk(
+        row_index=row_index,
+        normalized_plan=normalized_plan,
+        book_scale=frontier.book_scale,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+    )
+    frontier_volatility = _annualized_volatility(
+        frontier_walk,
+        periods_per_year=risk_budget.annualization_periods_per_year,
+    )
+    if frontier_volatility is None:
+        book_scale = frontier.book_scale
+        deployed_volatility = None
+    elif frontier_volatility <= _volatility_ceiling(target_volatility):
+        book_scale = frontier.book_scale
+        deployed_volatility = frontier_volatility
+    else:
+        book_scale, deployed_volatility = _calibrated_book_scale(
+            row_index=row_index,
+            normalized_plan=normalized_plan,
+            data=data,
+            cost_model=cost_model,
+            capacity_model=capacity_model,
+            config=config,
+            target_volatility=target_volatility,
+            max_book_scale=frontier.book_scale,
+        )
+    capacity_bound = (
+        frontier_volatility is not None
+        and frontier_volatility < target_volatility - _volatility_tolerance(target_volatility)
+    )
+    report = _sizing_report(
+        risk_budget,
+        shape=shape,
+        book_scale=book_scale,
+        deployed_volatility=deployed_volatility,
+        max_feasible_volatility=frontier_volatility,
+        capacity_bound=capacity_bound,
+        max_feasible_book_scale=frontier.book_scale,
+        binding_dimensions=frontier.binding_dimensions,
+    )
+    return normalized_plan.scaled(book_scale), report
+
+
+def _normalized_shape_plan(
+    raw_decision_plan: _DecisionPlan,
+) -> tuple[_DecisionPlan, NormalizedShapeMetadata]:
+    raw_gross, raw_net = _decision_plan_exposure_bounds(raw_decision_plan)
+    divisor = raw_gross if raw_gross > 0.0 else 1.0
+    normalized_plan = raw_decision_plan.scaled(1.0 / divisor)
+    normalized_gross, normalized_net = _decision_plan_exposure_bounds(normalized_plan)
+    shape = NormalizedShapeMetadata(
+        method="max_intended_raw_gross",
+        raw_gross_normalization_scalar=raw_gross,
+        raw_max_gross=raw_gross,
+        raw_max_net=raw_net,
+        normalized_max_gross=normalized_gross,
+        normalized_max_net=normalized_net,
+        decision_count=sum(len(items) for items in raw_decision_plan.by_time.values()),
+    )
+    return normalized_plan, shape
+
+
+def _decision_plan_exposure_bounds(plan: _DecisionPlan) -> tuple[float, float]:
+    intended: dict[str, float] = {}
+    max_gross = 0.0
+    max_net = 0.0
+    for _timestamp, planned in plan.by_time.items():
+        for decision in planned:
+            if decision.signed_weight == 0.0:
+                intended.pop(decision.symbol, None)
+            else:
+                intended[decision.symbol] = decision.signed_weight
+        gross = sum(abs(weight) for weight in intended.values())
+        net = abs(sum(intended.values()))
+        max_gross = max(max_gross, gross)
+        max_net = max(max_net, net)
+    return max_gross, max_net
+
+
+def _feasible_frontier(
+    *,
+    row_index: _RowIndex,
+    normalized_plan: _DecisionPlan,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+    shape: NormalizedShapeMetadata,
+) -> _FrontierResult:
+    if shape.normalized_max_gross <= _EXPOSURE_TOLERANCE:
+        return _FrontierResult(book_scale=0.0, binding_dimensions=())
+    leverage_scale, leverage_dimensions = _leverage_frontier_scale(shape, config)
+    feasible, verdict = _candidate_feasible(
+        row_index=row_index,
+        normalized_plan=normalized_plan,
+        book_scale=leverage_scale,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+    )
+    if feasible:
+        return _FrontierResult(
+            book_scale=leverage_scale,
+            binding_dimensions=leverage_dimensions,
+        )
+    if verdict is None or not _frontier_reason(verdict.reason):
+        raise FeasibilityError(
+            verdict
+            or FeasibilityVerdict(
+                feasible=False,
+                reason="sizing_frontier_failed",
+                detail="frontier candidate failed without a typed verdict",
+            )
+        )
+    binding_dimensions = set(leverage_dimensions)
+    if verdict.reason == REASON_CAPACITY_LIMIT_BREACH:
+        binding_dimensions.add("capacity")
+    else:
+        binding_dimensions.add("leverage")
+
+    low = 0.0
+    high = leverage_scale
+    for _ in range(_CALIBRATION_ITERATIONS):
+        mid = (low + high) / 2.0
+        feasible, verdict = _candidate_feasible(
+            row_index=row_index,
+            normalized_plan=normalized_plan,
+            book_scale=mid,
+            data=data,
+            cost_model=cost_model,
+            capacity_model=capacity_model,
+            config=config,
+        )
+        if feasible:
+            low = mid
+            continue
+        if verdict is None or not _frontier_reason(verdict.reason):
+            raise FeasibilityError(
+                verdict
+                or FeasibilityVerdict(
+                    feasible=False,
+                    reason="sizing_frontier_failed",
+                    detail="frontier candidate failed without a typed verdict",
+                )
+            )
+        high = mid
+        if verdict.reason == REASON_CAPACITY_LIMIT_BREACH:
+            binding_dimensions.add("capacity")
+        else:
+            binding_dimensions.add("leverage")
+    return _FrontierResult(
+        book_scale=low,
+        binding_dimensions=tuple(sorted(binding_dimensions)),
+    )
+
+
+def _leverage_frontier_scale(
+    shape: NormalizedShapeMetadata,
+    config: PortfolioFoundationConfig,
+) -> tuple[float, tuple[str, ...]]:
+    gross_scale = (
+        math.inf
+        if shape.normalized_max_gross <= _EXPOSURE_TOLERANCE
+        else config.max_gross_exposure / shape.normalized_max_gross
+    )
+    net_scale = (
+        math.inf
+        if shape.normalized_max_net <= _EXPOSURE_TOLERANCE
+        else config.max_net_exposure / shape.normalized_max_net
+    )
+    scale = min(gross_scale, net_scale)
+    if not math.isfinite(scale):
+        return 0.0, ()
+    dimensions: list[str] = []
+    if math.isclose(scale, gross_scale, rel_tol=1e-12, abs_tol=1e-12):
+        dimensions.append("gross_leverage")
+    if math.isclose(scale, net_scale, rel_tol=1e-12, abs_tol=1e-12):
+        dimensions.append("net_leverage")
+    return scale, tuple(dimensions)
+
+
+def _candidate_feasible(
+    *,
+    row_index: _RowIndex,
+    normalized_plan: _DecisionPlan,
+    book_scale: float,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+) -> tuple[bool, FeasibilityVerdict | None]:
+    try:
+        _priced_candidate_walk(
+            row_index=row_index,
+            normalized_plan=normalized_plan,
+            book_scale=book_scale,
+            data=data,
+            cost_model=cost_model,
+            capacity_model=capacity_model,
+            config=config,
+        )
+    except FeasibilityError as exc:
+        return False, exc.verdict
+    return True, None
+
+
+def _priced_candidate_walk(
+    *,
+    row_index: _RowIndex,
+    normalized_plan: _DecisionPlan,
+    book_scale: float,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+) -> BookWalkResult:
+    return _walk_book(
+        row_index,
+        normalized_plan.scaled(book_scale),
+        per_side_cost_fraction=cost_model_per_side_fraction(cost_model),
+        data_kind=data.kind,
+        capacity_model=capacity_model,
+        config=config,
+    )
+
+
+def _calibrated_book_scale(
+    *,
+    row_index: _RowIndex,
+    normalized_plan: _DecisionPlan,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+    target_volatility: float,
+    max_book_scale: float,
+) -> tuple[float, float | None]:
+    low = 0.0
+    high = max_book_scale
+    best_scale = 0.0
+    best_volatility: float | None = 0.0
+    for _ in range(_CALIBRATION_ITERATIONS):
+        mid = (low + high) / 2.0
+        walk = _priced_candidate_walk(
+            row_index=row_index,
+            normalized_plan=normalized_plan,
+            book_scale=mid,
+            data=data,
+            cost_model=cost_model,
+            capacity_model=capacity_model,
+            config=config,
+        )
+        volatility = _annualized_volatility(
+            walk,
+            periods_per_year=config.risk_budget.annualization_periods_per_year,
+        )
+        if volatility is None:
+            best_scale = mid
+            best_volatility = None
+            low = mid
+            continue
+        if volatility <= _volatility_ceiling(target_volatility):
+            best_scale = mid
+            best_volatility = volatility
+            low = mid
+        else:
+            high = mid
+    return best_scale, best_volatility
+
+
+def _frontier_reason(reason: str | None) -> bool:
+    return reason in {REASON_CAPACITY_LIMIT_BREACH, REASON_LEVERAGE_BUDGET_BREACH}
+
+
+def _annualized_volatility(
+    walk: BookWalkResult,
+    *,
+    periods_per_year: int,
+) -> float | None:
+    returns = [
+        float(value) for value in at_risk_period_returns(walk.path) if math.isfinite(float(value))
+    ]
+    if len(returns) < 2:
+        return None
+    return _sample_stdev(returns) * math.sqrt(periods_per_year)
+
+
+def _volatility_tolerance(target_volatility: float) -> float:
+    return max(1e-12, target_volatility * _VOLATILITY_TOLERANCE_FRACTION)
+
+
+def _volatility_ceiling(target_volatility: float) -> float:
+    return target_volatility + _volatility_tolerance(target_volatility)
+
+
+def _sizing_report(
+    risk_budget: RiskBudgetConfig,
+    *,
+    shape: NormalizedShapeMetadata,
+    book_scale: float,
+    deployed_volatility: float | None,
+    max_feasible_volatility: float | None,
+    capacity_bound: bool,
+    max_feasible_book_scale: float | None,
+    binding_dimensions: tuple[str, ...],
+) -> PortfolioSizingReport:
+    return PortfolioSizingReport(
+        schema_version=SIZING_REPORT_SCHEMA_VERSION,
+        mode=risk_budget.mode,
+        shape=shape,
+        annualization_periods_per_year=risk_budget.annualization_periods_per_year,
+        book_scale=book_scale,
+        target_volatility=risk_budget.target_volatility,
+        deployed_volatility=deployed_volatility,
+        max_feasible_volatility=max_feasible_volatility,
+        capacity_bound=capacity_bound,
+        max_feasible_book_scale=max_feasible_book_scale,
+        binding_dimensions=binding_dimensions,
+        final_max_intended_gross=shape.normalized_max_gross * book_scale,
+        final_max_intended_net=shape.normalized_max_net * book_scale,
+    )
+
+
+def _completed_sizing_report(
+    report: PortfolioSizingReport,
+    walk: BookWalkResult,
+) -> PortfolioSizingReport:
+    deployed_volatility = _annualized_volatility(
+        walk,
+        periods_per_year=report.annualization_periods_per_year,
+    )
+    return replace(report, deployed_volatility=deployed_volatility)
 
 
 def _build_scenario(
@@ -1374,6 +1958,8 @@ def _apply_funding(
             position.entry_time < funding_timestamp <= timestamp
         ):
             continue
+        # Funding apply-times are keyed by an observed signal bar's own timestamp, so this
+        # ``mark_at`` always resolves via the signal fast path — never a repaired row.
         mark = row_index.mark_at(symbol, timestamp)
         cashflow = -position.signed_qty * mark * funding_rate
         cash_delta += cashflow

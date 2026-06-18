@@ -86,6 +86,11 @@ slippage_bps_per_side = 0.0
 [capacity_model]
 mode = "off"
 
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+
 [output]
 results_dir = "results"
 """.lstrip()
@@ -123,6 +128,36 @@ def test_execute_strategy_run_completed_result(tmp_path: Path, monkeypatch: pyte
     assert result.decisions == [decision()]
     assert len(result.normalized_rows_sha256) == 64
     assert result.evidence_quality.data_availability_status == "complete"
+
+
+def test_execute_strategy_run_carries_mark_frame_without_exposing_it_to_strategy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    seen_rows: list[list[dict]] = []
+
+    def generate_decisions(rows, params):
+        seen_rows.append([dict(row) for row in rows])
+        return []
+
+    config = write_config(tmp_path)
+    monkeypatch.setattr(execution, "_load_strategy", lambda path, repo_root: generate_decisions)
+    repaired = {**rows()[0], "is_repaired": True}
+    monkeypatch.setattr(
+        execution,
+        "load_data",
+        lambda config, **_kwargs: LoadedData(
+            rows=rows(), mark_rows=[repaired], mark_repair={"repaired_row_count": 1}
+        ),
+    )
+
+    result = execute_strategy_run(config.to_execution_spec(), repo_root=tmp_path)
+
+    # The strategy received only signal rows — no repaired mark row leaked in (purity).
+    assert seen_rows and all(not row.get("is_repaired") for row in seen_rows[0])
+    # The mark frame is carried separately for the foundation.
+    assert result.mark_rows and result.mark_rows[0].get("is_repaired") is True
+    assert result.mark_repair == {"repaired_row_count": 1}
 
 
 def test_execute_strategy_run_reuses_loaded_rows_when_already_normalized(

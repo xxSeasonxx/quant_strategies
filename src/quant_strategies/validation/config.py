@@ -23,6 +23,7 @@ from quant_strategies.core.config import (
     DataConfig,
     FillModelConfig,
     LeverageBudgetConfig,
+    RiskBudgetConfig,
     StrategyExecutionSpec,
     WindowedDataConfig,
 )
@@ -190,8 +191,15 @@ class ScenarioRunConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     data: DataConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
+
+    @model_validator(mode="after")
+    def validate_fixed_scale(self) -> ScenarioRunConfig:
+        if self.risk_budget.mode != "fixed_scale":
+            raise ValueError("validation scenarios require risk_budget.mode = 'fixed_scale'")
+        return self
 
 
 class ValidationConfig(ValidationConfigModel):
@@ -206,6 +214,7 @@ class ValidationConfig(ValidationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
     output: ValidationOutputConfig
@@ -252,6 +261,8 @@ class ValidationConfig(ValidationConfigModel):
                 "windows.id values must not collide after validation artifact path sanitization: "
                 + "; ".join(collisions)
             )
+        if self.risk_budget.mode != "fixed_scale":
+            raise ValueError("validation requires risk_budget.mode = 'fixed_scale'")
         return self
 
     def to_execution_spec(self, window: ValidationWindow) -> StrategyExecutionSpec:
@@ -269,6 +280,7 @@ class ValidationConfig(ValidationConfigModel):
             fill_model=self.fill_model,
             cost_model=self.cost_model,
             capacity_model=self.capacity_model,
+            risk_budget=self.risk_budget,
             leverage_budget=self.leverage_budget,
             require_param_validator=True,
         )

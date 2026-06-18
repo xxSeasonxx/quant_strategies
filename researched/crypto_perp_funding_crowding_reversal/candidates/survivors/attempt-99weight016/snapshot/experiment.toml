@@ -1,0 +1,152 @@
+[params]
+funding_lookback_events = 5
+return_lookback_minutes = 120
+decision_interval_minutes = 240
+decision_lag_minutes = 1
+session_start_hour = 4
+session_end_hour = 24
+top_n = 5
+min_cross_section = 4
+min_abs_funding_bps = 1.0
+min_abs_return_bps = 0.0
+max_short_return_extension_bps = 275.0
+include_positive_funding_shorts = true
+include_negative_funding_longs = true
+min_same_sign_funding_events = 3
+min_latest_abs_funding_bps = 0.0
+volatility_lookback_minutes = 0
+min_abs_return_z = 0.0
+recent_return_lookback_minutes = 60
+max_recent_same_direction_return_bps = 250.0
+min_idiosyncratic_return_bps = 2.5
+min_short_idiosyncratic_return_bps = 0.0
+min_long_idiosyncratic_return_bps = 0.0
+symbol_cooldown_minutes = 0
+min_tail_count = 1
+balance_sides = false
+selection_score = "funding"
+require_exit_horizon = false
+weight = 0.1111111111111111
+hold_bars = 600
+short_hold_bars = 480
+long_hold_bars = 720
+high_extension_short_return_bps = 120.0
+high_extension_short_hold_bars = 120
+state_mode = "suppress_until_exit"
+overlap_exit_buffer_bars = 2
+
+[bounds.funding_lookback_events]
+min = 5
+max = 5
+
+[bounds.return_lookback_minutes]
+min = 120
+max = 120
+
+[bounds.decision_interval_minutes]
+min = 240
+max = 240
+
+[bounds.decision_lag_minutes]
+min = 1
+max = 1
+
+[bounds.session_start_hour]
+min = 4
+max = 4
+
+[bounds.session_end_hour]
+min = 24
+max = 24
+
+[bounds.top_n]
+min = 5
+max = 5
+
+[bounds.min_cross_section]
+min = 4
+max = 4
+
+[bounds.min_abs_funding_bps]
+min = 1.0
+max = 1.0
+
+[bounds.min_abs_return_bps]
+min = 0.0
+max = 0.0
+
+[bounds.max_short_return_extension_bps]
+min = 275.0
+max = 275.0
+
+[bounds.min_same_sign_funding_events]
+min = 3
+max = 3
+
+[bounds.min_latest_abs_funding_bps]
+min = 0.0
+max = 0.0
+
+[bounds.volatility_lookback_minutes]
+min = 0
+max = 0
+
+[bounds.min_abs_return_z]
+min = 0.0
+max = 0.0
+
+[bounds.recent_return_lookback_minutes]
+min = 60
+max = 60
+
+[bounds.max_recent_same_direction_return_bps]
+min = 250.0
+max = 250.0
+
+[bounds.min_idiosyncratic_return_bps]
+min = 2.5
+max = 2.5
+
+[bounds.min_short_idiosyncratic_return_bps]
+min = 0.0
+max = 0.0
+
+[bounds.min_long_idiosyncratic_return_bps]
+min = 0.0
+max = 0.0
+
+[bounds.symbol_cooldown_minutes]
+min = 0
+max = 0
+
+[bounds.min_tail_count]
+min = 1
+max = 1
+
+[bounds.weight]
+min = 0.1111111111111111
+max = 0.1111111111111111
+
+[bounds.hold_bars]
+min = 600
+max = 600
+
+[bounds.short_hold_bars]
+min = 480
+max = 480
+
+[bounds.long_hold_bars]
+min = 720
+max = 720
+
+[bounds.high_extension_short_return_bps]
+min = 120.0
+max = 120.0
+
+[bounds.high_extension_short_hold_bars]
+min = 120
+max = 120
+
+[bounds.overlap_exit_buffer_bars]
+min = 2
+max = 2

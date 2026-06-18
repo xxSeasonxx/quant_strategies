@@ -7,16 +7,18 @@ but do not reopen accepted tradeoffs unless a documented trigger occurs.
 ## Foundation Contract (north star)
 
 The unit of simulation is **one causal, single-account portfolio**, not an
-isolated trade. A strategy declares a **target book** — standing, signed
-weight-of-NAV `TargetDecision`s per instrument (`0` = flat/close), idempotent so
-same-symbol exposure nets and cannot stack, with optional declared price-path
-`RiskRule`s. The engine folds that book into **one netted, financed, marked book**
-on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**: the
-netted single-account portfolio NAV path is the single authoritative scored unit,
-and the per-trade ledger is a derived attribution view of the same walk. An
-envelope breach (over the operator-frozen leverage budget, unpriced, unsupported,
-or missing capacity evidence, a capacity participation-limit breach, zero-cost or zero-slippage on a
-scoreable run, unfinanced leverage, or a degenerate sample) is a typed
+isolated trade. A strategy declares a **target book** — standing, signed base
+target shapes per instrument (`0` = flat/close), idempotent so same-symbol
+exposure nets and cannot stack, with optional declared price-path `RiskRule`s.
+The foundation normalizes that shape, applies the operator `[risk_budget]`, and
+the engine folds the final executable weights into **one netted, financed, marked
+book** on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**:
+the netted single-account portfolio NAV path is the single authoritative scored
+unit, and the per-trade ledger is a derived attribution view of the same walk. An
+envelope breach (over the operator-frozen risk budget or leverage budget,
+unpriced, unsupported, or missing capacity evidence, a capacity participation-limit
+breach, zero-cost or zero-slippage on a scoreable run, unfinanced leverage, or a
+degenerate sample) is a typed
 **fail-closed** feasibility verdict that makes `succeeded=False` — never clamped,
 never a silent `None`. See `PRD.md` G8 and `AGENTS.md`.
 
@@ -27,11 +29,13 @@ validation run, and evaluation run. Quick run is diagnostic; validation run is
 mechanical evidence validation; evaluation run is stateless frozen-candidate
 portfolio, path, and economic evidence.
 - **Target-book decision contract:** strategies emit `TargetDecision`s — per
-instrument and as of a causal time, a standing **signed weight of NAV** (`0` =
+instrument and as of a causal time, a standing **signed base target shape** (`0` =
 flat/close) that holds until the next decision for that symbol changes it.
-Targets are **idempotent** (re-emitting the current target trades nothing), so
-signal-stacking is structurally inexpressible. Data/time-derivable exits are
-explicit `target=0` decisions; price-path exits are a declared `RiskRule`
+Targets are **idempotent** (re-emitting the current shaped target trades nothing),
+so signal-stacking is structurally inexpressible. The foundation normalizes the
+shape by maximum intended raw gross exposure and applies `[risk_budget]` to produce
+final executable weights. Data/time-derivable exits are explicit `target=0`
+decisions; price-path exits are a declared `RiskRule`
 (stop-loss / take-profit / trailing) enforced by the engine on the net position,
 which latches the instrument flat until the strategy emits a new (different)
 target. `RiskRule` barriers are evaluated against the bar's **intrabar range**
@@ -42,11 +46,19 @@ never changes the climbed `realistic_costs` path.
 - **One netted-book accounting spine:** all three surfaces use one shared
 decision/spec kernel **and one shared causal netted portfolio book**
 (`netted_portfolio_book_v1`). A single bar-by-bar walk nets same-symbol exposure
-to a running per-symbol quantity, trades only the delta against one shared
-cash/margin account through a market model (costs/fills/funding), and marks to
-market to produce one NAV path. There is no separate price-evidence fork by
+to a running per-symbol quantity, trades only the final sized delta against one
+shared cash/margin account through a market model (costs/fills/funding), and marks
+to market to produce one NAV path. There is no separate price-evidence fork by
 surface or data kind; evaluation adds only Parquet trace serialization around the
 same pure book.
+- **Risk-budget sizing:** quick-run, validation, and evaluation configs require
+`[risk_budget]` with explicit `annualization_periods_per_year`. Train quick runs
+may use `mode = "calibrate_vol"` with `target_volatility`; retained validation and
+evaluation use `mode = "fixed_scale"` with the positive `book_scale` recorded in
+the Train `PortfolioSizingReport`. Validation and evaluation reject
+`calibrate_vol`. Capacity-bound Train calibration is recorded on the sizing report,
+not encoded as a feasibility failure when the final frontier-sized book is
+feasible.
 - **Internal engine boundary:** `quant_strategies.engine` is an internal
 execution kernel for quick-run and validation internals/tests, not a fourth
 public user surface.
@@ -70,7 +82,7 @@ per-`(window, scenario)` out-of-sample return series typed and in-process —
 `periods_per_year`, `per_symbol`), `scenario_metrics` (`FoldScenarioMetrics`:
 undeflated `sharpe`/`sortino`/`calmar`/`max_drawdown`/`worst_period_return`/
 `trade_count`/`return_sample_count` + `causal_ok` + `scoreability_bearing` +
-`feasibility` + `provenance`),
+`feasibility` + `sizing_report` + `provenance`),
 `causal_replay_passed`, `provenance`, and the `returns_for`/`metrics_for`/
 `window_ids`/`scenario_ids_for` helpers. This lets consumers read per-fold OOS
 returns without scraping `tables/portfolio_path.parquet`; the `values` reuse the

@@ -158,6 +158,11 @@ def cost_fill_sensitivity_payload(
                 "warnings": item.result.warnings,
                 "unsupported_semantics": item.result.unsupported_semantics,
                 "feasibility": item.result.feasibility.payload(),
+                "sizing_report": (
+                    None
+                    if item.result.sizing_report is None
+                    else item.result.sizing_report.payload()
+                ),
                 "classification_reasons": scenario_classification_reasons(item),
             }
             for item in backend_results

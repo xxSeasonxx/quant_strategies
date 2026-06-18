@@ -198,6 +198,7 @@ def write_config(
     data_extra: str = "",
     leverage_budget_extra: str = "",
     capacity_model_extra: str | None = None,
+    risk_budget_extra: str | None = None,
     causality_policy_extra: str = "",
     envelope_extra: str = "",
 ) -> Path:
@@ -265,6 +266,14 @@ impact_exponent = 1.0
 """
         )
     )
+    risk_budget_block = (
+        risk_budget_extra
+        or """[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+"""
+    )
     config_path = repo_root / relative_path
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
@@ -291,6 +300,7 @@ fee_bps_per_side = 1.0
 slippage_bps_per_side = 0.5
 
     {capacity_model_block}
+    {risk_budget_block}
     {leverage_budget_extra}{causality_policy_extra}{envelope_extra}
 [output]
 	results_dir = "results"
@@ -309,6 +319,14 @@ def write_low_sample_config(repo_root: Path, **kwargs: object) -> Path:
 
 def trusted_envelope_section() -> str:
     return "[envelope]\noperator_frozen = true\n"
+
+
+def fixed_risk_budget_section(book_scale: float = 1.0) -> str:
+    return f"""[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = {book_scale}
+"""
 
 
 def priced_capacity_model_section(*, impact_coefficient_bps: float = 10.0) -> str:
@@ -1992,7 +2010,7 @@ def test_run_config_exposes_typed_in_process_economics(
     monkeypatch: pytest.MonkeyPatch,
 ):
     write_strategy(tmp_path)
-    config_path = write_low_sample_config(tmp_path)
+    config_path = write_low_sample_config(tmp_path, risk_budget_extra=fixed_risk_budget_section())
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2211,11 +2229,14 @@ def test_run_config_leverage_breach_fails_closed_with_typed_verdict(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # Inverted fail-open contract (design D5): an intended over-leverage book is a
-    # typed, fail-closed infeasible verdict, never a swallowed foundation=None with a
-    # soft warning. succeeded is False and the verdict names the breach + observed gross.
+    # Raw target magnitude is shape. Fixed scale 1.5 makes the final executable
+    # book over-levered, which is a typed, fail-closed infeasible verdict.
     write_over_leverage_strategy(tmp_path, target=1.5)
-    config_path = write_config(tmp_path, artifact_profile="summary")
+    config_path = write_config(
+        tmp_path,
+        artifact_profile="summary",
+        risk_budget_extra=fixed_risk_budget_section(1.5),
+    )
     monkeypatch.setattr(
         execution,
         "load_data",
@@ -2320,6 +2341,7 @@ def test_operator_leverage_budget_above_one_admits_within_budget_book(
         dataset=None,
         artifact_profile="summary",
         leverage_budget_extra="[leverage_budget]\nmax_gross_exposure = 2.0\nmax_net_exposure = 2.0\n",
+        risk_budget_extra=fixed_risk_budget_section(1.5),
     )
     _perp_rows(monkeypatch)
 
@@ -2344,6 +2366,7 @@ def test_operator_leverage_budget_above_one_still_fails_closed_above_ceiling(
         dataset=None,
         artifact_profile="summary",
         leverage_budget_extra="[leverage_budget]\nmax_gross_exposure = 2.0\nmax_net_exposure = 2.0\n",
+        risk_budget_extra=fixed_risk_budget_section(2.5),
     )
     _perp_rows(monkeypatch)
 
@@ -2370,6 +2393,7 @@ def test_default_operator_leverage_budget_is_conservative_one(
         symbol="BTC-PERP",
         dataset=None,
         artifact_profile="summary",
+        risk_budget_extra=fixed_risk_budget_section(1.5),
     )
     _perp_rows(monkeypatch)
 
@@ -2624,6 +2648,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.core.portfolio_foundation import (
     PortfolioFoundationConfig,
@@ -2686,7 +2711,14 @@ foundation = build_portfolio_foundation(
         impact_coefficient_bps=0.0,
         impact_exponent=1.0,
     ),
-    config=PortfolioFoundationConfig(subwindows=1),
+    config=PortfolioFoundationConfig(
+        risk_budget=RiskBudgetConfig(
+            mode="fixed_scale",
+            annualization_periods_per_year=252,
+            book_scale=1.0,
+        ),
+        subwindows=1,
+    ),
 )
 build_run_economics(foundation)
 
@@ -3552,6 +3584,27 @@ def test_run_config_rejects_future_declared_observation_before_request_build(
         for event in events
     )
     assert not any(event["stage"] == "causality_check" for event in events)
+
+
+def test_observation_audit_failure_message_is_bounded():
+    missing = tuple(
+        f"missing observation row for BTC-PERP: ETH-PERP at 2026-01-01T00:{index:02d}:00+00:00"
+        for index in range(12)
+    )
+    late = (
+        "observation row ETH-PERP at 2026-01-01T00:00:00+00:00 used by BTC-PERP "
+        "was available after decision_time",
+    ) * 3
+
+    message = runner_module._format_observation_audit_violations((*missing, *late))
+
+    assert "observation audit failed: 15 violations" in message
+    assert "missing_observation_row=12" in message
+    assert "late_observation_available_at=3" in message
+    assert "sample violations:" in message
+    assert "ETH-PERP at 2026-01-01T00:00:00+00:00" in message
+    assert "3 unique violations omitted" in message
+    assert len(message) < 1_500
 
 
 def test_run_config_records_row_contract_feedback(

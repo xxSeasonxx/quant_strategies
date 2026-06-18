@@ -33,6 +33,11 @@ max_adv_participation = 0.25
 impact_coefficient_bps = 10.0
 impact_exponent = 0.5
 
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 525949
+book_scale = 1.0
+
 [metrics]
 annualization_periods_per_year = 525949
 min_annualized_samples = 20

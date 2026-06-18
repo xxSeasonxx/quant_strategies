@@ -48,6 +48,10 @@ class StrategyExecutionResult:
     execution_loaded_rows: Sequence[Mapping[str, Any]] | None = None
     execution_normalized_rows: NormalizedRows | None = None
     execution_normalized_rows_sha256: str | None = None
+    # Valuation-only mark frame over the full execution window; consumed by the
+    # portfolio foundation, never passed to the strategy (purity).
+    mark_rows: Sequence[Mapping[str, Any]] = ()
+    mark_repair: Mapping[str, Any] | None = None
 
 
 class StrategyExecutionError(RunnerError):
@@ -203,6 +207,8 @@ def execute_strategy_run(
         execution_loaded_rows=execution_rows,
         execution_normalized_rows=normalized_rows,
         execution_normalized_rows_sha256=normalized_rows.normalized_rows_sha256,
+        mark_rows=loaded.mark_rows,
+        mark_repair=loaded.mark_repair,
     )
 
 

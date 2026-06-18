@@ -47,12 +47,13 @@ optimizing fiction.
 A disciplined Python library and CLI that:
 
 1. Defines a **declarative strategy contract**: a pure function emitting a
-  **target book** — a standing, signed target position per instrument over causal
-  time, with optional declared price-path risk rules.
-2. Provides a **mathematically explicit execution kernel** that simulates the
-  target book as **one causal, single-account portfolio** (same-symbol netting,
-  financing, mark-to-market) and treats that NAV path as the authoritative unit of
-  return, with declared assumptions.
+  **target book** — a standing, signed base target shape per instrument over
+  causal time, with optional declared price-path risk rules.
+2. Provides a **mathematically explicit execution kernel** that normalizes the
+  target-book shape, applies the operator risk budget, simulates the final sized
+  book as **one causal, single-account portfolio** (same-symbol netting,
+  financing, mark-to-market), and treats that NAV path as the authoritative unit
+  of return, with declared assumptions.
 3. Provides a **diagnostic quick-run harness** that computes quick-run evidence,
   causality hygiene, and bounded behavior diagnostics for one strategy version.
 4. Provides a **mechanical evidence validation harness** that runs a retained
@@ -135,10 +136,12 @@ not optimized for ad-hoc exploration; that is outside this foundation.
 The default strategy contract MUST express the executable v1 path clearly as a
 **target book**:
 
-- **Target**: a signed weight of NAV per instrument (long `+`, short `-`,
+- **Target**: a signed base shape scalar per instrument (long `+`, short `-`,
   `0` = flat/close), **standing** until changed. Open, close, adjust, and rebalance
   are all expressed as *setting a target*; targets are **idempotent**, so
   same-symbol exposure nets and repeated signals cannot stack into hidden leverage.
+  The foundation converts the emitted shape into final executable weights through
+  the operator risk budget.
 - **Instrument**: equity / ETF, FX pair, crypto perp.
 - **Risk rules**: optional declared price-path exits (stop-loss, take-profit,
   trailing) the engine enforces causally on the net position. Data- or time-based

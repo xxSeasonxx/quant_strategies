@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -35,6 +37,38 @@ def test_load_decision_strategy_returns_generate_decisions_callable(tmp_path: Pa
     assert callable(generate_decisions)
     assert isinstance(decisions[0], TargetDecision)
     assert decisions[0].instrument.symbol == "SPY"
+
+
+def test_load_decision_strategy_supports_dataclass_with_deferred_annotations(
+    tmp_path: Path,
+):
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text(
+        "from __future__ import annotations\n"
+        "from dataclasses import dataclass\n"
+        "@dataclass(frozen=True)\n"
+        "class State:\n"
+        "    value: int\n"
+        "def generate_decisions(rows, params):\n"
+        "    return [] if State(1).value == 1 else None\n"
+    )
+
+    generate_decisions = load_decision_strategy(strategy, repo_root=tmp_path)
+
+    assert generate_decisions([], {}) == []
+
+
+def test_load_decision_strategy_cleans_failed_import_from_sys_modules(tmp_path: Path):
+    strategy = tmp_path / "strategy.py"
+    strategy.write_text("raise RuntimeError('boom')\ndef generate_decisions(rows, params):\n    return []\n")
+    module_name = (
+        f"_quant_decision_strategy_{hashlib.sha1(str(strategy.resolve()).encode()).hexdigest()}"
+    )
+
+    with pytest.raises(DecisionStrategyLoadError, match="boom"):
+        load_decision_strategy(strategy, repo_root=tmp_path)
+
+    assert module_name not in sys.modules
 
 
 def test_load_decision_strategy_rejects_file_without_generate_decisions(tmp_path: Path):

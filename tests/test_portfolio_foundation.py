@@ -23,6 +23,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.core.portfolio_foundation import (
     INITIAL_EQUITY,
@@ -48,6 +49,11 @@ from quant_strategies.core.portfolio_foundation import (
 from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
+FIXED_SCALE_RISK_BUDGET = RiskBudgetConfig(
+    mode="fixed_scale",
+    annualization_periods_per_year=252,
+    book_scale=1.0,
+)
 
 
 def ts(index: int) -> datetime:
@@ -105,6 +111,22 @@ def bar_rows(
     return rows
 
 
+def volatile_bar_rows(*, symbol: str = "SPY") -> list[dict[str, object]]:
+    return bar_rows(
+        100.0,
+        101.0,
+        99.0,
+        102.0,
+        98.0,
+        103.0,
+        97.0,
+        104.0,
+        96.0,
+        105.0,
+        symbol=symbol,
+    )
+
+
 def ohlc_rows(
     *bars: tuple[float, float, float, float],
     symbol: str = "SPY",
@@ -159,6 +181,29 @@ def data_config(end_index: int, *, kind: str = "bars", symbols=("SPY",)) -> Data
     )
 
 
+def foundation_config(**overrides) -> PortfolioFoundationConfig:
+    return PortfolioFoundationConfig(risk_budget=FIXED_SCALE_RISK_BUDGET, **overrides)
+
+
+def calibrating_config(
+    target_volatility: float,
+    *,
+    max_gross_exposure: float = 1.0,
+    max_net_exposure: float = 1.0,
+) -> PortfolioFoundationConfig:
+    return PortfolioFoundationConfig(
+        risk_budget=RiskBudgetConfig(
+            mode="calibrate_vol",
+            annualization_periods_per_year=252,
+            target_volatility=target_volatility,
+        ),
+        subwindows=1,
+        min_return_sample=2,
+        max_gross_exposure=max_gross_exposure,
+        max_net_exposure=max_net_exposure,
+    )
+
+
 def walk(
     rows: list[dict[str, object]],
     decisions: list[TargetDecision],
@@ -168,8 +213,9 @@ def walk(
     config: PortfolioFoundationConfig | None = None,
     capacity: CapacityModelConfig | None = None,
     entry_lag_bars: int = 1,
+    mark_rows: list[dict[str, object]] = (),
 ) -> BookWalkResult:
-    row_index = _RowIndex(rows)
+    row_index = _RowIndex(rows, mark_rows)
     plan = _DecisionPlan(
         row_index,
         decisions,
@@ -181,7 +227,7 @@ def walk(
         per_side_cost_fraction=per_side_cost_fraction,
         data_kind=kind,
         capacity_model=capacity or capacity_model(),
-        config=config or PortfolioFoundationConfig(subwindows=1),
+        config=config or foundation_config(subwindows=1),
     )
 
 
@@ -261,7 +307,111 @@ def test_open_position_requires_mark_on_every_shared_multi_symbol_timestamp():
     ]
 
     with pytest.raises(ValueError, match=re.escape(f"missing_mark:SPY:{ts(2).isoformat()}")):
-        walk(rows, [target(0, 0.5)], config=PortfolioFoundationConfig(subwindows=1))
+        walk(rows, [target(0, 0.5)], config=foundation_config(subwindows=1))
+
+
+def _repaired_mark(symbol: str, index: int, close: float) -> dict[str, object]:
+    """A flat ``previous_close_mark`` repair row, as the upstream mark loader emits it.
+
+    Minimal by design: the engine reads only ``is_repaired`` plus OHLC from a mark row and
+    trusts the upstream ``tradable``/``mark_eligible`` flags, so they are omitted here."""
+    return {
+        "symbol": symbol,
+        "timestamp": ts(index),
+        "open": close,
+        "high": close,
+        "low": close,
+        "close": close,
+        "volume": 0.0,
+        "is_repaired": True,
+    }
+
+
+def test_open_position_marked_from_repair_frame_across_gap():
+    # SPY is held across ts(2), which it did not observe but the walk visits (QQQ has it).
+    # A repair-aware mark for SPY@ts(2) lets valuation continue instead of crashing.
+    rows = [
+        *bar_rows(100.0, 101.0, symbol="SPY"),
+        bar_rows(200.0, symbol="QQQ")[0] | {"timestamp": ts(2), "available_at": ts(2)},
+    ]
+    result = walk(
+        rows,
+        [target(0, 0.5)],
+        config=foundation_config(subwindows=1),
+        mark_rows=[_repaired_mark("SPY", 2, 101.0)],
+    )
+
+    assert ts(2) in {point.timestamp for point in result.path}
+    assert math.isfinite(result.final_nav) and result.final_nav > 0.0
+
+
+def test_valuation_reads_repair_frame_but_execution_stays_signal_only():
+    rows = bar_rows(100.0, 101.0, symbol="SPY")
+    index = _RowIndex(rows, [_repaired_mark("SPY", 2, 101.0)])
+
+    # Valuation (mark/bar) falls back to the repaired flat bar and records the audit.
+    assert index.mark_at("SPY", ts(2)) == pytest.approx(101.0)
+    assert index.bar_at("SPY", ts(2)) == (101.0, 101.0, 101.0, 101.0)
+    assert ("SPY", ts(2)) in index.consumed_repaired_marks
+
+    # Execution (row_at: fills/capacity/funding) never consults the repair frame.
+    with pytest.raises(ValueError, match=re.escape(f"missing_mark:SPY:{ts(2).isoformat()}")):
+        index.row_at("SPY", ts(2))
+
+
+def test_repaired_stop_position_does_not_fire_on_flat_bar_then_resolves_next_observed():
+    # Long with a 5% stop. SPY does not observe ts(2); it is a repaired flat bar (100) —
+    # the stop cannot fire on a flat bar. The real breach at ts(3) (94) resolves the stop
+    # on the next observed bar.
+    spy = ohlc_rows(
+        (100.0, 100.0, 100.0, 100.0),
+        (100.0, 100.0, 100.0, 100.0),
+        symbol="SPY",
+    )
+    spy.append(
+        ohlc_rows((94.0, 94.0, 94.0, 94.0), symbol="SPY")[0]
+        | {"timestamp": ts(3), "available_at": ts(3)}
+    )
+    rows = [
+        *spy,
+        bar_rows(200.0, symbol="QQQ")[0] | {"timestamp": ts(2), "available_at": ts(2)},
+    ]
+    decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
+    result = walk(
+        rows,
+        decisions,
+        config=foundation_config(subwindows=1),
+        mark_rows=[_repaired_mark("SPY", 2, 100.0)],
+    )
+
+    assert len(result.round_trips) == 1
+    assert result.round_trips[0].exit_time == ts(3)
+    assert result.round_trips[0].exit_reason == "stop_loss"
+
+
+def test_foundation_audits_consumed_repaired_marks():
+    rows = [
+        *bar_rows(100.0, 101.0, symbol="SPY"),
+        bar_rows(200.0, symbol="QQQ")[0] | {"timestamp": ts(2), "available_at": ts(2)},
+    ]
+    foundation = build_portfolio_foundation(
+        rows=rows,
+        decisions=[target(0, 0.5)],
+        data=data_config(2, symbols=("SPY", "QQQ")),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=1.0),
+        capacity_model=capacity_model(),
+        config=foundation_config(subwindows=1),
+        mark_rows=[_repaired_mark("SPY", 2, 101.0)],
+        mark_repair={"dataset": "equity_1min", "repaired_row_count": 1},
+    )
+
+    assert foundation.mark_repair is not None
+    audit = foundation.mark_repair
+    assert audit["repaired_row_count"] == 1
+    assert audit["consumed_repaired_mark_count"] == 1
+    assert {"symbol": "SPY", "timestamp": ts(2).isoformat()} in audit["consumed_repaired_marks"]
+    assert "mark_repair" in foundation.summary_payload()
 
 
 def test_forex_capacity_impact_is_unsupported():
@@ -366,7 +516,7 @@ def test_repeated_identical_target_is_idempotent_no_stacking():
     # target must net to a zero delta — no stacking to 1.0 gross.
     rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
     decisions = [target(0, 0.5), target(2, 0.5)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     # Gross exposure holds at 0.5 throughout the held bars, never 1.0.
     held = [point.gross_exposure for point in result.path]
@@ -380,7 +530,7 @@ def test_offsetting_target_nets_and_trades_only_the_delta():
     # reduction trades; gross drops to 0.4 with no extra round-trip (still long).
     rows = bar_rows(100.0, 100.0, 100.0, 100.0, 100.0)
     decisions = [target(0, 1.0), target(2, 0.4)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert result.path[1].gross_exposure == pytest.approx(1.0)
     assert result.path[3].gross_exposure == pytest.approx(0.4)
@@ -391,7 +541,7 @@ def test_offsetting_target_nets_and_trades_only_the_delta():
 def test_target_to_zero_closes_the_net_position_as_one_round_trip():
     rows = bar_rows(100.0, 100.0, 110.0, 110.0, 110.0)
     decisions = [target(0, 1.0), target(2, 0.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     trip = result.round_trips[0]
@@ -446,7 +596,7 @@ def quote_walk(
         per_side_cost_fraction=0.0,
         data_kind=kind,
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
 
 
@@ -497,7 +647,7 @@ def test_reversal_records_one_round_trip_and_reopens_short():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
 
     assert len(result.round_trips) == 1
@@ -517,7 +667,7 @@ def test_weight_to_quantity_sized_at_fill_bar_then_held_as_quantity():
     # Price then rises to 120 at d2: NAV = 100 + 1.0*(120-100) = 120 (held as qty).
     rows = bar_rows(100.0, 100.0, 120.0)
     decisions = [target(0, 1.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert result.path[0].portfolio_value == pytest.approx(INITIAL_EQUITY)
     assert result.path[1].portfolio_value == pytest.approx(INITIAL_EQUITY)
@@ -533,7 +683,7 @@ def test_same_bar_intended_gross_is_fill_order_independent():
     rows = bar_rows(100.0, 100.0, 100.0, symbol="AAA") + bar_rows(50.0, 50.0, 50.0, symbol="BBB")
     forward = [target(0, 0.5, symbol="AAA"), target(0, 0.4, symbol="BBB")]
     reversed_order = [target(0, 0.4, symbol="BBB"), target(0, 0.5, symbol="AAA")]
-    cfg = PortfolioFoundationConfig(subwindows=1)
+    cfg = foundation_config(subwindows=1)
 
     result_a = walk(rows, forward, config=cfg)
     result_b = walk(rows, reversed_order, config=cfg)
@@ -553,7 +703,7 @@ def test_risk_rule_stop_loss_flattens_at_crossing_bar():
     # -> flattened that bar.
     rows = bar_rows(100.0, 100.0, 94.0, 94.0)
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -571,7 +721,7 @@ def test_standing_target_does_not_reenter_until_a_new_target_after_stop():
         target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
         target(4, 1.0, risk_rule=RiskRule(stop_loss=0.05)),  # identical -> suppressed
     ]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     # Exactly one round-trip; latched flat for the remainder.
     assert len(result.round_trips) == 1
@@ -584,7 +734,7 @@ def test_new_different_target_clears_the_latch_and_reenters():
         target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05)),
         target(4, 0.5),  # different weight -> clears latch, re-enters
     ]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1  # only the stopped leg closed so far
     # Re-entered at d5 (fills the bar after the d4 decision) at weight 0.5.
@@ -597,7 +747,7 @@ def test_take_profit_flattens_at_the_level_not_the_close():
     # at 112 (conservative; no gap-favorable bonus). Realized PnL is the 10% level move.
     rows = bar_rows(100.0, 100.0, 112.0, 112.0)
     decisions = [target(0, 1.0, risk_rule=RiskRule(take_profit=0.10))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -616,7 +766,7 @@ def test_stop_fires_on_intrabar_low_even_when_the_close_recovers():
         (99.0, 99.0, 99.0, 99.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_time == ts(2)
@@ -636,7 +786,7 @@ def test_stop_gap_through_open_fills_at_the_worse_open():
         (91.0, 91.0, 91.0, 91.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_reason == "stop_loss"
@@ -655,7 +805,7 @@ def test_same_bar_stop_and_target_resolves_to_the_adverse_stop():
         (100.0, 100.0, 100.0, 100.0),
     )
     decisions = [target(0, 1.0, risk_rule=RiskRule(stop_loss=0.05, take_profit=0.05))]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     assert len(result.round_trips) == 1
     assert result.round_trips[0].exit_reason == "stop_loss"
@@ -674,7 +824,7 @@ def test_flat_bars_do_not_inflate_effective_sample_size():
     # return as price is flat); d5+ are flat and excluded.
     rows = bar_rows(100.0, 100.0, 110.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0, 121.0)
     decisions = [target(0, 1.0), target(3, 0.0)]
-    result = walk(rows, decisions, config=PortfolioFoundationConfig(subwindows=1))
+    result = walk(rows, decisions, config=foundation_config(subwindows=1))
 
     at_risk = [point for point in result.path if point.at_risk]
     # At-risk intervals: d1->d2, d2->d3, and the exit-fill interval d3->d4. None of
@@ -699,7 +849,7 @@ def test_flat_tail_does_not_change_sample_count_vs_short_window():
             fill_model=FillModelConfig(price="close", entry_lag_bars=1),
             cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
             capacity_model=capacity_model(),
-            config=PortfolioFoundationConfig(subwindows=1),
+            config=foundation_config(subwindows=1),
         )
         full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
         return full["return_sample_count"]
@@ -715,7 +865,7 @@ def test_foundation_payloads_do_not_emit_significance_fields():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
 
     matrix = foundation.matrix_payload()
@@ -784,7 +934,7 @@ def test_degenerate_sample_gated_as_non_scoreable_verdict():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -805,9 +955,7 @@ def test_leverage_budget_breach_fails_closed_with_observed_gross():
         walk(
             rows,
             decisions,
-            config=PortfolioFoundationConfig(
-                subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0
-            ),
+            config=foundation_config(subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0),
         )
     verdict = excinfo.value.verdict
     assert verdict.feasible is False
@@ -823,9 +971,7 @@ def test_net_budget_breach_fails_closed_even_when_gross_allowed():
         walk(
             rows,
             decisions,
-            config=PortfolioFoundationConfig(
-                subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0
-            ),
+            config=foundation_config(subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0),
         )
     assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
     assert excinfo.value.verdict.observed_net == pytest.approx(1.2)
@@ -840,9 +986,7 @@ def test_offsetting_legs_pass_net_budget_but_count_gross():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(
-            subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0
-        ),
+        config=foundation_config(subwindows=1, max_gross_exposure=1.5, max_net_exposure=1.0),
     )
     assert result.feasibility.feasible is True
     assert result.path[1].gross_exposure == pytest.approx(1.2)
@@ -893,7 +1037,7 @@ def test_zero_cost_on_scoreable_run_is_non_scoreable():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -912,7 +1056,7 @@ def test_zero_slippage_on_scoreable_run_is_non_scoreable():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, min_return_sample=2),
+        config=foundation_config(subwindows=1, min_return_sample=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     assert realistic["feasibility"]["feasible"] is False
@@ -930,9 +1074,7 @@ def test_unfinanced_leverage_fails_closed_when_budget_permits_net_above_one():
             rows,
             decisions,
             kind="bars",
-            config=PortfolioFoundationConfig(
-                subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0
-            ),
+            config=foundation_config(subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0),
         )
     verdict = excinfo.value.verdict
     assert verdict.reason == REASON_UNFINANCED_LEVERAGE
@@ -949,7 +1091,7 @@ def test_equity_fully_invested_with_costs_is_not_a_false_unfinanced_breach():
         [target(0, 1.0)],
         kind="bars",
         per_side_cost_fraction=0.01,
-        config=PortfolioFoundationConfig(subwindows=1, max_net_exposure=1.0),
+        config=foundation_config(subwindows=1, max_net_exposure=1.0),
     )
     assert result.feasibility.feasible is True
     assert max(point.net_exposure for point in result.path) > 1.0  # marked drift exists
@@ -963,9 +1105,7 @@ def test_crypto_perp_is_exempt_from_unfinanced_leverage_verdict():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(
-            subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0
-        ),
+        config=foundation_config(subwindows=1, max_gross_exposure=2.0, max_net_exposure=2.0),
     )
     assert result.feasibility.feasible is True
     assert result.path[1].net_exposure == pytest.approx(2.0)
@@ -982,9 +1122,7 @@ def test_equity_net_above_one_intent_is_a_leverage_budget_breach_not_unfinanced(
             rows,
             decisions,
             kind="bars",
-            config=PortfolioFoundationConfig(
-                subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0
-            ),
+            config=foundation_config(subwindows=1, max_gross_exposure=1.0, max_net_exposure=1.0),
         )
     assert excinfo.value.verdict.reason == REASON_LEVERAGE_BUDGET_BREACH
 
@@ -1003,7 +1141,7 @@ def test_funding_charged_on_net_held_position():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     # Entry filled d1 @100 (qty 1.0 NAV-unit = 1.0 contract). Funding at d2.
     assert result.path[2].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
@@ -1020,7 +1158,7 @@ def test_duplicate_funding_timestamps_deduped():
         rows,
         decisions,
         kind="crypto_perp_funding",
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     # Funding applied once, not twice.
     assert result.path[-1].portfolio_value == pytest.approx(INITIAL_EQUITY - 1.0)
@@ -1047,7 +1185,7 @@ def test_nav_reconciles_with_ledger_single_round_trip_with_costs():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     _reconcile(result)
 
@@ -1067,7 +1205,7 @@ def test_nav_reconciles_with_ledger_multi_symbol_and_funding():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.0005,
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     _reconcile(result)
 
@@ -1080,7 +1218,7 @@ def test_nav_reconciles_after_reversal():
         decisions,
         kind="crypto_perp_funding",
         per_side_cost_fraction=0.001,
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     assert len(result.round_trips) == 2
     _reconcile(result)
@@ -1095,7 +1233,7 @@ def test_non_flat_ending_book_marks_open_winner_into_nav_not_into_ledger():
     result = walk(
         rows,
         [target(0, 1.0)],  # opens long (fills @100), never closed
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     # Not flat at the boundary, and no closed round-trip.
     assert result.path[-1].gross_exposure > 0.0
@@ -1127,7 +1265,7 @@ def test_closed_round_trips_counted_by_exit_time_per_subwindow():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=2),
+        config=foundation_config(subwindows=2),
     )
     realistic = foundation.matrix_payload()["scenarios"]["realistic_costs"]
     counts = [sub["closed_trade_count"] for sub in realistic["subwindows"]]
@@ -1150,7 +1288,7 @@ def test_build_foundation_emits_three_scenarios_and_utilization_fields():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1, cost_stress_multiplier=2.0),
+        config=foundation_config(subwindows=1, cost_stress_multiplier=2.0),
     )
     payload = foundation.matrix_payload()
     assert set(payload["scenarios"]) == {"realistic_costs", "cost_stress", "fill_stress"}
@@ -1178,15 +1316,103 @@ def test_foundation_summary_reports_capacity_diagnostics():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(impact_coefficient_bps=100.0, portfolio_notional=1_000.0),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
 
     capacity = foundation.matrix_payload()["scenarios"]["realistic_costs"]["capacity"]
     assert capacity["execution_event_count"] == 1
-    assert capacity["total_normalized_turnover"] == pytest.approx(50.0)
-    assert capacity["total_impact_cost"] == pytest.approx(0.0025)
-    assert capacity["max_bar_participation"] == pytest.approx(0.005)
-    assert capacity["max_adv_participation"] == pytest.approx(0.005)
+    assert capacity["total_normalized_turnover"] == pytest.approx(100.0)
+    assert capacity["total_impact_cost"] == pytest.approx(0.01)
+    assert capacity["max_bar_participation"] == pytest.approx(0.01)
+    assert capacity["max_adv_participation"] == pytest.approx(0.01)
+
+
+def test_shape_normalization_removes_global_raw_target_scale():
+    rows = volatile_bar_rows()
+    decisions_small = [target(0, 0.5), target(8, 0.0)]
+    decisions_large = [target(0, 5.0), target(8, 0.0)]
+    common = {
+        "rows": rows,
+        "data": data_config(9),
+        "fill_model": FillModelConfig(price="close", entry_lag_bars=1),
+        "cost_model": CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
+        "capacity_model": capacity_model(portfolio_notional=1_000.0),
+        "config": calibrating_config(0.20),
+    }
+
+    small = build_portfolio_foundation(decisions=decisions_small, **common)
+    large = build_portfolio_foundation(decisions=decisions_large, **common)
+
+    assert small.sizing_report.shape.raw_gross_normalization_scalar == pytest.approx(0.5)
+    assert large.sizing_report.shape.raw_gross_normalization_scalar == pytest.approx(5.0)
+    assert small.sizing_report.book_scale == pytest.approx(large.sizing_report.book_scale)
+    assert small.ledger.round_trips[0].entry_weight == pytest.approx(
+        large.ledger.round_trips[0].entry_weight
+    )
+    assert small.summary_payload()["scenarios"]["realistic_costs"]["full_train"][
+        "total_return"
+    ] == pytest.approx(
+        large.summary_payload()["scenarios"]["realistic_costs"]["full_train"]["total_return"]
+    )
+
+
+def test_calibrate_vol_hits_target_below_frontier():
+    foundation = build_portfolio_foundation(
+        rows=volatile_bar_rows(),
+        decisions=[target(0, 1.0), target(8, 0.0)],
+        data=data_config(9),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
+        capacity_model=capacity_model(portfolio_notional=1_000.0),
+        config=calibrating_config(0.20),
+    )
+
+    assert foundation.sizing_report.capacity_bound is False
+    assert foundation.sizing_report.book_scale > 0.0
+    assert foundation.sizing_report.deployed_volatility == pytest.approx(0.20, rel=5e-4)
+    assert foundation.sizing_report.final_max_intended_gross == pytest.approx(
+        foundation.sizing_report.book_scale
+    )
+
+
+def test_calibrate_vol_reports_capacity_bound_frontier_without_failing():
+    foundation = build_portfolio_foundation(
+        rows=volatile_bar_rows(),
+        decisions=[target(0, 1.0), target(8, 0.0)],
+        data=data_config(9),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
+        capacity_model=capacity_model(
+            portfolio_notional=1_000.0,
+            max_bar_participation=0.00001,
+            max_adv_participation=0.00001,
+        ),
+        config=calibrating_config(10.0),
+    )
+
+    assert foundation.feasible_verdict().feasible is True
+    assert foundation.sizing_report.capacity_bound is True
+    assert foundation.sizing_report.max_feasible_volatility is not None
+    assert foundation.sizing_report.max_feasible_volatility < 10.0
+    assert "capacity" in foundation.sizing_report.binding_dimensions
+
+
+def test_calibrate_vol_flat_shape_is_not_capacity_bound():
+    foundation = build_portfolio_foundation(
+        rows=volatile_bar_rows(),
+        decisions=[],
+        data=data_config(9),
+        fill_model=FillModelConfig(price="close", entry_lag_bars=1),
+        cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.5),
+        capacity_model=capacity_model(portfolio_notional=1_000.0),
+        config=calibrating_config(0.20),
+    )
+
+    assert foundation.sizing_report.book_scale == pytest.approx(0.0)
+    assert foundation.sizing_report.capacity_bound is False
+    assert foundation.sizing_report.binding_dimensions == ()
+    assert foundation.sizing_report.deployed_volatility is None
+    assert foundation.sizing_report.max_feasible_volatility is None
 
 
 def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic():
@@ -1212,7 +1438,7 @@ def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic()
     }
 
     stressed = build_portfolio_foundation(
-        config=PortfolioFoundationConfig(subwindows=1, fill_stress_fraction=0.01),
+        config=foundation_config(subwindows=1, fill_stress_fraction=0.01),
         **kwargs,
     ).matrix_payload()["scenarios"]
     assert set(stressed) == {"realistic_costs", "cost_stress", "fill_stress"}
@@ -1222,7 +1448,7 @@ def test_fill_stress_scenario_worsens_barrier_exits_without_touching_realistic()
 
     # Opting the knob out drops the scenario and leaves the realistic path byte-identical.
     opted_out = build_portfolio_foundation(
-        config=PortfolioFoundationConfig(subwindows=1, fill_stress_fraction=0.0),
+        config=foundation_config(subwindows=1, fill_stress_fraction=0.0),
         **kwargs,
     ).matrix_payload()["scenarios"]
     assert set(opted_out) == {"realistic_costs", "cost_stress"}
@@ -1240,7 +1466,7 @@ def test_build_foundation_reports_every_configured_subwindow_even_when_empty():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=4),
+        config=foundation_config(subwindows=4),
     )
     subwindows = foundation.matrix_payload()["scenarios"]["realistic_costs"]["subwindows"]
     assert len(subwindows) == 4
@@ -1264,7 +1490,7 @@ def test_max_symbol_concentration_from_netted_book():
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=foundation_config(subwindows=1),
     )
     full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
     # Concentration = max leg notional / gross notional = 0.6 / 0.8 = 0.75.

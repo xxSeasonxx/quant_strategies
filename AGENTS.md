@@ -12,19 +12,21 @@ tests, and the explicit runner package for configured experiments.
 
 The unit of simulation is **one causal, single-account portfolio, not an isolated
 trade.** A `strategy.py` declares a *complete portfolio* — a **target book**: a
-standing, signed target weight of NAV per instrument (`0` = flat/close), idempotent
+standing, signed base target shape per instrument (`0` = flat/close), idempotent
 so same-symbol exposure nets and cannot stack, with optional declared price-path
-risk rules (stop/take-profit/trailing) the engine enforces on the net position. The
-engine folds that book into one netted, financed, marked book and scores its NAV
-path; the per-trade ledger is a derived attribution view, not an independent scored
-number.
+risk rules (stop/take-profit/trailing) the engine enforces on the net position.
+The foundation normalizes that shape, applies the operator `[risk_budget]`, and
+folds the final executable weights into one netted, financed, marked book. The NAV
+path is scored; the per-trade ledger is a derived attribution view, not an
+independent scored number.
 
 The contract is two-sided: **enable** any complete, tradeable portfolio to be
 expressed in `strategy.py`, and **guarantee** that whatever passes Train evidence is
-genuinely feasible to trade. The strategy owns the portfolio (allocation, sizing,
-netting intent, rebalancing, exits, declared risk); the engine owns the accounting,
-the market model, and the operator-frozen envelope (leverage ceiling, cost floor,
-costs/fills, universe, window, objective). An envelope breach is a typed,
+genuinely feasible to trade. The strategy owns the portfolio shape (allocation,
+netting intent, rebalancing, exits, declared risk); the foundation owns risk-budget
+sizing; the engine owns the accounting, the market model, and the operator-frozen
+envelope (risk budget, leverage ceiling, cost floor, costs/fills, capacity,
+universe, window, objective). An envelope breach is a typed,
 **fail-closed** verdict — never clamped, never a silent `None`. See `PRD.md` G8.
 
 ## Rules

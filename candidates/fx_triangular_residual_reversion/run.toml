@@ -51,6 +51,11 @@ slippage_bps_per_side = 0.5
 [capacity_model]
 mode = "off"
 
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 525949
+target_volatility = 0.10
+
 [envelope]
 operator_frozen = true
 

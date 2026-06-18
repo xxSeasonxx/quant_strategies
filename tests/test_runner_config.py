@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from quant_strategies.core.config import CapacityModelConfig
+from quant_strategies.core.config import CapacityModelConfig, RiskBudgetConfig
 from quant_strategies.core.errors import ConfigError
 from quant_strategies.decisions import load_decision_strategy
 from quant_strategies.runner.config import load_config
@@ -93,6 +93,11 @@ fee_bps_per_side = 0.0
 slippage_bps_per_side = 0.0
 
 {capacity_model_section}
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+
 [output]
 results_dir = "{results_dir}"
 {quick_checks_line}{artifact_profile_line}{output_extra}
@@ -117,6 +122,11 @@ def test_valid_run_config_is_accepted(tmp_path: Path):
     assert config.data.load_end is None
     assert config.capacity_model.mode == "adv_impact"
     assert config.capacity_model.portfolio_notional == 1_000_000.0
+    assert config.risk_budget == RiskBudgetConfig(
+        mode="calibrate_vol",
+        annualization_periods_per_year=252,
+        target_volatility=0.10,
+    )
     assert config.output.foundation_min_return_sample == 20
 
 
@@ -269,6 +279,56 @@ def test_capacity_model_is_required_for_run_config(tmp_path: Path):
             write_config(tmp_path, include_capacity_model=False),
             repo_root=tmp_path,
         )
+
+
+def test_risk_budget_is_required_for_run_config(tmp_path: Path):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    text = path.read_text()
+    start = text.index("[risk_budget]")
+    end = text.index("[output]")
+    path.write_text(text[:start] + text[end:])
+
+    with pytest.raises(ConfigError, match="risk_budget"):
+        load_config(path, repo_root=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("replacement", "message"),
+    [
+        (
+            """[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+""",
+            "target_volatility",
+        ),
+        (
+            """[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+""",
+            "book_scale",
+        ),
+        (
+            """[risk_budget]
+mode = "fixed_scale"
+book_scale = 1.0
+""",
+            "annualization_periods_per_year",
+        ),
+    ],
+)
+def test_risk_budget_mode_fields_are_validated(tmp_path: Path, replacement: str, message: str):
+    write_strategy(tmp_path)
+    path = write_config(tmp_path)
+    text = path.read_text()
+    start = text.index("[risk_budget]")
+    end = text.index("[output]")
+    path.write_text(text[:start] + replacement + "\n" + text[end:])
+
+    with pytest.raises(ConfigError, match=message):
+        load_config(path, repo_root=tmp_path)
 
 
 def test_adv_impact_capacity_model_requires_explicit_parameters():

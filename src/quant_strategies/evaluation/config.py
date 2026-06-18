@@ -23,6 +23,7 @@ from quant_strategies.core.config import (
     DataConfig,
     FillModelConfig,
     LeverageBudgetConfig,
+    RiskBudgetConfig,
     StrategyExecutionSpec,
     WindowedDataConfig,
 )
@@ -132,6 +133,7 @@ class EvaluationConfig(EvaluationConfigModel):
     fill_model: FillModelConfig
     cost_model: CostModelConfig
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     leverage_budget: LeverageBudgetConfig = Field(default_factory=LeverageBudgetConfig)
     metrics: EvaluationMetricsConfig
     causality_replay: CausalityReplayConfig = Field(default_factory=CausalityReplayConfig)
@@ -174,6 +176,8 @@ class EvaluationConfig(EvaluationConfigModel):
             raise ValueError("custom evaluation scenarios require at least one required scenario")
         if self.benchmark is not None and self.benchmark.symbol not in self.data.symbols:
             raise ValueError("benchmark.symbol must be included in data.symbols")
+        if self.risk_budget.mode != "fixed_scale":
+            raise ValueError("evaluation requires risk_budget.mode = 'fixed_scale'")
         return self
 
     def to_execution_spec(self, window: EvaluationWindow) -> StrategyExecutionSpec:
@@ -189,6 +193,7 @@ class EvaluationConfig(EvaluationConfigModel):
             fill_model=self.fill_model,
             cost_model=self.cost_model,
             capacity_model=self.capacity_model,
+            risk_budget=self.risk_budget,
             leverage_budget=self.leverage_budget,
             require_param_validator=True,
         )

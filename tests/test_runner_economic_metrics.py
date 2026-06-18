@@ -9,6 +9,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.core.portfolio_foundation import (
     PortfolioFoundationConfig,
@@ -23,6 +24,11 @@ from quant_strategies.runner.economic_metrics import (
 )
 
 START = datetime(2024, 1, 1, tzinfo=UTC)
+RISK_BUDGET = RiskBudgetConfig(
+    mode="fixed_scale",
+    annualization_periods_per_year=252,
+    book_scale=1.0,
+)
 
 
 def ts(index: int) -> datetime:
@@ -96,7 +102,7 @@ def foundation_for(
             impact_coefficient_bps=impact_coefficient_bps,
             impact_exponent=1.0,
         ),
-        config=PortfolioFoundationConfig(subwindows=1),
+        config=PortfolioFoundationConfig(risk_budget=RISK_BUDGET, subwindows=1),
     )
 
 

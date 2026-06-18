@@ -10,14 +10,15 @@ trustworthy evidence without ever letting a number with unclear semantics drive
 a conclusion.
 
 The unit of simulation is **one causal, single-account portfolio**, not an
-isolated trade. A strategy declares a **target book** — standing, signed
-weight-of-NAV `TargetDecision`s per instrument (`0` = flat/close), idempotent so
-same-symbol exposure nets and cannot stack, with optional declared price-path
-`RiskRule`s. The engine folds that book into **one netted, financed, marked book**
-on every surface and scores its **NAV path** as the single authoritative scored
-unit; the per-trade ledger is a derived attribution view of the same walk. An
-envelope breach is a typed **fail-closed** feasibility verdict, never a clamp and
-never a silent `None`. See `PRD.md` G8 and `AGENTS.md`.
+isolated trade. A strategy declares a **target book** — standing, signed base
+target shapes per instrument (`0` = flat/close), idempotent so same-symbol
+exposure nets and cannot stack, with optional declared price-path `RiskRule`s.
+The foundation normalizes that shape, applies the operator `[risk_budget]`, and
+the engine folds the final executable weights into **one netted, financed, marked
+book** on every surface. The **NAV path** is the single authoritative scored unit;
+the per-trade ledger is a derived attribution view of the same walk. An envelope
+breach is a typed **fail-closed** feasibility verdict, never a clamp and never a
+silent `None`. See `PRD.md` G8 and `AGENTS.md`.
 
 Research evaluation here means stateless evidence for a supplied frozen
 candidate. Candidate generation, search memory, ranking, stopping rules, and
@@ -59,8 +60,8 @@ flowchart TD
 The design has one spine:
 
 - **One strategy contract.** A strategy is a pure
-  `generate_decisions(rows, params)` that emits a standing, signed,
-  weight-of-NAV **target book** (`TargetDecision`s).
+  `generate_decisions(rows, params)` that emits a standing, signed base-shape
+  **target book** (`TargetDecision`s).
 - **One neutral execution spec.** Runner, validation, and evaluation adapt their
   config into the same `StrategyExecutionSpec`; none owns the other's execution
   path.
@@ -70,7 +71,8 @@ The design has one spine:
   fork. Evaluation adds only Parquet trace serialization around that same pure
   book.
 - **One execution kernel.** Import → validate params → load rows (via `quant_data`)
-  → freeze inputs → typed target decisions → strict causal replay.
+  → freeze inputs → typed target decisions → risk-budget sizing → strict causal
+  replay.
 - **One model of money.** A single bar-by-bar walk nets same-symbol exposure,
   trades only the delta against one shared cash/margin account through a market
   model (costs/fills/funding), and marks to market to produce one NAV path. **The
@@ -104,13 +106,14 @@ generate_decisions(rows, params) -> list[TargetDecision]
 ```
 
 - **Target book, not trade tickets.** Each `TargetDecision` declares, as of a
-  causal time and per instrument, a **standing signed weight of NAV** (`+` long,
-  `−` short, `0` = flat/close). A target holds until the next decision for that
-  symbol changes it. Targets are **idempotent** — re-emitting the current target
-  trades nothing — so signal-stacking is structurally inexpressible and the
-  strategy is forced to reason about the whole book. The strategy owns the
-  complete portfolio: allocation, sizing, netting intent, rebalancing, explicit
-  exits, side, and hedging.
+  causal time and per instrument, a **standing signed base target shape** (`+`
+  long, `-` short, `0` = flat/close). A target holds until the next decision for
+  that symbol changes it. Targets are **idempotent** — re-emitting the current
+  target trades nothing — so signal-stacking is structurally inexpressible and the
+  strategy is forced to reason about the whole book. The strategy owns allocation
+  shape, netting intent, rebalancing, explicit exits, side, and hedging; the
+  foundation owns conversion from shape to final executable weights through the
+  operator `[risk_budget]`.
 - **Pure.** Inspect the `rows` and `params` you were handed; do not load data, call
   engines, write artifacts, loop, or mutate inputs. Computing on the given rows
   (e.g. pandas math) is fine. Purity is enforced by a **best-effort static lint**
@@ -142,7 +145,7 @@ generate_decisions(rows, params) -> list[TargetDecision]
   filled no better than the bar open. A fired rule latches the instrument flat
   until the strategy emits a new (different) target.
 - **Narrow default ontology.** Equities/ETFs, FX pairs, and crypto perps as a
-  signed weight-of-NAV target. Futures, options, and multi-leg live behind
+  signed base target shape. Futures, options, and multi-leg live behind
   explicit imports from `quant_strategies.decisions.extended_ontology`.
 - **Documented.** Each module docstring states thesis, observables, rule,
   assumptions, provenance, and falsifier.
@@ -152,9 +155,10 @@ generate_decisions(rows, params) -> list[TargetDecision]
 **Quick run** — `quant-strategies run config.toml`
 
 Loads rows, runs the pure strategy, validates the target-book decision contract,
-applies the configured causality replay policy, runs the candidate through the
-single causal netted portfolio book, and scores its NAV path for one strategy
-version. For Train/autoresearch iteration, `micro` replay is a cheap replay check:
+normalizes the target shape, applies `[risk_budget]`, applies the configured
+causality replay policy, runs the candidate through the single causal netted
+portfolio book, and scores its NAV path for one strategy version. For
+Train/autoresearch iteration, `micro` replay is a cheap replay check:
 detected causality violations fail closed, while timeout or incomplete probe
 evidence can still score but is non-retainable. Complete replay remains available
 through explicit strict replay and the later validation/evaluation surfaces.
@@ -168,7 +172,8 @@ subwindow records, not survivor-grade evaluation evidence. Python callers receiv
 `RunResult`; status lives under `result.outcome`, while replayability,
 row-contract, causality, and warning fields live under `result.evidence`;
 trade economics live under `result.economics`, portfolio-foundation diagnostics
-under `result.foundation`, the typed feasibility verdict under
+and `PortfolioSizingReport` live under `result.foundation`, the typed
+feasibility verdict under
 `result.feasibility`, and the quick-run retention verdict under
 `result.retainability`.
 The runner result model is nested (`result.outcome` / `result.evidence`) with no
@@ -196,12 +201,15 @@ decision observations for `close`, `funding_timestamp`, `funding_rate`, and
 breach is the fail-closed feasibility verdict. Validation causality
 replay defaults to complete replay and can be explicitly configured as bounded
 for large-panel research runs.
+Validation uses `[risk_budget].mode = "fixed_scale"` from the retained Train sizing
+report; it rejects per-window recalibration.
 
 **Evaluation run** — `quant-strategies evaluate candidates/<candidate_id>/evaluation.toml`
 
 Runs a frozen candidate through the research evaluation surface and writes
 portfolio, economic, and path evidence from the **same single causal netted
-portfolio book** as quick run and validation; evaluation adds only Parquet trace
+portfolio book** as quick run and validation; evaluation applies
+`[risk_budget].mode = "fixed_scale"` per fold and adds only Parquet trace
 serialization through `pyarrow` around that pure book, with no JSONL fallback.
 The single book is the only money model. Evaluation
 also writes normalized input row snapshots as Parquet and decision records as
@@ -262,6 +270,12 @@ configured as bounded; result provenance records the replay scope.
   `capacity_unpriced`. `forex_with_quotes` ADV impact is unsupported until FX
   notional liquidity is calibrated and fails with
   `capacity_unsupported_volume_semantics`.
+- **Risk budget is an operator-frozen sizing envelope.** Quick run, validation, and
+  evaluation configs must declare `[risk_budget]`. Train quick runs use
+  `mode = "calibrate_vol"` with explicit `annualization_periods_per_year` and
+  `target_volatility`; retained validation/evaluation use `mode = "fixed_scale"`
+  with the positive `book_scale` recorded in the Train `PortfolioSizingReport`.
+  Validation and evaluation do not recalibrate from their evidence windows.
 - **Retainable quick-run evidence requires envelope provenance.** Quick-run configs
   that may feed retained-candidate validation/evaluation declare `[envelope]
   operator_frozen = true`. A completed run without that provenance can still be

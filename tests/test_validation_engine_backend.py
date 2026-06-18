@@ -10,6 +10,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
 )
 from quant_strategies.decisions import InstrumentRef, RiskRule, TargetDecision
 from quant_strategies.validation.backends import BackendMetrics
@@ -69,8 +70,9 @@ def target(
 
 
 def long_round_trip() -> list[TargetDecision]:
-    # Standing weight-of-NAV book: open long at bar0 (fills bar1 close 101), flatten at
-    # bar2 (fills bar3 close 103). One netted-book round trip held across at-risk bars.
+    # Standing base-shape book: open long at bar0 (fills bar1 close 101), flatten
+    # at bar2 (fills bar3 close 103). One netted-book round trip held across
+    # at-risk bars.
     return [target(0, 1.0), target(2, 0.0)]
 
 
@@ -81,6 +83,7 @@ def scenario_config(
     impact_coefficient_bps: float = 0.0,
     data_kind: str = "bars",
     entry_lag_bars: int = 1,
+    book_scale: float = 1.0,
 ):
     dataset = "demo_bars" if data_kind == "bars" else None
     return ScenarioRunConfig(
@@ -96,6 +99,11 @@ def scenario_config(
             max_adv_participation=1.0,
             impact_coefficient_bps=impact_coefficient_bps,
             impact_exponent=1.0,
+        ),
+        risk_budget=RiskBudgetConfig(
+            mode="fixed_scale",
+            annualization_periods_per_year=525949,
+            book_scale=book_scale,
         ),
         data=DataConfig(
             kind=data_kind,
@@ -239,12 +247,12 @@ def test_spine_backend_accepts_crypto_perp_without_funding_events_as_zero_fundin
 
 
 def test_spine_backend_leverage_breach_is_typed_unsupported_not_clamped():
-    # Intended gross > the operator budget is a fail-closed leverage verdict, surfaced
-    # as a typed ``unsupported`` reason rather than a clamped score.
+    # Final sized gross > the operator budget is a fail-closed leverage verdict,
+    # surfaced as a typed ``unsupported`` reason rather than a clamped score.
     result = SpineBackend().run(
-        decisions=[target(0, 2.0), target(2, 0.0)],
+        decisions=[target(0, 1.0), target(2, 0.0)],
         rows=rows(),
-        config=scenario_config(),
+        config=scenario_config(book_scale=2.0),
     )
     assert result.status == "unsupported"
     assert result.metrics == {}

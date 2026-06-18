@@ -7,8 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from quant_strategies.core.config import CapacityModelConfig, LeverageBudgetConfig
-from quant_strategies.core.portfolio_foundation import FeasibilityVerdict
+from quant_strategies.core.config import CapacityModelConfig, LeverageBudgetConfig, RiskBudgetConfig
+from quant_strategies.core.portfolio_foundation import FeasibilityVerdict, PortfolioSizingReport
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.fold_returns import FoldReturnSeries, FoldScenarioMetrics
 from quant_strategies.evaluation.metrics import MetricValue
@@ -45,6 +45,7 @@ class PreparedPortfolioInputs:
     decisions: tuple[TargetDecision, ...]
     rows: tuple[Mapping[str, Any], ...]
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     data_kind: str = "bars"
     leverage_budget: LeverageBudgetConfig = field(default_factory=LeverageBudgetConfig)
 
@@ -63,6 +64,7 @@ class PortfolioEvaluationResult(BaseModel):
     feasibility: FeasibilityVerdict = Field(
         default_factory=lambda: FeasibilityVerdict(feasible=True)
     )
+    sizing_report: PortfolioSizingReport | None = None
     tables: PortfolioTraceTables | None = None
 
 

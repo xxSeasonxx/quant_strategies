@@ -13,14 +13,15 @@ live trading, ranking, or promotion. Its one job is to make sure no number with
 unclear semantics ever drives a conclusion.
 
 The unit of simulation is **one causal, single-account portfolio, not an isolated
-trade.** Your strategy declares a *complete portfolio* — a **target book** — and
-the foundation folds it into one netted, financed, marked book and scores that
-**NAV path**. The contract is two-sided: you can express any complete, tradeable
-portfolio in `strategy.py`, and a strategy that passes Train evidence is genuinely
-feasible to trade — an envelope breach (over the frozen leverage budget, zero-cost,
-zero-slippage, unfinanced leverage, degenerate sample) is a typed **fail-closed**
-verdict that
-makes the run non-scoreable, never a clamp and never a silent `None`.
+trade.** Your strategy declares a *complete portfolio* — a **target book** of base
+shape targets — and the foundation normalizes that shape, applies `[risk_budget]`,
+folds the final executable weights into one netted, financed, marked book, and
+scores that **NAV path**. The contract is two-sided: you can express any complete,
+tradeable portfolio in `strategy.py`, and a strategy that passes Train evidence is
+genuinely feasible to trade — an envelope breach (over the frozen risk budget or
+leverage budget, zero-cost, zero-slippage, unfinanced leverage, degenerate sample)
+is a typed **fail-closed** verdict that makes the run non-scoreable, never a clamp
+and never a silent `None`.
 
 ---
 
@@ -31,13 +32,14 @@ these rules. They are the difference between evidence and noise.
 
 1. **A strategy is a pure function declaring a target book.** You write one file
    that exposes `generate_decisions(rows, params) -> Sequence[TargetDecision]`. Each
-   `TargetDecision` is a **standing, signed weight-of-NAV target** for one
-   instrument (`+` long, `−` short, `0` = flat/close) that holds until your next
+   `TargetDecision` is a **standing, signed base target shape** for one
+   instrument (`+` long, `-` short, `0` = flat/close) that holds until your next
    decision for that symbol changes it. Targets are **idempotent** — re-emitting the
    current target trades nothing — so same-symbol exposure nets and repeated signals
-   cannot stack into hidden leverage. Inspect only the `rows` and `params` you are
-   handed. Do **not** load data, call engines, write files, open the network, read
-   clocks, use RNG, or run background loops. Purity is checked by a best-effort
+   cannot stack into hidden leverage. The foundation converts shape to final
+   executable weights with `[risk_budget]`. Inspect only the `rows` and `params` you
+   are handed. Do **not** load data, call engines, write files, open the network,
+   read clocks, use RNG, or run background loops. Purity is checked by a best-effort
    static lint (`decisions/purity.py`) — treat the contract as the real guarantee,
    not the lint.
 2. **You do not load data.** The run surfaces load rows through `quant_data`'s
@@ -52,7 +54,7 @@ these rules. They are the difference between evidence and noise.
 4. **`validate_params` is required for validation and evaluation**, optional for
    quick runs. Make invalid params raise.
 5. **Use `result.succeeded` as the completion check** on all three surfaces. For a
-   quick run, `succeeded` now means **feasible and completed**: the portfolio book
+   quick run, `succeeded` means **feasible and completed**: the portfolio book
    was built and passed the feasibility envelope. A breach of that envelope is a
    typed, fail-closed verdict on `RunResult.feasibility` (reason + observed
    exposure) that sets `succeeded = False` — read the verdict reason
@@ -62,11 +64,12 @@ these rules. They are the difference between evidence and noise.
    may advance to validation/evaluation, also require `result.retainable`.
    Validation's advisory `decision` label — including `mechanical_fail` — is
    evidence, not promotion logic.
-6. **Build within the frozen envelope.** Costs, fills, the leverage ceiling (gross
-   and net), asset universe, and window are operator-frozen — your strategy cannot
-   relax them. Intended gross/net over the budget is non-scoreable, not silently
-   scaled down; a scoreable run with zero costs is non-scoreable. Express your
-   chosen exposure inside the budget. That *is* part of being tradeable.
+6. **Build within the frozen envelope.** Costs, fills, risk budget, the leverage
+   ceiling (gross and net), asset universe, and window are operator-frozen — your
+   strategy cannot relax them. Train quick runs may calibrate volatility; retained
+   validation and evaluation consume the recorded fixed `book_scale`. Final
+   executable gross/net over the budget is non-scoreable, not silently scaled down;
+   a scoreable run with zero costs is non-scoreable.
 7. **Artifacts are evidence, not truth.** Do not treat a generated `summary.json`
    or metric as a proven result. Nothing in this repo proves out-of-sample
    validity, freedom from in-sample fitting, or trading readiness.
@@ -95,7 +98,7 @@ in consumer code.
 ## Golden path (copy-paste)
 
 Write one pure strategy file declaring a **target book** and a small config, then
-run it. The strategy below sets a signed weight-of-NAV target per instrument and
+run it. The strategy below sets a signed base target shape per instrument and
 closes by setting the target back to `0`; `examples/simple_momentum/strategy.py`
 and the `candidates/` strategy files follow the same shape.
 
@@ -106,7 +109,7 @@ and the `candidates/` strategy files follow the same shape.
 Source / provenance: internal_note docs/notes/my_strategy.md citing <paper/url>.
 Market rationale: <why an edge could exist>.
 Required observables: symbol, timestamp, close.
-Decision rule: hold a long 25%-of-NAV target while the close rises; flatten otherwise.
+Decision rule: hold a long base shape target while the close rises; flatten otherwise.
 Assumptions: fills occur after the decision bar (entry_lag_bars=1).
 Falsifier: if the rule has no positive gross edge, reject before tuning.
 """
@@ -139,7 +142,7 @@ def generate_decisions(
             strategy_id="my_strategy",
             instrument=InstrumentRef(kind="equity_or_etf", symbol=symbol),
             decision_time=ts, as_of_time=ts,
-            target=target,            # signed weight of NAV; 0 = flat/close
+            target=target,            # signed base shape; 0 = flat/close
             risk_rule=RiskRule(stop_loss=0.05) if target else None,  # optional engine-enforced stop
             observations=(ObservationRef(symbol=symbol, timestamp=ts, field="close"),),
         ))
@@ -178,6 +181,15 @@ max_bar_participation = 0.50
 max_adv_participation = 0.25
 impact_coefficient_bps = 10.0
 impact_exponent = 0.5
+
+[leverage_budget]
+max_gross_exposure = 1.0
+max_net_exposure = 1.0
+
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 98280
+target_volatility = 0.10
 
 [envelope]
 operator_frozen = true
@@ -264,7 +276,7 @@ trading. Those live in `quant_autoresearch` and human review — never here.
 | **[README.md](README.md)** (this) | *Where do I start? What are the rules and boundaries?* | everyone, first |
 | **[usage-guide.md](usage-guide.md)** | *How do I write a strategy and run quick-run / validation / evaluation?* | strategy authors, agents |
 | **[reference.md](reference.md)** | *What is the exact API, decision schema, config key, result field, exit code?* | lookups |
-| **[migration.md](migration.md)** | *What contract must I emit/consume, what must `quant_autoresearch` reflect, and how do older decision shapes map across?* | consumers wiring a loop into this repo |
+| **[integration.md](integration.md)** | *What contract must I emit/consume, and what must `quant_autoresearch` reflect?* | consumers wiring a loop into this repo |
 
 Deeper internal contracts (for maintainers, not consumers) live in
 [`docs/foundation-surfaces.md`](../foundation-surfaces.md), [`FOUNDATION_LOCK.md`](../../FOUNDATION_LOCK.md),

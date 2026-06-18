@@ -54,6 +54,7 @@ class MultiBarFakeBackend(FakeBackend):
         metrics: Any,
         data_kind: str = "bars",
         capacity_model: Any = None,
+        risk_budget: Any = None,
         leverage_budget: Any = None,
     ) -> PortfolioEvaluationResult:
         timestamps = [AS_OF + timedelta(days=index) for index in range(4)]
@@ -310,6 +311,11 @@ max_adv_participation = 1.0
 impact_coefficient_bps = 0.0
 impact_exponent = 1.0
 
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = 1.0
+
 [metrics]
 annualization_periods_per_year = 365
 
@@ -436,6 +442,7 @@ def test_spine_backend_fold_returns_smoke():
     from tests.test_evaluation_backend import capacity_model, decision, flat, scenario
     from tests.test_evaluation_backend import rows as backend_rows
 
+    from quant_strategies.core.config import RiskBudgetConfig
     from quant_strategies.evaluation.config import EvaluationMetricsConfig
     from quant_strategies.evaluation.fold_returns import fold_series_from_portfolio_path
     from quant_strategies.evaluation.spine_backend import SpineEvaluationBackend
@@ -449,6 +456,11 @@ def test_spine_backend_fold_returns_smoke():
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         capacity_model=capacity_model(),
+        risk_budget=RiskBudgetConfig(
+            mode="fixed_scale",
+            annualization_periods_per_year=252,
+            book_scale=1.0,
+        ),
     )
     assert result.status == "completed"
     assert result.tables is not None

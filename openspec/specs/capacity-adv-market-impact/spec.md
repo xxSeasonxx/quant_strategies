@@ -31,16 +31,16 @@ non-scoreable capacity verdict rather than silently scoring capacity-free.
 - **THEN** the run can complete as a flat/no-activity book without capacity impact
 
 ### Requirement: Executed deltas produce capacity execution events
-
 The shared netted portfolio book SHALL emit one capacity execution event for each
-non-zero executed delta. Each event SHALL carry the symbol, execution timestamp,
-event reason, side, fill price, signed delta units, normalized executed notional,
-real executed notional at the configured portfolio scale, base transaction cost,
-impact cost, total transaction cost, bar notional volume, ADV notional volume,
-bar participation, ADV participation, and available decision metadata.
+non-zero final sized executed delta. Each event SHALL carry the symbol, execution
+timestamp, event reason, side, fill price, signed delta units, normalized executed
+notional, real executed notional at the configured portfolio scale, base
+transaction cost, impact cost, total transaction cost, bar notional volume, ADV
+notional volume, bar participation, ADV participation, and available decision
+metadata.
 
 #### Scenario: Target change records an execution event
-- **WHEN** a target decision changes an instrument's net quantity
+- **WHEN** a final sized target decision changes an instrument's net quantity
 - **THEN** the book records one execution event for the traded delta
 - **AND** the event's notional and costs match the cash update applied to NAV
 
@@ -68,20 +68,20 @@ impact as an after-the-fact reporting adjustment outside the NAV path.
 - **AND** capacity diagnostics report zero executed notional and zero participation
 
 ### Requirement: Participation limits fail closed
-
 The capacity model SHALL enforce frozen maximum bar participation and maximum ADV
-participation. If an execution event breaches either limit, the run SHALL fail
-closed with reason `capacity_limit_breach` and include the breached dimension and
-observed participation in the verdict detail. The book SHALL NOT clamp, scale
-down, split, or defer the order to fit the capacity limit.
+participation on final executable sized deltas. If a final execution event
+breaches either limit, the run SHALL fail closed with reason
+`capacity_limit_breach` and include the breached dimension and observed
+participation in the verdict detail. The book SHALL NOT clamp, scale down, split,
+or defer a final fixed-scale order to fit the capacity limit.
 
 #### Scenario: Bar participation breach is infeasible
-- **WHEN** an execution event's real notional exceeds the configured maximum bar participation
+- **WHEN** a final execution event's real notional exceeds the configured maximum bar participation
 - **THEN** the run fails closed with `capacity_limit_breach`
 - **AND** the order is not resized to fit the bar volume
 
 #### Scenario: ADV participation breach is infeasible
-- **WHEN** an execution event's real notional exceeds the configured maximum ADV participation
+- **WHEN** a final execution event's real notional exceeds the configured maximum ADV participation
 - **THEN** the run fails closed with `capacity_limit_breach`
 - **AND** the order is not resized to fit ADV
 
@@ -103,13 +103,11 @@ capacity pricing until a calibrated notional-volume contract exists, because its
 - **AND** the model records the configured portfolio notional scale used for real-notional conversion
 
 ### Requirement: Retained evidence requires a trusted realistic envelope
-
 Quick-run evidence SHALL be retainable only when the scoring envelope is
 explicitly declared operator-frozen and passes minimal realism checks. The
-envelope includes costs, capacity, and the configured leverage budget, including
-the conservative default leverage budget when no `[leverage_budget]` section is
-present. A run MAY still score for diagnostics when the envelope is not trusted,
-but it SHALL NOT be retainable.
+envelope includes costs, capacity, the configured leverage budget, and the
+configured risk budget. A run MAY still score for diagnostics when the envelope
+is not trusted, but it SHALL NOT be retainable.
 
 #### Scenario: Missing envelope provenance is non-retainable
 - **WHEN** a quick run omits the operator-frozen envelope declaration
@@ -131,3 +129,27 @@ but it SHALL NOT be retainable.
 - **WHEN** a quick run sets bar or ADV participation limits above `1.0`
 - **THEN** the run is not retainable
 - **AND** the retainability reason identifies participation bounds
+
+#### Scenario: Risk budget must be trusted
+- **WHEN** a quick run lacks a valid operator-frozen risk budget
+- **THEN** the run is not retainable
+- **AND** the retainability reason identifies risk-budget provenance
+
+### Requirement: Calibration frontier is sizing information
+The foundation SHALL report feasible calibration frontiers as sizing information,
+not as fail-closed capacity verdicts. When a `calibrate_vol` run computes a
+feasible frontier below the requested volatility, the foundation SHALL report the
+binding capacity or leverage dimension as sizing information rather than as a
+fail-closed capacity verdict, provided the final frontier-sized executable book
+itself is feasible.
+
+#### Scenario: Frontier-bound calibration reports capacity bound
+- **WHEN** the requested risk budget requires a scale above the capacity or leverage frontier
+- **THEN** the foundation sizes to the frontier
+- **AND** the sizing report identifies `capacity_bound = true` and the binding dimension
+- **AND** the capacity feasibility verdict remains feasible for the final sized book
+
+#### Scenario: Frontier report includes maximum feasible volatility
+- **WHEN** calibration is capacity-bound
+- **THEN** the sizing report includes `max_feasible_volatility`
+- **AND** downstream consumers can distinguish under-capacity from an unpriced capacity failure

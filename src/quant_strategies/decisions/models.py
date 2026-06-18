@@ -130,15 +130,17 @@ class RiskRule(DecisionModel):
 
 
 class TargetDecision(DecisionModel):
-    """A standing, signed weight-of-NAV target for one instrument as of a causal time.
+    """A standing, signed base target shape for one instrument as of a causal time.
 
-    The strategy owns the complete portfolio: ``target`` is a signed weight of NAV
-    (positive long, negative short, ``0`` = flat/close) that stands until the next
-    decision for the instrument changes it. A single signed target per instrument
-    makes same-symbol exposure net by construction and additive stacking structurally
-    inexpressible. Flat and leveraged-intent targets are valid contract inputs;
-    intended exposure beyond the operator leverage budget is handled by the engine's
-    feasibility verdict, never by rejecting the decision shape.
+    The strategy owns the complete portfolio shape: ``target`` is a signed
+    weight-like scalar (positive long, negative short, ``0`` = flat/close) that
+    stands until the next decision for the instrument changes it. The foundation
+    normalizes the emitted shape and applies the configured risk budget to produce
+    final executable signed weights. A single signed target per instrument makes
+    same-symbol exposure net by construction and additive stacking structurally
+    inexpressible. Flat and leveraged shape targets are valid contract inputs;
+    final executable exposure beyond the operator envelope is handled by the
+    engine's feasibility verdict, never by rejecting the decision shape.
     """
 
     decision_id: str | None = None

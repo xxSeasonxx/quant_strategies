@@ -56,6 +56,7 @@ class SpineBackend:
                 cost_model=config.cost_model,
                 capacity_model=config.capacity_model,
                 config=PortfolioFoundationConfig(
+                    risk_budget=config.risk_budget,
                     subwindows=1,
                     max_gross_exposure=config.leverage_budget.max_gross_exposure,
                     max_net_exposure=config.leverage_budget.max_net_exposure,
@@ -78,6 +79,7 @@ class SpineBackend:
             metrics=_ledger_metrics(foundation.ledger),
             round_trips=foundation.ledger.round_trips,
             feasibility=foundation.feasible_verdict(),
+            sizing_report=foundation.sizing_report,
         )
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
@@ -31,6 +33,7 @@ from quant_strategies.core.portfolio_foundation import (
     FeasibilityError,
     FeasibilityVerdict,
     PortfolioFoundationConfig,
+    PortfolioSizingReport,
     RunPortfolioFoundation,
     build_portfolio_foundation,
 )
@@ -56,6 +59,8 @@ from quant_strategies.runner import (
 )
 from quant_strategies.runner.economic_metrics import RunEconomics, RunTrade
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
+
+_OBSERVATION_AUDIT_SAMPLE_LIMIT = 10
 
 
 @dataclass(frozen=True)
@@ -303,7 +308,10 @@ def run_config(
         include_diagnostics=True,
     )
     retainability = _quick_run_retainability(
-        config, evidence_quality, foundation.feasible_verdict()
+        config,
+        evidence_quality,
+        foundation.feasible_verdict(),
+        foundation.sizing_report,
     )
     try:
         assessment_status, notes = _write_completion_artifacts(
@@ -824,7 +832,10 @@ def _build_portfolio_foundation(
                 fill_model=config.fill_model,
                 cost_model=config.cost_model,
                 capacity_model=config.capacity_model,
+                mark_rows=execution.mark_rows,
+                mark_repair=execution.mark_repair,
                 config=PortfolioFoundationConfig(
+                    risk_budget=config.risk_budget,
                     subwindows=config.output.foundation_subwindows,
                     cost_stress_multiplier=config.output.foundation_cost_stress_multiplier,
                     fill_stress_fraction=config.output.foundation_fill_stress_fraction,
@@ -1004,6 +1015,7 @@ def _quick_run_retainability(
     config: config_module.RunConfig,
     evidence_quality: EvidenceQuality,
     verdict: FeasibilityVerdict,
+    sizing_report: PortfolioSizingReport | None,
 ) -> RunRetainability:
     if not verdict.feasible:
         return RunRetainability(
@@ -1020,6 +1032,11 @@ def _quick_run_retainability(
     envelope_reason = _envelope_retainability_reason(config)
     if envelope_reason is not None:
         reason, detail = envelope_reason
+        return RunRetainability(retainable=False, reason=reason, detail=detail)
+
+    sizing_reason = _sizing_retainability_reason(sizing_report)
+    if sizing_reason is not None:
+        reason, detail = sizing_reason
         return RunRetainability(retainable=False, reason=reason, detail=detail)
 
     return RunRetainability(retainable=True, reason=None, detail=None)
@@ -1069,6 +1086,19 @@ def _envelope_retainability_reason(
                 "capacity_participation_unbounded",
                 "max bar/ADV participation must be <= 1.0",
             )
+    return None
+
+
+def _sizing_retainability_reason(
+    sizing_report: PortfolioSizingReport | None,
+) -> tuple[str, str | None] | None:
+    if sizing_report is None:
+        return ("risk_budget_sizing_missing", "portfolio sizing report is required")
+    if not math.isfinite(sizing_report.book_scale) or sizing_report.book_scale <= 0.0:
+        return (
+            "risk_budget_sizing_missing",
+            "portfolio sizing report must record a positive book_scale",
+        )
     return None
 
 
@@ -1198,7 +1228,47 @@ def _assert_declared_observations_causal(
         *audit_observation_dependencies(row_index, decisions),
     )
     if violations:
-        raise data_readiness.DataReadinessError("; ".join(violations))
+        raise data_readiness.DataReadinessError(_format_observation_audit_violations(violations))
+
+
+def _format_observation_audit_violations(violations: Sequence[str]) -> str:
+    if not violations:
+        return "observation audit failed"
+
+    counts = Counter(_observation_audit_category(violation) for violation in violations)
+    category_summary = ", ".join(
+        f"{category}={count}" for category, count in sorted(counts.items())
+    )
+    unique_samples = tuple(dict.fromkeys(violations))
+    sample_limit = _OBSERVATION_AUDIT_SAMPLE_LIMIT
+    samples = "; ".join(unique_samples[:sample_limit])
+    omitted = len(unique_samples) - sample_limit
+
+    message = f"observation audit failed: {len(violations)} violations"
+    if category_summary:
+        message = f"{message} ({category_summary})"
+    message = f"{message}; sample violations: {samples}"
+    if omitted > 0:
+        message = f"{message}; {omitted} unique violations omitted"
+    return message
+
+
+def _observation_audit_category(violation: str) -> str:
+    if violation.startswith("invalid timestamp"):
+        return "invalid_observation_timestamp"
+    if violation.startswith("missing observation row"):
+        return "missing_observation_row"
+    if violation.startswith("missing observation field"):
+        return "missing_observation_field"
+    if "references future row" in violation:
+        return "future_observation_row"
+    if violation.startswith("missing available_at"):
+        return "missing_observation_available_at"
+    if violation.startswith("invalid available_at"):
+        return "invalid_observation_available_at"
+    if violation.startswith("observation row") and "was available after decision_time" in violation:
+        return "late_observation_available_at"
+    return "observation_audit"
 
 
 def _causality_message(result: LookaheadCheckResult) -> str:

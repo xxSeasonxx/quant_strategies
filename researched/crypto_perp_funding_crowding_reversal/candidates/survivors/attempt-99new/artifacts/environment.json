@@ -1,0 +1,17 @@
+{
+  "packages": {
+    "pydantic": "2.12.5",
+    "quant-data": "0.1.0",
+    "quant-strategies": "0.1.0"
+  },
+  "python": {
+    "version": "3.12.13"
+  },
+  "repository": {
+    "commit": "d4cb7f2feb8e8978a8abd6098e49f47ec0c2b9a8",
+    "dirty": false,
+    "short_commit": "d4cb7f2",
+    "status_porcelain_sha256": null,
+    "tracked_diff_sha256": null
+  }
+}

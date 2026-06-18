@@ -79,6 +79,11 @@ max_adv_participation = 1.0
 impact_coefficient_bps = 0.0
 impact_exponent = 1.0
 
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+
 [output]
 results_dir = "results"
 artifact_profile = "summary"
@@ -319,6 +324,11 @@ max_adv_participation = 1.0
 impact_coefficient_bps = 0.0
 impact_exponent = 1.0
 
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = 1.0
+
 [metrics]
 annualization_periods_per_year = 365
 
@@ -445,6 +455,7 @@ def test_run_evaluation_executes_once_per_window_and_fans_out_scenarios(
             rows: Sequence[dict[str, Any]],
             data_kind: str = "bars",
             capacity_model: Any = None,
+            risk_budget: Any = None,
             leverage_budget: Any = None,
         ) -> dict[str, Any]:
             self.prepare_calls += 1

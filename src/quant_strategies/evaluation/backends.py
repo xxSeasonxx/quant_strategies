@@ -3,7 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from quant_strategies.core.config import CapacityModelConfig, LeverageBudgetConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    LeverageBudgetConfig,
+    RiskBudgetConfig,
+)
 from quant_strategies.decisions import TargetDecision
 from quant_strategies.evaluation.config import EvaluationMetricsConfig
 from quant_strategies.evaluation.results import (
@@ -36,6 +40,7 @@ class EvaluationBackend(Protocol):
         scenario: EvaluationScenario,
         metrics: EvaluationMetricsConfig,
         capacity_model: CapacityModelConfig,
+        risk_budget: RiskBudgetConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PortfolioEvaluationResult: ...
@@ -51,6 +56,7 @@ class PreparedEvaluationBackend(EvaluationBackend, Protocol):
         decisions: Sequence[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
         capacity_model: CapacityModelConfig,
+        risk_budget: RiskBudgetConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PreparedPortfolioInputs: ...

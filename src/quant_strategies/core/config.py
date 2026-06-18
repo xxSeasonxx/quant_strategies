@@ -160,6 +160,38 @@ class LeverageBudgetConfig(SharedConfigModel):
         return self
 
 
+class RiskBudgetConfig(SharedConfigModel):
+    """Operator-owned conversion from target-book shape to executable book size."""
+
+    mode: Literal["calibrate_vol", "fixed_scale"]
+    annualization_periods_per_year: int = Field(gt=0)
+    target_volatility: float | None = None
+    book_scale: float | None = None
+
+    @model_validator(mode="after")
+    def validate_mode_fields(self) -> RiskBudgetConfig:
+        values = (self.target_volatility, self.book_scale)
+        if any(value is not None and not math.isfinite(value) for value in values):
+            raise ValueError("risk_budget values must be finite")
+        if self.mode == "calibrate_vol":
+            if self.target_volatility is None or self.target_volatility <= 0.0:
+                raise ValueError(
+                    "risk_budget.target_volatility must be positive when mode = 'calibrate_vol'"
+                )
+            if self.book_scale is not None:
+                raise ValueError("risk_budget.book_scale is only valid when mode = 'fixed_scale'")
+        if self.mode == "fixed_scale":
+            if self.book_scale is None or self.book_scale <= 0.0:
+                raise ValueError(
+                    "risk_budget.book_scale must be positive when mode = 'fixed_scale'"
+                )
+            if self.target_volatility is not None:
+                raise ValueError(
+                    "risk_budget.target_volatility is only valid when mode = 'calibrate_vol'"
+                )
+        return self
+
+
 class CausalityPolicyConfig(SharedConfigModel):
     """Operator-frozen scoreability policy for the causality dimension.
 
@@ -209,6 +241,7 @@ class StrategyExecutionSpec:
     strategy_id: str
     data: DataConfig
     capacity_model: CapacityModelConfig
+    risk_budget: RiskBudgetConfig
     params: dict[str, Any] = field(default_factory=dict)
     fill_model: FillModelConfig = field(default_factory=FillModelConfig)
     cost_model: CostModelConfig = field(default_factory=CostModelConfig)

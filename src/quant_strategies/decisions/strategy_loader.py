@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
@@ -62,11 +63,16 @@ def load_decision_strategy(
         raise DecisionStrategyLoadError(f"could not import strategy file: {strategy_path}")
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     try:
         spec.loader.exec_module(module)
     except SystemExit as exc:
+        if sys.modules.get(module_name) is module:
+            del sys.modules[module_name]
         raise DecisionStrategyLoadError(f"strategy import exited: {exc}") from exc
     except Exception as exc:
+        if sys.modules.get(module_name) is module:
+            del sys.modules[module_name]
         raise DecisionStrategyLoadError(f"strategy import failed: {exc}") from exc
 
     generate_decisions = getattr(module, "generate_decisions", None)

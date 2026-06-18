@@ -9,6 +9,7 @@ from quant_strategies.core.config import (
     CostModelConfig,
     DataConfig,
     FillModelConfig,
+    RiskBudgetConfig,
     StrategyExecutionSpec,
     WindowedDataConfig,
 )
@@ -84,6 +85,11 @@ fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 
 {capacity_model_section}
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = 1.0
+
 [metrics]
 annualization_periods_per_year = {annualization}
 {f"min_annualized_samples = {min_annualized_samples}" if min_annualized_samples is not None else ""}
@@ -123,6 +129,11 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
         impact_coefficient_bps=10.0,
         impact_exponent=0.5,
     )
+    assert config.risk_budget == RiskBudgetConfig(
+        mode="fixed_scale",
+        annualization_periods_per_year=252,
+        book_scale=1.0,
+    )
     assert config.to_execution_spec(config.windows[0]) == StrategyExecutionSpec(
         strategy_path=candidate / "strategy.py",
         strategy_id="demo",
@@ -137,6 +148,7 @@ def test_load_evaluation_config_resolves_candidate_local_paths(tmp_path: Path):
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=0.5, slippage_bps_per_side=0.5),
         capacity_model=config.capacity_model,
+        risk_budget=config.risk_budget,
         require_param_validator=True,
     )
 
@@ -243,6 +255,35 @@ def test_capacity_model_is_required_for_evaluation_config(tmp_path: Path):
 
     with pytest.raises(EvaluationConfigError, match="capacity_model"):
         load_evaluation_config(candidate / "evaluation.toml")
+
+
+def test_risk_budget_is_required_for_evaluation_config(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "evaluation.toml"
+    write_config(config_path)
+    text = config_path.read_text()
+    start = text.index("[risk_budget]")
+    end = text.index("[metrics]")
+    config_path.write_text(text[:start] + text[end:])
+
+    with pytest.raises(EvaluationConfigError, match="risk_budget"):
+        load_evaluation_config(config_path)
+
+
+def test_evaluation_rejects_calibrate_vol_risk_budget(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "evaluation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text()
+        .replace('mode = "fixed_scale"', 'mode = "calibrate_vol"')
+        .replace("book_scale = 1.0", "target_volatility = 0.10")
+    )
+
+    with pytest.raises(EvaluationConfigError, match="fixed_scale"):
+        load_evaluation_config(config_path)
 
 
 def test_load_evaluation_config_accepts_min_annualized_samples_override(tmp_path: Path):

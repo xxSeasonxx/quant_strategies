@@ -7,7 +7,12 @@ from typing import Any
 import pytest
 
 from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
-from quant_strategies.core.config import CapacityModelConfig, CostModelConfig, FillModelConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    CostModelConfig,
+    FillModelConfig,
+    RiskBudgetConfig,
+)
 from quant_strategies.core.portfolio_foundation import (
     REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     BookWalkResult,
@@ -117,6 +122,30 @@ def capacity_model() -> CapacityModelConfig:
     )
 
 
+def risk_budget() -> RiskBudgetConfig:
+    return RiskBudgetConfig(
+        mode="fixed_scale",
+        annualization_periods_per_year=252,
+        book_scale=1.0,
+    )
+
+
+def fixed_risk_budget(book_scale: float) -> RiskBudgetConfig:
+    return RiskBudgetConfig(
+        mode="fixed_scale",
+        annualization_periods_per_year=252,
+        book_scale=book_scale,
+    )
+
+
+def calibrating_risk_budget() -> RiskBudgetConfig:
+    return RiskBudgetConfig(
+        mode="calibrate_vol",
+        annualization_periods_per_year=252,
+        target_volatility=0.20,
+    )
+
+
 # --- one shared book on every surface; no data-kind routing ------------------
 
 
@@ -153,6 +182,7 @@ def test_spine_backend_returns_metrics_and_tables_for_a_long_round_trip():
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "completed"
@@ -187,6 +217,7 @@ def test_spine_backend_emits_no_trade_evidence_for_zero_decisions():
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "completed"
@@ -210,6 +241,7 @@ def test_spine_backend_surfaces_capacity_feasibility_reason_as_unsupported_seman
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         data_kind="forex_with_quotes",
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "unsupported"
@@ -218,8 +250,9 @@ def test_spine_backend_surfaces_capacity_feasibility_reason_as_unsupported_seman
 
 
 def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breach():
-    # Two same-bar 0.75 targets -> intended gross 1.5 > 1.0 budget. The decision shape
-    # is accepted; the typed feasibility verdict makes the scenario fail (never clamped).
+    # Raw same-bar gross 1.5 is accepted as shape, then fixed scale 1.5 makes the
+    # final executable gross breach the 1.0 budget. The book fails closed and is
+    # never clamped.
     leveraged = [
         decision(symbol="BTC-PERP", target=0.75),
         decision(symbol="ETH-PERP", target=0.75),
@@ -232,6 +265,7 @@ def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breac
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         capacity_model=capacity_model(),
+        risk_budget=fixed_risk_budget(1.5),
     )
 
     assert result.status == "failed"
@@ -239,6 +273,32 @@ def test_spine_backend_accepts_leveraged_intent_but_fails_closed_on_budget_breac
         "feasibility_breach:leverage_budget_breach" in warning for warning in result.warnings
     )
     assert result.tables is None
+
+
+def test_spine_backend_rejects_direct_calibrate_vol_risk_budget():
+    backend = SpineEvaluationBackend()
+    decisions = [decision(target=0.25), flat(when=datetime(2026, 1, 1, 0, 2, tzinfo=UTC))]
+    metrics = EvaluationMetricsConfig(annualization_periods_per_year=252)
+    direct = backend.run(
+        decisions=decisions,
+        rows=rows(),
+        scenario=scenario(),
+        metrics=metrics,
+        capacity_model=capacity_model(),
+        risk_budget=calibrating_risk_budget(),
+    )
+    prepared = backend.prepare_inputs(
+        decisions=decisions,
+        rows=rows(),
+        capacity_model=capacity_model(),
+        risk_budget=calibrating_risk_budget(),
+    )
+    prepared_result = backend.run_prepared(prepared=prepared, scenario=scenario(), metrics=metrics)
+
+    for result in (direct, prepared_result):
+        assert result.status == "failed"
+        assert result.warnings == ("evaluation backend requires risk_budget.mode = 'fixed_scale'",)
+        assert result.sizing_report is None
 
 
 def test_spine_backend_carries_zero_cost_feasibility_verdict_on_diagnostic_scenario():
@@ -280,6 +340,7 @@ def test_spine_backend_carries_zero_cost_feasibility_verdict_on_diagnostic_scena
             min_annualized_samples=2,
         ),
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "completed"
@@ -315,6 +376,7 @@ def test_spine_backend_models_funding_for_crypto_perp_kind():
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         data_kind="crypto_perp_funding",
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "completed"
@@ -333,6 +395,7 @@ def test_spine_backend_run_prepared_reuses_window_inputs_across_scenarios():
         decisions=decisions,
         rows=rows(),
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     base = scenario()
@@ -621,6 +684,7 @@ def test_spine_backend_real_pandas_smoke():
         scenario=scenario(),
         metrics=EvaluationMetricsConfig(annualization_periods_per_year=252),
         capacity_model=capacity_model(),
+        risk_budget=risk_budget(),
     )
 
     assert result.status == "completed"

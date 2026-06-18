@@ -5,13 +5,15 @@ what it returns. Product intent and ownership boundaries live in `PRD.md`;
 agent operating rules live in `AGENTS.md`.
 
 The unit of simulation is **one causal, single-account portfolio**. A strategy
-declares a **target book** (standing, signed weight-of-NAV `TargetDecision`s per
-instrument); the engine folds it into one netted, financed, marked book on every
-surface (`netted_portfolio_book_v1`) and scores its **NAV path**. The per-trade
-ledger is a derived attribution view of that same walk. An envelope breach (over
-the operator-frozen leverage budget, unpriced, unsupported, or missing capacity
-evidence, a capacity participation-limit breach, zero-cost or zero-slippage on a
-scoreable run, unfinanced leverage, degenerate sample) is a typed **fail-closed**
+declares a **target book** (standing, signed base-shape `TargetDecision`s per
+instrument); the foundation normalizes that shape, applies `[risk_budget]`, and
+the engine folds the final executable weights into one netted, financed, marked
+book on every surface (`netted_portfolio_book_v1`) and scores its **NAV path**.
+The per-trade ledger is a derived attribution view of that same walk. An envelope
+breach (over the operator-frozen risk budget or leverage budget, unpriced,
+unsupported, or missing capacity evidence, a capacity participation-limit breach,
+zero-cost or zero-slippage on a scoreable run, unfinanced leverage, degenerate
+sample) is a typed **fail-closed**
 feasibility
 verdict that makes `succeeded=False` — never clamped, never a silent `None`. See
 `PRD.md` G8.
@@ -70,6 +72,11 @@ book** — the single causal netted portfolio book (`netted_portfolio_book_v1`).
 NAV path is the authoritative scored object on every surface; evaluation adds only
 Parquet trace serialization around that same pure book. There is no separate
 price-evidence fork — every surface scores the same book.
+
+All three surfaces require `[risk_budget]`. Quick-run Train diagnostics may use
+`mode = "calibrate_vol"` with `target_volatility`; retained validation/evaluation
+use `mode = "fixed_scale"` with the positive `book_scale` recorded by the Train
+`PortfolioSizingReport`. Validation and evaluation reject calibration mode.
 
 Path anchoring:
 
@@ -165,7 +172,7 @@ Important sections:
 - top-level `strategy_path`, `strategy_id`;
 - `[data]` loaded through `quant_data`;
 - `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
-  `[leverage_budget]`;
+  `[leverage_budget]`, `[risk_budget]`;
 - `[envelope] operator_frozen = true` for retainable quick-run evidence;
 - `[output]` with repo-local generated `results_dir` under `results/`, artifact
 profile, and diagnostic sizing.
@@ -181,7 +188,10 @@ full-profile artifacts. Completed, feasible quick-run `summary.json` files inclu
 `economic_metrics`, a compact summary of the per-trade attribution ledger derived
 from the book walk, and `portfolio_foundation`, the compact summary of the
 authoritative scored NAV book (schema `v2`, basis `netted_portfolio_book_v1`)
-for Train scoring. The economics summary includes impact-cost attribution, and
+for Train scoring. `portfolio_foundation.sizing_report` records the sizing mode,
+shape normalization scalar, annualization cadence, `book_scale`, deployed/max
+feasible volatility, capacity-bound status, binding dimensions, and final intended
+gross/net exposure. The economics summary includes impact-cost attribution, and
 each portfolio-foundation scenario includes compact capacity diagnostics: execution
 event count, normalized/real turnover, impact cost, and max/mean bar and ADV
 participation. Diagnostic-profile runs additionally write `diagnostics.json` with
@@ -247,7 +257,7 @@ Important sections:
   only — the netted-book spine);
 - `[[windows]]`;
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
-  `[leverage_budget]`;
+  `[leverage_budget]`, `[risk_budget]`;
 - `[readiness]`;
 - `[output]`;
 - `[search_pressure]`, plus optional `[mechanical_thresholds]`.
@@ -364,7 +374,7 @@ Important sections:
 - top-level `strategy_path`, `strategy_id`;
 - `[[windows]]`;
 - `[data]`, `[params]`, `[fill_model]`, `[cost_model]`, `[capacity_model]`,
-  `[leverage_budget]`;
+  `[leverage_budget]`, `[risk_budget]`;
 - `[metrics]` with `annualization_periods_per_year` and optional
   `min_annualized_samples`;
 - optional `[readiness]` for decision observation requirements; defaults to at

@@ -19,6 +19,7 @@ def test_shared_config_primitives_are_neutral_not_runner_owned():
         CostModelConfig,
         DataConfig,
         FillModelConfig,
+        RiskBudgetConfig,
         WindowedDataConfig,
     )
     from quant_strategies.runner import config as runner_config
@@ -29,6 +30,7 @@ def test_shared_config_primitives_are_neutral_not_runner_owned():
     assert FillModelConfig.__module__ == "quant_strategies.core.config"
     assert CostModelConfig.__module__ == "quant_strategies.core.config"
     assert CapacityModelConfig.__module__ == "quant_strategies.core.config"
+    assert RiskBudgetConfig.__module__ == "quant_strategies.core.config"
     assert runner_config.DataConfig is DataConfig
     assert runner_config.FillModelConfig is FillModelConfig
     assert runner_config.CostModelConfig is CostModelConfig
@@ -37,10 +39,12 @@ def test_shared_config_primitives_are_neutral_not_runner_owned():
     assert ValidationConfig.model_fields["fill_model"].annotation is FillModelConfig
     assert ValidationConfig.model_fields["cost_model"].annotation is CostModelConfig
     assert ValidationConfig.model_fields["capacity_model"].annotation is CapacityModelConfig
+    assert ValidationConfig.model_fields["risk_budget"].annotation is RiskBudgetConfig
     assert ScenarioRunConfig.model_fields["data"].annotation is DataConfig
     assert ScenarioRunConfig.model_fields["fill_model"].annotation is FillModelConfig
     assert ScenarioRunConfig.model_fields["cost_model"].annotation is CostModelConfig
     assert ScenarioRunConfig.model_fields["capacity_model"].annotation is CapacityModelConfig
+    assert ScenarioRunConfig.model_fields["risk_budget"].annotation is RiskBudgetConfig
 
 
 def write_strategy(path: Path) -> None:
@@ -118,6 +122,11 @@ fee_bps_per_side = 0.5
 slippage_bps_per_side = 0.5
 {extra}
 {capacity_model_section}
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = 1.0
+
 {readiness}
 
 [output]
@@ -279,6 +288,35 @@ def test_capacity_model_is_required_for_validation_config(tmp_path: Path):
     write_config(config_path, include_capacity_model=False)
 
     with pytest.raises(ValidationConfigError, match="capacity_model"):
+        load_validation_config(config_path)
+
+
+def test_risk_budget_is_required_for_validation_config(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    text = config_path.read_text()
+    start = text.index("[risk_budget]")
+    end = text.index("[readiness]")
+    config_path.write_text(text[:start] + text[end:])
+
+    with pytest.raises(ValidationConfigError, match="risk_budget"):
+        load_validation_config(config_path)
+
+
+def test_validation_rejects_calibrate_vol_risk_budget(tmp_path: Path):
+    candidate = tmp_path / "candidate"
+    write_strategy(candidate / "strategy.py")
+    config_path = candidate / "validation.toml"
+    write_config(config_path)
+    config_path.write_text(
+        config_path.read_text()
+        .replace('mode = "fixed_scale"', 'mode = "calibrate_vol"')
+        .replace("book_scale = 1.0", "target_volatility = 0.10")
+    )
+
+    with pytest.raises(ValidationConfigError, match="fixed_scale"):
         load_validation_config(config_path)
 
 

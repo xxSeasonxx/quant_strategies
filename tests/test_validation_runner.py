@@ -118,6 +118,11 @@ max_bar_participation = 1.0
 max_adv_participation = 1.0
 impact_coefficient_bps = 0.0
 impact_exponent = 1.0
+
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 252
+book_scale = 1.0
 {extra_config}
 
 [readiness]
@@ -336,6 +341,7 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
                 "observed_net": None,
                 "detail": None,
             },
+            "sizing_report": None,
         },
     }
     base_decision_line = base_decision_file.read_text().splitlines()[0]
@@ -1508,7 +1514,11 @@ def test_run_validation_reports_budget_breach_from_spine_for_leveraged_target_we
 ):
     candidate = write_candidate(tmp_path)
     config_path = candidate / "validation.toml"
-    config_path.write_text(config_path.read_text().replace("weight = 1.0", "weight = 1.01"))
+    config_path.write_text(
+        config_path.read_text()
+        .replace("weight = 1.0", "weight = 1.01")
+        .replace("book_scale = 1.0", "book_scale = 1.01")
+    )
     monkeypatch.setattr(
         "quant_strategies.core.execution.load_data",
         lambda config, **_kwargs: LoadedData(rows=rows()),
@@ -1601,6 +1611,7 @@ def test_run_validation_reports_budget_breach_from_spine_for_cross_symbol_gross_
         (candidate / "validation.toml")
         .read_text()
         .replace('symbols = ["BTC-PERP"]', 'symbols = ["BTC-PERP", "ETH-PERP"]')
+        .replace("book_scale = 1.0", "book_scale = 1.2")
     )
     (candidate / "strategy.py").write_text(
         "from quant_strategies.decisions import InstrumentRef, ObservationRef, TargetDecision\n"

@@ -17,7 +17,12 @@ from datetime import date
 from typing import Any
 
 from quant_strategies.core.accounting_model import SHARED_ACCOUNTING_MODEL
-from quant_strategies.core.config import CapacityModelConfig, DataConfig, LeverageBudgetConfig
+from quant_strategies.core.config import (
+    CapacityModelConfig,
+    DataConfig,
+    LeverageBudgetConfig,
+    RiskBudgetConfig,
+)
 from quant_strategies.core.portfolio_foundation import (
     REASON_CAPACITY_UNSUPPORTED_VOLUME_SEMANTICS,
     BookWalkResult,
@@ -63,6 +68,7 @@ class SpineEvaluationBackend:
         decisions: Sequence[TargetDecision],
         rows: Sequence[Mapping[str, Any]],
         capacity_model: CapacityModelConfig,
+        risk_budget: RiskBudgetConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PreparedPortfolioInputs:
@@ -71,6 +77,7 @@ class SpineEvaluationBackend:
             rows=tuple(dict(row) for row in rows),
             data_kind=data_kind,
             capacity_model=capacity_model,
+            risk_budget=risk_budget,
             leverage_budget=leverage_budget,
         )
 
@@ -82,6 +89,7 @@ class SpineEvaluationBackend:
         scenario: EvaluationScenario,
         metrics: EvaluationMetricsConfig,
         capacity_model: CapacityModelConfig,
+        risk_budget: RiskBudgetConfig,
         data_kind: str = "bars",
         leverage_budget: LeverageBudgetConfig = _DEFAULT_LEVERAGE_BUDGET,
     ) -> PortfolioEvaluationResult:
@@ -90,6 +98,7 @@ class SpineEvaluationBackend:
             rows=rows,
             data_kind=data_kind,
             capacity_model=capacity_model,
+            risk_budget=risk_budget,
             leverage_budget=leverage_budget,
         )
         return self.run_prepared(prepared=prepared, scenario=scenario, metrics=metrics)
@@ -166,6 +175,7 @@ class SpineEvaluationBackend:
             required=scenario.required,
             scoreability_bearing=scenario.scoreability_bearing,
             feasibility=feasibility,
+            sizing_report=walk.sizing_report,
             tables=tables,
         )
 
@@ -182,10 +192,17 @@ def _walk_for_scenario(
         cost_model=scenario.cost_model,
         capacity_model=prepared.capacity_model,
         config=PortfolioFoundationConfig(
+            risk_budget=_fixed_evidence_risk_budget(prepared.risk_budget),
             max_gross_exposure=prepared.leverage_budget.max_gross_exposure,
             max_net_exposure=prepared.leverage_budget.max_net_exposure,
         ),
     )
+
+
+def _fixed_evidence_risk_budget(risk_budget: RiskBudgetConfig) -> RiskBudgetConfig:
+    if risk_budget.mode != "fixed_scale":
+        raise ValueError("evaluation backend requires risk_budget.mode = 'fixed_scale'")
+    return risk_budget
 
 
 def _data_config(data_kind: str, rows: Sequence[Mapping[str, Any]]) -> DataConfig:

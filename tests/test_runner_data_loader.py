@@ -71,6 +71,11 @@ slippage_bps_per_side = 0.0
 [capacity_model]
 mode = "off"
 
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 252
+target_volatility = 0.10
+
 [output]
 results_dir = "results"
 '''.lstrip()
@@ -252,6 +257,7 @@ def test_crypto_perp_funding_adapter_loads_funding_rows(
         ]
 
     monkeypatch.setattr(data_loader, "load_crypto_perp_bars_with_funding", fake_load_crypto)
+    monkeypatch.setattr(data_loader, "load_strategy_universe_mark_frame", _fake_mark_loader())
 
     loaded = data_loader.load_data(config, engine=object())
 
@@ -283,10 +289,61 @@ def test_crypto_perp_funding_adapter_uses_explicit_load_window(
         ]
 
     monkeypatch.setattr(data_loader, "load_crypto_perp_bars_with_funding", fake_load_crypto)
+    mark_calls: list[tuple] = []
+    monkeypatch.setattr(
+        data_loader, "load_strategy_universe_mark_frame", _fake_mark_loader(mark_calls)
+    )
 
     data_loader.load_data(config, engine=object())
 
     assert calls == [("BTC-PERP", config.data.start, config.data.load_end, True)]
+    # The mark frame loads from the base OHLCV dataset over the same window.
+    assert mark_calls == [
+        (
+            ["BTC-PERP"],
+            "crypto_perp_1min",
+            config.data.start,
+            config.data.load_end,
+            True,
+        )
+    ]
+
+
+def _fake_mark_loader(calls: list | None = None):
+    """Stub for the upstream repair-aware mark loader, recording its call args."""
+    from types import SimpleNamespace
+
+    def fake(engine, symbols, dataset, start, end, *, strict, return_summary):
+        if calls is not None:
+            calls.append((list(symbols), dataset, start, end, strict))
+        summary = SimpleNamespace(
+            dataset=dataset,
+            repaired_row_count=0,
+            affected_symbols=[],
+            classification_counts={},
+        )
+        return [], summary
+
+    return fake
+
+
+def test_unrepairable_mark_gap_fails_closed_at_data_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    config = make_config(tmp_path, kind="crypto_perp_funding", symbols=["BTC-PERP"], dataset=None)
+    monkeypatch.setattr(
+        data_loader,
+        "load_crypto_perp_bars_with_funding",
+        lambda *args, **kwargs: [row("BTC-PERP")],
+    )
+
+    def fake_mark(*args, **kwargs):
+        raise ValueError("crypto_perp_1min_with_funding/BTC-PERP ...: unrepairable_gap")
+
+    monkeypatch.setattr(data_loader, "load_strategy_universe_mark_frame", fake_mark)
+
+    with pytest.raises(DataLoadError, match="unrepairable_gap"):
+        data_loader.load_data(config, engine=object())
 
 
 def test_forex_with_quotes_adapter_preserves_bid_ask_for_quote_fills(

@@ -71,9 +71,10 @@ rationale**, **Required observables**, **Decision rule**, **Assumptions**,
 ## Decision schema
 
 `TargetDecision` and its components are frozen, strict Pydantic models with
-`extra="forbid"`. The decision is a **standing, signed weight-of-NAV target** per
-instrument; there is no `open`/`close`/`direction` enum, no sizing-kind, and no
-welded exit policy. Enum (Literal) values:
+`extra="forbid"`. The decision is a **standing, signed base target shape** per
+instrument. Use the target sign for long/short/flat intent, target magnitude for
+shape, and `risk_rule` for engine-enforced price-path exits. Enum (Literal)
+values:
 
 | Type | Allowed values |
 |---|---|
@@ -87,7 +88,7 @@ welded exit policy. Enum (Literal) values:
 | `instrument` | `InstrumentRef` | — | — |
 | `decision_time` | `datetime` | — | timezone-aware; the bar the target becomes effective |
 | `as_of_time` | `datetime` | — | timezone-aware; **`as_of_time <= decision_time`** |
-| `target` | `float` | — | finite signed weight of NAV: `+` long, `−` short, `0` = flat/close; standing + idempotent |
+| `target` | `float` | — | finite signed base shape: `+` long, `-` short, `0` = flat/close; standing + idempotent |
 | `risk_rule` | `RiskRule \| None` | `None` | optional engine-enforced price-path exit on the net position |
 | `observations` | `tuple[ObservationRef, ...]` | `()` | declare the rows the rule used |
 | `metadata` | `Mapping[str, Any]` | `{}` | must be JSON-compatible; frozen on construction |
@@ -98,9 +99,9 @@ to a held **quantity** at its decision bar (weight drifts with the mark between
 decisions — hold a constant weight by emitting explicit rebalancing decisions), and
 is **idempotent** (re-emitting the current target trades nothing). Same-symbol
 targets net to the latest value; additive stacking is structurally inexpressible.
-A `target` whose intended gross/net exceeds the operator-frozen leverage budget is a
-valid decision — it is handled by the fail-closed feasibility verdict, not rejected
-as an unsupported shape.
+A `target` is normalized with the full emitted target-book shape and then sized by
+`[risk_budget]`; the final executable gross/net book is handled by the fail-closed
+feasibility verdict, not rejected as an unsupported strategy shape.
 
 ### `InstrumentRef`
 
@@ -162,7 +163,8 @@ Common sections, then per-surface differences. Dates are ISO strings
 **`[cost_model]`** — `fee_bps_per_side` (float), `slippage_bps_per_side` (float).
 
 **`[capacity_model]`** — required on quick run, validation, and evaluation.
-Operator-frozen, peer to `[fill_model]` / `[cost_model]` / `[leverage_budget]`.
+Operator-frozen, peer to `[fill_model]` / `[cost_model]` / `[leverage_budget]` /
+`[risk_budget]`.
 `mode = "adv_impact"` requires `portfolio_notional > 0`,
 `adv_lookback_bars`, `adv_min_observations <= adv_lookback_bars`,
 `max_bar_participation`, `max_adv_participation`, `impact_coefficient_bps`, and
@@ -173,11 +175,19 @@ fails with `capacity_unsupported_volume_semantics`.
 
 **`[leverage_budget]`** — `max_gross_exposure` (float, default `1.0`, `>= 1.0`),
 `max_net_exposure` (float, default `1.0`, `>= 1.0`). Operator-frozen, peer to
-`[fill_model]`/`[cost_model]` (**not** an agent-editable `[output]` key). Intended
-gross/net exposure above either ceiling is non-scoreable via the feasibility verdict
-(`leverage_budget_breach`), never clamped to fit; the default `1.0/1.0` admits an
-unlevered book only, so a strategy that runs gross > 1 requires the operator to raise
-the ceiling.
+`[fill_model]`/`[cost_model]`/`[risk_budget]` (**not** an agent-editable `[output]`
+key). Final executable gross/net exposure above either ceiling is non-scoreable via
+the feasibility verdict (`leverage_budget_breach`), never clamped to fit; the default
+`1.0/1.0` admits an unlevered book only, so a final sized book that runs gross > 1
+requires the operator to raise the ceiling.
+
+**`[risk_budget]`** — required on quick run, validation, and evaluation.
+Operator-frozen conversion from emitted target-book shape to final executable book
+size. All modes require `annualization_periods_per_year` (positive int).
+`mode = "calibrate_vol"` requires positive `target_volatility` and is used for
+Train quick runs. `mode = "fixed_scale"` requires positive `book_scale` and is used
+for retained validation/evaluation; validation and evaluation reject
+`calibrate_vol`.
 
 ### Quick run (`experiment.toml`)
 
@@ -191,6 +201,7 @@ strategy_path, strategy_id            # top-level
                  max_bar_participation, max_adv_participation,
                  impact_coefficient_bps, impact_exponent
 [leverage_budget] max_gross_exposure, max_net_exposure
+[risk_budget] mode, annualization_periods_per_year, target_volatility|book_scale
 [envelope] operator_frozen
 [causality_policy] allow_unverified_scoring
 [output] results_dir, quick_checks (bool), artifact_profile, diagnostic_sample_trades (int),
@@ -202,9 +213,9 @@ strategy_path, strategy_id            # top-level
 
 `foundation_subwindows` is bounded to 1-64. `foundation_min_return_sample`
 defaults to 20 and may be set to any integer >= 2 for explicit diagnostics.
-The portfolio **leverage budget (gross and net) lives in the operator-frozen
-`[leverage_budget]` section** (above), not an agent-editable `[output]` key — there
-is no `foundation_max_gross_exposure` field.
+Declare the portfolio **leverage budget (gross and net)** only in the
+operator-frozen `[leverage_budget]` section above. `[output]` owns artifact
+controls.
 Intended exposure beyond the budget is non-scoreable via the feasibility verdict
 (`leverage_budget_breach`), never clamped to fit.
 
@@ -246,7 +257,7 @@ generation, strategy-input artifacts, and causality replay still use only
 strategy_path, strategy_id, verdict_source?   # top-level
 [[windows]] id (unique), start, end           # one or more
 [data]   kind, dataset, symbols               # no inline start/end
-[params], [fill_model], [cost_model], [capacity_model], [leverage_budget]
+[params], [fill_model], [cost_model], [capacity_model], [leverage_budget], [risk_budget]
 [readiness] min_observations_per_decision (int), required_observation_fields (list[str])
 [causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [output] results_dir
@@ -270,7 +281,7 @@ still included.
 strategy_path, strategy_id                     # top-level
 [[windows]] id, start, end
 [data]   kind, dataset, symbols
-[params], [fill_model], [cost_model], [capacity_model], [leverage_budget]
+[params], [fill_model], [cost_model], [capacity_model], [leverage_budget], [risk_budget]
 [metrics] annualization_periods_per_year (int), min_annualized_samples (int, default 20)
 [causality_replay]? scope = "complete" | "bounded", probe_limit, timeout_seconds
 [readiness]?                                    # optional; defaults to >=1 obs + >=1 symbol per decision
@@ -308,7 +319,7 @@ the run completed and `failure_stage is None`.
 | `outcome` | `RunOutcome` | terminal status (below) |
 | `evidence` | `RunEvidence` | evidence quality (below) |
 | `economics` | `RunEconomics \| None` | per-trade attribution ledger **derived from the book walk**, populated on completed engine runs even under compact artifact profiles |
-| `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics); the book is mandatory, so this is populated on every completed, feasible run and is `None` only when the run failed before/at the book (e.g. a feasibility breach) |
+| `foundation` | `RunPortfolioFoundation \| None` | the **authoritative scored portfolio book** (NAV path + scenario metrics + sizing report); the book is mandatory, so this is populated on every completed, feasible run and is `None` only when the run failed before/at the book (e.g. a feasibility breach) |
 | `feasibility` | `FeasibilityVerdict \| None` | typed fail-closed verdict; `None` when the run failed before the book was built; on a breach carries `reason` + observed exposure and maps to a `feasibility` `failure_stage` |
 | `succeeded` | `bool` (property) | `outcome.completed and outcome.failure_stage is None` — i.e. **feasible and completed**; a feasibility breach sets `failure_stage="feasibility"` |
 | `retainability` | `RunRetainability` | typed quick-run retention verdict: `retainable`, `reason`, and `detail` |
@@ -402,13 +413,17 @@ in default artifacts.
 
 Top-level payload fields are `schema_version`
 (`quant_strategies.quick_run.portfolio_foundation/v2`), `basis`
-(`netted_portfolio_book_v1`), `evidence_class`, and `scenarios`. Each scenario
-reports a typed `feasibility` payload, compact `capacity` diagnostics, a compact
-`full_train` metric record, and subwindow metrics such as `return_sample_count`,
-`mean_return`, `return_volatility`, `effective_sample_size`, `sharpe`,
-`sharpe_standard_error`, `skew`, `kurtosis`, `total_return`,
-`max_drawdown`, `closed_trade_count`, `max_symbol_concentration`, and the live
-`max/mean_gross_utilization` / `max/mean_net_utilization` exposure series.
+(`netted_portfolio_book_v1`), `evidence_class`, `sizing_report`, and `scenarios`.
+`sizing_report` records the sizing mode, shape normalization method and scalar,
+annualization cadence, `book_scale`, target/deployed/max-feasible volatility,
+capacity-bound status, binding dimensions, and final intended gross/net exposure.
+Each scenario reports a typed `feasibility` payload, compact `capacity`
+diagnostics, a compact `full_train` metric record, and subwindow metrics such as
+`return_sample_count`, `mean_return`, `return_volatility`,
+`effective_sample_size`, `sharpe`, `sharpe_standard_error`, `skew`, `kurtosis`,
+`total_return`, `max_drawdown`, `closed_trade_count`, `max_symbol_concentration`,
+and the live `max/mean_gross_utilization` / `max/mean_net_utilization` exposure
+series.
 
 Scenario payload fields:
 
@@ -449,9 +464,9 @@ Metric record fields (`full_train` and each subwindow):
 Consumer rules:
 
 - `summary_payload()` and `summary.json["portfolio_foundation"]` include
-  scenario summaries and `full_train`, but not `subwindows`.
+  `sizing_report`, scenario summaries, and `full_train`, but not `subwindows`.
 - `matrix_payload()` and `diagnostics.json["portfolio_foundation"]` include the
-  same scenario summaries plus `subwindows`.
+  same `sizing_report`, scenario summaries, and `subwindows`.
 - Neither payload includes raw NAV arrays, period-return arrays, position traces,
   or per-period holdings.
 - PSR and final Train score are not emitted here. Downstream consumers compute
@@ -466,6 +481,29 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
   "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
   "basis": "netted_portfolio_book_v1",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
+  "sizing_report": {
+    "schema_version": "quant_strategies.portfolio_sizing/v1",
+    "mode": "calibrate_vol",
+    "shape": {
+      "method": "max_intended_raw_gross",
+      "raw_gross_normalization_scalar": 0.25,
+      "raw_max_gross": 0.25,
+      "raw_max_net": 0.25,
+      "normalized_max_gross": 1.0,
+      "normalized_max_net": 1.0,
+      "decision_count": 2
+    },
+    "annualization_periods_per_year": 98280,
+    "book_scale": 0.25,
+    "target_volatility": 0.10,
+    "deployed_volatility": 0.10,
+    "max_feasible_volatility": 0.30,
+    "capacity_bound": false,
+    "max_feasible_book_scale": 0.75,
+    "binding_dimensions": [],
+    "final_max_intended_gross": 0.25,
+    "final_max_intended_net": 0.25
+  },
   "scenarios": {
     "realistic_costs": {
       "scenario_id": "realistic_costs",
@@ -530,6 +568,9 @@ each scenario:
   "schema_version": "quant_strategies.quick_run.portfolio_foundation/v2",
   "basis": "netted_portfolio_book_v1",
   "evidence_class": "quick_run_portfolio_foundation_diagnostic",
+  "sizing_report": {
+    "...": "same sizing report shape as summary"
+  },
   "scenarios": {
     "realistic_costs": {
       "scenario_id": "realistic_costs",
@@ -607,7 +648,7 @@ each scenario:
 | `assessment_status` | `str` | default `evaluation_failed`; `evaluation_preflight_failed` on preflight/audit fail |
 | `evidence_quality_warnings` | `tuple[str, …]` | — |
 | `fold_returns` | `tuple[FoldReturnSeries, …]` | per-`(window, scenario)` OOS return series, in-process (no Parquet); `()` unless completed |
-| `scenario_metrics` | `tuple[FoldScenarioMetrics, …]` | per-`(window, scenario)` summary risk scalars + provenance; `()` unless completed |
+| `scenario_metrics` | `tuple[FoldScenarioMetrics, …]` | per-`(window, scenario)` summary risk scalars + sizing report + provenance; `()` unless completed |
 | `causal_replay_passed` | `bool \| None` | Tier-0 causal-replay / decision-contract integrity: `True` on a completed run, `False` on a causal/audit failure stage (`data_audit`, `preflight`), `None` on a pre-causal failure |
 | `provenance` | `Mapping[str, str]` | run provenance (backend, python + package versions, data-snapshot `normalized_rows_sha256`); `{}` unless populated |
 | `succeeded` | `bool` (property) | `run_completed and failure_stage is None` |
@@ -651,6 +692,7 @@ insufficient return sample), exactly as the artifact metrics.
 | `causal_ok` | `bool` | per-fold Tier-0 integrity (`True` for completed scenarios) |
 | `scoreability_bearing` | `bool` | whether the scenario counts as scoreable filter evidence |
 | `feasibility` | `FeasibilityVerdict` | shared-book scoreability verdict for the scenario |
+| `sizing_report` | `PortfolioSizingReport \| None` | sizing evidence used to construct the final executable fold book |
 | `provenance` | `Mapping[str, str]` | data-snapshot + version identity (FR-I1) |
 
 ---

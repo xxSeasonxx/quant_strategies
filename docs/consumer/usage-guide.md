@@ -76,13 +76,14 @@ generate_decisions(rows, params) -> Sequence[TargetDecision]   # required
 validate_params(params) -> Mapping                             # required for validate/evaluate
 ```
 
-A `TargetDecision` is a **standing, signed weight-of-NAV target** for one
-instrument (`+` long, `−` short, `0` = flat/close) that holds until your next
-decision for that symbol changes it. Targets are **idempotent** (re-emitting the
-current target is a no-op), so same-symbol exposure nets by construction and
-repeated signals cannot stack into hidden leverage. You own the whole portfolio:
-allocation, sizing, netting intent, rebalancing, explicit exits, and optional
-declared price-path risk.
+A `TargetDecision` is a **standing, signed base target shape** for one instrument
+(`+` long, `-` short, `0` = flat/close) that holds until your next decision for
+that symbol changes it. Targets are **idempotent** (re-emitting the current target
+is a no-op), so same-symbol exposure nets by construction and repeated signals
+cannot stack into hidden leverage. You own the portfolio shape: allocation,
+netting intent, rebalancing, explicit exits, and optional declared price-path risk.
+The foundation owns conversion from shape to final executable weights through
+`[risk_budget]`.
 
 ### 1. The module docstring (required)
 
@@ -145,7 +146,7 @@ TargetDecision(
     #   kind ∈ {"equity_or_etf", "fx_pair", "crypto_perp"}
     decision_time=ts,          # tz-aware datetime; when the decision is effective
     as_of_time=ts,             # tz-aware; data cutoff. MUST be <= decision_time
-    target=0.25,               # signed weight of NAV: + long, - short, 0 = flat/close
+    target=0.25,               # signed base shape: + long, - short, 0 = flat/close
     risk_rule=RiskRule(        # optional; engine-enforced price-path exits on the net position
         stop_loss=0.05,        # fraction of entry mark (5% adverse) — not bps
         take_profit=None,
@@ -160,11 +161,11 @@ TargetDecision(
 
 Notes that matter:
 
-- **The target is a standing signed weight, not a one-shot ticket.** It holds until
+- **The target is a standing signed shape, not a one-shot ticket.** It holds until
   your next decision for that instrument changes it. To close, emit `target=0`. To
-  rebalance to a constant weight, emit explicit periodic decisions — weight drifts
-  with the mark between decisions (the engine fixes the held *quantity* at the
-  decision bar, it does not continuously rebalance).
+  rebalance shape, emit explicit periodic decisions; the foundation applies the
+  risk budget once the full shape stream is known, then the engine fixes the held
+  quantity at each decision bar.
 - **Targets net, they never stack.** Emitting `+0.20` then `+0.30` for one symbol
   resolves to `+0.30`, not `+0.50`. Re-emitting the standing target trades nothing.
 - **Two kinds of exit.** Anything derivable from **data or time** (signal reversal,
@@ -230,7 +231,26 @@ All three surfaces share these sections (full key list in
 [cost_model]        # fee_bps_per_side; slippage_bps_per_side
 [capacity_model]    # mode = "adv_impact"|"off"; portfolio_notional + ADV/impact limits
 [leverage_budget]   # max_gross_exposure; max_net_exposure
+[risk_budget]       # mode + explicit annualization cadence + target_volatility/book_scale
 [output]            # results_dir (+ profile/sizing for quick run)
+```
+
+Quick-run Train configs may use:
+
+```toml
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 98280
+target_volatility = 0.10
+```
+
+Validation and evaluation configs use the retained quick-run scale:
+
+```toml
+[risk_budget]
+mode = "fixed_scale"
+annualization_periods_per_year = 98280
+book_scale = 0.75
 ```
 
 **Fill timing.** `entry_lag_bars = 1` means a close-derived signal at bar *t* fills
@@ -280,7 +300,7 @@ print(result.foundation.feasible)            # authoritative scored NAV book on 
 
 **Config** (`experiment.toml`): top-level `strategy_path`, `strategy_id`; `[data]`
 with inline `start`/`end`; `[params]`, `[fill_model]`, `[cost_model]`,
-`[capacity_model]`, `[leverage_budget]`; `[envelope] operator_frozen = true`
+`[capacity_model]`, `[leverage_budget]`, `[risk_budget]`; `[envelope] operator_frozen = true`
 when the quick-run evidence may be retained; `[output]` with `results_dir`,
 `quick_checks`, `artifact_profile`, optional
 `causality_check`, quick-run foundation controls
@@ -291,7 +311,7 @@ diagnostic profile) `diagnostic_sample_trades`.
 defaults to 20 and accepts integers >= 2 for explicit diagnostics.
 The **leverage budget (gross and net) is operator-frozen** in the
 `[leverage_budget]` section (`max_gross_exposure` / `max_net_exposure`, default
-`1.0/1.0`, `>= 1.0`) — it is not an agent-editable `[output]` key. Intended exposure
+`1.0/1.0`, `>= 1.0`). `[output]` owns artifact controls. Intended exposure
 beyond the budget makes the run non-scoreable through the feasibility verdict
 (`leverage_budget_breach`), it is never clamped to fit.
 The **capacity model is also operator-frozen**. `mode = "adv_impact"` requires a
@@ -308,6 +328,8 @@ fast diagnostic evidence: detected causality violations fail closed, while timeo
 or incomplete probe evidence can still score but is not complete retention proof.
 Require `result.retainable` before advancing quick-run evidence to validation or
 evaluation.
+`result.foundation.sizing_report` records the frozen `book_scale`; use that value
+in validation/evaluation `[risk_budget].mode = "fixed_scale"` configs.
 Research candidates live as candidate-local bundles:
 `candidates/<candidate_id>/strategy.py` plus `run.toml` and optional
 `validation.toml` / `evaluation.toml`. In quick-run configs, `strategy_path`
@@ -517,7 +539,7 @@ print(result.result_dir)
 **Config** (`validation.toml`): top-level `strategy_path`, `strategy_id`, optional
 `verdict_source` (`"engine"` only); one or more `[[windows]]` (each with a unique
 `id` + `start`/`end`); `[data]`, `[params]`, `[fill_model]`, `[cost_model]`,
-`[capacity_model]`, `[leverage_budget]`;
+`[capacity_model]`, `[leverage_budget]`, `[risk_budget]`;
 `[readiness]` (`min_observations_per_decision`, `required_observation_fields`);
 `[output]`; `[search_pressure]` (`prior_search`); optional `[mechanical_thresholds]`.
 
@@ -559,7 +581,7 @@ print(result.evidence_quality_warnings)
 
 **Config** (`evaluation.toml`): top-level `strategy_path`, `strategy_id`;
 `[[windows]]`; `[data]`, `[params]`, `[fill_model]`, `[cost_model]`,
-`[capacity_model]`, `[leverage_budget]`; `[metrics]`
+`[capacity_model]`, `[leverage_budget]`, `[risk_budget]`; `[metrics]`
 with `annualization_periods_per_year` (must match bar cadence) and optional
 `min_annualized_samples` (default `20`); optional `[readiness]`, optional
 `[benchmark]` (`symbol`, which must also appear in `data.symbols`), and optional
@@ -701,14 +723,16 @@ rules, and promotion. Do not import `quant_strategies.engine` or any
 - **Do not import the engine or internals** (`quant_strategies.engine`, `_`-modules)
   in consumer code. Use the three public surfaces.
 - **Do not key signals off `timestamp`.** Use `available_at` for observability.
-- **Do not put accounting in signal logic.** Fills, costs, netting, financing, and
-  the leverage budget belong to the engine; declare the intended target book.
+- **Do not put accounting or final sizing in signal logic.** Fills, costs,
+  netting, financing, leverage, and risk-budget sizing belong to the foundation;
+  declare the intended target-book shape.
 - **Do not emit a fresh target to add exposure.** Targets net to the latest value,
   not a stack — express your total intended weight, not an increment.
 - **Do not read future rows to place a stop.** Use a declared `RiskRule`; a
   data/time exit is an explicit `target=0` decision.
-- **Do not expect an over-budget book to be scaled down.** Intended gross/net over
-  the frozen leverage budget is non-scoreable (fail-closed), never clamped to fit.
+- **Do not expect an over-budget fixed-scale book to be scaled down.** Final
+  executable gross/net over the frozen leverage budget is non-scoreable
+  (fail-closed), never clamped to fit.
 - **Do not treat a metric or artifact as proof.** They are evidence; nothing here
   proves out-of-sample validity or trading readiness.
 - **Do not read `mechanical_fail` as a crash**, or `result.succeeded` as a positive
