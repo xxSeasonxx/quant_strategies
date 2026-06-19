@@ -22,7 +22,13 @@ from quant_strategies.causality import (
     strict_replay_boundaries,
 )
 from quant_strategies.core import engine_runner as _engine_runner
-from quant_strategies.core.errors import RunnerError
+from quant_strategies.core.config import StrategyExecutionSpec
+from quant_strategies.core.data_loader import (
+    LoadedData,
+    data_load_fingerprint,
+    data_load_identity,
+)
+from quant_strategies.core.errors import PreparedDataMismatchError, RunnerError
 from quant_strategies.core.evidence_quality import CausalityVerification, EvidenceQuality
 from quant_strategies.core.execution import (
     StrategyExecutionError,
@@ -59,6 +65,7 @@ from quant_strategies.runner import (
 )
 from quant_strategies.runner.economic_metrics import RunEconomics, RunTrade
 from quant_strategies.runner.events import RunnerEventSink, RunnerStageEmitter
+from quant_strategies.runner.prepared import PreparedRunData, prepare_run_data
 
 _OBSERVATION_AUDIT_SAMPLE_LIMIT = 10
 
@@ -173,6 +180,7 @@ def run_config(
     *,
     repo_root: Path | None = None,
     event_sink: RunnerEventSink | None = None,
+    prepared: PreparedRunData | None = None,
 ) -> RunResult:
     effective_repo_root = (
         Path(repo_root).resolve() if repo_root is not None else config_module.default_repo_root()
@@ -196,6 +204,11 @@ def run_config(
             outcome=RunOutcome(failure_stage="config_load"),
         )
 
+    # Fail closed on a preloaded/config data-identity mismatch before any side effect:
+    # a caller precondition violation must not leave an orphaned result directory.
+    spec = config.to_execution_spec()
+    preloaded = _verified_preloaded_data(spec, prepared, config_path)
+
     try:
         with events.stage("artifact_initialization", strategy_id=config.strategy_id):
             result_dir = artifacts.create_result_dir(config)
@@ -217,8 +230,9 @@ def run_config(
     try:
         with events.stage("strategy_execution", strategy_id=config.strategy_id):
             execution = execute_strategy_run(
-                config.to_execution_spec(),
+                spec,
                 repo_root=effective_repo_root,
+                preloaded=preloaded,
             )
     except StrategyExecutionError as exc:
         return _execution_failure_result(
@@ -356,6 +370,30 @@ def run_config(
         feasibility=foundation.feasible_verdict(),
         retainability=retainability,
     )
+
+
+def _verified_preloaded_data(
+    spec: StrategyExecutionSpec,
+    prepared: PreparedRunData | None,
+    config_path: str | Path,
+) -> LoadedData | None:
+    """Fail-closed check that preloaded data matches this config's data identity.
+
+    A mismatch is a caller precondition violation (reusing data prepared for a different
+    window/symbols/identity), so it raises rather than producing a misleading failed
+    ``RunResult`` that could be mistaken for a failed research attempt.
+    """
+    if prepared is None:
+        return None
+    live_fingerprint = data_load_fingerprint(spec)
+    if live_fingerprint != prepared.fingerprint:
+        raise PreparedDataMismatchError(
+            "prepared data does not match this run config's data identity "
+            f"(config={config_path}): prepared fingerprint={prepared.fingerprint}, "
+            f"config fingerprint={live_fingerprint}, config data identity="
+            f"{data_load_identity(spec)}"
+        )
+    return prepared.loaded_data
 
 
 def _execution_failure_result(
@@ -1466,6 +1504,8 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 
 __all__ = [
+    "PreparedDataMismatchError",
+    "PreparedRunData",
     "RunCausalityEvidence",
     "RunEconomics",
     "RunEvidence",
@@ -1473,5 +1513,6 @@ __all__ = [
     "RunPortfolioFoundation",
     "RunResult",
     "RunTrade",
+    "prepare_run_data",
     "run_config",
 ]

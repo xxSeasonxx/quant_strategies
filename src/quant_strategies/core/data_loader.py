@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -55,6 +57,35 @@ def load_strategy_universe_mark_frame(*args: Any, **kwargs: Any) -> Any:
     from quant_data.contract_loaders import load_strategy_universe_mark_frame as upstream
 
     return upstream(*args, **kwargs)
+
+
+def data_load_identity(config: StrategyExecutionSpec) -> dict[str, Any]:
+    """The exact config inputs that determine ``LoadedData`` and its normalized rows.
+
+    This is the single source of truth for data identity: every field the loader
+    (`load_data`/`_load_rows`/`_load_mark_rows`) or normalizer
+    (`NormalizedRows.from_rows`, via required-field rules) reads. ``symbols`` order is
+    preserved because it drives multi-symbol row order and therefore the normalized
+    hash. Keep this aligned with the loader whenever either changes.
+    """
+    data = config.data
+    return {
+        "kind": data.kind,
+        "dataset": data.dataset,
+        "symbols": list(data.symbols),
+        "start": data.start.isoformat(),
+        "end": data.end.isoformat(),
+        "load_start": data.load_start.isoformat() if data.load_start is not None else None,
+        "load_end": data.load_end.isoformat() if data.load_end is not None else None,
+        "fill_price": config.fill_model.price,
+        "capacity_mode": config.capacity_model.mode,
+    }
+
+
+def data_load_fingerprint(config: StrategyExecutionSpec) -> str:
+    """Stable digest of :func:`data_load_identity` for fail-closed preloaded reuse."""
+    canonical = json.dumps(data_load_identity(config), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def load_data(

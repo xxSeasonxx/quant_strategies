@@ -83,6 +83,10 @@ unpriced or under-contracted class already fails closed). In order:
    class forward only when it becomes an active research direction; §2.3 items also
    need upstream backfill first.
 
+§2.4 is a separate throughput and sizing-precision track, orthogonal to this
+feasibility ladder — no untradeable-evidence path depends on it, so it is
+sequenced on its own and does not preempt §2.2.
+
 ### 2.1 Market-Model Follow-Ons
 
 The netted book prices crypto-perp funding and the operator-frozen ADV
@@ -147,6 +151,69 @@ it. Read `DATASET_STATUS[dataset]["status"]` at runtime and treat `blocked` as
 | `forex_rollover_rates` | `load_forex_rollover_rates` | FX carry/rollover pricing |
 | `margin_reference_rates` | `load_margin_reference_rates` | margin financing on gross > 1 |
 | `ticker_events` | `load_ticker_events` | delisting/rename → survivorship reconstruction |
+
+### 2.4 Quick-run throughput and sizing precision
+
+A separate track from the feasibility ladder: it makes a quick run faster and the
+sizing result exact rather than approximated. A completing quick run is dominated
+by the portfolio-sizing search (≈90% of `build_portfolio_foundation`) and, second,
+by data load + normalize + hash (≈25% of the run); the sizing cost is largest for
+capacity-binding multi-asset minute-bar books. Two independent changes — different
+root causes, files, and risk classes — so keep them as separate proposals for clean
+review. Phase 1 is low-risk and can land first; Phase 2 is the correctness-sensitive
+centerpiece.
+
+**Phase 1 — preloaded-data reuse: the in-process seam exists (`run_config(prepared=)`
+via `prepare_run_data`, owned by `docs/foundation-surfaces.md`). Open work is the
+consumer mechanism.**
+The `quant_autoresearch` climb runs one attempt per OS process (external driver
+re-invokes the CLI; state is file-based), so an in-memory `PreparedRunData` cannot
+cross processes and does not speed up that consumer on its own. Realizing the speedup
+needs a deliberate choice between a disk-backed prepared cache (preserves the
+crash-isolated process-per-attempt model) and an in-process climb loop (prepare once,
+loop N attempts); decide before wiring the consumer.
+
+**Phase 2 — sizing redesign: exploit scale-homogeneity (correctness-sensitive).**
+Root cause: `_sized_decision_plan` finds `book_scale` with two blind bisections — a
+capacity frontier (`_feasible_frontier`) and a volatility target
+(`_calibrated_book_scale`), each `_CALIBRATION_ITERATIONS` (24) full book walks —
+treating feasibility and volatility as opaque functions of scale. They are not
+opaque: scaling the book by `s` scales every position's notional by `s`, so
+exposure, turnover, participation, and gross P&L are degree-1 homogeneous in `s`,
+and gross-return volatility is ≈ linear in `s` to first order. Bisection rediscovers
+a line by halving, to 1/2²⁴ precision, on a vol target meaningful only to ~1%.
+Correct design — walk once, derive analytically, verify the nonlinear residual:
+- Leverage and capacity frontiers are closed-form in `s` (participation(s) =
+  s·participation(1); leverage is already analytic in `_leverage_frontier_scale`) →
+  derive `s_max` from one walk's recorded degree-1 quantities, no bisection.
+- Seed the vol-target scale from one reference walk: `s* = ref · target_vol /
+  vol(ref)`; refine with a bounded, bracketed secant (typically 1–3 walks) for the
+  genuinely nonlinear residual (market-impact cost, NAV compounding).
+- ~50 walks → ~2–4. More correct, not only faster: the frontier becomes exact and
+  the false vol precision is removed.
+Subtlety to respect: linearity holds only inside the feasible region; tripping a
+leverage / capacity / financing limit changes the fail-closed path, so vol(`s`) can
+kink at the frontier. Apply the linear model strictly below the analytic frontier;
+the bracketed refinement must never return a less-conservative scale than a
+verified-feasible one. Linearity is the seed and verifier, never an unchecked
+assumption.
+Done-right criteria (so this is not revisited): record the homogeneity invariant
+(what scales degree-1 and what does not) in `FOUNDATION_LOCK.md`; add a property-test
+suite asserting the analytic+refine `book_scale` matches the current bisection within
+the vol tolerance and stays feasible across representative books; carry a quant-math
+review. `book_scale` is a recorded sizing output consumed by validation/evaluation
+under `fixed_scale`, so its value may shift in the last digits — covered by the
+equivalence-to-tolerance tests. Do not lower `_CALIBRATION_ITERATIONS` as a shortcut;
+that is a tuning band-aid this redesign makes obsolete.
+
+**Phase 3 — typed `_RowIndex` boundary (conditional, measure-gated).**
+`_RowIndex` stores raw row mappings and re-parses/re-validates numeric fields
+(`_positive_row_field`) on every per-bar valuation, across every walk. The principled
+fix is to validate at the boundary: parse each row's numerics once at index
+construction and serve typed values. Phase 2 cuts walk count ~12×, which subsumes
+most of this cost. Promote Phase 3 only if post-Phase-2 measurement still shows
+per-bar valuation as a bottleneck; do not pre-commit — it touches the locked
+accounting hot path.
 
 ## 3. Locked Direction
 

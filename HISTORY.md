@@ -14,6 +14,27 @@ exception.
 
 ---
 
+## 2026-06-18 — Preloaded data reuse for quick runs
+
+`runner.prepare_run_data(config_path)` loads and normalizes one data window once and
+returns an opaque, fingerprinted `PreparedRunData`; `run_config` accepts it via
+`prepared=` and reuses it across runs over the same window without reloading or
+re-normalizing the panel. The reuse seam (`execute_strategy_run(preloaded=...)`)
+already existed internally; this exposes it publicly behind a fail-closed check. The
+fingerprint (`data_load_fingerprint`) covers exactly the inputs that determine the
+load and normalized rows — kind, dataset, symbols, start/end, load_start/load_end,
+fill price, capacity mode — and `run_config` raises `PreparedDataMismatchError` (a
+plain exception, not a `RunnerError`) when the live config's data identity does not
+match the prepared data, so reuse never silently scores against the wrong panel and a
+precondition violation never masquerades as a failed run.
+
+Scope: `run_config` only; `run_validation`/`run_evaluation` score on already-loaded
+rows and are unchanged. Reuse is in-process and the prepared object is not persisted,
+so a process-per-attempt consumer needs a separate disk-cache or in-process-loop
+decision before it benefits. Rejected: a loose `preloaded_rows=` bag (no fail-closed
+identity check) and a hidden in-engine cache (the cache lifetime is the consumer's
+climb, which the engine must not own).
+
 ## 2026-06-18 — Repair-aware mark frames for position marking
 
 The portfolio foundation now values open positions against a dedicated, valuation-only
