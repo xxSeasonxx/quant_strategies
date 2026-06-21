@@ -59,6 +59,20 @@ the Train `PortfolioSizingReport`. Validation and evaluation reject
 `calibrate_vol`. Capacity-bound Train calibration is recorded on the sizing report,
 not encoded as a feasibility failure when the final frontier-sized book is
 feasible.
+- **Book-scale homogeneity invariant:** the book scale `s` multiplies the declared
+signed target shape. Intended gross/net exposure is that shape times `s` —
+NAV-independent and exactly degree-1 — so the leverage frontier is closed-form (`min`
+over gross/net of operator budget / normalized exposure) and needs no walk. Realized
+quantities (executed notional, capacity participation, turnover, at-risk-return
+volatility) are only **first-order** degree-1 in `s`: positions are sized from live
+equity, so a residual from NAV compounding and market-impact cost makes them
+approximately, not exactly, linear. They are monotone increasing in `s`. `book_scale` is therefore derived from the
+analytic frontier and a linear seed, then refined by a safeguarded bracketed secant
+that verifies every candidate with a real walk and returns only a verified-feasible,
+verified-within-target scale — never less conservative than a verified point, since
+the residual can locally kink participation or volatility. The fail-closed verdicts
+are unchanged; scale-independent breaches (unpriced short/financing, missing volume,
+capacity off) fail at every positive `s`.
 - **Internal engine boundary:** `quant_strategies.engine` is an internal
 execution kernel for quick-run and validation internals/tests, not a fourth
 public user surface.

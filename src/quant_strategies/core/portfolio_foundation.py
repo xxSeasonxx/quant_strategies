@@ -54,8 +54,15 @@ REASON_CAPACITY_INSUFFICIENT_ADV_HISTORY = "capacity_insufficient_adv_history"
 REASON_CAPACITY_LIMIT_BREACH = "capacity_limit_breach"
 
 _EXPOSURE_TOLERANCE = 1e-9
+# Maximum book-scale calibration steps. The analytic seed + safeguarded secant converge
+# in 1-3 steps; this is only a fail-safe iteration cap, not a precision knob.
 _CALIBRATION_ITERATIONS = 24
 _VOLATILITY_TOLERANCE_FRACTION = 1e-4
+# Relative bracket width below which a scale search has converged.
+_SIZING_SCALE_TOLERANCE = 1e-12
+# Capacity utilization (participation / limit) this close to 1.0 from below is at the
+# frontier; the search stops rather than tightening an already-converged bracket.
+_FRONTIER_UTILIZATION_TOLERANCE = 1e-6
 
 
 @dataclass(frozen=True)
@@ -100,6 +107,12 @@ class FeasibilityVerdict:
     reason: FeasibilityReason | None = None
     observed_gross: float | None = None
     observed_net: float | None = None
+    # Capacity breach observables: the breaching participation ratio and the limit it
+    # exceeded. Set only on a capacity-limit breach (mirrors observed_gross/observed_net
+    # for leverage). They make the breach self-describing so the sizing search can seed
+    # the capacity frontier analytically instead of probing for it.
+    observed_participation: float | None = None
+    participation_limit: float | None = None
     detail: str | None = None
 
     def payload(self) -> dict[str, Any]:
@@ -111,6 +124,8 @@ class FeasibilityVerdict:
                     "reason": self.reason,
                     "observed_gross": self.observed_gross,
                     "observed_net": self.observed_net,
+                    "observed_participation": self.observed_participation,
+                    "participation_limit": self.participation_limit,
                     "detail": self.detail,
                 }
             ),
@@ -1007,6 +1022,7 @@ def _sized_decision_plan(
             config=config,
             target_volatility=target_volatility,
             max_book_scale=frontier.book_scale,
+            max_volatility=frontier_volatility,
         )
     capacity_bound = (
         frontier_volatility is not None
@@ -1074,7 +1090,11 @@ def _feasible_frontier(
     if shape.normalized_max_gross <= _EXPOSURE_TOLERANCE:
         return _FrontierResult(book_scale=0.0, binding_dimensions=())
     leverage_scale, leverage_dimensions = _leverage_frontier_scale(shape, config)
-    feasible, verdict = _candidate_feasible(
+    # The leverage cap is exact in ``s``: intended gross/net exposure is the declared
+    # book shape scaled by ``s`` (NAV-independent, degree-1), so a leverage / unfinanced
+    # / short breach cannot trip at or below ``leverage_scale``. Walk once at the cap; if
+    # feasible, that is the frontier. Otherwise only capacity can bind below it.
+    walk, verdict = _probe_scale(
         row_index=row_index,
         normalized_plan=normalized_plan,
         book_scale=leverage_scale,
@@ -1083,12 +1103,9 @@ def _feasible_frontier(
         capacity_model=capacity_model,
         config=config,
     )
-    if feasible:
-        return _FrontierResult(
-            book_scale=leverage_scale,
-            binding_dimensions=leverage_dimensions,
-        )
-    if verdict is None or not _frontier_reason(verdict.reason):
+    if walk is not None:
+        return _FrontierResult(book_scale=leverage_scale, binding_dimensions=leverage_dimensions)
+    if verdict is None or verdict.reason != REASON_CAPACITY_LIMIT_BREACH:
         raise FeasibilityError(
             verdict
             or FeasibilityVerdict(
@@ -1097,29 +1114,71 @@ def _feasible_frontier(
                 detail="frontier candidate failed without a typed verdict",
             )
         )
-    binding_dimensions = set(leverage_dimensions)
-    if verdict.reason == REASON_CAPACITY_LIMIT_BREACH:
-        binding_dimensions.add("capacity")
-    else:
-        binding_dimensions.add("leverage")
+    return _capacity_frontier(
+        row_index=row_index,
+        normalized_plan=normalized_plan,
+        data=data,
+        cost_model=cost_model,
+        capacity_model=capacity_model,
+        config=config,
+        leverage_scale=leverage_scale,
+        leverage_dimensions=leverage_dimensions,
+        breach=verdict,
+    )
 
-    low = 0.0
-    high = leverage_scale
+
+def _capacity_frontier(
+    *,
+    row_index: _RowIndex,
+    normalized_plan: _DecisionPlan,
+    data: DataConfig,
+    cost_model: CostModelConfig,
+    capacity_model: CapacityModelConfig,
+    config: PortfolioFoundationConfig,
+    leverage_scale: float,
+    leverage_dimensions: tuple[str, ...],
+    breach: FeasibilityVerdict,
+) -> _FrontierResult:
+    """Capacity-bound frontier below the leverage cap via a safeguarded secant.
+
+    The bracket ``[low, high]`` keeps ``low`` feasible and ``high`` infeasible; each
+    candidate is verified by a real walk. Capacity utilization ``u(s) = max event
+    participation / its limit`` is monotone-increasing and first-order linear in ``s``,
+    so the secant predicts the ``u = 1`` crossing in 1-3 steps. The candidate is capped at
+    the bracket midpoint (:func:`_bracketed_scale`), so a probe that still breaches halves
+    the infeasible end of the bracket — the search reaches a feasible scale in bisection
+    time and cannot creep or stall at ``0`` even when the breach seed (a first-breach
+    utilization, a lower bound on the true peak) is uninformative; feasible probes then
+    climb toward the frontier by verified secant steps. The returned scale is the largest
+    verified-feasible candidate — never less conservative than a verified point, since the
+    NAV/impact residual can locally kink ``u``.
+    """
+    binding_dimensions = tuple(sorted(set(leverage_dimensions) | {"capacity"}))
+    low, util_low = 0.0, 0.0
+    high, util_high = leverage_scale, _breach_utilization(breach)
+    best_scale = 0.0
     for _ in range(_CALIBRATION_ITERATIONS):
-        mid = (low + high) / 2.0
-        feasible, verdict = _candidate_feasible(
+        if high - low <= _SIZING_SCALE_TOLERANCE * max(high, 1.0):
+            break
+        candidate = _bracketed_scale(low, util_low, high, util_high, 1.0)
+        walk, verdict = _probe_scale(
             row_index=row_index,
             normalized_plan=normalized_plan,
-            book_scale=mid,
+            book_scale=candidate,
             data=data,
             cost_model=cost_model,
             capacity_model=capacity_model,
             config=config,
         )
-        if feasible:
-            low = mid
+        if walk is not None:
+            best_scale = candidate
+            low, util_low = candidate, _capacity_utilization(walk, capacity_model)
+            if util_low >= 1.0 - _FRONTIER_UTILIZATION_TOLERANCE:
+                # At the frontier from below; tightening the bracket further cannot raise
+                # the largest verified-feasible scale.
+                break
             continue
-        if verdict is None or not _frontier_reason(verdict.reason):
+        if verdict is None or verdict.reason != REASON_CAPACITY_LIMIT_BREACH:
             raise FeasibilityError(
                 verdict
                 or FeasibilityVerdict(
@@ -1128,15 +1187,69 @@ def _feasible_frontier(
                     detail="frontier candidate failed without a typed verdict",
                 )
             )
-        high = mid
-        if verdict.reason == REASON_CAPACITY_LIMIT_BREACH:
-            binding_dimensions.add("capacity")
-        else:
-            binding_dimensions.add("leverage")
-    return _FrontierResult(
-        book_scale=low,
-        binding_dimensions=tuple(sorted(binding_dimensions)),
-    )
+        high, util_high = candidate, _breach_utilization(verdict)
+    return _FrontierResult(book_scale=best_scale, binding_dimensions=binding_dimensions)
+
+
+def _breach_utilization(verdict: FeasibilityVerdict) -> float:
+    """Capacity utilization (participation / limit, ``>= 1``) at an infeasible scale.
+
+    A capacity breach always records both observables; the degenerate-limit guard returns
+    ``inf`` so the secant falls back to bisection rather than dividing by zero.
+    """
+    observed = verdict.observed_participation
+    limit = verdict.participation_limit
+    if observed is None or limit is None or limit <= 0.0 or not math.isfinite(observed):
+        return math.inf
+    return observed / limit
+
+
+def _capacity_utilization(walk: BookWalkResult, capacity_model: CapacityModelConfig) -> float:
+    """Peak capacity utilization over a completed walk: the largest participation/limit
+    ratio across executed events. ``0.0`` when capacity is not priced or nothing traded;
+    ``1.0`` is the frontier."""
+    if capacity_model.mode != "adv_impact":
+        return 0.0
+    max_adv = capacity_model.max_adv_participation
+    max_bar = capacity_model.max_bar_participation
+    utilization = 0.0
+    for event in walk.execution_events:
+        if max_adv is not None and max_adv > 0.0:
+            utilization = max(utilization, event.adv_participation / max_adv)
+        if max_bar is not None and max_bar > 0.0:
+            utilization = max(utilization, event.bar_participation / max_bar)
+    return utilization
+
+
+def _secant_predict(
+    low: float, f_low: float, high: float, f_high: float, target: float
+) -> float | None:
+    """Scale where a near-linear ``f(s)`` reaches ``target``, by secant through two
+    bracket points. ``None`` when the slope is degenerate (the caller bisects instead)."""
+    slope = f_high - f_low
+    if not math.isfinite(slope) or abs(slope) <= _EXPOSURE_TOLERANCE:
+        return None
+    predicted = low + (target - f_low) * (high - low) / slope
+    if not math.isfinite(predicted):
+        return None
+    return predicted
+
+
+def _bracketed_scale(low: float, f_low: float, high: float, f_high: float, target: float) -> float:
+    """Next probe scale for a ``[low, high]`` bracket: the secant prediction toward
+    ``target``, capped at the bracket midpoint and bisected when degenerate or out of
+    range. Because the candidate never exceeds the midpoint, a *rejecting* probe (one
+    that moves the far, infeasible/above-target end) drops that end to at most the
+    midpoint — the rejecting side halves each step — so the search reaches the feasible
+    region in bisection time and cannot creep or stall at ``0`` on a poor endpoint
+    estimate. A verified probe then advances the near end by a secant step, which can be
+    below the midpoint (so the accepted bound may move less than half) and accelerates the
+    common, near-linear case."""
+    midpoint = low + (high - low) / 2.0
+    predicted = _secant_predict(low, f_low, high, f_high, target)
+    if predicted is None or not (low < predicted < high):
+        return midpoint
+    return min(predicted, midpoint)
 
 
 def _leverage_frontier_scale(
@@ -1164,7 +1277,7 @@ def _leverage_frontier_scale(
     return scale, tuple(dimensions)
 
 
-def _candidate_feasible(
+def _probe_scale(
     *,
     row_index: _RowIndex,
     normalized_plan: _DecisionPlan,
@@ -1173,9 +1286,12 @@ def _candidate_feasible(
     cost_model: CostModelConfig,
     capacity_model: CapacityModelConfig,
     config: PortfolioFoundationConfig,
-) -> tuple[bool, FeasibilityVerdict | None]:
+) -> tuple[BookWalkResult | None, FeasibilityVerdict | None]:
+    """Walk the book at ``book_scale``. Return ``(walk, None)`` when feasible so the
+    caller can reuse the walk's recorded utilization, or ``(None, verdict)`` on a
+    fail-closed breach."""
     try:
-        _priced_candidate_walk(
+        walk = _priced_candidate_walk(
             row_index=row_index,
             normalized_plan=normalized_plan,
             book_scale=book_scale,
@@ -1185,8 +1301,8 @@ def _candidate_feasible(
             config=config,
         )
     except FeasibilityError as exc:
-        return False, exc.verdict
-    return True, None
+        return None, exc.verdict
+    return walk, None
 
 
 def _priced_candidate_walk(
@@ -1219,42 +1335,58 @@ def _calibrated_book_scale(
     config: PortfolioFoundationConfig,
     target_volatility: float,
     max_book_scale: float,
+    max_volatility: float,
 ) -> tuple[float, float | None]:
-    low = 0.0
-    high = max_book_scale
-    best_scale = 0.0
+    """Largest book scale whose deployed volatility stays within the target ceiling.
+
+    Below the feasible frontier every positive scale is feasible and its volatility is
+    measurable, monotone-increasing, and first-order linear in ``s`` with a NAV-compounding
+    + market-impact residual. The secant through the origin gives the linear seed
+    ``s* = max_book_scale * target / vol(max_book_scale)``; a safeguarded bracketed secant
+    then refines for the residual. ``max_book_scale`` / ``max_volatility`` are the frontier
+    walk's already-computed (scale, volatility) — the upper, above-ceiling bracket end —
+    passed in to avoid an extra walk. The result is the largest verified scale with
+    volatility ``<= ceiling`` (never above it).
+    """
+    periods_per_year = config.risk_budget.annualization_periods_per_year
+    ceiling = _volatility_ceiling(target_volatility)
+    band = _volatility_tolerance(target_volatility)
+    low, vol_low = 0.0, 0.0
+    high, vol_high = max_book_scale, max_volatility
+    best_scale: float = 0.0
     best_volatility: float | None = 0.0
     for _ in range(_CALIBRATION_ITERATIONS):
-        mid = (low + high) / 2.0
+        if high - low <= _SIZING_SCALE_TOLERANCE * max(high, 1.0):
+            break
+        candidate = _bracketed_scale(low, vol_low, high, vol_high, target_volatility)
         walk = _priced_candidate_walk(
             row_index=row_index,
             normalized_plan=normalized_plan,
-            book_scale=mid,
+            book_scale=candidate,
             data=data,
             cost_model=cost_model,
             capacity_model=capacity_model,
             config=config,
         )
-        volatility = _annualized_volatility(
-            walk,
-            periods_per_year=config.risk_budget.annualization_periods_per_year,
-        )
-        if volatility is None:
-            best_scale = mid
-            best_volatility = None
-            low = mid
-            continue
-        if volatility <= _volatility_ceiling(target_volatility):
-            best_scale = mid
-            best_volatility = volatility
-            low = mid
+        volatility = _annualized_volatility(walk, periods_per_year=periods_per_year)
+        # Volatility is defined for every ``s > 0`` here: the at-risk sample count is
+        # scale-invariant, and the caller only calibrates when the frontier volatility is
+        # defined. A ``None`` is therefore unreachable; treat it conservatively as below
+        # target (scale up) and keep the secant's lower anchor on the last real value.
+        if volatility is None or volatility <= ceiling:
+            best_scale, best_volatility = candidate, volatility
+            low = candidate
+            if volatility is not None:
+                vol_low = volatility
+                if volatility >= target_volatility - band:
+                    break
         else:
-            high = mid
+            # The upper anchor refreshes only on an above-ceiling probe. On the feasible
+            # branch it is intentionally left pinned to the original frontier (a verified
+            # above-ceiling bound), which keeps the bracket's infeasible end valid; do not
+            # re-anchor it to a feasible point.
+            high, vol_high = candidate, volatility
     return best_scale, best_volatility
-
-
-def _frontier_reason(reason: str | None) -> bool:
-    return reason in {REASON_CAPACITY_LIMIT_BREACH, REASON_LEVERAGE_BUDGET_BREACH}
 
 
 def _annualized_volatility(
@@ -1885,6 +2017,8 @@ def _check_capacity_limit(
         FeasibilityVerdict(
             feasible=False,
             reason=REASON_CAPACITY_LIMIT_BREACH,
+            observed_participation=observed,
+            participation_limit=limit,
             detail=f"{name} {observed:.6g} > limit {limit:.6g} at {timestamp.isoformat()}",
         )
     )

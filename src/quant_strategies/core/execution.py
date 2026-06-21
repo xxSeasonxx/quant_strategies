@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
 from quant_strategies.core.config import StrategyExecutionSpec
-from quant_strategies.core.data_loader import LoadedData, load_data
+from quant_strategies.core.data_loader import load_data
 from quant_strategies.core.errors import RunnerError, StrategyLoadError
 from quant_strategies.core.evidence_quality import EvidenceQuality
 from quant_strategies.data_contract import NormalizedRows
@@ -85,7 +85,6 @@ def execute_strategy_run(
     *,
     repo_root: Path,
     require_passed_row_contract: bool = False,
-    preloaded: LoadedData | None = None,
 ) -> StrategyExecutionResult:
     try:
         generate_decisions = _load_strategy(config.strategy_path, repo_root=repo_root)
@@ -113,13 +112,10 @@ def execute_strategy_run(
             f"param validation failed: {exc}",
         ) from exc
 
-    if preloaded is not None:
-        loaded = preloaded
-    else:
-        try:
-            loaded = load_data(config)
-        except RunnerError as exc:
-            raise StrategyExecutionError("data_load", str(exc)) from exc
+    try:
+        loaded = load_data(config)
+    except RunnerError as exc:
+        raise StrategyExecutionError("data_load", str(exc)) from exc
 
     if loaded.normalized_rows is not None:
         normalized_rows = loaded.normalized_rows

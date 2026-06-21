@@ -339,6 +339,8 @@ def test_run_validation_writes_mechanical_caution_artifacts_for_one_positive_win
                 "reason": None,
                 "observed_gross": None,
                 "observed_net": None,
+                "observed_participation": None,
+                "participation_limit": None,
                 "detail": None,
             },
             "sizing_report": None,

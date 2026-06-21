@@ -27,14 +27,3 @@ class RequestBuildError(RunnerError):
 
 class EvaluationRunError(RunnerError):
     """Raised when engine evaluation crashes instead of returning a report."""
-
-
-class PreparedDataMismatchError(Exception):
-    """Raised when preloaded data does not match a run config's data identity.
-
-    A caller precondition violation (reusing a ``PreparedRunData`` against a config with
-    a different data window/symbols/identity), not a run outcome — so it propagates as a
-    hard error rather than a ``RunResult`` failure, and must never masquerade as a failed
-    research attempt. Deliberately not a ``RunnerError`` so ``run_config``'s
-    ``except RunnerError`` handlers do not swallow it.
-    """

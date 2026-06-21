@@ -19,9 +19,6 @@ Import only these. Everything else (including `quant_strategies.engine` and any
 | Import | Kind | Purpose |
 |---|---|---|
 | `quant_strategies.runner.run_config` | function | Run the quick-run surface |
-| `quant_strategies.runner.prepare_run_data` | function | Load one window once for reuse across `run_config` calls over the same window |
-| `quant_strategies.runner.PreparedRunData` | dataclass | Opaque reusable data load; pass to `run_config(prepared=...)` |
-| `quant_strategies.runner.PreparedDataMismatchError` | exception | Raised when prepared data does not match a config's data identity |
 | `quant_strategies.runner.RunResult` / `RunOutcome` / `RunEvidence` / `RunCausalityEvidence` | dataclass | Quick-run result types |
 | `quant_strategies.runner.RunEconomics` / `RunTrade` | dataclass | Typed per-trade attribution ledger (derived from the book) + summary/slice economics |
 | `quant_strategies.validation.run_validation` | function | Run the validation surface |
@@ -47,20 +44,12 @@ ordinary run failures — they return a structured failure):
 
 ```python
 run_config(config_path: str | Path, *, repo_root: Path | None = None,
-           event_sink: RunnerEventSink | None = None,
-           prepared: PreparedRunData | None = None) -> RunResult
+           event_sink: RunnerEventSink | None = None) -> RunResult
 run_validation(config_path: str | Path, *, repo_root: Path | None = None,
                event_sink=... | None = None) -> ValidationRunResult
 run_evaluation(config_path: str | Path, *, repo_root: Path | None = None,
                event_sink=... | None = None) -> EvaluationRunResult
 ```
-
-`run_config` optionally accepts `prepared=` to reuse a `prepare_run_data(config_path,
-*, repo_root=None, engine=None) -> PreparedRunData` load across many runs over the
-same data window (Train iteration). It reloads nothing when reused and produces
-identical scored evidence to a fresh load. Unlike an ordinary run failure, a prepared
-/ config data-identity mismatch raises `PreparedDataMismatchError` (a caller
-precondition violation, not a structured result).
 
 ---
 

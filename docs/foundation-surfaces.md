@@ -213,24 +213,6 @@ complete and score, but it is not complete retention proof; use
 `RunResult.retainable` before advancing quick-run evidence to validation or
 evaluation.
 
-Preloaded data reuse: `prepare_run_data(config_path, *, repo_root=None,
-engine=None)` loads and normalizes one data window once and returns an opaque
-`PreparedRunData`. Passing it as `run_config(config_path, prepared=...)` scores many
-strategy variants over the same window without reloading or re-normalizing the panel
-each run. `run_config` verifies the prepared data against the live config's data
-identity (kind, dataset, symbols, window, fill price, capacity mode) and raises
-`PreparedDataMismatchError` on a mismatch — a reuse precondition violation never
-scores as a failed run. A reused run produces identical scored evidence to a fresh
-load of the same window. Reuse is an in-process optimization; the prepared object is
-not persisted.
-
-```python
-from quant_strategies.runner import prepare_run_data, run_config
-
-prepared = prepare_run_data("path/to/experiment.toml")
-result = run_config("path/to/experiment.toml", prepared=prepared)
-```
-
 `RiskRule` stop-loss, take-profit, and trailing thresholds are declared as
 **fractions of the position's entry mark** and enforced by the engine on the net
 position: they are evaluated against the bar's **intrabar range** (high/low) — a

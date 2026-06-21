@@ -261,7 +261,7 @@ de-duplicates, joins, or repairs rows locally.
 source joining, adjustment/survivorship policy, deterministic row ordering, and
 the causal `available_at` stamp. The supported contract range is pinned as
 `quant-data>=0.1.0,<0.2.0`; the consumer-side data-boundary contract is locked in
-[`FOUNDATION_LOCK.md`](../../FOUNDATION_LOCK.md) and `openspec/specs/data-boundary/spec.md`.
+[`FOUNDATION_LOCK.md`](../../FOUNDATION_LOCK.md).
 
 **Out of scope (by design):** choosing which ideas to research, mutating variants,
 ranking candidates, search memory, stopping rules, promotion, and paper/live

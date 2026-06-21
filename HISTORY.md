@@ -14,26 +14,45 @@ exception.
 
 ---
 
-## 2026-06-18 — Preloaded data reuse for quick runs
+## 2026-06-22 — Preloaded-data reuse seam, added and removed
 
-`runner.prepare_run_data(config_path)` loads and normalizes one data window once and
-returns an opaque, fingerprinted `PreparedRunData`; `run_config` accepts it via
-`prepared=` and reuses it across runs over the same window without reloading or
-re-normalizing the panel. The reuse seam (`execute_strategy_run(preloaded=...)`)
-already existed internally; this exposes it publicly behind a fail-closed check. The
-fingerprint (`data_load_fingerprint`) covers exactly the inputs that determine the
-load and normalized rows — kind, dataset, symbols, start/end, load_start/load_end,
-fill price, capacity mode — and `run_config` raises `PreparedDataMismatchError` (a
-plain exception, not a `RunnerError`) when the live config's data identity does not
-match the prepared data, so reuse never silently scores against the wrong panel and a
-precondition violation never masquerades as a failed run.
+A public in-process data-reuse seam (`prepare_run_data` / `run_config(prepared=)`) shipped
+2026-06-18 and was removed four days later, leaving the public surface unchanged. It was
+meant to amortize the redundant data load+normalize across the `quant_autoresearch` climb,
+but the climb is agent-in-the-loop: one CLI invocation scores one attempt over one window
+and exits, so there is no same-window batch for an in-process seam to amortize. The only
+engine code such a seam could justify — a stateless disk cache — is the weakest option: it
+re-pays interpreter startup and adds deserialization to recover a load cost an OS-warm page
+cache already makes cheap, while the principled cross-process win (worker pool / in-process
+loop) needs no engine code. Recorded so the ~25% load cost is not re-proposed as an
+in-process cache; the seam is a few trivial lines to reintroduce if a batched consumer ever
+lands.
 
-Scope: `run_config` only; `run_validation`/`run_evaluation` score on already-loaded
-rows and are unchanged. Reuse is in-process and the prepared object is not persisted,
-so a process-per-attempt consumer needs a separate disk-cache or in-process-loop
-decision before it benefits. Rejected: a loose `preloaded_rows=` bag (no fail-closed
-identity check) and a hidden in-engine cache (the cache lifetime is the consumer's
-climb, which the engine must not own).
+## 2026-06-21 — Scale-homogeneity book-scale sizing
+
+`book_scale` calibration replaced two blind bisections (a capacity/leverage frontier and
+a volatility target, each running `_CALIBRATION_ITERATIONS` full book walks — ~48 walks
+per `calibrate_vol` Train run) with an analytic seed plus a safeguarded bracketed secant.
+The leverage frontier is now closed-form (intended exposure is the declared shape times
+the scale, NAV-independent and exactly degree-1); capacity participation and at-risk
+volatility are first-order degree-1 in the scale with a NAV-compounding + market-impact
+residual, so each is seeded from the linear relation and refined by a secant that verifies
+every candidate with a real walk and accepts only a verified-feasible, verified-within-target
+scale. Representative books now size in ≤5 walks (2 when leverage-bound).
+
+`FeasibilityVerdict` gained `observed_participation` / `participation_limit`, set on a
+capacity-limit breach (mirroring `observed_gross` / `observed_net`), so the breach is
+self-describing and seeds the capacity frontier; the serialized verdict payload gains the
+two keys. The homogeneity invariant is recorded in `FOUNDATION_LOCK.md`.
+
+Scope: the Train `calibrate_vol` path only — `fixed_scale` (validation/evaluation) is
+unchanged. The recorded `book_scale` may shift in its last digits (the analytic search
+stops at the frontier from below, slightly more conservatively than the bisection edge);
+`tests/test_sizing_homogeneity.py` pins equivalence to a bisection reference within the
+volatility tolerance, result feasibility, and the homogeneity invariants. Rejected: a
+capacity measurement walk with enforcement disabled (a flag on the locked accounting hot
+path, and NAV can blow up far above the frontier) and lowering `_CALIBRATION_ITERATIONS`
+(a tuning band-aid this redesign makes obsolete — it is retained only as a fail-safe cap).
 
 ## 2026-06-18 — Repair-aware mark frames for position marking
 
@@ -164,16 +183,16 @@ in `FOUNDATION_LOCK.md`.
 
 ## Review disposition log
 
-Dated review artifacts live in `docs/reviews/`; the openspec change archive lives
-in `openspec/changes/archive/`. Current contracts supersede all of them — read
-`FOUNDATION_LOCK.md` for the live disposition anchor.
+Dated review artifacts live in `docs/reviews/`. Current contracts supersede all of
+them — read `FOUNDATION_LOCK.md` for the live disposition anchor.
 
 | Review | Disposition |
 | --- | --- |
+| `2026-06-21-sizing-homogeneity-quant.md` | Quant-math review of the scale-homogeneity book-scale sizing; findings dispositioned. |
 | `2026-06-12-foundation-codex.md` | Delta review; accepted findings in `TODOS.md` + `FOUNDATION_LOCK.md`. |
 | `2026-06-11-foundation-claude.md` | Broad first-principles review; accepted findings folded into `TODOS.md` + `FOUNDATION_LOCK.md`. |
 | `2026-06-10-live-trade-feasibility-review.md` | Retired; folded into `TODOS.md` + `FOUNDATION_LOCK.md`; full text in git history. |
-| `2026-06-04-foundation-codex-quant.md` | Quant-lens working review; row-order finding implemented via the contract-loader migration (`openspec/specs/data-boundary/spec.md`). |
+| `2026-06-04-foundation-codex-quant.md` | Quant-lens working review; row-order finding implemented via the contract-loader migration (contract owned by `FOUNDATION_LOCK.md`). |
 | `2026-06-04-foundation-codex.md` | Codex foundation working review; cleanup findings dispositioned. |
 | `2026-06-04-foundation-claude.md` | Claude foundation working review; cleanup findings dispositioned. |
 | `2026-06-03-foundation-codex-disposition.md` | Root-level Codex working review copy; accepted findings dispositioned. |
