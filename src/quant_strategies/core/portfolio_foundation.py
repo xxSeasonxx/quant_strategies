@@ -2439,6 +2439,7 @@ def _scenario_metrics(
         _record_path_point(accumulator, point, include_return=path_index > 0)
 
     for trip in round_trips:
+        abs_pnl = abs(trip.realized_pnl)
         if _timestamp_in_window(
             trip.exit_time,
             full_train_accumulator.start_time,
@@ -2446,9 +2447,15 @@ def _scenario_metrics(
             is_last=True,
         ):
             full_train_accumulator.closed_trade_count += 1
+            full_train_accumulator.abs_pnl_by_symbol[trip.symbol] = (
+                full_train_accumulator.abs_pnl_by_symbol.get(trip.symbol, 0.0) + abs_pnl
+            )
         bucket = _bucket_for_timestamp(trip.exit_time, bounds)
         if bucket is not None:
             accumulators[bucket].closed_trade_count += 1
+            accumulators[bucket].abs_pnl_by_symbol[trip.symbol] = (
+                accumulators[bucket].abs_pnl_by_symbol.get(trip.symbol, 0.0) + abs_pnl
+            )
 
     return (
         _metric_from_accumulator(
@@ -2474,7 +2481,7 @@ class _MetricAccumulator:
     end_time: datetime
     returns: list[float] = field(default_factory=list)
     navs: list[float] = field(default_factory=list)
-    max_concentration: float = 0.0
+    abs_pnl_by_symbol: dict[str, float] = field(default_factory=dict)
     gross_samples: list[float] = field(default_factory=list)
     net_samples: list[float] = field(default_factory=list)
     closed_trade_count: int = 0
@@ -2488,7 +2495,7 @@ class _FullTrainAccumulator:
     last_nav: float | None = None
     peak_nav: float | None = None
     max_drawdown: float | None = None
-    max_concentration: float = 0.0
+    abs_pnl_by_symbol: dict[str, float] = field(default_factory=dict)
     gross_samples: list[float] = field(default_factory=list)
     net_samples: list[float] = field(default_factory=list)
     closed_trade_count: int = 0
@@ -2501,7 +2508,6 @@ def _record_path_point(
     include_return: bool,
 ) -> None:
     accumulator.navs.append(point.portfolio_value)
-    accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
     accumulator.gross_samples.append(point.gross_exposure)
     accumulator.net_samples.append(point.net_exposure)
     if include_return and point.at_risk:
@@ -2523,9 +2529,23 @@ def _record_full_train_path_point(
     accumulator.max_drawdown = (
         drawdown if accumulator.max_drawdown is None else min(accumulator.max_drawdown, drawdown)
     )
-    accumulator.max_concentration = max(accumulator.max_concentration, point.concentration)
     accumulator.gross_samples.append(point.gross_exposure)
     accumulator.net_samples.append(point.net_exposure)
+
+
+def _economic_concentration(abs_pnl_by_symbol: Mapping[str, float]) -> float:
+    """Largest single symbol's share of the window's realized PnL.
+
+    Economic dependence on one name, not the instantaneous gross-notional share: a
+    diversified book whose PnL is spread across names scores low even when it holds
+    one name at a time, and a genuine single-name book scores 1.0. A window with no
+    realized PnL has no economic concentration and returns 0.0 (such a book is killed
+    by the evidence and money-floor gates, not by breadth).
+    """
+    total = sum(abs_pnl_by_symbol.values())
+    if total <= 0.0:
+        return 0.0
+    return max(abs_pnl_by_symbol.values()) / total
 
 
 def _metric_from_accumulator(
@@ -2560,7 +2580,7 @@ def _metric_from_accumulator(
         total_return=_accumulator_total_return(accumulator),
         max_drawdown=_accumulator_max_drawdown(accumulator),
         closed_trade_count=accumulator.closed_trade_count,
-        max_symbol_concentration=accumulator.max_concentration,
+        max_symbol_concentration=_economic_concentration(accumulator.abs_pnl_by_symbol),
         max_gross_utilization=_max(accumulator.gross_samples),
         mean_gross_utilization=_mean(accumulator.gross_samples),
         max_net_utilization=_max(accumulator.net_samples),

@@ -436,7 +436,7 @@ Scenario payload fields:
 | `full_train` | `dict` | compact metric record for the full Train scoring path |
 | `subwindow_count` | `int` | configured `foundation_subwindows` |
 | `min_closed_trade_count` | `int` | weakest subwindow closed-trade count |
-| `max_symbol_concentration` | `float` | maximum subwindow symbol concentration |
+| `max_symbol_concentration` | `float` | largest subwindow economic concentration (max over subwindows) |
 | `warning_counts` | `dict[str, int]` | counts of subwindow statistic warnings |
 | `subwindows` | `list[dict]` | matrix payload only; omitted from compact summary |
 
@@ -449,7 +449,7 @@ Metric record fields (`full_train` and each subwindow):
 | `total_return` | `float \| None` | full Train: ending NAV / starting NAV - 1; subwindow: compounded endpoint-assigned period returns |
 | `max_drawdown` | `float \| None` | local peak-to-trough drawdown, negative or zero |
 | `closed_trade_count` | `int` | netted-book round trips (a net position returning to flat), counted by exit time |
-| `max_symbol_concentration` | `float` | max symbol concentration on the netted, marked book |
+| `max_symbol_concentration` | `float` | economic concentration: largest single symbol's share of the window's realized PnL (`0.0` when the window has no realized PnL) |
 | `max_gross_utilization` / `mean_gross_utilization` | `float` | live mark-to-market gross-exposure series (reported risk signal, not the fail-closed check) |
 | `max_net_utilization` / `mean_net_utilization` | `float` | live mark-to-market net-exposure series |
 | `return_sample_count` | `int` | finite period returns over **at-risk** (capital-deployed) bars, not a zero-padded calendar |

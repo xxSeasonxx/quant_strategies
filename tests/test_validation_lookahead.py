@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -740,6 +740,49 @@ def test_strict_replay_auto_derived_boundaries_catch_suppression():
     assert result.violations == ("hidden_lookahead_suppression_detected",)
     assert result.emitted_replay_verified is True
     assert result.strict_suppression_verified is False
+
+
+def test_micro_causality_admits_multi_decision_per_signal_ramp():
+    # A causal entry ramp: one signal bar fans into several decisions for the same
+    # symbol across consecutive bars, every step stamped as_of the signal bar and
+    # using only signal-time data. No future row is read to add or withhold a
+    # decision, so the suppression check must admit it.
+    bars = [datetime(2026, 1, 1, 0, minute, tzinfo=UTC) for minute in range(5)]
+    rows = [row(ts, 100.0 + index, available_at=ts) for index, ts in enumerate(bars)]
+    signal_ts = bars[0]
+
+    def ramp_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[str, Any]):
+        timestamps = sorted(item["timestamp"] for item in rows if item.get("symbol") == "BTC-PERP")
+        if not timestamps or timestamps[0] != signal_ts:
+            return []
+        # Signal at the first bar; schedule a four-step ramp at fixed one-minute
+        # spacing computed from the signal bar alone. The whole schedule is emitted
+        # at the signal bar (no future row is read), each step stamped as_of the
+        # signal bar, so a causal prefix replay reproduces every step.
+        return [
+            TargetDecision(
+                decision_id=f"demo:ramp:{step}",
+                strategy_id="demo",
+                instrument=InstrumentRef(kind="crypto_perp", symbol="BTC-PERP"),
+                decision_time=signal_ts + timedelta(minutes=step),
+                as_of_time=signal_ts,
+                target=(step + 1) / 4.0,
+            )
+            for step in range(4)
+        ]
+
+    result = check_micro_causality(
+        ramp_strategy,
+        rows=rows,
+        params={},
+        baseline_decisions=ramp_strategy(rows, {}),
+        strategy_id="demo",
+        max_probes=40,
+        timeout_seconds=5.0,
+    )
+
+    assert result.violations == ()
+    assert result.passed is True
 
 
 def test_strict_hidden_lookahead_detects_same_bar_replay_emission_for_boundary():

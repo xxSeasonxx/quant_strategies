@@ -1155,22 +1155,38 @@ def _boundary_jsonable(boundary: ReplayBoundary) -> dict[str, object]:
 
 
 def _emitted_boundaries(decisions: Sequence[TargetDecision]) -> tuple[ReplayBoundary, ...]:
+    # Exact emissions per (as_of, decision_time) drive the subset check; the
+    # suppression check scopes by (as_of, symbol) and ignores decision_time
+    # (``_decision_matches_boundary``), so its allowed set must be the full per-(as_of,
+    # symbol) set. Otherwise a single signal that fans into several decisions sharing
+    # one as_of (e.g. a multi-bar entry ramp) is wrongly flagged as suppression.
     items: dict[tuple[datetime, datetime], set[str | None]] = {}
     symbols: dict[tuple[datetime, datetime], set[str]] = {}
+    allowed_by_asof_symbol: dict[tuple[datetime, str], set[str | None]] = {}
     for decision in decisions:
         key = (decision.as_of_time, decision.decision_time)
         items.setdefault(key, set()).add(decision.decision_id)
         symbols.setdefault(key, set()).add(decision.instrument.symbol)
-    return tuple(
-        ReplayBoundary(
-            as_of_time=as_of_time,
-            decision_time=decision_time,
-            expected_decision_ids=frozenset(items[(as_of_time, decision_time)]),
-            allowed_decision_ids=frozenset(items[(as_of_time, decision_time)]),
-            symbols=frozenset(symbols[(as_of_time, decision_time)]),
+        allowed_by_asof_symbol.setdefault(
+            (decision.as_of_time, decision.instrument.symbol),
+            set(),
+        ).add(decision.decision_id)
+    boundaries: list[ReplayBoundary] = []
+    for as_of_time, decision_time in sorted(items):
+        boundary_symbols = symbols[(as_of_time, decision_time)]
+        allowed: set[str | None] = set()
+        for symbol in boundary_symbols:
+            allowed.update(allowed_by_asof_symbol.get((as_of_time, symbol), set()))
+        boundaries.append(
+            ReplayBoundary(
+                as_of_time=as_of_time,
+                decision_time=decision_time,
+                expected_decision_ids=frozenset(items[(as_of_time, decision_time)]),
+                allowed_decision_ids=frozenset(allowed),
+                symbols=frozenset(boundary_symbols),
+            )
         )
-        for as_of_time, decision_time in sorted(items)
-    )
+    return tuple(boundaries)
 
 
 def strict_replay_boundaries(

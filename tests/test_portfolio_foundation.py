@@ -1478,23 +1478,39 @@ def test_build_foundation_reports_every_configured_subwindow_even_when_empty():
     }
 
 
-def test_max_symbol_concentration_from_netted_book():
-    aaa = bar_rows(100.0, 100.0, 100.0, symbol="AAA")
-    bbb = bar_rows(100.0, 100.0, 100.0, symbol="BBB")
+def test_max_symbol_concentration_is_economic_pnl_share():
+    # Two names open at equal weight, but one carries essentially all the realized
+    # PnL. The gated breadth metric must measure *economic* dependence on a symbol
+    # (its share of realized PnL), not the instantaneous gross-notional share. The
+    # gross-notional share here is ~0.5 (equal entry weight); the economic share is
+    # ~1.0 because only AAA produces PnL.
+    aaa = bar_rows(100.0, 100.0, 110.0, 110.0, symbol="AAA")  # +10% before exit
+    bbb = bar_rows(100.0, 100.0, 100.0, 100.0, symbol="BBB")  # flat
     rows = aaa + bbb
-    decisions = [target(0, 0.6, symbol="AAA"), target(0, 0.2, symbol="BBB")]
+    decisions = [
+        target(0, 0.4, symbol="AAA"),
+        target(0, 0.4, symbol="BBB"),
+        target(2, 0.0, symbol="AAA"),
+        target(2, 0.0, symbol="BBB"),
+    ]
     foundation = build_portfolio_foundation(
         rows=rows,
         decisions=decisions,
-        data=data_config(2, symbols=("AAA", "BBB")),
+        data=data_config(3, symbols=("AAA", "BBB")),
         fill_model=FillModelConfig(price="close", entry_lag_bars=1),
         cost_model=CostModelConfig(fee_bps_per_side=1.0, slippage_bps_per_side=0.0),
         capacity_model=capacity_model(),
         config=foundation_config(subwindows=1),
     )
+    abs_pnl: dict[str, float] = {}
+    for trip in foundation.ledger.round_trips:
+        abs_pnl[trip.symbol] = abs_pnl.get(trip.symbol, 0.0) + abs(trip.realized_pnl)
+    expected = max(abs_pnl.values()) / sum(abs_pnl.values())
     full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
-    # Concentration = max leg notional / gross notional = 0.6 / 0.8 = 0.75.
-    assert full["max_symbol_concentration"] == pytest.approx(0.75)
+    # Metric equals the realized-PnL share of the dominant symbol, computed from the
+    # scenario's own round-trip ledger (not the instantaneous gross-notional share).
+    assert full["max_symbol_concentration"] == pytest.approx(expected)
+    assert full["max_symbol_concentration"] > 0.9
 
 
 def test_walk_function_is_importable_and_pure_path_object():
