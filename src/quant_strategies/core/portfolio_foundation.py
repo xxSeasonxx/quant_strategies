@@ -331,6 +331,7 @@ class FoundationMetric:
     max_drawdown: float | None
     closed_trade_count: int
     max_symbol_concentration: float
+    effective_symbol_count: float
     max_gross_utilization: float
     mean_gross_utilization: float
     max_net_utilization: float
@@ -346,6 +347,7 @@ class FoundationMetric:
             "max_drawdown": self.max_drawdown,
             "closed_trade_count": self.closed_trade_count,
             "max_symbol_concentration": self.max_symbol_concentration,
+            "effective_symbol_count": self.effective_symbol_count,
             "max_gross_utilization": self.max_gross_utilization,
             "mean_gross_utilization": self.mean_gross_utilization,
             "max_net_utilization": self.max_net_utilization,
@@ -2548,6 +2550,22 @@ def _economic_concentration(abs_pnl_by_symbol: Mapping[str, float]) -> float:
     return max(abs_pnl_by_symbol.values()) / total
 
 
+def _effective_symbol_count(abs_pnl_by_symbol: Mapping[str, float]) -> float:
+    """Effective number of names carrying the window's realized PnL.
+
+    The inverse Herfindahl index of the realized-PnL shares (1 / sum(share**2)):
+    it reads how many symbols actually carry the edge, complementing the
+    single-name concentration scalar. Balanced PnL across N names returns N; a
+    single name returns 1; a window with no realized PnL has no economic breadth
+    and returns 0.0 (such a book is killed by the evidence and money-floor gates,
+    not by breadth).
+    """
+    total = sum(abs_pnl_by_symbol.values())
+    if total <= 0.0:
+        return 0.0
+    return 1.0 / sum((value / total) ** 2 for value in abs_pnl_by_symbol.values())
+
+
 def _metric_from_accumulator(
     window_id: str,
     accumulator: _MetricAccumulator | _FullTrainAccumulator,
@@ -2581,6 +2599,7 @@ def _metric_from_accumulator(
         max_drawdown=_accumulator_max_drawdown(accumulator),
         closed_trade_count=accumulator.closed_trade_count,
         max_symbol_concentration=_economic_concentration(accumulator.abs_pnl_by_symbol),
+        effective_symbol_count=_effective_symbol_count(accumulator.abs_pnl_by_symbol),
         max_gross_utilization=_max(accumulator.gross_samples),
         mean_gross_utilization=_mean(accumulator.gross_samples),
         max_net_utilization=_max(accumulator.net_samples),

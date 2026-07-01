@@ -422,8 +422,8 @@ diagnostics, a compact `full_train` metric record, and subwindow metrics such as
 `return_sample_count`, `mean_return`, `return_volatility`,
 `effective_sample_size`, `sharpe`, `sharpe_standard_error`, `skew`, `kurtosis`,
 `total_return`, `max_drawdown`, `closed_trade_count`, `max_symbol_concentration`,
-and the live `max/mean_gross_utilization` / `max/mean_net_utilization` exposure
-series.
+`effective_symbol_count`, and the live `max/mean_gross_utilization` /
+`max/mean_net_utilization` exposure series.
 
 Scenario payload fields:
 
@@ -450,6 +450,7 @@ Metric record fields (`full_train` and each subwindow):
 | `max_drawdown` | `float \| None` | local peak-to-trough drawdown, negative or zero |
 | `closed_trade_count` | `int` | netted-book round trips (a net position returning to flat), counted by exit time |
 | `max_symbol_concentration` | `float` | economic concentration: largest single symbol's share of the window's realized PnL (`0.0` when the window has no realized PnL) |
+| `effective_symbol_count` | `float` | effective number of names carrying realized PnL: inverse-HHI of the realized-PnL shares (`1 / sum(share**2)`); `N` for balanced PnL across `N` names, `1` for a single name, `0.0` when the window has no realized PnL |
 | `max_gross_utilization` / `mean_gross_utilization` | `float` | live mark-to-market gross-exposure series (reported risk signal, not the fail-closed check) |
 | `max_net_utilization` / `mean_net_utilization` | `float` | live mark-to-market net-exposure series |
 | `return_sample_count` | `int` | finite period returns over **at-risk** (capital-deployed) bars, not a zero-padded calendar |
@@ -533,6 +534,7 @@ Compact summary shape, used by `RunPortfolioFoundation.summary_payload()` and
         "max_drawdown": -0.01,
         "closed_trade_count": 12,
         "max_symbol_concentration": 1.0,
+        "effective_symbol_count": 1.0,
         "max_gross_utilization": 0.27,
         "mean_gross_utilization": 0.21,
         "max_net_utilization": 0.27,
@@ -601,6 +603,7 @@ each scenario:
           "max_drawdown": -0.01,
           "closed_trade_count": 3,
           "max_symbol_concentration": 1.0,
+          "effective_symbol_count": 1.0,
           "max_gross_utilization": 0.27,
           "mean_gross_utilization": 0.21,
           "max_net_utilization": 0.27,

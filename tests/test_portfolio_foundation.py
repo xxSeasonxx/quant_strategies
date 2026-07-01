@@ -1505,12 +1505,32 @@ def test_max_symbol_concentration_is_economic_pnl_share():
     abs_pnl: dict[str, float] = {}
     for trip in foundation.ledger.round_trips:
         abs_pnl[trip.symbol] = abs_pnl.get(trip.symbol, 0.0) + abs(trip.realized_pnl)
-    expected = max(abs_pnl.values()) / sum(abs_pnl.values())
+    total_abs_pnl = sum(abs_pnl.values())
+    expected = max(abs_pnl.values()) / total_abs_pnl
+    expected_effective_n = 1.0 / sum((v / total_abs_pnl) ** 2 for v in abs_pnl.values())
     full = foundation.matrix_payload()["scenarios"]["realistic_costs"]["full_train"]
     # Metric equals the realized-PnL share of the dominant symbol, computed from the
     # scenario's own round-trip ledger (not the instantaneous gross-notional share).
     assert full["max_symbol_concentration"] == pytest.approx(expected)
     assert full["max_symbol_concentration"] > 0.9
+    # AAA carries essentially all PnL (BBB only bleeds cost), so the edge is
+    # economically one name regardless of how many names the book holds: the
+    # effective symbol count is the inverse-HHI of the same shares and sits at ~1.
+    assert full["effective_symbol_count"] == pytest.approx(expected_effective_n)
+    assert full["effective_symbol_count"] < 1.05
+
+
+def test_effective_symbol_count_is_inverse_hhi_of_pnl_share():
+    # Effective number of PnL-bearing names = 1 / sum(share**2). It reads how many
+    # names actually carry the edge, complementing the single-name concentration
+    # scalar: balanced PnL across N names returns N; a single name returns 1; an
+    # empty/zero-PnL book has no economic breadth and returns 0.
+    eff = foundation_module._effective_symbol_count
+    assert eff({"A": 1.0, "B": 1.0, "C": 1.0, "D": 1.0}) == pytest.approx(4.0)
+    assert eff({"A": 5.0}) == pytest.approx(1.0)
+    assert eff({"A": 3.0, "B": 1.0}) == pytest.approx(1.6)
+    assert eff({}) == 0.0
+    assert eff({"A": 0.0, "B": 0.0}) == 0.0
 
 
 def test_walk_function_is_importable_and_pure_path_object():
