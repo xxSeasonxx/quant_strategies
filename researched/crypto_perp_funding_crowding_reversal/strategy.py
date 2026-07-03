@@ -1,499 +1,1028 @@
-"""Strategy: crypto_perp_funding_crowding_reversal_stateful_rebalance
+"""Crypto perp funding crowding reversal.
 
-Source / provenance:
-Internal crowding-reversal hypothesis derived from crypto perpetual futures
-funding-rate mechanism literature, especially Ackerer, Hugonnier, and Jermann
-(2024), "Perpetual Futures Pricing", NBER Working Paper 32936, DOI
-10.3386/w32936, and Zhang (2026), "Funding Rate Mechanism in Perpetual
-Futures", SSRN 6185958, DOI 10.2139/ssrn.6185958. This file is not a direct
-paper replication.
-
-Market rationale:
-Recent same-direction perpetual funding pressure and price extension can mark
-crowded positioning that mean-reverts over the next configured max holding
-window. Repeated same-symbol signals are state updates, not independent trade
-tickets, so this bench variant suppresses new same-symbol entries until the
-active target window has exited.
-
-Required observables:
-Symbol, timestamp, close, funding timestamp, funding rate, and funding-event
-flag for crypto perpetual bars.
-
-Signal rule:
-On a sparse as-of cadence, use completed prior closes and funding events at or
-before the as-of time. Emit decisions after the as-of bar can be observed. Short
-the strongest positive funding plus positive return tail, and optionally long
-the strongest negative funding plus negative return tail. This simplified
-variant trades repeated long tranches when summed recent funding pressure is
-negative enough and price has extended down. It concentrates exposure in the
-higher-edge non-BTC long book, uses a 100-minute cadence, requires stronger
-funding pressure only during market-wide selloff regimes, and lets DOGE/LINK/ETH
-hold longer than ADA to test whether higher-edge symbols have a slower
-mean-reversion payoff. ADA remains the 8-hour coverage sleeve.
-
-Assumptions:
-Funding timestamps are known no later than the as-of time, market data
-availability is represented by the runner's `available_at` field when present,
-and the completed prior close rather than the as-of close drives return
-extension.
-
-Falsifier:
-If explicit same-symbol state suppression removes the broad candidate's edge or
-leaves too few trades for the sample gate, the old result was likely an
-overlapping-ticket artifact rather than a tradable rebalance rule.
+Thesis:
+Realized same-sign funding pressure plus same-direction price extension can mark
+crowded perp positioning. After the signal bar is observable, the strategy takes
+the other side of the crowded move and exits through an explicit fixed-horizon
+flat target.
 """
 
-from __future__ import annotations
-
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import math
-from typing import Any
+from typing import Any, cast
 
-from quant_strategies.decisions import ExitPolicy, InstrumentRef, ObservationRef, PositionTarget, StrategyDecision
+from quant_strategies.decisions import (
+    InstrumentRef,
+    ObservationRef,
+    RiskRule,
+    TargetDecision,
+)
 
-__all__ = ["validate_params", "generate_decisions"]
+__all__ = ["generate_decisions", "validate_params"]
 
-_STRATEGY_ID = "crypto_perp_funding_crowding_reversal_stateful_rebalance"
-_REQUIRED_FIELDS = {"symbol", "timestamp", "close", "funding_timestamp", "funding_rate", "has_funding_event"}
-_EXCLUDED_LONG_SYMBOLS = frozenset({"BTC-PERP"})
-_EXTENDED_HOLD_LONG_SYMBOLS = frozenset({"DOGE-PERP", "ETH-PERP", "LINK-PERP"})
-_EXTENDED_HOLD_BARS = 848
-_LONG_WEIGHT_MULTIPLIER = 1.5
+_STRATEGY_ID = "crypto_perp_funding_crowding_reversal"
+_REQUIRED_FIELDS = {
+    "symbol",
+    "timestamp",
+    "available_at",
+    "close",
+    "funding_timestamp",
+    "funding_rate",
+    "has_funding_event",
+}
+_DEFAULT_PARAMS: dict[str, object] = {
+    "funding_lookback_events": 5,
+    "funding_decay": 0.0,
+    "return_lookback_minutes": 120,
+    "decision_interval_minutes": 240,
+    "entry_twap_bars": 1,
+    "exit_twap_bars": 0,
+    "decision_lag_minutes": 1,
+    "session_start_hour": 0,
+    "session_end_hour": 24,
+    "top_n": 5,
+    "min_cross_section": 4,
+    "min_abs_funding_bps": 1.0,
+    "min_abs_return_bps": 0.0,
+    "include_positive_funding_shorts": True,
+    "include_negative_funding_longs": True,
+    "min_same_sign_funding_events": 3,
+    "min_latest_abs_funding_bps": 0.0,
+    "recent_return_lookback_minutes": 60,
+    "max_recent_same_direction_return_bps": 250.0,
+    "min_idiosyncratic_return_bps": 2.5,
+    "idiosyncratic_mode": "raw",
+    "min_idiosyncratic_sigma": 0.5,
+    "selection_score": "combined",
+    "cross_section_reference": "mean",
+    "weighting": "equal",
+    "dislocation_weight_power": 1.0,
+    "vol_lookback_minutes": 1440,
+    "long_hold_minutes": 720,
+    "short_hold_minutes": 480,
+    "hold_vol_scaling": 0.0,
+    "hold_dislocation_scaling": 0.0,
+    "take_profit_frac": 0.0,
+}
+
+_HOLD_MIN_MINUTES = 120
+_HOLD_MAX_MINUTES = 1440
 
 
+@dataclass(frozen=True)
+class _BarRow:
+    symbol: str
+    timestamp: datetime
+    available_at: datetime
+    close: float
+
+
+@dataclass(frozen=True)
+class _FundingEvent:
+    timestamp: datetime
+    bar_timestamp: datetime
+    available_at: datetime
+    rate: float
+
+
+@dataclass(frozen=True)
 class _SymbolRows:
-    __slots__ = (
-        "timestamps",
-        "timestamp_to_index",
-        "closes_by_timestamp",
-        "conflicting_close_timestamps",
-        "funding_event_rows",
-        "funding_event_times",
-        "latest_timestamp",
-    )
+    bars: tuple[_BarRow, ...]
+    timestamps: tuple[datetime, ...]
+    funding_events: tuple[_FundingEvent, ...]
+    funding_available_at: tuple[datetime, ...]
 
-    def __init__(
-        self,
-        *,
-        timestamps: tuple[datetime, ...],
-        timestamp_to_index: dict[datetime, int],
-        closes_by_timestamp: dict[datetime, float],
-        conflicting_close_timestamps: frozenset[datetime],
-        funding_event_rows: tuple[tuple[datetime, datetime, float], ...],
-        funding_event_times: tuple[datetime, ...],
-        latest_timestamp: datetime,
-    ) -> None:
-        self.timestamps = timestamps
-        self.timestamp_to_index = timestamp_to_index
-        self.closes_by_timestamp = closes_by_timestamp
-        self.conflicting_close_timestamps = conflicting_close_timestamps
-        self.funding_event_rows = funding_event_rows
-        self.funding_event_times = funding_event_times
-        self.latest_timestamp = latest_timestamp
+
+@dataclass(frozen=True)
+class _Candidate:
+    symbol: str
+    signal_row: _BarRow
+    lookback_row: _BarRow
+    funding_events: tuple[_FundingEvent, ...]
+    funding_pressure_bps: float
+    latest_funding_bps: float
+    same_sign_funding_events: int
+    return_extension_bps: float
+    recent_return_bps: float
+    volatility: float | None = None
+    recent_row: _BarRow | None = None
+
+
+@dataclass(frozen=True)
+class _Selection:
+    candidate: _Candidate
+    side: int
+    score: float
+    idiosyncratic: float = 0.0
 
 
 def validate_params(params: Mapping[str, object]) -> dict[str, object]:
-    validated = dict(params)
-    _validate_scalar_params(validated)
+    """Validate the bounded thesis parameters used by the strategy."""
+
+    unknown = set(params) - set(_DEFAULT_PARAMS)
+    if unknown:
+        raise ValueError(f"unknown params: {sorted(unknown)}")
+
+    merged = {**_DEFAULT_PARAMS, **dict(params)}
+    validated: dict[str, object] = {
+        "funding_lookback_events": _positive_int(
+            merged["funding_lookback_events"], "funding_lookback_events"
+        ),
+        "funding_decay": _non_negative_float(
+            merged["funding_decay"], "funding_decay"
+        ),
+        "return_lookback_minutes": _positive_int(
+            merged["return_lookback_minutes"], "return_lookback_minutes"
+        ),
+        "decision_interval_minutes": _positive_int(
+            merged["decision_interval_minutes"], "decision_interval_minutes"
+        ),
+        "entry_twap_bars": _positive_int(
+            merged["entry_twap_bars"], "entry_twap_bars"
+        ),
+        "exit_twap_bars": _non_negative_int(
+            merged["exit_twap_bars"], "exit_twap_bars"
+        ),
+        "decision_lag_minutes": _non_negative_int(
+            merged["decision_lag_minutes"], "decision_lag_minutes"
+        ),
+        "session_start_hour": _hour(merged["session_start_hour"], "session_start_hour"),
+        "session_end_hour": _session_end_hour(merged["session_end_hour"]),
+        "top_n": _positive_int(merged["top_n"], "top_n"),
+        "min_cross_section": _positive_int(
+            merged["min_cross_section"], "min_cross_section"
+        ),
+        "min_abs_funding_bps": _non_negative_float(
+            merged["min_abs_funding_bps"], "min_abs_funding_bps"
+        ),
+        "min_abs_return_bps": _non_negative_float(
+            merged["min_abs_return_bps"], "min_abs_return_bps"
+        ),
+        "include_positive_funding_shorts": _bool_param(
+            merged["include_positive_funding_shorts"],
+            "include_positive_funding_shorts",
+        ),
+        "include_negative_funding_longs": _bool_param(
+            merged["include_negative_funding_longs"],
+            "include_negative_funding_longs",
+        ),
+        "min_same_sign_funding_events": _non_negative_int(
+            merged["min_same_sign_funding_events"], "min_same_sign_funding_events"
+        ),
+        "min_latest_abs_funding_bps": _non_negative_float(
+            merged["min_latest_abs_funding_bps"], "min_latest_abs_funding_bps"
+        ),
+        "recent_return_lookback_minutes": _non_negative_int(
+            merged["recent_return_lookback_minutes"],
+            "recent_return_lookback_minutes",
+        ),
+        "max_recent_same_direction_return_bps": _non_negative_float(
+            merged["max_recent_same_direction_return_bps"],
+            "max_recent_same_direction_return_bps",
+        ),
+        "min_idiosyncratic_return_bps": _non_negative_float(
+            merged["min_idiosyncratic_return_bps"],
+            "min_idiosyncratic_return_bps",
+        ),
+        "idiosyncratic_mode": _idiosyncratic_mode(merged["idiosyncratic_mode"]),
+        "min_idiosyncratic_sigma": _non_negative_float(
+            merged["min_idiosyncratic_sigma"], "min_idiosyncratic_sigma"
+        ),
+        "selection_score": _selection_score(merged["selection_score"]),
+        "cross_section_reference": _cross_section_reference(
+            merged["cross_section_reference"]
+        ),
+        "dislocation_weight_power": _positive_float(
+            merged["dislocation_weight_power"], "dislocation_weight_power"
+        ),
+        "weighting": _weighting(merged["weighting"]),
+        "vol_lookback_minutes": _positive_int(
+            merged["vol_lookback_minutes"], "vol_lookback_minutes"
+        ),
+        "long_hold_minutes": _positive_int(
+            merged["long_hold_minutes"], "long_hold_minutes"
+        ),
+        "short_hold_minutes": _positive_int(
+            merged["short_hold_minutes"], "short_hold_minutes"
+        ),
+        "hold_vol_scaling": _non_negative_float(
+            merged["hold_vol_scaling"], "hold_vol_scaling"
+        ),
+        "hold_dislocation_scaling": _non_negative_float(
+            merged["hold_dislocation_scaling"], "hold_dislocation_scaling"
+        ),
+        "take_profit_frac": _non_negative_float(
+            merged["take_profit_frac"], "take_profit_frac"
+        ),
+    }
+    if _param_int(validated, "session_start_hour") >= _param_int(
+        validated, "session_end_hour"
+    ):
+        raise ValueError("session_start_hour must be < session_end_hour")
+    if not (
+        validated["include_positive_funding_shorts"]
+        or validated["include_negative_funding_longs"]
+    ):
+        raise ValueError("at least one side must be enabled")
     return validated
 
 
-def _generate_signal_payloads(
-    bars: Sequence[Mapping[str, object]],
-    params: Mapping[str, object],
-) -> list[dict[str, object]]:
+def generate_decisions(
+    bars: Sequence[Mapping[str, object]], params: Mapping[str, object]
+) -> list[TargetDecision]:
+    """Emit standing crypto-perp target decisions for the funding reversal thesis."""
+
     if not bars:
         return []
-    _require_fields(bars, _REQUIRED_FIELDS)
-    _validate_scalar_params(params)
+    validated = validate_params(params)
+    rows_by_symbol = _rows_by_symbol(bars)
+    if len(rows_by_symbol) < _param_int(validated, "min_cross_section"):
+        return []
 
-    funding_lookback_events = _positive_int(params.get("funding_lookback_events", 3), "funding_lookback_events")
-    return_lookback_minutes = _positive_int(params.get("return_lookback_minutes", 240), "return_lookback_minutes")
-    decision_interval_minutes = _positive_int(params.get("decision_interval_minutes", 480), "decision_interval_minutes")
-    decision_lag_minutes = _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
-    top_n = _positive_int(params.get("top_n", 1), "top_n")
-    min_cross_section = _positive_int(params.get("min_cross_section", 4), "min_cross_section")
-    min_abs_funding_bps = _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
-    min_abs_return_bps = _non_negative_float(params.get("min_abs_return_bps", 25.0), "min_abs_return_bps")
-    max_short_return_extension_bps = _non_negative_float(
-        params.get("max_short_return_extension_bps", 0.0),
-        "max_short_return_extension_bps",
+    signal_times = _cadence_signal_times(rows_by_symbol, validated)
+    n_universe = len(rows_by_symbol)
+    weighting = _param_str(validated, "weighting")
+    twap_bars = _param_int(validated, "entry_twap_bars")
+    exit_twap_bars = _param_int(validated, "exit_twap_bars") or twap_bars
+    take_profit_frac = _param_float(validated, "take_profit_frac")
+    risk_rule = (
+        RiskRule(take_profit=take_profit_frac) if take_profit_frac > 0.0 else None
     )
-    include_positive_funding_shorts = _bool_param(
-        params.get("include_positive_funding_shorts", True),
-        "include_positive_funding_shorts",
-    )
-    include_negative_funding_longs = _bool_param(
-        params.get("include_negative_funding_longs", True),
-        "include_negative_funding_longs",
-    )
-    min_same_sign_funding_events = _non_negative_int(
-        params.get("min_same_sign_funding_events", 0),
-        "min_same_sign_funding_events",
-    )
-    min_latest_abs_funding_bps = _non_negative_float(
-        params.get("min_latest_abs_funding_bps", 0.0),
-        "min_latest_abs_funding_bps",
-    )
-    volatility_lookback_minutes = _non_negative_int(
-        params.get("volatility_lookback_minutes", 0),
-        "volatility_lookback_minutes",
-    )
-    min_abs_return_z = _non_negative_float(params.get("min_abs_return_z", 0.0), "min_abs_return_z")
-    recent_return_lookback_minutes = _non_negative_int(
-        params.get("recent_return_lookback_minutes", 0),
-        "recent_return_lookback_minutes",
-    )
-    max_recent_same_direction_return_bps = _non_negative_float(
-        params.get("max_recent_same_direction_return_bps", 0.0),
-        "max_recent_same_direction_return_bps",
-    )
-    min_idiosyncratic_return_bps = _non_negative_float(
-        params.get("min_idiosyncratic_return_bps", 0.0),
-        "min_idiosyncratic_return_bps",
-    )
-    min_short_idiosyncratic_return_bps = _non_negative_float(
-        params.get("min_short_idiosyncratic_return_bps", min_idiosyncratic_return_bps),
-        "min_short_idiosyncratic_return_bps",
-    )
-    min_long_idiosyncratic_return_bps = _non_negative_float(
-        params.get("min_long_idiosyncratic_return_bps", min_idiosyncratic_return_bps),
-        "min_long_idiosyncratic_return_bps",
-    )
-    symbol_cooldown_minutes = _non_negative_int(
-        params.get("symbol_cooldown_minutes", 0),
-        "symbol_cooldown_minutes",
-    )
-    min_tail_count = _positive_int(params.get("min_tail_count", 1), "min_tail_count")
-    balance_sides = _bool_param(params.get("balance_sides", False), "balance_sides")
-    selection_score = str(params.get("selection_score", "funding"))
-    if selection_score not in {"funding", "return", "product"}:
-        raise ValueError("selection_score must be one of: funding, return, product")
-    require_exit_horizon = _bool_param(params.get("require_exit_horizon", False), "require_exit_horizon")
-    weight = float(params.get("weight", 1.0))
-    hold_bars = _positive_int(params.get("hold_bars", params.get("hold_minutes", 480)), "hold_bars")
-    short_hold_bars = _positive_int(params.get("short_hold_bars", hold_bars), "short_hold_bars")
-    long_hold_bars = _positive_int(params.get("long_hold_bars", hold_bars), "long_hold_bars")
-    high_extension_short_return_bps = _non_negative_float(
-        params.get("high_extension_short_return_bps", 0.0),
-        "high_extension_short_return_bps",
-    )
-    high_extension_short_hold_bars = _positive_int(
-        params.get("high_extension_short_hold_bars", short_hold_bars),
-        "high_extension_short_hold_bars",
-    )
-    state_mode = str(params.get("state_mode", "suppress_until_exit"))
-    if state_mode not in {"off", "suppress_until_exit"}:
-        raise ValueError("state_mode must be one of: off, suppress_until_exit")
-    overlap_exit_buffer_bars = _non_negative_int(
-        params.get("overlap_exit_buffer_bars", 2),
-        "overlap_exit_buffer_bars",
-    )
-    exit_controls = _exit_controls(params)
-    required_exit_horizon_bars = max(
-        short_hold_bars,
-        long_hold_bars,
-        high_extension_short_hold_bars if high_extension_short_return_bps > 0.0 else short_hold_bars,
-    )
+    active_until: dict[str, datetime] = {}
+    decisions: list[TargetDecision] = []
 
-    rows_by_symbol = _rows_by_symbol(bars, need_timestamp_index=require_exit_horizon)
-    as_of_times = sorted(
-        {
-            timestamp
+    for signal_time in signal_times:
+        candidates = [
+            candidate
             for rows in rows_by_symbol.values()
-            for timestamp in rows.timestamps
-            if _is_long_decision_time(timestamp, decision_interval_minutes, params)
-        }
+            if (
+                candidate := _candidate_at_signal_time(
+                    rows,
+                    signal_time,
+                    funding_lookback_events=_param_int(
+                        validated, "funding_lookback_events"
+                    ),
+                    funding_decay=_param_float(validated, "funding_decay"),
+                    return_lookback_minutes=_param_int(
+                        validated, "return_lookback_minutes"
+                    ),
+                    recent_return_lookback_minutes=_param_int(
+                        validated, "recent_return_lookback_minutes"
+                    ),
+                    vol_lookback_minutes=_param_int(
+                        validated, "vol_lookback_minutes"
+                    ),
+                )
+            )
+            is not None
+        ]
+        if len(candidates) < _param_int(validated, "min_cross_section"):
+            continue
+
+        market_return_bps = _cross_section_reference_bps(
+            [candidate.return_extension_bps for candidate in candidates],
+            _param_str(validated, "cross_section_reference"),
+        )
+        selections = _select_candidates(candidates, market_return_bps, validated)
+        if not selections:
+            continue
+        magnitudes = _selection_targets(
+            selections,
+            n_universe,
+            weighting,
+            _param_float(validated, "dislocation_weight_power"),
+        )
+        reference_volatility = _reference_volatility(selections)
+        reference_idiosyncratic = _reference_idiosyncratic(selections)
+
+        cross_section_available_at = max(
+            candidate.signal_row.available_at for candidate in candidates
+        )
+        earliest_decision_time = cross_section_available_at + timedelta(
+            minutes=_param_int(validated, "decision_lag_minutes")
+        )
+
+        decision_time = earliest_decision_time
+        for selection, magnitude in zip(selections, magnitudes):
+            candidate = selection.candidate
+            symbol = candidate.symbol
+            if (
+                active_until.get(symbol, datetime.min.replace(tzinfo=timezone.utc))
+                >= decision_time
+            ):
+                continue
+
+            base_hold = (
+                _param_int(validated, "long_hold_minutes")
+                if selection.side > 0
+                else _param_int(validated, "short_hold_minutes")
+            )
+            if _param_float(validated, "hold_vol_scaling") > 0.0:
+                hold_minutes = _scaled_hold_minutes(
+                    base_hold,
+                    candidate.volatility,
+                    reference_volatility,
+                    _param_float(validated, "hold_vol_scaling"),
+                )
+            elif _param_float(validated, "hold_dislocation_scaling") > 0.0:
+                hold_minutes = _conviction_scaled_hold(
+                    base_hold,
+                    selection.idiosyncratic,
+                    reference_idiosyncratic,
+                    _param_float(validated, "hold_dislocation_scaling"),
+                )
+            else:
+                hold_minutes = base_hold
+            exit_time = decision_time + timedelta(minutes=hold_minutes)
+
+            target = selection.side * magnitude
+            decisions.extend(
+                _ramped_decisions(
+                    symbol=symbol,
+                    entry_time=decision_time,
+                    exit_time=exit_time,
+                    target=target,
+                    twap_bars=twap_bars,
+                    exit_twap_bars=exit_twap_bars,
+                    entry_as_of=candidate.signal_row.timestamp,
+                    risk_rule=risk_rule,
+                    observations=_observations(candidate),
+                    metadata={
+                        "signal_family": _STRATEGY_ID,
+                        "funding_pressure_bps": candidate.funding_pressure_bps,
+                        "latest_funding_bps": candidate.latest_funding_bps,
+                        "return_extension_bps": candidate.return_extension_bps,
+                        "recent_return_bps": candidate.recent_return_bps,
+                        "market_return_bps": market_return_bps,
+                        "side": "long" if selection.side > 0 else "short",
+                        "selection_score": selection.score,
+                    },
+                )
+            )
+            active_until[symbol] = exit_time + timedelta(minutes=exit_twap_bars - 1)
+
+    return sorted(
+        decisions,
+        key=lambda decision: (
+            decision.decision_time,
+            decision.instrument.symbol,
+            decision.target,
+        ),
     )
 
-    signals: list[dict[str, object]] = []
-    last_signal_time_by_symbol: dict[str, datetime] = {}
-    active_until_by_symbol: dict[str, datetime] = {}
-    for as_of_time in as_of_times:
-        candidates = _decision_candidates(
-            rows_by_symbol,
-            as_of_time,
-            funding_lookback_events,
-            return_lookback_minutes,
-            volatility_lookback_minutes,
-            recent_return_lookback_minutes,
-        )
-        if len(candidates) < min_cross_section:
-            continue
-        market_return_bps = sum(candidate["return_extension_bps"] for candidate in candidates) / len(candidates)
-        decision_time = as_of_time + timedelta(minutes=decision_lag_minutes)
-        candidates = _filter_exit_horizon(
-            candidates,
-            rows_by_symbol,
-            decision_time,
-            required_exit_horizon_bars,
-            require_exit_horizon,
-        )
 
-        positive_tail = [
-            candidate
-            for candidate in candidates
-            if include_positive_funding_shorts
-            and candidate["funding_pressure_bps"] >= min_abs_funding_bps
-            and candidate["return_extension_bps"] >= min_abs_return_bps
-            and _passes_max_short_return_extension(candidate, max_short_return_extension_bps)
-            and candidate["funding_same_sign_events"] >= min_same_sign_funding_events
-            and abs(candidate["latest_funding_bps"]) >= min_latest_abs_funding_bps
-            and _passes_return_z(candidate, min_abs_return_z)
-            and _passes_recent_cooloff(candidate, "short", max_recent_same_direction_return_bps)
-            and _passes_idiosyncratic_return(candidate, "short", market_return_bps, min_short_idiosyncratic_return_bps)
-        ]
-        negative_tail = [
-            candidate
-            for candidate in candidates
-            if _passes_long_funding_pressure(candidate, _regime_funding_threshold(min_abs_funding_bps, market_return_bps))
-            and candidate["return_extension_bps"] <= -min_abs_return_bps
-            and abs(candidate["latest_funding_bps"]) >= min_latest_abs_funding_bps
-            and _passes_return_z(candidate, min_abs_return_z)
-            and _passes_recent_cooloff(candidate, "long", max_recent_same_direction_return_bps)
-            and _passes_idiosyncratic_return(candidate, "long", market_return_bps, min_long_idiosyncratic_return_bps)
-            and candidate["symbol"] not in _EXCLUDED_LONG_SYMBOLS
-        ]
-        if len(positive_tail) < min_tail_count:
-            positive_tail = []
-        if len(negative_tail) < min_tail_count:
-            negative_tail = []
+def _ramped_decisions(
+    *,
+    symbol: str,
+    entry_time: datetime,
+    exit_time: datetime,
+    target: float,
+    twap_bars: int,
+    exit_twap_bars: int,
+    entry_as_of: datetime,
+    risk_rule: RiskRule | None,
+    observations: tuple[ObservationRef, ...],
+    metadata: Mapping[str, object],
+) -> list[TargetDecision]:
+    """Ramp a position in over ``twap_bars`` and out over ``exit_twap_bars`` bars.
 
-        selected_shorts: list[dict[str, Any]] = []
-        selected_longs = _selected_tail(negative_tail, "long", selection_score, top_n) if include_negative_funding_longs else []
-        selected_longs = [
-            candidate
-            for candidate in selected_longs
-            if _passes_symbol_session_start_gate(candidate["symbol"], as_of_time, params)
-        ]
-        if balance_sides:
-            balanced_count = min(len(selected_shorts), len(selected_longs))
-            selected_shorts = selected_shorts[:balanced_count]
-            selected_longs = selected_longs[:balanced_count]
+    Each standing target steps the cumulative NAV weight so the engine trades an
+    equal delta per bar, spreading entry and exit participation instead of pinning
+    one bar against the capacity cap. Entry and exit spread independently, so the
+    exit ramp can be lengthened to relieve the synchronized fixed-horizon unwind
+    without changing entry timing. ``twap_bars == 1`` reproduces a single-bar
+    entry. Entry steps carry the signal-bar ``as_of``; the exit is the
+    fixed-horizon unwind scheduled at entry, so its steps carry the entry time as
+    ``as_of``.
+    """
 
-        for candidate in selected_shorts:
-            hold = _candidate_hold_bars(
-                candidate,
-                "short",
-                short_hold_bars,
-                long_hold_bars,
-                high_extension_short_return_bps,
-                high_extension_short_hold_bars,
-            )
-            if _passes_symbol_cooldown(
-                candidate["symbol"],
-                decision_time,
-                last_signal_time_by_symbol,
-                symbol_cooldown_minutes,
-            ) and _passes_state_gate(
-                candidate["symbol"],
-                decision_time,
-                active_until_by_symbol,
-                state_mode,
-            ):
-                signals.append(
-                    _signal(
-                        candidate,
-                        decision_time,
-                        as_of_time,
-                        "short",
-                        weight,
-                        hold,
-                        exit_controls,
-                        state_mode,
-                    )
-                )
-                last_signal_time_by_symbol[candidate["symbol"]] = decision_time
-                _record_active_window(
-                    candidate["symbol"],
-                    decision_time,
-                    max(hold, short_hold_bars),
-                    overlap_exit_buffer_bars,
-                    active_until_by_symbol,
-                    state_mode,
-                )
-        if include_negative_funding_longs:
-            for candidate in selected_longs:
-                hold = _candidate_hold_bars(
-                    candidate,
-                    "long",
-                    short_hold_bars,
-                    _symbol_long_hold_bars(candidate["symbol"], short_hold_bars, long_hold_bars),
-                    high_extension_short_return_bps,
-                    high_extension_short_hold_bars,
-                )
-                if _passes_symbol_cooldown(
-                    candidate["symbol"],
-                    decision_time,
-                    last_signal_time_by_symbol,
-                    symbol_cooldown_minutes,
-                ):
-                    signals.append(
-                        _signal(
-                            candidate,
-                            decision_time,
-                            as_of_time,
-                            "long",
-                            weight * _LONG_WEIGHT_MULTIPLIER,
-                            hold,
-                            exit_controls,
-                            state_mode,
-                        )
-                    )
-                    last_signal_time_by_symbol[candidate["symbol"]] = decision_time
-                    _record_active_window(
-                        candidate["symbol"],
-                        decision_time,
-                        hold,
-                        overlap_exit_buffer_bars,
-                        active_until_by_symbol,
-                        state_mode,
-                    )
-
-    return signals
-
-
-def generate_decisions(bars: Sequence[Mapping[str, object]], params: Mapping[str, object]) -> list[StrategyDecision]:
-    decisions: list[StrategyDecision] = []
-    for signal in _generate_signal_payloads(bars, params):
-        side = str(signal["side"])
-        if side not in {"long", "short"}:
-            raise ValueError(f"unsupported decision side: {side}")
+    decisions: list[TargetDecision] = []
+    for step in range(twap_bars):
         decisions.append(
-            StrategyDecision(
+            TargetDecision(
                 strategy_id=_STRATEGY_ID,
-                instrument=InstrumentRef(kind="crypto_perp", symbol=str(signal["symbol"])),
-                decision_time=_as_datetime(signal["decision_time"]),
-                as_of_time=_as_datetime(signal["as_of_time"]),
-                target=PositionTarget(
-                    direction=side,
-                    sizing_kind="target_weight",
-                    size=float(signal["weight"]),
-                ),
-                exit_policy=ExitPolicy(
-                    max_hold_bars=_positive_int(signal.get("max_hold_bars", signal["hold_bars"]), "max_hold_bars"),
-                    take_profit_bps=_optional_positive_float(signal.get("take_profit_bps"), "take_profit_bps"),
-                    stop_loss_bps=_optional_positive_float(signal.get("stop_loss_bps"), "stop_loss_bps"),
-                    trailing_stop_bps=_optional_positive_float(signal.get("trailing_stop_bps"), "trailing_stop_bps"),
-                ),
-                observations=tuple(signal.get("observations", ())),
-                metadata={
-                    "funding_pressure_bps": signal.get("funding_pressure_bps"),
-                    "entry_return_extension_bps": signal.get("entry_return_extension_bps"),
-                    "signal_family": signal.get("signal_family"),
-                    "state_mode": signal.get("state_mode"),
-                },
+                instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
+                decision_time=entry_time + timedelta(minutes=step),
+                as_of_time=entry_as_of,
+                target=target * (step + 1) / twap_bars,
+                risk_rule=risk_rule,
+                observations=observations,
+                metadata=metadata,
+            )
+        )
+    for step in range(exit_twap_bars):
+        decisions.append(
+            TargetDecision(
+                strategy_id=_STRATEGY_ID,
+                instrument=InstrumentRef(kind="crypto_perp", symbol=symbol),
+                decision_time=exit_time + timedelta(minutes=step),
+                as_of_time=entry_time,
+                target=target * (exit_twap_bars - 1 - step) / exit_twap_bars,
+                metadata={"exit_reason": "fixed_horizon"},
             )
         )
     return decisions
 
 
-def _require_fields(bars: Sequence[Mapping[str, object]], required: set[str]) -> None:
-    for index, row in enumerate(bars):
-        if all(field in row for field in required):
-            continue
-        missing = required.difference(row.keys())
+def _rows_by_symbol(bars: Sequence[Mapping[str, object]]) -> dict[str, _SymbolRows]:
+    grouped_bars: dict[str, list[_BarRow]] = {}
+    grouped_funding: dict[str, list[_FundingEvent]] = {}
+    for index, bar in enumerate(bars):
+        missing = _REQUIRED_FIELDS - set(bar)
         if missing:
-            raise ValueError(f"bar {index} missing required fields: {sorted(missing)}")
+            raise ValueError(f"bar {index} missing fields: {sorted(missing)}")
+
+        symbol = str(bar["symbol"])
+        timestamp = _datetime_value(bar["timestamp"], "timestamp")
+        available_at = _datetime_value(bar["available_at"], "available_at")
+        close = _positive_float(bar["close"], "close")
+        grouped_bars.setdefault(symbol, []).append(
+            _BarRow(
+                symbol=symbol,
+                timestamp=timestamp,
+                available_at=available_at,
+                close=close,
+            )
+        )
+
+        if _bool_value(bar["has_funding_event"]):
+            funding_rate = _finite_float(bar["funding_rate"], "funding_rate")
+            funding_timestamp = _datetime_value(
+                bar["funding_timestamp"], "funding_timestamp"
+            )
+            grouped_funding.setdefault(symbol, []).append(
+                _FundingEvent(
+                    timestamp=funding_timestamp,
+                    bar_timestamp=timestamp,
+                    available_at=available_at,
+                    rate=funding_rate,
+                )
+            )
+
+    result: dict[str, _SymbolRows] = {}
+    for symbol, symbol_bars in grouped_bars.items():
+        ordered_bars = tuple(sorted(symbol_bars, key=lambda row: row.timestamp))
+        ordered_funding = tuple(
+            sorted(grouped_funding.get(symbol, ()), key=lambda event: event.available_at)
+        )
+        result[symbol] = _SymbolRows(
+            bars=ordered_bars,
+            timestamps=tuple(row.timestamp for row in ordered_bars),
+            funding_events=ordered_funding,
+            funding_available_at=tuple(event.available_at for event in ordered_funding),
+        )
+    return result
 
 
-def _validate_scalar_params(params: Mapping[str, object]) -> None:
-    _positive_int(params.get("funding_lookback_events", 3), "funding_lookback_events")
-    _positive_int(params.get("return_lookback_minutes", 240), "return_lookback_minutes")
-    _positive_int(params.get("decision_interval_minutes", 480), "decision_interval_minutes")
-    _non_negative_int(params.get("decision_lag_minutes", 1), "decision_lag_minutes")
-    _positive_int(params.get("top_n", 1), "top_n")
-    _positive_int(params.get("min_cross_section", 4), "min_cross_section")
-    _non_negative_float(params.get("min_abs_funding_bps", 1.0), "min_abs_funding_bps")
-    _non_negative_float(params.get("min_abs_return_bps", 25.0), "min_abs_return_bps")
-    _non_negative_float(params.get("max_short_return_extension_bps", 0.0), "max_short_return_extension_bps")
-    _bool_param(params.get("include_positive_funding_shorts", True), "include_positive_funding_shorts")
-    _bool_param(params.get("include_negative_funding_longs", True), "include_negative_funding_longs")
-    _non_negative_int(params.get("min_same_sign_funding_events", 0), "min_same_sign_funding_events")
-    _non_negative_float(params.get("min_latest_abs_funding_bps", 0.0), "min_latest_abs_funding_bps")
-    _non_negative_int(params.get("volatility_lookback_minutes", 0), "volatility_lookback_minutes")
-    _non_negative_float(params.get("min_abs_return_z", 0.0), "min_abs_return_z")
-    _non_negative_int(params.get("recent_return_lookback_minutes", 0), "recent_return_lookback_minutes")
-    _non_negative_float(
-        params.get("max_recent_same_direction_return_bps", 0.0),
-        "max_recent_same_direction_return_bps",
+def _cadence_signal_times(
+    rows_by_symbol: Mapping[str, _SymbolRows], params: Mapping[str, object]
+) -> tuple[datetime, ...]:
+    interval = _param_int(params, "decision_interval_minutes")
+    session_start = _param_int(params, "session_start_hour")
+    session_end = _param_int(params, "session_end_hour")
+    times = {
+        row.timestamp
+        for rows in rows_by_symbol.values()
+        for row in rows.bars
+        if _is_cadence_timestamp(row.timestamp, interval, session_start, session_end)
+    }
+    return tuple(sorted(times))
+
+
+def _is_cadence_timestamp(
+    timestamp: datetime,
+    interval_minutes: int,
+    session_start_hour: int,
+    session_end_hour: int,
+) -> bool:
+    if timestamp.hour < session_start_hour or timestamp.hour >= session_end_hour:
+        return False
+    minute_of_day = timestamp.hour * 60 + timestamp.minute
+    return minute_of_day % interval_minutes == 0
+
+
+def _candidate_at_signal_time(
+    rows: _SymbolRows,
+    signal_time: datetime,
+    *,
+    funding_lookback_events: int,
+    funding_decay: float,
+    return_lookback_minutes: int,
+    recent_return_lookback_minutes: int,
+    vol_lookback_minutes: int,
+) -> _Candidate | None:
+    signal_index = bisect_right(rows.timestamps, signal_time) - 1
+    if signal_index < 0:
+        return None
+    signal_row = rows.bars[signal_index]
+
+    lookback_time = signal_time - timedelta(minutes=return_lookback_minutes)
+    lookback_index = bisect_right(rows.timestamps, lookback_time) - 1
+    if lookback_index < 0:
+        return None
+    lookback_row = rows.bars[lookback_index]
+
+    funding_index = bisect_right(rows.funding_available_at, signal_row.available_at)
+    if funding_index < funding_lookback_events:
+        return None
+    funding_events = rows.funding_events[
+        funding_index - funding_lookback_events : funding_index
+    ]
+
+    funding_pressure_bps = _weighted_funding_pressure_bps(funding_events, funding_decay)
+    latest_funding_bps = funding_events[-1].rate * 10_000.0
+    sign = 1 if funding_pressure_bps > 0.0 else -1 if funding_pressure_bps < 0.0 else 0
+    same_sign_funding_events = (
+        sum(1 for event in funding_events if event.rate * sign > 0.0)
+        if sign != 0
+        else 0
     )
-    min_idiosyncratic_return_bps = _non_negative_float(
-        params.get("min_idiosyncratic_return_bps", 0.0),
-        "min_idiosyncratic_return_bps",
+    return_extension_bps = (signal_row.close / lookback_row.close - 1.0) * 10_000.0
+
+    recent_return_bps = 0.0
+    recent_row: _BarRow | None = None
+    if recent_return_lookback_minutes > 0:
+        recent_time = signal_time - timedelta(minutes=recent_return_lookback_minutes)
+        recent_index = bisect_right(rows.timestamps, recent_time) - 1
+        if recent_index >= 0:
+            recent_row = rows.bars[recent_index]
+            recent_return_bps = (signal_row.close / recent_row.close - 1.0) * 10_000.0
+
+    return _Candidate(
+        symbol=signal_row.symbol,
+        signal_row=signal_row,
+        lookback_row=lookback_row,
+        funding_events=funding_events,
+        funding_pressure_bps=funding_pressure_bps,
+        latest_funding_bps=latest_funding_bps,
+        same_sign_funding_events=same_sign_funding_events,
+        return_extension_bps=return_extension_bps,
+        recent_return_bps=recent_return_bps,
+        volatility=_realized_volatility(rows, signal_index, vol_lookback_minutes),
+        recent_row=recent_row,
     )
-    _non_negative_float(
-        params.get("min_short_idiosyncratic_return_bps", min_idiosyncratic_return_bps),
-        "min_short_idiosyncratic_return_bps",
+
+
+def _weighted_funding_pressure_bps(
+    funding_events: tuple[_FundingEvent, ...], decay: float
+) -> float:
+    """Summed funding crowding in bps, optionally recency-weighted.
+
+    Events are ordered oldest-to-newest. With ``decay == 0`` every event carries
+    weight 1 and this is the plain sum (baseline). With ``decay > 0`` recent
+    settlements weigh more (``exp(-decay * age)``, age 0 = newest); weights are
+    renormalized to sum to the event count so the crowding *scale* is preserved
+    and only its recency *tilt* changes.
+    """
+
+    if decay <= 0.0 or len(funding_events) <= 1:
+        return sum(event.rate for event in funding_events) * 10_000.0
+    count = len(funding_events)
+    weights = [math.exp(-decay * (count - 1 - i)) for i in range(count)]
+    total = sum(weights)
+    scale = count / total
+    weighted = sum(
+        weights[i] * scale * funding_events[i].rate for i in range(count)
     )
-    _non_negative_float(
-        params.get("min_long_idiosyncratic_return_bps", min_idiosyncratic_return_bps),
-        "min_long_idiosyncratic_return_bps",
+    return weighted * 10_000.0
+
+
+def _realized_volatility(
+    rows: _SymbolRows, signal_index: int, lookback_minutes: int
+) -> float | None:
+    """Std of 1-minute close-to-close returns over the lookback ending at the signal bar.
+
+    Causal: uses only bars at or before the signal bar. Returns ``None`` when the
+    window is too short or degenerate so weighting can fall back to equal.
+    """
+
+    lookback_time = rows.bars[signal_index].timestamp - timedelta(minutes=lookback_minutes)
+    start = bisect_left(rows.timestamps, lookback_time)
+    window = rows.bars[start : signal_index + 1]
+    if len(window) < 3:
+        return None
+    returns = [
+        window[i].close / window[i - 1].close - 1.0 for i in range(1, len(window))
+    ]
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+    vol = math.sqrt(variance)
+    return vol if vol > 0.0 else None
+
+
+def _select_candidates(
+    candidates: Sequence[_Candidate],
+    market_return_bps: float,
+    params: Mapping[str, object],
+) -> list[_Selection]:
+    min_funding = _param_float(params, "min_abs_funding_bps")
+    min_return = _param_float(params, "min_abs_return_bps")
+    min_latest_funding = _param_float(params, "min_latest_abs_funding_bps")
+    min_same_sign = _param_int(params, "min_same_sign_funding_events")
+    max_recent = _param_float(params, "max_recent_same_direction_return_bps")
+    selection_score = _param_str(params, "selection_score")
+
+    # Idiosyncratic dislocation is the name's price extension measured against the
+    # cross-section reference. "raw" uses the extension in bps vs the cross-section
+    # mean. "vol_normalized" divides each extension by its expected horizon move
+    # (per-minute vol × sqrt(horizon)) so the screen is comparable across names of
+    # different volatility. "beta_adjusted" subtracts a beta-scaled market move
+    # (beta ≈ name_vol / cross-section_vol) rather than the beta=1 mean, so a
+    # high-beta name's move is not mistaken for idiosyncratic dislocation.
+    mode = _param_str(params, "idiosyncratic_mode")
+    return_lookback_minutes = _param_int(params, "return_lookback_minutes")
+    betas: dict[str, float] | None = None
+    if mode == "vol_normalized":
+        min_idio = _param_float(params, "min_idiosyncratic_sigma")
+        dislocations = {
+            candidate.symbol: _dislocation_sigma(candidate, return_lookback_minutes)
+            for candidate in candidates
+        }
+        known = [value for value in dislocations.values() if value is not None]
+        if not known:
+            return []
+        market_dislocation = sum(known) / len(known)
+    else:
+        min_idio = _param_float(params, "min_idiosyncratic_return_bps")
+        dislocations = {
+            candidate.symbol: candidate.return_extension_bps for candidate in candidates
+        }
+        market_dislocation = market_return_bps
+        if mode == "beta_adjusted":
+            betas = _cross_section_betas(candidates)
+
+    selections: list[_Selection] = []
+    for candidate in candidates:
+        dislocation = dislocations[candidate.symbol]
+        if dislocation is None:
+            continue
+        reference = market_dislocation * (
+            betas[candidate.symbol] if betas is not None else 1.0
+        )
+        idio_long = reference - dislocation
+        idio_short = dislocation - reference
+        if (
+            _param_bool(params, "include_negative_funding_longs")
+            and candidate.funding_pressure_bps <= -min_funding
+            and candidate.return_extension_bps <= -min_return
+            and abs(candidate.latest_funding_bps) >= min_latest_funding
+            and candidate.same_sign_funding_events >= min_same_sign
+            and candidate.recent_return_bps >= -max_recent
+            and idio_long >= min_idio
+        ):
+            selections.append(
+                _Selection(
+                    candidate=candidate,
+                    side=1,
+                    score=_score(candidate, idio_long, selection_score),
+                    idiosyncratic=idio_long,
+                )
+            )
+        if (
+            _param_bool(params, "include_positive_funding_shorts")
+            and candidate.funding_pressure_bps >= min_funding
+            and candidate.return_extension_bps >= min_return
+            and abs(candidate.latest_funding_bps) >= min_latest_funding
+            and candidate.same_sign_funding_events >= min_same_sign
+            and candidate.recent_return_bps <= max_recent
+            and idio_short >= min_idio
+        ):
+            selections.append(
+                _Selection(
+                    candidate=candidate,
+                    side=-1,
+                    score=_score(candidate, idio_short, selection_score),
+                    idiosyncratic=idio_short,
+                )
+            )
+
+    selections.sort(
+        key=lambda selection: (
+            selection.score,
+            abs(selection.candidate.funding_pressure_bps),
+            abs(selection.candidate.return_extension_bps),
+        ),
+        reverse=True,
     )
-    _non_negative_int(params.get("symbol_cooldown_minutes", 0), "symbol_cooldown_minutes")
-    _positive_int(params.get("min_tail_count", 1), "min_tail_count")
-    _bool_param(params.get("balance_sides", False), "balance_sides")
-    selection_score = str(params.get("selection_score", "funding"))
-    if selection_score not in {"funding", "return", "product"}:
-        raise ValueError("selection_score must be one of: funding, return, product")
-    _bool_param(params.get("require_exit_horizon", False), "require_exit_horizon")
-    weight = float(params.get("weight", 1.0))
-    if not math.isfinite(weight) or weight <= 0.0:
-        raise ValueError("weight must be finite and positive")
-    hold_bars = _positive_int(params.get("hold_bars", params.get("hold_minutes", 480)), "hold_bars")
-    short_hold_bars = _positive_int(params.get("short_hold_bars", hold_bars), "short_hold_bars")
-    _positive_int(params.get("long_hold_bars", hold_bars), "long_hold_bars")
-    _non_negative_float(params.get("high_extension_short_return_bps", 0.0), "high_extension_short_return_bps")
-    _positive_int(
-        params.get("high_extension_short_hold_bars", short_hold_bars),
-        "high_extension_short_hold_bars",
+    return selections[: _param_int(params, "top_n")]
+
+
+def _selection_targets(
+    selections: Sequence[_Selection],
+    n_universe: int,
+    weighting: str,
+    dislocation_weight_power: float = 1.0,
+) -> list[float]:
+    """Per-selection target magnitudes (before the signed side is applied).
+
+    ``equal`` gives each name ``1/n_universe`` (gross scales with the number of
+    active names, unchanged from the equal-weight book). ``inverse_vol`` keeps the
+    same average per-name budget but reshapes it across the selected set in
+    proportion to ``1/realized_vol`` (risk parity), so gross per decision is
+    preserved while high-vol names carry proportionally less. ``dislocation``
+    reshapes the same budget in proportion to each name's idiosyncratic
+    dislocation magnitude — conviction weighting that leans into the biggest
+    capitulations. Both reshaping modes preserve gross per decision and fall back
+    to equal weight on a degenerate set.
+    """
+
+    base = 1.0 / n_universe
+    if weighting == "equal":
+        return [base] * len(selections)
+
+    if weighting == "dislocation":
+        weights = [
+            max(0.0, selection.idiosyncratic) ** dislocation_weight_power
+            for selection in selections
+        ]
+        mean_weight = sum(weights) / len(weights) if weights else 0.0
+        if mean_weight <= 0.0:
+            return [base] * len(selections)
+        return [base * value / mean_weight for value in weights]
+
+    inverse = [
+        1.0 / selection.candidate.volatility
+        if selection.candidate.volatility
+        else None
+        for selection in selections
+    ]
+    known = [value for value in inverse if value is not None]
+    if not known:
+        return [base] * len(selections)
+    fill = sum(known) / len(known)
+    inverse = [value if value is not None else fill for value in inverse]
+    mean_inverse = sum(inverse) / len(inverse)
+    return [base * value / mean_inverse for value in inverse]
+
+
+def _cross_section_betas(candidates: Sequence[_Candidate]) -> dict[str, float]:
+    """Per-name beta proxy to the cross-section: ``name_vol / mean_vol``.
+
+    A vol-ratio proxy for market beta (exact under the high cross-perp
+    correlation of crowded regimes). Names or a cross-section with unknown
+    volatility fall back to beta 1.0, which reproduces the plain-mean reference.
+    """
+
+    known = [candidate.volatility for candidate in candidates if candidate.volatility]
+    if not known:
+        return {candidate.symbol: 1.0 for candidate in candidates}
+    market_vol = sum(known) / len(known)
+    if market_vol <= 0.0:
+        return {candidate.symbol: 1.0 for candidate in candidates}
+    return {
+        candidate.symbol: (
+            candidate.volatility / market_vol if candidate.volatility else 1.0
+        )
+        for candidate in candidates
+    }
+
+
+def _dislocation_sigma(
+    candidate: _Candidate, return_lookback_minutes: int
+) -> float | None:
+    """Price extension in units of the name's expected move over the lookback.
+
+    Divides the raw extension by ``per_minute_vol * sqrt(horizon)`` (random-walk
+    horizon vol), so a dislocation is measured relative to each name's own
+    volatility rather than in absolute bps. Returns ``None`` when volatility is
+    unknown or degenerate so the name is excluded from vol-normalized screening.
+    """
+
+    if not candidate.volatility:
+        return None
+    scale_bps = candidate.volatility * math.sqrt(return_lookback_minutes) * 10_000.0
+    if scale_bps <= 0.0:
+        return None
+    return candidate.return_extension_bps / scale_bps
+
+
+def _cross_section_reference_bps(values: Sequence[float], mode: str) -> float:
+    """Cross-section reference extension: the mean, or the robust median.
+
+    ``median`` resists the skew a few co-moving extreme names impose on the mean,
+    giving a cleaner "typical move" for the idiosyncratic dislocation.
+    """
+
+    if not values:
+        return 0.0
+    if mode == "median":
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2 == 1:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2.0
+    return sum(values) / len(values)
+
+
+def _reference_volatility(selections: Sequence[_Selection]) -> float | None:
+    """Mean realized volatility across the selected names, or ``None`` if unknown.
+
+    Used as the reference point for risk-time hold scaling so a name is held
+    relative to how volatile it is versus the rest of the selected book.
+    """
+
+    known = [
+        selection.candidate.volatility
+        for selection in selections
+        if selection.candidate.volatility
+    ]
+    if not known:
+        return None
+    return sum(known) / len(known)
+
+
+def _scaled_hold_minutes(
+    base_hold: int,
+    volatility: float | None,
+    reference_volatility: float | None,
+    scaling: float,
+) -> int:
+    """Hold length, optionally scaled into risk-time.
+
+    ``scaling == 0`` returns the fixed ``base_hold``. Otherwise the hold is
+    ``base_hold * (reference_vol / name_vol) ** scaling`` — higher-vol names are
+    held shorter — clamped to ``[_HOLD_MIN_MINUTES, _HOLD_MAX_MINUTES]``. Falls
+    back to the fixed hold when either volatility is unknown.
+    """
+
+    if scaling <= 0.0 or not volatility or not reference_volatility:
+        return base_hold
+    scaled = base_hold * (reference_volatility / volatility) ** scaling
+    return int(min(_HOLD_MAX_MINUTES, max(_HOLD_MIN_MINUTES, scaled)))
+
+
+def _reference_idiosyncratic(selections: Sequence[_Selection]) -> float | None:
+    """Mean positive idiosyncratic dislocation across the selected names."""
+
+    positive = [
+        selection.idiosyncratic
+        for selection in selections
+        if selection.idiosyncratic > 0.0
+    ]
+    if not positive:
+        return None
+    return sum(positive) / len(positive)
+
+
+def _conviction_scaled_hold(
+    base_hold: int,
+    idiosyncratic: float,
+    reference_idiosyncratic: float | None,
+    scaling: float,
+) -> int:
+    """Hold length scaled by conviction (idiosyncratic dislocation magnitude).
+
+    ``scaling == 0`` returns the fixed ``base_hold``. Otherwise the hold is
+    ``base_hold * (idio / reference_idio) ** scaling`` — bigger capitulations are
+    held longer for their bigger, slower bounce — clamped to
+    ``[_HOLD_MIN_MINUTES, _HOLD_MAX_MINUTES]``. Falls back to the fixed hold when
+    the dislocation reference is unknown or non-positive.
+    """
+
+    if scaling <= 0.0 or idiosyncratic <= 0.0 or not reference_idiosyncratic:
+        return base_hold
+    scaled = base_hold * (idiosyncratic / reference_idiosyncratic) ** scaling
+    return int(min(_HOLD_MAX_MINUTES, max(_HOLD_MIN_MINUTES, scaled)))
+
+
+def _score(
+    candidate: _Candidate,
+    idiosyncratic_dislocation: float,
+    selection_score: str,
+) -> float:
+    funding_score = abs(candidate.funding_pressure_bps)
+    extension_score = max(0.0, idiosyncratic_dislocation)
+    if selection_score == "funding":
+        return funding_score
+    if selection_score == "extension":
+        return extension_score
+    return funding_score + extension_score
+
+
+def _observations(candidate: _Candidate) -> tuple[ObservationRef, ...]:
+    return (
+        ObservationRef(
+            symbol=candidate.symbol,
+            timestamp=candidate.lookback_row.timestamp,
+            field="close",
+            source="crypto_perp_1min_with_funding",
+        ),
+        ObservationRef(
+            symbol=candidate.symbol,
+            timestamp=candidate.signal_row.timestamp,
+            field="close",
+            source="crypto_perp_1min_with_funding",
+        ),
+        *(
+            (
+                ObservationRef(
+                    symbol=candidate.symbol,
+                    timestamp=candidate.recent_row.timestamp,
+                    field="close",
+                    source="crypto_perp_1min_with_funding",
+                ),
+            )
+            if candidate.recent_row is not None
+            else ()
+        ),
+        *(
+            ObservationRef(
+                symbol=candidate.symbol,
+                timestamp=event.bar_timestamp,
+                field="funding_rate",
+                source="crypto_perp_1min_with_funding",
+            )
+            for event in candidate.funding_events
+        ),
     )
-    state_mode = str(params.get("state_mode", "suppress_until_exit"))
-    if state_mode not in {"off", "suppress_until_exit"}:
-        raise ValueError("state_mode must be one of: off, suppress_until_exit")
-    _non_negative_int(params.get("overlap_exit_buffer_bars", 2), "overlap_exit_buffer_bars")
-    _exit_controls(params)
+
+
+def _param_int(params: Mapping[str, object], key: str) -> int:
+    return cast(int, params[key])
+
+
+def _param_float(params: Mapping[str, object], key: str) -> float:
+    return cast(float, params[key])
+
+
+def _param_bool(params: Mapping[str, object], key: str) -> bool:
+    return cast(bool, params[key])
+
+
+def _param_str(params: Mapping[str, object], key: str) -> str:
+    return cast(str, params[key])
+
+
+def _datetime_value(value: object, field_name: str) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    else:
+        raise ValueError(f"{field_name} must be a datetime or ISO string")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _finite_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"{name} must be numeric")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite")
+    return parsed
+
+
+def _positive_float(value: object, name: str) -> float:
+    parsed = _finite_float(value, name)
+    if parsed <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return parsed
+
+
+def _non_negative_float(value: object, name: str) -> float:
+    parsed = _finite_float(value, name)
+    if parsed < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return parsed
+
+
+def _int_value(value: object, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    return value
 
 
 def _positive_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _int_value(value, name)
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
 
 
 def _non_negative_int(value: object, name: str) -> int:
-    parsed = int(value)
+    parsed = _int_value(value, name)
     if parsed < 0:
         raise ValueError(f"{name} must be non-negative")
     return parsed
 
 
-def _non_negative_float(value: object, name: str) -> float:
-    parsed = float(value)
-    if not math.isfinite(parsed) or parsed < 0.0:
-        raise ValueError(f"{name} must be finite and non-negative")
+def _hour(value: object, name: str) -> int:
+    parsed = _int_value(value, name)
+    if parsed < 0 or parsed > 23:
+        raise ValueError(f"{name} must be in [0, 23]")
     return parsed
 
 
-def _optional_positive_float(value: object, name: str) -> float | None:
-    if value is None:
-        return None
-    parsed = float(value)
-    if not math.isfinite(parsed) or parsed <= 0.0:
-        raise ValueError(f"{name} must be finite and positive")
+def _session_end_hour(value: object) -> int:
+    parsed = _int_value(value, "session_end_hour")
+    if parsed < 1 or parsed > 24:
+        raise ValueError("session_end_hour must be in [1, 24]")
     return parsed
-
-
-def _exit_controls(params: Mapping[str, object]) -> dict[str, object]:
-    controls: dict[str, object] = {}
-    for name in ("take_profit_bps", "stop_loss_bps", "trailing_stop_bps"):
-        value = _optional_positive_float(params.get(name), name)
-        if value is not None:
-            controls[name] = value
-    return controls
 
 
 def _bool_param(value: object, name: str) -> bool:
@@ -502,506 +1031,39 @@ def _bool_param(value: object, name: str) -> bool:
     return value
 
 
-def _rows_by_symbol(
-    bars: Sequence[Mapping[str, object]],
-    *,
-    need_timestamp_index: bool = True,
-) -> dict[str, _SymbolRows]:
-    rows_by_symbol: dict[str, list[tuple[datetime, float | None, datetime | None, float | None, bool]]] = {}
-    for row in bars:
-        symbol = str(row["symbol"])
-        rows_by_symbol.setdefault(symbol, []).append(
-            (
-                _as_datetime(row["timestamp"]),
-                _finite_float(row["close"]),
-                _optional_datetime(row["funding_timestamp"]),
-                _finite_float(row["funding_rate"]),
-                bool(row["has_funding_event"]),
-            )
+def _bool_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    raise ValueError("has_funding_event must be boolean")
+
+
+def _selection_score(value: object) -> str:
+    parsed = str(value)
+    if parsed not in {"combined", "funding", "extension"}:
+        raise ValueError("selection_score must be one of: combined, funding, extension")
+    return parsed
+
+
+def _idiosyncratic_mode(value: object) -> str:
+    parsed = str(value)
+    if parsed not in {"raw", "vol_normalized", "beta_adjusted"}:
+        raise ValueError(
+            "idiosyncratic_mode must be one of: raw, vol_normalized, beta_adjusted"
         )
+    return parsed
 
-    indexed: dict[str, _SymbolRows] = {}
-    for symbol, rows in rows_by_symbol.items():
-        rows.sort(key=lambda item: item[0])
-        timestamps: list[datetime] = []
-        closes_by_timestamp: dict[datetime, float] = {}
-        conflicting_close_timestamps: set[datetime] = set()
-        funding_event_rows: list[tuple[datetime, datetime, float]] = []
 
-        for timestamp, close, funding_time, funding_rate, has_funding_event in rows:
-            timestamps.append(timestamp)
+def _cross_section_reference(value: object) -> str:
+    parsed = str(value)
+    if parsed not in {"mean", "median"}:
+        raise ValueError("cross_section_reference must be one of: mean, median")
+    return parsed
 
-            if close is not None:
-                if timestamp in closes_by_timestamp:
-                    existing_close = closes_by_timestamp[timestamp]
-                    if not math.isclose(existing_close, float(close), rel_tol=0.0, abs_tol=1e-12):
-                        conflicting_close_timestamps.add(timestamp)
-                else:
-                    closes_by_timestamp[timestamp] = float(close)
 
-            if has_funding_event and funding_time is not None and funding_rate is not None:
-                funding_event_rows.append((timestamp, funding_time, funding_rate))
-
-        funding_rate_by_time: dict[datetime, float] = {}
-        for _, funding_time, funding_rate in funding_event_rows:
-            existing_rate = funding_rate_by_time.get(funding_time)
-            if existing_rate is not None and not math.isclose(
-                existing_rate,
-                funding_rate,
-                rel_tol=0.0,
-                abs_tol=1e-15,
-            ):
-                raise ValueError(f"conflicting duplicate funding rates at {funding_time.isoformat()}")
-            funding_rate_by_time[funding_time] = funding_rate
-
-        funding_events_by_time = tuple(
-            sorted(
-                (
-                    (funding_time, row_timestamp, funding_rate)
-                    for row_timestamp, funding_time, funding_rate in funding_event_rows
-                ),
-                key=lambda item: (item[0], item[1]),
-            )
-        )
-
-        indexed[symbol] = _SymbolRows(
-            timestamps=tuple(timestamps),
-            timestamp_to_index={timestamp: index for index, timestamp in enumerate(timestamps)}
-            if need_timestamp_index
-            else {},
-            closes_by_timestamp=closes_by_timestamp,
-            conflicting_close_timestamps=frozenset(conflicting_close_timestamps),
-            funding_event_rows=funding_events_by_time,
-            funding_event_times=tuple(item[0] for item in funding_events_by_time),
-            latest_timestamp=timestamps[-1],
-        )
-    return indexed
-
-
-def _filter_exit_horizon(
-    candidates: list[dict[str, Any]],
-    rows_by_symbol: dict[str, _SymbolRows],
-    decision_time: datetime,
-    hold_bars: int,
-    require_exit_horizon: bool,
-) -> list[dict[str, Any]]:
-    if not require_exit_horizon:
-        return candidates
-    return [
-        candidate
-        for candidate in candidates
-        if _has_exit_horizon(rows_by_symbol[candidate["symbol"]], decision_time, hold_bars)
-    ]
-
-
-def _has_exit_horizon(rows: _SymbolRows, decision_time: datetime, hold_bars: int) -> bool:
-    decision_index = rows.timestamp_to_index.get(decision_time)
-    if decision_index is None:
-        return False
-    return decision_index + hold_bars < len(rows.timestamps)
-
-
-def _decision_candidates(
-    rows_by_symbol: dict[str, _SymbolRows],
-    decision_time: datetime,
-    funding_lookback_events: int,
-    return_lookback_minutes: int,
-    volatility_lookback_minutes: int,
-    recent_return_lookback_minutes: int,
-) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    observed_time = decision_time - timedelta(minutes=1)
-    base_time = decision_time - timedelta(minutes=return_lookback_minutes)
-
-    for symbol, rows in rows_by_symbol.items():
-        observed_close = _exact_close_at(rows, observed_time)
-        base_close = _exact_close_at(rows, base_time)
-        funding_stats = _funding_pressure_stats(rows, decision_time, funding_lookback_events)
-        if (
-            observed_close is None
-            or base_close is None
-            or observed_close <= 0.0
-            or base_close <= 0.0
-            or funding_stats is None
-        ):
-            continue
-        return_extension_bps = (observed_close / base_close - 1.0) * 10_000.0
-        candidates.append(
-            {
-                "symbol": symbol,
-                "funding_pressure_bps": funding_stats["funding_pressure_bps"],
-                "funding_same_sign_events": funding_stats["funding_same_sign_events"],
-                "latest_funding_bps": funding_stats["latest_funding_bps"],
-                "return_extension_bps": return_extension_bps,
-                "return_z": _realized_return_z(
-                    rows,
-                    observed_time,
-                    return_lookback_minutes,
-                    volatility_lookback_minutes,
-                    return_extension_bps,
-                ),
-                "recent_return_bps": _recent_return_bps(rows, observed_time, recent_return_lookback_minutes),
-                "observation_points": (
-                    (observed_time, "close"),
-                    (base_time, "close"),
-                    *((timestamp, "funding_rate") for timestamp in funding_stats["funding_observation_timestamps"]),
-                ),
-            }
-        )
-    return candidates
-
-
-def _exact_close_at(rows: _SymbolRows, timestamp: datetime) -> float | None:
-    if timestamp in rows.conflicting_close_timestamps:
-        raise ValueError(f"conflicting duplicate close rows at {timestamp.isoformat()}")
-    return rows.closes_by_timestamp.get(timestamp)
-
-
-def _funding_pressure_stats(
-    rows: _SymbolRows,
-    decision_time: datetime,
-    funding_lookback_events: int,
-) -> dict[str, float | int | tuple[datetime, ...]] | None:
-    end = bisect_right(rows.funding_event_times, decision_time)
-    recent: list[tuple[datetime, datetime, float]] = []
-    seen_funding_times: set[datetime] = set()
-    for index in range(end - 1, -1, -1):
-        funding_time, row_timestamp, funding_rate = rows.funding_event_rows[index]
-        if row_timestamp > decision_time or funding_time in seen_funding_times:
-            continue
-        seen_funding_times.add(funding_time)
-        recent.append((funding_time, row_timestamp, funding_rate))
-        if len(recent) == funding_lookback_events:
-            break
-
-    if len(recent) < funding_lookback_events:
-        return None
-    recent.reverse()
-    recent_rates = [rate for _, _, rate in recent]
-    funding_pressure_bps = sum(recent_rates) * 10_000.0
-    pressure_sign = _sign(funding_pressure_bps)
-    return {
-        "funding_pressure_bps": funding_pressure_bps,
-        "funding_same_sign_events": sum(1 for rate in recent_rates if _sign(rate) == pressure_sign),
-        "latest_funding_bps": recent_rates[-1] * 10_000.0,
-        "funding_observation_timestamps": tuple(row_timestamp for _, row_timestamp, _ in recent),
-    }
-
-
-def _recent_return_bps(rows: _SymbolRows, observed_time: datetime, lookback_minutes: int) -> float | None:
-    if lookback_minutes <= 0:
-        return None
-    observed_close = _exact_close_at(rows, observed_time)
-    base_close = _exact_close_at(rows, observed_time - timedelta(minutes=lookback_minutes))
-    if observed_close is None or base_close is None or observed_close <= 0.0 or base_close <= 0.0:
-        return None
-    return (observed_close / base_close - 1.0) * 10_000.0
-
-
-def _realized_return_z(
-    rows: _SymbolRows,
-    observed_time: datetime,
-    return_lookback_minutes: int,
-    volatility_lookback_minutes: int,
-    return_extension_bps: float,
-) -> float | None:
-    if volatility_lookback_minutes <= 0:
-        return None
-
-    returns: list[float] = []
-    start_time = observed_time - timedelta(minutes=volatility_lookback_minutes)
-    previous_close = _exact_close_at(rows, start_time)
-    if previous_close is None or previous_close <= 0.0:
-        return None
-    for offset in range(1, volatility_lookback_minutes + 1):
-        timestamp = start_time + timedelta(minutes=offset)
-        close = _exact_close_at(rows, timestamp)
-        if close is None or close <= 0.0:
-            return None
-        returns.append(math.log(close / previous_close))
-        previous_close = close
-
-    if len(returns) < 2:
-        return None
-    mean_return = sum(returns) / len(returns)
-    variance = sum((value - mean_return) ** 2 for value in returns) / len(returns)
-    horizon_vol_bps = math.sqrt(variance) * math.sqrt(return_lookback_minutes) * 10_000.0
-    if horizon_vol_bps <= 0.0:
-        return None
-    return return_extension_bps / horizon_vol_bps
-
-
-def _passes_return_z(candidate: Mapping[str, Any], min_abs_return_z: float) -> bool:
-    if min_abs_return_z <= 0.0:
-        return True
-    value = candidate.get("return_z")
-    return isinstance(value, float) and abs(value) >= min_abs_return_z
-
-
-def _passes_recent_cooloff(
-    candidate: Mapping[str, Any],
-    side: str,
-    max_recent_same_direction_return_bps: float,
-) -> bool:
-    if max_recent_same_direction_return_bps <= 0.0:
-        return True
-    value = candidate.get("recent_return_bps")
-    if not isinstance(value, float):
-        return False
-    if side == "short":
-        return value <= max_recent_same_direction_return_bps
-    return value >= -max_recent_same_direction_return_bps
-
-
-def _passes_idiosyncratic_return(
-    candidate: Mapping[str, Any],
-    side: str,
-    market_return_bps: float,
-    min_idiosyncratic_return_bps: float,
-) -> bool:
-    if min_idiosyncratic_return_bps <= 0.0:
-        return True
-    idiosyncratic_return_bps = float(candidate["return_extension_bps"]) - market_return_bps
-    if side == "short":
-        return idiosyncratic_return_bps >= min_idiosyncratic_return_bps
-    return idiosyncratic_return_bps <= -min_idiosyncratic_return_bps
-
-
-def _passes_max_short_return_extension(
-    candidate: Mapping[str, Any],
-    max_short_return_extension_bps: float,
-) -> bool:
-    if max_short_return_extension_bps <= 0.0:
-        return True
-    return float(candidate["return_extension_bps"]) <= max_short_return_extension_bps
-
-
-def _passes_long_funding_pressure(
-    candidate: Mapping[str, Any],
-    min_abs_funding_bps: float,
-) -> bool:
-    return float(candidate["funding_pressure_bps"]) <= -min_abs_funding_bps
-
-
-def _passes_long_candidate(
-    candidate: Mapping[str, Any],
-    min_abs_funding_bps: float,
-    min_abs_return_bps: float,
-    min_latest_abs_funding_bps: float,
-    min_abs_return_z: float,
-    max_recent_same_direction_return_bps: float,
-    market_return_bps: float,
-    min_long_idiosyncratic_return_bps: float,
-) -> bool:
-    return (
-        _passes_long_funding_pressure(candidate, min_abs_funding_bps)
-        and candidate["return_extension_bps"] <= -min_abs_return_bps
-        and abs(candidate["latest_funding_bps"]) >= min_latest_abs_funding_bps
-        and _passes_return_z(candidate, min_abs_return_z)
-        and _passes_recent_cooloff(candidate, "long", max_recent_same_direction_return_bps)
-        and _passes_idiosyncratic_return(candidate, "long", market_return_bps, min_long_idiosyncratic_return_bps)
-        and candidate["symbol"] not in _EXCLUDED_LONG_SYMBOLS
-    )
-
-
-def _symbol_funding_threshold(symbol: object, min_abs_funding_bps: float) -> float:
-    if symbol == "ADA-PERP":
-        return min_abs_funding_bps
-    return max(min_abs_funding_bps, 1.5)
-
-
-def _regime_funding_threshold(min_abs_funding_bps: float, market_return_bps: float) -> float:
-    if market_return_bps <= -90.0:
-        return max(min_abs_funding_bps, 1.5)
-    return min_abs_funding_bps
-
-
-def _symbol_long_hold_bars(symbol: object, short_hold_bars: int, long_hold_bars: int) -> int:
-    if str(symbol) in _EXTENDED_HOLD_LONG_SYMBOLS:
-        return _EXTENDED_HOLD_BARS
-    return short_hold_bars
-
-
-def _candidate_hold_bars(
-    candidate: Mapping[str, Any],
-    side: str,
-    short_hold_bars: int,
-    long_hold_bars: int,
-    high_extension_short_return_bps: float,
-    high_extension_short_hold_bars: int,
-) -> int:
-    if side == "long":
-        return long_hold_bars
-    return short_hold_bars
-
-
-def _selected_tail(
-    candidates: list[dict[str, Any]],
-    side: str,
-    selection_score: str,
-    top_n: int,
-) -> list[dict[str, Any]]:
-    if selection_score == "product":
-        return sorted(
-            candidates,
-            key=lambda item: (
-                -abs(item["funding_pressure_bps"] * item["return_extension_bps"]),
-                -abs(item["funding_pressure_bps"]),
-                -abs(item["return_extension_bps"]),
-                item["symbol"],
-            ),
-        )[:top_n]
-    if selection_score == "return":
-        return sorted(
-            candidates,
-            key=lambda item: (
-                -abs(item["return_extension_bps"]),
-                -abs(item["funding_pressure_bps"]),
-                item["symbol"],
-            ),
-        )[:top_n]
-    if side == "short":
-        return sorted(
-            candidates,
-            key=lambda item: (-item["funding_pressure_bps"], -item["return_extension_bps"], item["symbol"]),
-        )[:top_n]
-    return sorted(
-        candidates,
-        key=lambda item: (item["funding_pressure_bps"], item["return_extension_bps"], item["symbol"]),
-    )[:top_n]
-
-
-def _passes_symbol_cooldown(
-    symbol: str,
-    decision_time: datetime,
-    last_signal_time_by_symbol: Mapping[str, datetime],
-    symbol_cooldown_minutes: int,
-) -> bool:
-    if symbol_cooldown_minutes <= 0:
-        return True
-    last_signal_time = last_signal_time_by_symbol.get(symbol)
-    if last_signal_time is None:
-        return True
-    return decision_time - last_signal_time >= timedelta(minutes=symbol_cooldown_minutes)
-
-
-def _passes_state_gate(
-    symbol: str,
-    decision_time: datetime,
-    active_until_by_symbol: Mapping[str, datetime],
-    state_mode: str,
-) -> bool:
-    if state_mode == "off":
-        return True
-    active_until = active_until_by_symbol.get(symbol)
-    return active_until is None or decision_time > active_until
-
-
-def _record_active_window(
-    symbol: str,
-    decision_time: datetime,
-    hold_bars: int,
-    overlap_exit_buffer_bars: int,
-    active_until_by_symbol: dict[str, datetime],
-    state_mode: str,
-) -> None:
-    if state_mode == "off":
-        return
-    active_until_by_symbol[symbol] = decision_time + timedelta(minutes=hold_bars + overlap_exit_buffer_bars)
-
-
-def _sign(value: float) -> int:
-    if value > 0.0:
-        return 1
-    if value < 0.0:
-        return -1
-    return 0
-
-
-def _is_decision_time(timestamp: datetime, decision_interval_minutes: int, params: Mapping[str, object]) -> bool:
-    session_start_hour = int(params.get("session_start_hour", 0))
-    session_end_hour = int(params.get("session_end_hour", 24))
-    if timestamp.second or timestamp.microsecond:
-        return False
-    if not session_start_hour <= timestamp.hour < session_end_hour:
-        return False
-    minute_of_day = timestamp.hour * 60 + timestamp.minute
-    return minute_of_day % decision_interval_minutes == 0
-
-
-def _is_long_decision_time(timestamp: datetime, decision_interval_minutes: int, params: Mapping[str, object]) -> bool:
-    if _is_decision_time(timestamp, decision_interval_minutes, params):
-        return True
-    if decision_interval_minutes < 8:
-        return False
-    session_start_hour = int(params.get("session_start_hour", 0))
-    session_end_hour = int(params.get("session_end_hour", 24))
-    if timestamp.second or timestamp.microsecond:
-        return False
-    if not session_start_hour <= timestamp.hour < session_end_hour:
-        return False
-    minute_of_day = timestamp.hour * 60 + timestamp.minute
-    interval = 100
-    return interval > 0 and minute_of_day % interval == 0
-
-
-def _passes_symbol_session_start_gate(symbol: object, timestamp: datetime, params: Mapping[str, object]) -> bool:
-    if str(symbol) != "ADA-PERP":
-        return True
-    session_start_hour = int(params.get("session_start_hour", 0))
-    session_start_minute = session_start_hour * 60
-    minute_of_day = timestamp.hour * 60 + timestamp.minute
-    return not (session_start_minute <= minute_of_day <= session_start_minute + 100)
-
-
-def _signal(
-    candidate: Mapping[str, Any],
-    decision_time: datetime,
-    as_of_time: datetime,
-    side: str,
-    weight: float,
-    hold_bars: int,
-    exit_controls: Mapping[str, object],
-    state_mode: str,
-) -> dict[str, object]:
-    symbol = str(candidate["symbol"])
-    payload: dict[str, object] = {
-        "symbol": symbol,
-        "decision_time": decision_time,
-        "as_of_time": as_of_time,
-        "side": side,
-        "weight": weight,
-        "hold_bars": hold_bars,
-        "max_hold_bars": hold_bars,
-        "funding_pressure_bps": candidate["funding_pressure_bps"],
-        "entry_return_extension_bps": candidate["return_extension_bps"],
-        "signal_family": _STRATEGY_ID,
-        "state_mode": state_mode,
-        "observations": tuple(
-            ObservationRef(symbol=symbol, timestamp=timestamp, field=field, source="quant_data")
-            for timestamp, field in candidate.get("observation_points", ())
-        ),
-    }
-    payload.update(exit_controls)
-    return payload
-
-
-def _as_datetime(value: object) -> datetime:
-    if not isinstance(value, datetime):
-        raise TypeError(f"expected datetime timestamp, got {type(value).__name__}")
-    return value
-
-
-def _optional_datetime(value: object) -> datetime | None:
-    if value is None:
-        return None
-    return _as_datetime(value)
-
-
-def _finite_float(value: object) -> float | None:
-    if value is None:
-        return None
-    parsed = float(value)
-    if not math.isfinite(parsed):
-        return None
+def _weighting(value: object) -> str:
+    parsed = str(value)
+    if parsed not in {"equal", "inverse_vol", "dislocation"}:
+        raise ValueError("weighting must be one of: equal, inverse_vol, dislocation")
     return parsed

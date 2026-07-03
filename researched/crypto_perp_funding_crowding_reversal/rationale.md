@@ -1,82 +1,83 @@
-# Rationale
+# Rationale — Crypto Perp Funding Crowding Reversal (curated Train handoff)
 
-## Working Thesis
+Curated for downstream evaluation. Train-only evidence; not OOS/paper/live/deployability proof.
+This is the current lifecycle; it supersedes the prior symbol-specific lifecycle (git history).
 
-Crowded perpetual positioning reflected by persistent negative funding pressure and recent negative price extension mean-reverts after the funding pressure is observable.
+## Thesis
 
-## Final Train Survivor
+Realized same-sign funding pressure plus same-direction price extension marks crowded crypto-perp
+positioning that mean-reverts over an intraday fixed-horizon hold. Negative summed funding (shorts
+are paying — a crowded-short capitulation) plus a name being idiosyncratically down versus the
+cross-section marks the crowded move; the book fades it by going long and exits at a fixed horizon.
 
-`attempt-0099` is the selected Train survivor.
+## Observable (decision-time causal)
 
-Core expression:
+- Data: `crypto_perp_1min_with_funding`; fields `close`, `available_at`, `funding_timestamp`,
+  `funding_rate`, `has_funding_event`. A row is used only when `available_at <= decision_time`.
+- Signal: sum of the latest realized funding settlements (crowding, sign-only — see below), plus
+  price extension vs a completed prior close, measured idiosyncratically against the cross-section
+  mean over the candidates present at the signal bar.
 
-- Long-only.
-- Excludes BTC-PERP from emitted trades.
-- Uses BTC only as cross-sectional context.
-- Trades ETH-PERP, DOGE-PERP, ADA-PERP, and LINK-PERP.
-- Requires negative summed funding pressure and negative return extension.
-- Applies a stricter funding threshold during broad selloff regimes.
-- Skips early-session ADA entries to avoid timing noise.
-- Uses longer holds for DOGE/ETH/LINK and a shorter ADA coverage hold.
+## Universe (protocol-frozen, return-blind)
 
-This is Train-only evidence.
+Eight liquid majors: `BTC, ETH, SOL, XRP, BNB, DOGE, ADA, LINK` (`-PERP`). Selected for liquidity
+and full in-window coverage, never for realized return. Breadth is converged via the signal (the
+active book holds fewer names where the edge is strongest), never by pruning the frozen universe.
 
-## Durable Decisions
+## Survivor (attempt-0012, recommended robust)
 
-- **Do not use the short book.** Short-side variants often repaired coverage but degraded cost-stressed robustness.
-- **Do not add fixed price exits by default.** Take-profit, stop-loss, and trailing-stop variants repeatedly harmed cost stress and payoff.
-- **BTC is not part of the emitted book.** BTC funding behaved more like low-edge anchor/hedge flow than clean crowding dislocation.
-- **ADA is coverage ballast.** ADA is lower quality than DOGE/ETH/LINK but necessary for subwindow coverage.
-- **High-edge symbols need longer holds.** DOGE/ETH/LINK improved with longer holds than ADA.
-- **Strong funding filters are high quality but sparse.** They produced high raw scores but failed subwindow coverage unless carefully repaired.
+Long-only; cadence 240; `min_same_sign=1`, `min_abs_funding=1 bp`, `min_idio=2.5 bp` (raw, mean
+reference); recent-return guard off; hold 720; `top_n=5`; `entry_twap=20`, `exit_twap=30`;
+`weighting=dislocation` with `dislocation_weight_power=3`. Score 0.326 (deployed-return LCB), t 2.15,
+PF 1.84, deployed vol 15.0% (full risk budget), breadth 0.319, all 8 gates pass, 6/6 subwindows
+positive. Edge concentrated in high-vol altcoins (DOGE/XRP/ADA/SOL), broadly cross-sectional (7/8
+names net positive), not a one-name artifact.
 
-## Retained Candidate Buckets
+## The two research wins (what makes this survivor)
 
-### Survivors
+1. **Exit-ramp decoupling (capacity).** All names in a cohort exit together at the fixed horizon;
+   that synchronized unwind pinned the 0.50 bar-participation cap and throttled the book to ~10%
+   vol. Spreading the *exit* over more bars than the entry (`exit_twap=30` vs `entry_twap=20`)
+   relieves the pin and deploys the full 15% risk budget — smoothly and monotonically (not the
+   fragile entry-TWAP spike). This is the dominant deployed-return lever; capacity relief is alpha,
+   not a wall.
+2. **Convex dislocation-conviction sizing.** Equal-weighting the 1-3 held names leaves return on the
+   table: the edge scales *super-linearly* with idiosyncratic dislocation (the biggest crowded-short
+   capitulations bounce biggest). Weighting each name by its dislocation raised to ~cubic power
+   (gross preserved) lifts profit factor and t. Inspected as robust: it improves the *weakest*
+   subwindow while PnL stays spread across 5-6 names — a genuine cross-sectional feature, not
+   in-sample winner-weighting.
 
-- `attempt-0014`: first all-gates survivor.
-- `attempt-0018`: 90-minute/8-hour survivor.
-- `attempt-0033`: strong non-BTC long-only book.
-- `attempt-0059`: selloff-gated funding-threshold survivor.
-- `attempt-0068`: per-symbol hold improvement.
-- `attempt-0079`: exact ADA session-start skip.
-- `attempt-0080`: ADA early-window skip.
-- `attempt-0093`: 14-hour high-edge hold.
-- `attempt-0095`: 15-hour high-edge hold.
-- `attempt-0098`: 14.25-hour high-edge hold.
-- `attempt-0099`: final best survivor.
+## Durable falsifications (candidate taxonomy)
 
-### Gated Candidates
+- **Signal is absolute-bps, vol-seeking.** Vol-normalizing the dislocation is catastrophic
+  (attempt-0002); beta-adjusting it is mildly worse (0010); median vs mean reference is inert
+  (0007). The raw absolute dislocation vs the cross-section mean is the right form.
+- **Funding is a sign detector only.** Level/count/magnitude/recency and adding funding magnitude to
+  the conviction weight are all non-predictive (0005; and 0014's overfit tail).
+- **Exit is fixed-horizon 720.** Any *varied* exit — shorter/longer fixed, take-profit, vol-scaled
+  (0006), dislocation-scaled (0009) — hurts: shorter cuts the slow bounce; any per-name variation
+  adds return-series heterogeneity that lowers the effective sample size and t.
+- **Conviction belongs in sizing, not hold, and on the dislocation axis, not funding or recent
+  return** (0015 worse; 0009 worse).
 
-- `attempt-0097`: 14.5-hour boundary candidate.
-- `attempt-0100`: final 14.05-hour boundary test.
+## Residual risks (for OOS scrutiny)
 
-### Near Misses
+- **Marginal significance.** t ≈ 2.1 on 8 names is a knife-edge; the pass is not robust-with-margin.
+  This is universe-bound: 8 majors supply only 1-3 concurrent crowded-short setups (duty cycle
+  ~33%), which pins statistical independence and hence t near 2 regardless of shape or scale.
+- **Overfit tail.** The protocol numeric-max (attempt-0014, 0.341) adds a mechanism-less +0.015 via
+  non-predictive funding magnitude and power-4 convexity. Prefer attempt-0012; treat 0014 as an
+  explicit overfit robustness check.
+- **Lumpy edge.** Per-trade kurtosis is high; the big bounces are the edge (tail-trimming hurt), so
+  the return distribution is fat-tailed by construction.
 
-- `attempt-0013`: high-score long-only variant, failed sparse coverage.
-- `attempt-0046`: strong 1.5 bps funding filter, high quality but sparse.
-- `attempt-0049`: dense strong-funding book, one-trade sparse miss.
-- `attempt-0056`: selloff strong-threshold sparse miss.
-- `attempt-0057`: deep selloff one-trade sparse miss.
-- `attempt-0081`: wide ADA skip, high raw score but sparse miss.
-- `attempt-0087`: ADA latest-funding quality filter, sparse miss.
+## Reseed case (Season's call; not part of this package)
 
-### Anti-Patterns
-
-- `attempt-0010`: short coverage repaired coverage but killed economics.
-- `attempt-0017`: take-profit exit failed.
-- `attempt-0024`: stop-loss exit failed.
-- `attempt-0025`: trailing-stop exit failed.
-- `attempt-0053`: hard funding acceleration filter failed.
-- `attempt-0055`: tranche-cap failed.
-
-## Residual Risks
-
-- Heavy Train-selection pressure: 100 attempts on one Train window.
-- Candidate is not OOS, paper, live, or deployability evidence.
-- Final structure has symbol-specific logic and timing controls; this is plausible but overfit-prone.
-- Causality replay was not enabled during the Train loop; source review found no obvious lookahead, but downstream evaluation should include causality replay.
-
-## Evaluation Boundary
-
-Downstream evaluation may compare retained candidates, but OOS results must not feed back into this same Train thesis. If OOS fails, archive this package or start a fresh thesis from the learned principles.
+The binding constraint is the universe/envelope, not the edge. The same long-only
+funding-crowding-reversal mechanism — carrying both wins (exit-ramp decoupling, convex conviction) —
+on the full ~25-name return-blind data-ready crypto-perp universe should raise t mainly via **duty
+cycle** (more names firing → more at-risk calendar → higher effective sample size) and lower
+per-name ADV participation (more deployable capacity). The diversification/Sharpe gain is limited
+(crypto-perp crowding is one highly-correlated factor, cross-perp ρ ≈ 0.6-0.8). This is a new
+lifecycle with a new protocol/ledger, decided by Season — not an extension of this Train thesis.

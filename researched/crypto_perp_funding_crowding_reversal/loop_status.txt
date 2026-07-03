@@ -1,0 +1,11 @@
+attempts: 15
+best_score: 0.340967652257242
+best_run_id: attempt-0014
+last_status: discard
+continuation: allowed
+stop_reason: 
+max_iterations: 50
+remaining_iterations: 35
+plateau_patience: 50
+subwindows: 6
+

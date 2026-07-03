@@ -4,115 +4,139 @@ This package is a curated handoff from `quant_autoresearch` for downstream evalu
 
 This package is Train-only research evidence. It is not OOS, paper, live, or deployability evidence.
 
+## Supersession note
+
+This package **replaces** a prior offload of the same `strategy_id` (an earlier lifecycle whose
+survivor was `attempt-0099`: a symbol-specific thesis — non-BTC-only, skip-ADA-early-session,
+per-symbol holds — scored under a retired gate). That lifecycle is **superseded and preserved only
+in git history**. The current lifecycle is a clean 8-symbol book with **no symbol-specific
+exceptions**, re-run under the current `significance` gate, and it materially outperforms the prior
+one. Do not mix the two lifecycles' ledgers or metrics; everything below is the current lifecycle.
+
 ## Current Train Survivor
 
-- Current survivor: `attempt-0099`
+- Current survivor: `attempt-0012` (recommended, robust)
 - Strategy file: `strategy.py`
-- Train score: `0.21735915161032543`
-- Gates: all pass
-- Subwindow trade counts: `258,100,51,12,100,55`
-- Trade count: `576`
-- Net return sum: `1.4319279628946049`
-- Cost stress score: `0.18345328245288353`
-- Profit factor: `2.118590347460084`
+- Train score (deployed-return LCB, `return - 1*SE`): `0.3258`
+- Significance (deflated, `return - 2*SE`): `+0.0414` (t = 2.15)
+- Gates: all 8 pass (`trade_floor, minimum_evidence, path_risk, significance,
+  cost_stress_retention, breadth, causality, complexity_cap`)
+- Full-Train annualized return: `0.610` at deployed vol `0.150` (full risk budget)
+- Profit factor: `1.837` · win rate `0.562` · trades `306`
+- Subwindow trade counts: `125,54,16,7,62,42` (all 6 subwindows net positive)
+- Economic symbol concentration (breadth): `0.319` (ceiling 0.70)
+- Cost-stress return retention: `0.807`
 
-The survivor is a long-only crypto perp funding-dislocation strategy:
+The survivor is a **long-only crypto-perp funding-crowding-reversal** book on the frozen 8-symbol
+universe:
 
-- trade non-BTC symbols only;
-- use negative summed funding pressure plus negative price extension;
-- require stronger funding pressure during broad selloff regimes;
-- skip ADA early-session timing noise;
-- use 8-hour ADA holds and extended DOGE/ETH/LINK holds;
-- use Train-only next-bar fills and protocol-owned costs.
+- Fade crowded-short capitulations: go long names with **negative summed funding** (crowded shorts
+  pay) plus **idiosyncratic price-down vs the cross-section** (relative-value dislocation).
+- Rank/select cross-sectionally; hold a fixed **720-minute** horizon; rebalance on a **240-minute**
+  cadence aligned to 8h funding settlements.
+- **Two research wins define this survivor vs a plain equal-weight book:** (1) *exit-ramp
+  decoupling* — spreading the synchronized fixed-horizon unwind over more bars than the entry
+  relieves the bar-participation cap and deploys the full 15% risk budget; (2) *convex
+  dislocation-conviction sizing* — weight each name by its idiosyncratic dislocation raised to a
+  power (~cubic), concentrating capital on the biggest capitulations (which bounce biggest).
+- Train-only next-bar (`close`, `entry_lag_bars=1`) fills and protocol-owned costs.
+
+### Recommended survivor vs protocol numeric-max
+
+The protocol keep-rule's highest-scoring row is `attempt-0014` (score `0.3410`), retained under
+`candidates/gated_candidates/`. Its extra `+0.015` over `attempt-0012` comes from a
+**mechanism-less overfit tail**: it adds funding *magnitude* to the conviction weight (funding
+magnitude is non-predictive in this thesis) and pushes convexity to power 4. `attempt-0012` is the
+recommended robust survivor; evaluate `attempt-0014` only as an overfit robustness check (does the
+extra Train score survive OOS, or decay as expected?).
 
 ## Authoritative Files
 
-- `strategy.py`: final Train survivor strategy snapshot from `attempt-0099`.
-- `experiment.toml`: bounded params from `attempt-0099`.
-- `protocol.train.toml`: Train protocol used for the survivor.
-- `results.tsv`: canonical Train ledger from the source research bench.
-- `rationale.md`: curated thesis and research summary.
-- `candidates/`: retained structurally distinct attempts.
-- `diagnostics/`: flat diagnostic/summary copies for retained attempts.
+- `strategy.py`: final Train survivor strategy snapshot from `attempt-0012`.
+- `experiment.toml`: bounded params from `attempt-0012`.
+- `protocol.train.toml`: the frozen Train protocol (data, costs, fills, capacity, leverage budget,
+  objective, gates, stop rules) — this is the source `protocol.toml`, renamed.
+- `results.tsv`: canonical Train ledger for this lifecycle (15 attempts).
+- `loop_status.txt`: lifecycle status snapshot at offload.
+- `rationale.md`: curated thesis, the two wins, candidate taxonomy, residual risks, reseed case.
+- `candidates/`: retained attempts by bucket, each with `snapshot/` + `artifacts/`.
+- `diagnostics/`: flat diagnostic/summary copies per retained attempt.
+- `evaluation/README.md`: downstream evaluation plan.
 
 ## Train Setup
 
 - Source repo: `/Users/Season_Yang/Personal/quant_autoresearch`
-- Data kind: `crypto_perp_funding`
-- Symbols: `BTC-PERP`, `ETH-PERP`, `DOGE-PERP`, `ADA-PERP`, `LINK-PERP`
-- Train window: `2025-03-01` through `2025-12-31`
-- Execution buffer: `load_end = 2026-01-07`
-- Fill price: close
-- Entry lag: 1 bar
-- Exit lag: 0 bars
-- Fee: 5 bps per side
-- Slippage: 1 bps per side
-- Objective: worst subwindow, 6 subwindows
-- Key gates: trade floor, subwindow coverage, breadth, cost stress, complexity, train score floor
+- Data kind: `crypto_perp_funding` (dataset `crypto_perp_1min_with_funding`).
+- Symbols (8, protocol-frozen, return-blind): `BTC, ETH, SOL, XRP, BNB, DOGE, ADA, LINK` (`-PERP`).
+- Train window: `2025-03-01 .. 2025-12-31`; data loaded to `2026-01-07`.
+- Fills: `close`, `entry_lag_bars = 1` (next-bar).
+- Costs: `fee 5.0 bps/side`, `slippage 1.0 bps/side`.
+- Capacity: `adv_impact`, `$1,000,000` notional, `max_bar_participation 0.50`,
+  `max_adv_participation 0.25`, impact `10 bps^0.5`.
+- Leverage budget (operator-frozen): `max_gross 1.0`, `max_net 1.0`.
+- Risk budget: `calibrate_vol`, `target_volatility 0.15`.
+- Objective: `return_lcb_subwindow` (6 subwindows); significance gate deflates full-Train return at
+  `k = 2.0` SE and requires it positive (≈ t ≥ 2).
 
 ## Retention Policy
 
-Retained candidates were selected for structural diversity and diagnostic value, not only performance rank. The goal is to preserve distinct thesis expressions and useful failures while dropping dominated variants and noisy boundary sweeps.
-
-Buckets:
-
-- `survivors`: keep rows and meaningful structural survivor steps.
-- `gated_candidates`: all gates pass but did not update the best survivor.
-- `near_misses`: high-score or diagnostic one-gate misses.
-- `anti_patterns`: representative failed ideas that should not be repeated blindly.
-
-Bad candidates were dropped when they were not survivors, not near-misses, and not uniquely informative.
+The retained set was selected for **structural diversity and diagnostic value**, not performance
+rank. This is a small lifecycle (15 attempts), so **all 15 are retained**, each with a one-line
+verdict, bucketed as: `survivors/` (gate-passing keeps on the winning path), `gated_candidates/`
+(all gates pass but not the recommended survivor), `near_misses/` (failed exactly one gate —
+significance — narrowly), `anti_patterns/` (representative falsified mechanism-classes not to
+repeat).
 
 ## Retained Candidates
 
-| Attempt | Bucket | Score | Gates | Subwindows | Trades | Net | Cost stress | Why retained |
-|---|---|---:|---|---|---:|---:|---:|---|
-| attempt-0014 | Survivor | 0.095715 | true | 390,193,63,14,180,82 | 922 | 0.956822 | 0.066397 | first all-gates survivor |
-| attempt-0018 | Survivor | 0.153675 | true | 333,156,55,12,146,76 | 778 | 0.852224 | 0.097935 | 90-minute/8-hour survivor |
-| attempt-0033 | Survivor | 0.166732 | true | 308,114,53,13,115,63 | 666 | 1.220793 | 0.130939 | non-BTC long book |
-| attempt-0059 | Survivor | 0.175855 | true | 283,108,53,12,104,58 | 618 | 1.157420 | 0.137665 | selloff-gated funding threshold |
-| attempt-0068 | Survivor | 0.180674 | true | 283,108,53,12,104,58 | 618 | 1.285457 | 0.140247 | per-symbol hold improvement |
-| attempt-0079 | Survivor | 0.194602 | true | 270,103,51,12,102,57 | 595 | 1.304473 | 0.159695 | skip exact ADA session start |
-| attempt-0080 | Survivor | 0.196862 | true | 258,100,51,12,100,55 | 576 | 1.301654 | 0.162204 | skip ADA early window |
-| attempt-0093 | Survivor | 0.209831 | true | 258,100,51,12,100,55 | 576 | 1.398901 | 0.175824 | 14-hour high-edge hold |
-| attempt-0095 | Survivor | 0.211421 | true | 258,100,51,12,100,55 | 576 | 1.421436 | 0.177311 | 15-hour high-edge hold |
-| attempt-0098 | Survivor | 0.215233 | true | 258,100,51,12,100,55 | 576 | 1.424205 | 0.181483 | 14.25-hour hold parent |
-| attempt-0099 | Survivor | 0.217359 | true | 258,100,51,12,100,55 | 576 | 1.431928 | 0.183453 | final best survivor |
-| attempt-0097 | Gated | 0.211904 | true | 258,100,51,12,100,55 | 576 | 1.445360 | 0.178128 | 14.5-hour boundary |
-| attempt-0100 | Gated | 0.208370 | true | 258,100,51,12,100,55 | 576 | 1.394516 | 0.174423 | final boundary test |
-| attempt-0013 | Near miss | 0.163191 | false | 192,93,33,9,93,43 | 463 | 0.683681 | 0.129455 | high-score long-only coverage miss |
-| attempt-0046 | Near miss | 0.206772 | false | 251,84,50,2,73,38 | 498 | 1.109541 | 0.173302 | strong funding raw-score sparse miss |
-| attempt-0049 | Near miss | 0.165565 | false | 459,160,88,11,138,62 | 918 | 1.775734 | 0.123118 | dense strong-funding sparse miss |
-| attempt-0056 | Near miss | 0.185767 | false | 266,94,51,9,99,50 | 569 | 1.091551 | 0.148419 | selloff strong-threshold sparse miss |
-| attempt-0057 | Near miss | 0.175855 | false | 281,108,51,11,104,58 | 613 | 1.141409 | 0.137704 | deep selloff one-trade sparse miss |
-| attempt-0081 | Near miss | 0.203347 | false | 246,96,50,11,98,55 | 556 | 1.298137 | 0.169207 | wide ADA skip one-trade sparse miss |
-| attempt-0087 | Near miss | 0.206309 | false | 194,70,36,10,89,49 | 448 | 1.123066 | 0.173756 | ADA latest-funding high-quality sparse miss |
-| attempt-0010 | Anti-pattern | -0.082448 | false | 265,308,304,325,302,271 | 1775 | 0.417500 | -0.133917 | short coverage killed economics |
-| attempt-0017 | Anti-pattern | 0.022209 | false | 333,156,55,12,146,76 | 778 | 0.201631 | -0.038761 | take-profit failure |
-| attempt-0024 | Anti-pattern | 0.017164 | false | 333,156,55,12,146,76 | 778 | 0.354466 | -0.025225 | stop-loss failure |
-| attempt-0025 | Anti-pattern | -0.347864 | false | 333,156,55,12,146,76 | 778 | -0.138006 | -0.537661 | trailing-stop failure |
-| attempt-0053 | Anti-pattern | -0.234874 | false | 139,38,20,5,37,32 | 271 | 0.521966 | -0.275307 | hard funding acceleration failure |
-| attempt-0055 | Anti-pattern | 0.075895 | false | 179,73,28,10,65,46 | 401 | 0.564220 | -0.021366 | tranche-cap failure |
+| Attempt | Bucket | Lever tested | Score | Gates | Verdict |
+|---|---|---|---|---|---|
+| 0001 | survivors | warm-start baseline (equal wt, exit=entry ramp) | 0.196 | pass | Feasible anchor; t 2.02, capacity-throttled to 10% vol. |
+| 0004 | survivors | **exit-ramp decoupling (exit=30)** | 0.282 | pass | WIN: deploys full 15% budget; +44% score. |
+| 0008 | survivors | dislocation-conviction sizing (linear) | 0.291 | pass | WIN: conviction lifts PF; edge is vol-seeking/absolute. |
+| 0011 | survivors | convex conviction (power 2) | 0.311 | pass | WIN: super-linear conviction; broad subwindow gain. |
+| 0012 | survivors | **convex conviction (power 3)** | 0.326 | pass | **HEADLINE**: robust peak; t 2.15, PF 1.84. |
+| 0013 | survivors | convex conviction (power 4) | 0.335 | pass | Still climbing but decelerating; power-3 is the robust choice. |
+| 0014 | gated_candidates | combined (funding+dislocation) conviction, power 4 | 0.341 | pass | Protocol score-max, but +0.015 is mechanism-less overfit (non-predictive funding magnitude). |
+| 0010 | gated_candidates | beta-adjusted idiosyncratic dislocation | 0.271 | pass | Gates pass but worse than raw; cross-name adjustment de-selects the high-vol altcoins that carry the edge. |
+| 0003 | near_misses | exit-ramp too far (exit=40) | 0.282 | fail (sig) | Full deployment overshoots; t 1.997 — the t=2 knife-edge. |
+| 0007 | near_misses | median cross-section reference | 0.274 | fail (sig) | Near-inert vs mean; signal reference is well-formed. |
+| 0002 | anti_patterns | vol-normalized dislocation | -0.187 | fail | Catastrophic: normalizing kills the edge (it is absolute-bps, vol-seeking). |
+| 0005 | anti_patterns | funding recency weighting | 0.062 | fail | Funding is sign-only; timing/magnitude non-predictive. |
+| 0006 | anti_patterns | vol-scaled hold | 0.231 | fail | Varying hold length lowers t via return-series heterogeneity. |
+| 0009 | anti_patterns | dislocation-scaled hold | 0.246 | fail | Same heterogeneity cost; conviction belongs in sizing, not hold. |
+| 0015 | anti_patterns | recent-capitulation conviction | 0.278 | fail | Worse conviction axis than cross-sectional dislocation. |
 
 ## Lessons From Train
 
-- Shorts repeatedly repaired coverage but damaged cost-stressed robustness.
-- Fixed take-profit, fixed stop-loss, and trailing-stop exits were harmful.
-- BTC behaved more like low-edge anchor flow than a clean dislocation signal.
-- ADA was necessary for sparse-window coverage but needed session-timing controls.
-- DOGE/ETH/LINK benefited from longer holds than ADA.
-- Strong funding filters improved raw score but often starved the sparse subwindow.
+- The edge is **long-only** (crowded-short capitulations; the short side has no gross edge in a
+  structurally long-funding market), **cross-sectional** (relative-value dislocation is
+  load-bearing), and **vol-seeking in absolute bps** (concentrated in high-vol altcoins;
+  DOGE/XRP/ADA/SOL, not BTC/ETH).
+- **Conviction helps only via sizing, and only on the dislocation axis.** Convex
+  dislocation-weighting is a genuine, broad, inspected-robust win. Funding magnitude, recent-return
+  magnitude, and any cross-name normalization (vol- or beta-) do **not** help.
+- **Capacity is a real alpha lever, not a wall.** Decoupling the exit ramp deploys the full risk
+  budget; this is where most of the deployed-return gain comes from.
+- The exit is **fixed-horizon 720 min**; every timing/scaling variant hurts (heterogeneity or
+  cutting winners). The cadence is **240 min** (funding-settlement aligned).
+
+### What not to repeat
+
+Vol-/beta-normalized dislocation, funding-magnitude/recency signals, varied (vol- or
+dislocation-scaled) hold lengths, and adding funding magnitude to the conviction weight. See
+`anti_patterns/` and `gated_candidates/attempt-0014-*`.
 
 ## Evaluation Plan
 
-Downstream evaluation should compare the final survivor with a small set of structurally distinct alternatives:
+See `evaluation/README.md`. Primary candidate `attempt-0012`; structurally-diverse comparison set;
+strict one-way rule (OOS results must not be fed back to patch this Train thesis).
 
-- `attempt-0099`: final survivor.
-- `attempt-0098`: nearest parent.
-- `attempt-0080`: ADA timing survivor before final hold tuning.
-- `attempt-0068`: per-symbol hold survivor.
-- `attempt-0059`: selloff-gated survivor.
-- `attempt-0033`: first strong non-BTC survivor.
-- selected near-misses if evaluation is explicitly designed to test boundary hypotheses.
+## Do Not Infer
 
-Evaluation must be one-way. Do not use OOS results to patch this same Train thesis. If OOS fails, archive or start a fresh thesis using the learned principles.
+- Train gates do not prove deployability; the significance pass is **marginal** (t ≈ 2.1 on 8
+  names — a knife-edge), which is itself a key finding.
+- This package includes no OOS, paper, or live execution evidence.
+- The binding constraint is the **universe** (8 majors supply only 1-3 concurrent crowded-short
+  setups → duty cycle ~33% → t pinned near 2), not the edge. A wider return-blind universe is the
+  documented reseed lever (see `rationale.md`), and is Season's call — not implied by this package.

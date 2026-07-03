@@ -1,0 +1,94 @@
+{
+  "artifact_profile": "diagnostic",
+  "artifacts": {
+    "config.toml": {
+      "sha256": "c2b98472873593b2d92141b77639642bb22d7ea57f9e1120d76625571dd3f0f7"
+    },
+    "data_manifest.json": {
+      "sha256": "5aa9d527bc7b84dca279787a11e3492aaa7d5dd76767322654613eb279f2a571"
+    },
+    "diagnostics.json": {
+      "sha256": "7e8b6ca80a725ec0d4f19f378d7793bce76c295f6783e3b7b514cce156b67769"
+    },
+    "notes.md": {
+      "sha256": "990bb31e6748655afff6bda926bcaf7acada7ec9e31e0876e52b3d9330b87707"
+    },
+    "strategy_snapshot.py": {
+      "sha256": "3d2c39a4315dd0a47839ee7abb828edcc27ef6d202b50a12e28ec3b4b4c76828"
+    }
+  },
+  "engine": {
+    "evidence_schema": "quant_strategies.engine.evidence/v4"
+  },
+  "evidence": {
+    "evidence_class": "quick_run_diagnostic",
+    "funding_model": "netted_cash_funding_accrual",
+    "live_eligible": false,
+    "metric_semantics": {
+      "nav_attribution.sum_cost_return": {
+        "aggregation": "sum over book round-trips of total traded cost on the netted delta / NAV",
+        "asymmetry": "total cost charged on the traded delta of the netted book, including impact",
+        "backend": "portfolio_book_spine",
+        "base": "realized attribution of the single netted-book NAV walk, as a fraction of NAV",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
+        "name": "nav_attribution.sum_cost_return",
+        "return_path_model": "netted_book_delta_cost",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "nav_attribution.sum_funding_return": {
+        "aggregation": "sum over book round-trips of accrued funding cash / NAV",
+        "asymmetry": "netted cash funding accrual on the net held position",
+        "backend": "portfolio_book_spine",
+        "base": "realized attribution of the single netted-book NAV walk, as a fraction of NAV",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
+        "name": "nav_attribution.sum_funding_return",
+        "return_path_model": "netted_cash_funding_accrual",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "nav_attribution.sum_gross_return": {
+        "aggregation": "sum over book round-trips of realized price proceeds / NAV",
+        "asymmetry": "realized round-trip price attribution of the netted book NAV path",
+        "backend": "portfolio_book_spine",
+        "base": "realized attribution of the single netted-book NAV walk, as a fraction of NAV",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
+        "name": "nav_attribution.sum_gross_return",
+        "return_path_model": "netted_book_price_return",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "nav_attribution.sum_impact_return": {
+        "aggregation": "sum over book round-trips of market-impact cost / NAV",
+        "asymmetry": "component of sum_cost_return, not a second subtraction from net",
+        "backend": "portfolio_book_spine",
+        "base": "realized attribution of the single netted-book NAV walk, as a fraction of NAV",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
+        "name": "nav_attribution.sum_impact_return",
+        "return_path_model": "netted_book_adv_impact_cost",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      },
+      "nav_attribution.sum_net_return": {
+        "aggregation": "gross plus funding minus cost, summed over book round-trips",
+        "asymmetry": "reconciles with the NAV path's realized PnL",
+        "backend": "portfolio_book_spine",
+        "base": "realized attribution of the single netted-book NAV walk, as a fraction of NAV",
+        "comparability": "reconciles_with_nav_path_realized_pnl",
+        "name": "nav_attribution.sum_net_return",
+        "return_path_model": "netted_book_nav_attribution",
+        "tolerance": null,
+        "unit": "decimal_fraction"
+      }
+    },
+    "paper_trade_eligible": false,
+    "requires_manual_approval": true,
+    "return_model": "portfolio_book_nav_path",
+    "strategy_contract": "target_book"
+  },
+  "replayable_from_artifacts": false,
+  "repository": {
+    "commit": "f527875dec6898ef24eda023a0a9f6db754d4405",
+    "short_commit": "f527875"
+  }
+}
