@@ -6,7 +6,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from quant_strategies.boundary import FrozenMapping, frozen_params, frozen_rows
+from quant_strategies.boundary import FrozenMapping, frozen_params
 from quant_strategies.core.config import StrategyExecutionSpec
 from quant_strategies.core.data_loader import load_data
 from quant_strategies.core.errors import RunnerError, StrategyLoadError
@@ -124,22 +124,32 @@ def execute_strategy_run(
     else:
         normalized_rows = NormalizedRows.from_rows(config, loaded.rows)
     execution_rows = normalized_rows.projection_rows()
-    strategy_rows = _strategy_visible_rows(config, execution_rows)
-    if (
-        config.data.load_start is not None or config.data.load_end is not None
-    ) and not strategy_rows:
-        raise StrategyExecutionError(
-            "data_load",
-            "decision window returned no rows",
-            loaded_rows=(),
-            normalized_rows=None,
-            evidence_quality=None,
-            execution_normalized_rows=normalized_rows,
-        )
-    if len(strategy_rows) == len(execution_rows):
+    window_predicate = _strategy_window_predicate(config)
+    if window_predicate is None:
+        strategy_rows = execution_rows
         strategy_normalized_rows = normalized_rows
     else:
-        strategy_normalized_rows = NormalizedRows.from_rows(config, strategy_rows)
+        # One predicate drives the empty/length guards, the subset selection, and the
+        # re-normalize fallback, so the decision-window rule is expressed exactly once.
+        keep_indices = [index for index, row in enumerate(execution_rows) if window_predicate(row)]
+        strategy_rows = tuple(execution_rows[index] for index in keep_indices)
+        if not strategy_rows:
+            raise StrategyExecutionError(
+                "data_load",
+                "decision window returned no rows",
+                loaded_rows=(),
+                normalized_rows=None,
+                evidence_quality=None,
+                execution_normalized_rows=normalized_rows,
+            )
+        if len(keep_indices) == len(execution_rows):
+            strategy_normalized_rows = normalized_rows
+        elif normalized_rows.issue_count == 0:
+            # Issue-free full window: slice the already-normalized rows (reuses
+            # canonical lines/hash) instead of re-normalizing the subset.
+            strategy_normalized_rows = normalized_rows.window_subset(keep_indices)
+        else:
+            strategy_normalized_rows = NormalizedRows.from_rows(config, strategy_rows)
     rows = strategy_normalized_rows.projection_rows()
     row_hash = strategy_normalized_rows.normalized_rows_sha256
     evidence = strategy_normalized_rows.evidence_quality()
@@ -152,7 +162,7 @@ def execute_strategy_run(
             normalized_rows=strategy_normalized_rows,
             evidence_quality=evidence,
         )
-    strategy_rows = frozen_rows(rows)
+    strategy_rows = strategy_normalized_rows.frozen_rows()
     strategy_params = frozen_params(validated_params)
 
     decision_count = 0
@@ -232,15 +242,20 @@ def _row_contract_failure_message(row_contract: Mapping[str, Any]) -> str:
     return f"row contract {row_contract['status']}"
 
 
-def _strategy_visible_rows(
+def _strategy_window_predicate(
     config: StrategyExecutionSpec,
-    rows: Sequence[Mapping[str, Any]],
-) -> Sequence[Mapping[str, Any]]:
+) -> Callable[[Mapping[str, Any]], bool] | None:
+    """Row-visibility predicate for the decision window, or ``None`` when none applies.
+
+    ``None`` means no separate load window is configured, so every loaded row is
+    strategy-visible. Otherwise the returned predicate is the single expression of
+    the window rule that the strategy-window filter, the length/empty guards, and
+    ``NormalizedRows.window_subset`` all select on.
+    """
     if config.data.load_start is None and config.data.load_end is None:
-        return rows
-    start = config.data.start
-    end = config.data.end
-    return tuple(row for row in rows if _row_date(row.get("timestamp")) in _date_window(start, end))
+        return None
+    window = _date_window(config.data.start, config.data.end)
+    return lambda row: _row_date(row.get("timestamp")) in window
 
 
 def _date_window(start: date, end: date) -> range:

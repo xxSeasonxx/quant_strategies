@@ -15,6 +15,18 @@ def json_safe_value(value: Any) -> Any:
     Shared serialization helper used by the row contract, the data loader, and the
     artifact writers — it is not row-contract-specific, so it lives in `core`.
     """
+    # Fast paths for the exact scalar types that dominate row values, so the
+    # per-row canonical-JSON hot path skips the abc ``isinstance`` machinery. Each
+    # returns exactly what the general logic below would for that value; anything
+    # that is not an exact-type match (subclasses, numpy scalars, containers) falls
+    # through unchanged, so output stays byte-identical for every input.
+    value_type = type(value)
+    if value_type is str or value_type is int or value_type is bool or value is None:
+        return value
+    if value_type is float:
+        return value if math.isfinite(value) else None
+    if value_type is datetime or value_type is date:
+        return value.isoformat()
     if isinstance(value, datetime | date):
         return value.isoformat()
     if isinstance(value, float):

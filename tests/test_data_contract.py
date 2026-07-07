@@ -606,3 +606,114 @@ def test_row_contract_summary_counts_all_issues_while_bounding_issue_sample():
     ]
     assert len(summary["issues"]) == 25
     assert any(issue["reason"] == "row_missing_required_field" for issue in summary["issues"])
+
+
+def _multi_day_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for day in range(3):
+        for symbol in ("SPY", "QQQ"):
+            rows.append(
+                valid_row(
+                    symbol=symbol,
+                    timestamp=TIMESTAMP + timedelta(days=day),
+                    available_at=AVAILABLE_AT + timedelta(days=day),
+                    close=100.0 + day * 0.25,
+                )
+            )
+    return rows
+
+
+def _funding_rows() -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for day in range(3):
+        for symbol in ("BTC-PERP", "ETH-PERP"):
+            ts = TIMESTAMP + timedelta(days=day)
+            row = valid_row(
+                symbol=symbol,
+                timestamp=ts,
+                available_at=AVAILABLE_AT + timedelta(days=day),
+                close=100.0 + day * 0.25,
+                has_funding_event=(day == 0),
+            )
+            if day == 0:
+                row["funding_rate"] = 0.0001
+                row["funding_timestamp"] = ts
+            rows.append(row)
+    return rows
+
+
+def _assert_window_subset_matches_from_rows(cfg, full: NormalizedRows, keep) -> None:
+    projection = full.projection_rows()
+    indices = [index for index, row in enumerate(projection) if keep(row)]
+    subset = full.window_subset(indices)
+    expected = NormalizedRows.from_rows(cfg, [projection[index] for index in indices])
+    assert [dict(row) for row in subset.projection_rows()] == [
+        dict(row) for row in expected.projection_rows()
+    ]
+    assert subset.normalized_rows_sha256 == expected.normalized_rows_sha256
+    assert subset.data_availability_status == expected.data_availability_status
+    assert subset.duplicate_key_count == expected.duplicate_key_count
+    assert subset.row_contract_summary() == expected.row_contract_summary()
+    assert dict(subset.availability_coverage) == dict(expected.availability_coverage)
+    assert subset.ranges_by_symbol == expected.ranges_by_symbol
+    assert subset.evidence_quality() == expected.evidence_quality()
+    assert [dict(row) for row in subset.frozen_rows()] == [
+        dict(row) for row in expected.frozen_rows()
+    ]
+
+
+def test_window_subset_identity_returns_self_when_all_kept():
+    full = NormalizedRows.from_rows(config(), _multi_day_rows())
+
+    assert full.window_subset(list(range(len(full)))) is full
+
+
+def test_window_subset_drop_tail_matches_from_rows():
+    full = NormalizedRows.from_rows(config(), _multi_day_rows())
+    keep_days = {TIMESTAMP.date(), (TIMESTAMP + timedelta(days=1)).date()}
+
+    _assert_window_subset_matches_from_rows(
+        config(), full, lambda row: row["timestamp"].date() in keep_days
+    )
+
+
+def test_window_subset_interior_window_matches_from_rows():
+    full = NormalizedRows.from_rows(config(), _multi_day_rows())
+    keep_day = (TIMESTAMP + timedelta(days=1)).date()
+
+    _assert_window_subset_matches_from_rows(
+        config(), full, lambda row: row["timestamp"].date() == keep_day
+    )
+
+
+def test_window_subset_funding_kind_matches_from_rows():
+    cfg = config(kind="crypto_perp_funding")
+    full = NormalizedRows.from_rows(cfg, _funding_rows())
+    assert full.issue_count == 0
+    keep_days = {TIMESTAMP.date(), (TIMESTAMP + timedelta(days=1)).date()}
+
+    _assert_window_subset_matches_from_rows(
+        cfg, full, lambda row: row["timestamp"].date() in keep_days
+    )
+
+
+def test_window_subset_empty_matches_from_rows():
+    full = NormalizedRows.from_rows(config(), _multi_day_rows())
+
+    subset = full.window_subset([])
+    expected = NormalizedRows.from_rows(config(), [])
+
+    assert len(subset) == 0
+    assert subset.normalized_rows_sha256 == expected.normalized_rows_sha256
+    assert subset.data_availability_status == expected.data_availability_status
+    assert subset.row_contract_summary() == expected.row_contract_summary()
+
+
+def test_window_subset_rejects_normalized_set_with_issues():
+    row = valid_row()
+    del row["open"]
+    normalized = NormalizedRows.from_rows(config(), [valid_row(), row])
+    assert normalized.issue_count != 0
+
+    with pytest.raises(ValueError, match="issue-free"):
+        normalized.window_subset([0])
