@@ -313,7 +313,7 @@ def _fake_mark_loader(calls: list | None = None):
     """Stub for the upstream repair-aware mark loader, recording its call args."""
     from types import SimpleNamespace
 
-    def fake(engine, symbols, dataset, start, end, *, strict, return_summary):
+    def fake(engine, symbols, dataset, start, end, *, strict, return_summary, max_rows=None):
         if calls is not None:
             calls.append((list(symbols), dataset, start, end, strict))
         summary = SimpleNamespace(

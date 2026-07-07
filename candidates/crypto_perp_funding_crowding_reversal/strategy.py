@@ -1,10 +1,57 @@
-"""Crypto perp funding crowding reversal.
+"""Strategy: crypto_perp_funding_crowding_reversal
 
-Thesis:
-Realized same-sign funding pressure plus same-direction price extension can mark
-crowded perp positioning. After the signal bar is observable, the strategy takes
-the other side of the crowded move and exits through an explicit fixed-horizon
-flat target.
+Source / provenance:
+Internally developed via the quant_autoresearch Train research loop and offloaded
+as the attempt-0012 survivor of a curated handoff. internal_note:
+researched/crypto_perp_funding_crowding_reversal/rationale.md documents the
+thesis, the two research wins, the falsified-variant taxonomy, and residual
+risks. No external paper is claimed; the mechanism treats realized perp funding
+as a positioning-crowding proxy.
+
+Market rationale:
+Realized same-sign funding pressure plus same-direction price extension marks
+crowded crypto-perp positioning that mean-reverts over an intraday fixed-horizon
+hold. Negative summed funding (shorts are paying — a crowded-short capitulation)
+on a name that is idiosyncratically down versus the cross-section marks the
+crowded move; the book fades it by going long and exits at a fixed horizon. The
+edge is long-only (the short side has no gross edge in a structurally
+long-funding market), cross-sectional (relative-value dislocation is
+load-bearing), and vol-seeking in absolute bps (concentrated in high-vol
+altcoins).
+
+Required observables:
+Symbol, timezone-aware bar timestamp, available_at, and close for crypto
+perpetual bars, plus funding_timestamp, funding_rate, and has_funding_event from
+the crypto_perp_1min_with_funding dataset. A row is used only when its
+available_at is at or before the emitted decision_time.
+
+Decision rule:
+On a fixed cadence, for each name sum the latest realized funding settlements
+(sign-only crowding) and measure price extension versus a completed prior close,
+taken idiosyncratically against the cross-section mean of the candidates present
+at the signal bar. Go long names whose summed funding is negative and whose
+idiosyncratic extension is down past configured thresholds; rank cross-sectionally
+and hold the top names. Size each selection by its idiosyncratic dislocation
+raised to a power (convex conviction), preserving gross per decision. Ramp entry
+over entry_twap bars and exit over a longer exit_twap ramp; the fixed-horizon
+unwind is an explicit flat (target=0) scheduled at entry, so the hold horizon
+lives on the target book rather than an engine hold field.
+
+Assumptions:
+Input bars are timezone-aware and ordered by causal availability through
+available_at; funding crowding is treated as sign-only (level, count, magnitude,
+and recency are non-predictive here). The exit is a fixed-horizon policy flat, not
+a data-driven signal, so it declares no observation and reuses the entry's
+already-available as_of_time. Same-symbol targets net by construction, and the
+scheduled flat closes the position before the next same-name entry.
+
+Falsifier:
+If the long-only cross-sectional funding-crowding-reversal book does not produce
+positive net return after realistic costs and ADV/impact capacity, or the edge
+depends on one symbol or one subwindow rather than the cross-section, reject the
+thesis before adding filters or per-name exceptions. Vol- or beta-normalizing the
+dislocation, treating funding as more than a sign, and any varied (shorter,
+take-profit, vol- or dislocation-scaled) exit are already-falsified variants.
 """
 
 from bisect import bisect_left, bisect_right
