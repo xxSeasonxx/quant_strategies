@@ -10,6 +10,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from quant_strategies.boundary import FrozenMapping
+from quant_strategies.boundary import frozen_rows as _freeze_rows_tuple
 from quant_strategies.core.evidence_quality import CausalityVerification, EvidenceQuality
 from quant_strategies.core.serialization import json_safe_value
 from quant_strategies.datetime_utils import parse_aware_datetime
@@ -174,6 +176,12 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
         repr=False,
     )
     _by_symbol_timestamp_cache: Mapping[tuple[str, datetime], Mapping[str, Any]] | None = field(
+        default=None,
+        init=False,
+        compare=False,
+        repr=False,
+    )
+    _frozen_rows_cache: tuple[FrozenMapping, ...] | None = field(
         default=None,
         init=False,
         compare=False,
@@ -368,6 +376,63 @@ class NormalizedRows(Sequence[Mapping[str, Any]]):
             cached = tuple(MappingProxyType(dict(row)) for row in self._storage)
             object.__setattr__(self, "_projection_rows_cache", cached)
         return cached
+
+    def frozen_rows(self) -> tuple[FrozenMapping, ...]:
+        """Immutable ``FrozenMapping`` view of the rows, built once and cached.
+
+        The strategy boundary and the causality replay both need frozen rows; the
+        storage values are already immutable, so this only rewraps each row as a
+        ``FrozenMapping`` a single time per normalized set instead of re-freezing on
+        every access.
+        """
+        cached = self._frozen_rows_cache
+        if cached is None:
+            cached = _freeze_rows_tuple(self.projection_rows())
+            object.__setattr__(self, "_frozen_rows_cache", cached)
+        return cached
+
+    def window_subset(self, indices: Sequence[int]) -> NormalizedRows:
+        """Derive a row subset by position without re-normalizing or re-hashing.
+
+        Valid only when this set is issue-free (``issue_count == 0``): a subset of an
+        issue-free set is itself issue-free, so the per-row canonical lines (and thus
+        the hash) are reused verbatim by slicing, and the contract aggregates collapse
+        to cheap counts. Callers must fall back to ``from_rows`` when ``issue_count``
+        is nonzero. ``indices`` are ascending positions into the current rows; the
+        result is byte-for-byte identical to ``from_rows`` over the rows at those
+        positions.
+        """
+        if self.issue_count != 0:
+            raise ValueError("window_subset requires an issue-free normalized set")
+        if len(indices) == len(self._storage):
+            return self
+        sub_storage = tuple(self._storage[index] for index in indices)
+        sub_lines = tuple(self._canonical_jsonl_lines[index] for index in indices)
+        total = len(sub_storage)
+        availability_coverage: dict[str, Any] = {
+            "field": "available_at",
+            "present": total,
+            "total": total,
+            "fraction": None if total == 0 else 1.0,
+        }
+        return type(self)(
+            data_kind=self.data_kind,
+            required_fields=self.required_fields,
+            issues=(),
+            issue_count=0,
+            normalized_rows_sha256=_normalized_rows_sha256_from_lines(sub_lines),
+            data_availability_status=_availability_status(total=total, valid=total, invalid=0),
+            duplicate_key_count=0,
+            _storage=sub_storage,
+            _canonical_jsonl_lines=sub_lines,
+            _range_items=_range_items([dict(row) for row in sub_storage]),
+            _availability_coverage_items=tuple(availability_coverage.items()),
+            _issue_reason_items=(),
+            _missing_required_field_items=(),
+            _funding_event_missing_field_items=(),
+            _quant_data_feedback_items=(),
+            _has_error_issues=False,
+        )
 
     @property
     def by_symbol_timestamp(self) -> Mapping[tuple[str, datetime], Mapping[str, Any]]:

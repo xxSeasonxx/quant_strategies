@@ -676,7 +676,11 @@ def _deterministic_replay_failure(
     strategy_id: str,
     mode: ReplayMode,
 ) -> LookaheadCheckResult | None:
-    full_rows = frozen_rows(_projection_rows(rows))
+    full_rows = (
+        rows.frozen_rows()
+        if isinstance(rows, NormalizedRows)
+        else frozen_rows(_projection_rows(rows))
+    )
     try:
         replay_output = generate_decisions(full_rows, params)
     except SystemExit as exc:
@@ -1271,8 +1275,10 @@ def _visible_row_index(rows: NormalizedRows | Sequence[Mapping[str, Any]]) -> _V
 
 
 def _visible_row_index_from_normalized(rows: NormalizedRows) -> _VisibleRowIndex:
+    # Reuse the frozen rows cached on the normalized set (index-aligned with the
+    # projection rows) instead of re-freezing each row here.
     visible_rows = []
-    for row in rows.projection_rows():
+    for row, frozen_row in zip(rows.projection_rows(), rows.frozen_rows(), strict=True):
         timestamp = row.get("timestamp")
         if not _is_aware_datetime(timestamp):
             continue
@@ -1280,7 +1286,7 @@ def _visible_row_index_from_normalized(rows: NormalizedRows) -> _VisibleRowIndex
         visible_rows.append(
             _VisibleRow(
                 row=row,
-                frozen_row=frozen_rows((row,))[0],
+                frozen_row=frozen_row,
                 timestamp=timestamp,
                 available_at=available_at if _is_aware_datetime(available_at) else None,
             )

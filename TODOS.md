@@ -131,6 +131,27 @@ A separate track from the feasibility ladder: making a completing quick run fast
 capacity/volatility search (the homogeneity invariant in `FOUNDATION_LOCK.md`), sizing
 a representative book in a handful of walks.
 
+**Data-prep de-duplication (in working tree, pending code review).** Per-experiment runtime
+is dominated by data preparation, not the strategy or the NAV walk (analysis in
+`PERF_REVIEW_crypto_perp_funding_crowding_reversal.md`). Three internal, output-identical
+changes cut the redundant work: concrete-type fast paths in `core/serialization.py`
+`json_safe_value` (canonical-line encode ~1.45x); a cached `NormalizedRows.frozen_rows()`
+reused by execution and the causality index/replay so rows are frozen once rather than ~5x;
+and `NormalizedRows.window_subset`, which derives the strategy-visible window by slicing the
+already-normalized full-window set instead of a second `from_rows` (~17x on that step, on the
+issue-free path, else it falls back to `from_rows`). The active climb protocol also lowered
+`micro_probe_limit` 40->12 and `micro_timeout_seconds` 600->30 (fewer causality replays — an
+evidence trade-off, applied at a reseed boundary). Public surfaces, `normalized_rows_sha256`
+values, emitted decisions, and the NAV path are unchanged.
+
+**Remaining dominant cost — data load + row materialization (not started).** With the above
+in place, the DB query plus the Polars->`list[dict]` materialization of the signal frame and
+the valuation mark frame is the largest per-experiment cost and the driver of the ~30 GB
+full-window RSS. The two levers are a persistent-worker climb that loads/normalizes/freezes
+the protocol-frozen data once (worth re-adding the prepared-data seam only once a consumer
+uses it) and an array-backed row representation that avoids materializing Python dicts per
+row. Both are larger changes and Season's call.
+
 **Typed `_RowIndex` boundary (conditional, measure-gated).** `_RowIndex` stores raw
 row mappings and re-parses/re-validates numeric fields (`_positive_row_field`) on every
 per-bar valuation, across every walk. The principled fix is to validate at the
