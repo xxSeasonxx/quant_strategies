@@ -1,0 +1,74 @@
+# Runnable quick-run bundle for crypto_perp_tsmom_vol_target (candidate #1 in
+# docs/research/crypto/README.md: per-symbol time-series momentum + engine
+# vol-target overlay). [data] is a short smoke window with small lookbacks so the
+# formation/volatility warmup fits inside the decision window; swap in the full
+# 25-perp universe and the real OOS window downstream.
+strategy_path = "strategy.py"
+strategy_id = "crypto_perp_tsmom_vol_target"
+
+[data]
+kind = "crypto_perp_funding"
+symbols = [
+  "BTC-PERP",
+  "ETH-PERP",
+  "SOL-PERP",
+  "XRP-PERP",
+  "BNB-PERP",
+  "DOGE-PERP",
+  "ADA-PERP",
+  "LINK-PERP",
+]
+# Full universe for the real climb (25 perps):
+# "ADA-PERP","APT-PERP","ARB-PERP","ATOM-PERP","AVAX-PERP","BNB-PERP","BTC-PERP",
+# "DOGE-PERP","DOT-PERP","ETH-PERP","FET-PERP","INJ-PERP","LINK-PERP","MATIC-PERP",
+# "NEAR-PERP","OP-PERP","PEPE-PERP","RENDER-PERP","SEI-PERP","SOL-PERP","SUI-PERP",
+# "TIA-PERP","UNI-PERP","WIF-PERP","XRP-PERP"
+start = "2025-03-01"
+end = "2025-03-11"
+
+[params]
+lookback_days = 5
+signal = "vol_scaled"
+rebalance_days = 1
+ma_gate_days = 0
+vol_lookback_days = 5
+allow_short = true
+decision_lag_minutes = 1
+base_weight = 1.0
+
+[fill_model]
+price = "close"
+entry_lag_bars = 1
+
+[cost_model]
+fee_bps_per_side = 5.0
+slippage_bps_per_side = 1.0
+
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 1440
+adv_min_observations = 60
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 525600
+target_volatility = 0.15
+
+[leverage_budget]
+max_gross_exposure = 1.0
+max_net_exposure = 1.0
+
+[envelope]
+operator_frozen = true
+
+[output]
+results_dir = "results"
+quick_checks = true
+artifact_profile = "diagnostic"
+diagnostic_sample_trades = 5
+causality_check = "micro"

@@ -1,0 +1,80 @@
+# Runnable quick-run bundle for crypto_perp_funding_carry_tilt (candidate #2 in
+# docs/research/crypto/README.md: cross-sectional perp-only funding-carry tilt,
+# short high-funding / long low-funding, conditional + beta-neutral). [data] is a
+# short smoke window; swap in the full 25-perp universe and the real OOS window
+# downstream. Runs under crypto_perp_funding so funding is collected as financing.
+strategy_path = "strategy.py"
+strategy_id = "crypto_perp_funding_carry_tilt"
+
+[data]
+kind = "crypto_perp_funding"
+symbols = [
+  "BTC-PERP",
+  "ETH-PERP",
+  "SOL-PERP",
+  "XRP-PERP",
+  "BNB-PERP",
+  "DOGE-PERP",
+  "ADA-PERP",
+  "LINK-PERP",
+  "AVAX-PERP",
+  "DOT-PERP",
+  "NEAR-PERP",
+  "INJ-PERP",
+]
+# Full universe for the real climb (25 perps):
+# "ADA-PERP","APT-PERP","ARB-PERP","ATOM-PERP","AVAX-PERP","BNB-PERP","BTC-PERP",
+# "DOGE-PERP","DOT-PERP","ETH-PERP","FET-PERP","INJ-PERP","LINK-PERP","MATIC-PERP",
+# "NEAR-PERP","OP-PERP","PEPE-PERP","RENDER-PERP","SEI-PERP","SOL-PERP","SUI-PERP",
+# "TIA-PERP","UNI-PERP","WIF-PERP","XRP-PERP"
+start = "2025-03-01"
+end = "2025-03-07"
+
+[params]
+funding_lookback_events = 3
+quantile_frac = 0.20
+weighting = "inv_vol"
+beta_neutralize = true
+rebalance_hours = 8
+min_funding_spread_bps = 0.5
+min_cross_section = 6
+vol_lookback_minutes = 1440
+gross_budget = 1.0
+decision_lag_minutes = 1
+
+[fill_model]
+price = "close"
+entry_lag_bars = 1
+
+[cost_model]
+fee_bps_per_side = 5.0
+slippage_bps_per_side = 1.0
+
+[capacity_model]
+mode = "adv_impact"
+portfolio_notional = 1000000.0
+adv_lookback_bars = 1440
+adv_min_observations = 60
+max_bar_participation = 0.50
+max_adv_participation = 0.25
+impact_coefficient_bps = 10.0
+impact_exponent = 0.5
+
+[risk_budget]
+mode = "calibrate_vol"
+annualization_periods_per_year = 525600
+target_volatility = 0.15
+
+[leverage_budget]
+max_gross_exposure = 3.0
+max_net_exposure = 1.0
+
+[envelope]
+operator_frozen = true
+
+[output]
+results_dir = "results"
+quick_checks = true
+artifact_profile = "diagnostic"
+diagnostic_sample_trades = 5
+causality_check = "micro"
