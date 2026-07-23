@@ -12,6 +12,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal
 
+from pydantic_core import PydanticSerializationError
+
 from quant_strategies.boundary import frozen_params, frozen_rows
 from quant_strategies.data_contract import NormalizedRows
 from quant_strategies.datetime_utils import parse_aware_datetime
@@ -182,6 +184,23 @@ class _FocusedCausalityDeadline(BaseException):
     pass
 
 
+def _contains_focused_deadline(exc: BaseException) -> bool:
+    pending = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, _FocusedCausalityDeadline):
+            return True
+        if current.__cause__ is not None:
+            pending.append(current.__cause__)
+        if current.__context__ is not None:
+            pending.append(current.__context__)
+    return False
+
+
 DecisionGenerator = Callable[
     [Sequence[Mapping[str, Any]], Mapping[str, Any]],
     object,
@@ -302,6 +321,10 @@ def check_micro_causality(
             )
     except _FocusedCausalityDeadline:
         return _micro_timeout_result(started, timeout_seconds, plan)
+    except PydanticSerializationError as exc:
+        if _contains_focused_deadline(exc):
+            return _micro_timeout_result(started, timeout_seconds, plan)
+        raise
     elapsed = time.perf_counter() - started
     if elapsed > timeout_seconds:
         return _micro_timeout_result(started, timeout_seconds, plan, lookahead=lookahead)
@@ -358,6 +381,10 @@ def check_bounded_causality(
             )
     except _FocusedCausalityDeadline:
         return _bounded_timeout_result(started, timeout_seconds, plan)
+    except PydanticSerializationError as exc:
+        if _contains_focused_deadline(exc):
+            return _bounded_timeout_result(started, timeout_seconds, plan)
+        raise
     elapsed = time.perf_counter() - started
     if elapsed > timeout_seconds:
         return _bounded_timeout_result(started, timeout_seconds, plan, lookahead=lookahead)
@@ -448,6 +475,10 @@ def check_focused_causality(
             )
     except _FocusedCausalityDeadline:
         return _focused_timeout_result(key=key, config=config, plan=plan)
+    except PydanticSerializationError as exc:
+        if _contains_focused_deadline(exc):
+            return _focused_timeout_result(key=key, config=config, plan=plan)
+        raise
     if _timed_out(started, config.timeout_seconds):
         return _focused_timeout_result(key=key, config=config, plan=plan, lookahead=lookahead)
     if lookahead.passed and lookahead.skipped_probe_count:

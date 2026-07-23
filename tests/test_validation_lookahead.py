@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from pydantic_core import PydanticSerializationError
 
 import quant_strategies.causality as causality
 from quant_strategies.causality import (
@@ -95,6 +96,32 @@ def replay_raising_strategy(rows: Sequence[Mapping[str, Any]], params: Mapping[s
     if all(item.get("timestamp") != FUTURE for item in rows):
         raise RuntimeError("replay cannot run")
     return [decision()]
+
+
+class _NoopFocusedTimeout:
+    def __init__(self, timeout_seconds: float) -> None:
+        self.timeout_seconds = timeout_seconds
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> bool:
+        return False
+
+
+def _raise_wrapped_focused_deadline(*_args: object, **_kwargs: object) -> None:
+    try:
+        raise causality._FocusedCausalityDeadline()
+    except causality._FocusedCausalityDeadline as exc:
+        raise PydanticSerializationError(
+            "Error calling function `serialize_metadata`: _FocusedCausalityDeadline: "
+        ) from exc
+
+
+def _install_wrapped_deadline_replay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(causality, "_focused_timeout_supported", lambda _timeout: True)
+    monkeypatch.setattr(causality, "_focused_timeout", _NoopFocusedTimeout)
+    monkeypatch.setattr(causality, "check_hidden_lookahead", _raise_wrapped_focused_deadline)
 
 
 def test_hidden_lookahead_check_passes_as_of_only_strategy():
@@ -301,6 +328,51 @@ def test_focused_causality_interrupts_slow_replay():
     assert elapsed < 0.5
 
 
+def test_focused_causality_treats_wrapped_serialization_deadline_as_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+    _install_wrapped_deadline_replay(monkeypatch)
+
+    result = check_focused_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        key=focused_key(),
+        config=FocusedCausalityConfig(max_probes=4, timeout_seconds=60.0),
+    )
+
+    assert result.status == "timeout"
+    assert result.scoring_allowed is False
+    assert result.rejection_reason == "focused_causality_timeout"
+
+
+def test_focused_causality_reraises_unrelated_serialization_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+
+    def raise_unrelated_serialization_error(*_args: object, **_kwargs: object) -> None:
+        raise PydanticSerializationError("unrelated serialization failure")
+
+    monkeypatch.setattr(causality, "_focused_timeout_supported", lambda _timeout: True)
+    monkeypatch.setattr(causality, "_focused_timeout", _NoopFocusedTimeout)
+    monkeypatch.setattr(causality, "check_hidden_lookahead", raise_unrelated_serialization_error)
+
+    with pytest.raises(PydanticSerializationError, match="unrelated serialization failure"):
+        check_focused_causality(
+            as_of_strategy,
+            rows=source_rows,
+            params={},
+            baseline_decisions=as_of_strategy(source_rows, {}),
+            strategy_id="demo",
+            key=focused_key(),
+            config=FocusedCausalityConfig(max_probes=4, timeout_seconds=60.0),
+        )
+
+
 def test_focused_causality_rejects_skipped_sampled_probe():
     source_rows = [
         row(AS_OF, 100.0, available_at=AS_OF),
@@ -422,6 +494,28 @@ def test_micro_causality_timeout_after_slow_planning(monkeypatch: pytest.MonkeyP
     assert result.violations == ("micro_causality_timeout",)
 
 
+def test_micro_causality_treats_wrapped_serialization_deadline_as_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+    _install_wrapped_deadline_replay(monkeypatch)
+
+    result = check_micro_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        max_probes=3,
+        timeout_seconds=60.0,
+    )
+
+    assert result.passed is False
+    assert result.replay_scope == "micro"
+    assert result.timed_out is True
+    assert result.violations == ("micro_causality_timeout",)
+
+
 def test_bounded_replay_plan_always_includes_emitted_boundaries():
     source_rows = [
         row(AS_OF, 100.0, available_at=AS_OF),
@@ -512,6 +606,28 @@ def test_bounded_causality_uses_prepared_baseline_decision_index(
 
     assert result.passed is True
     assert result.replay_scope == "bounded"
+
+
+def test_bounded_causality_treats_wrapped_serialization_deadline_as_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source_rows = [row(AS_OF, 100.0, available_at=AS_OF)]
+    _install_wrapped_deadline_replay(monkeypatch)
+
+    result = causality.check_bounded_causality(
+        as_of_strategy,
+        rows=source_rows,
+        params={},
+        baseline_decisions=as_of_strategy(source_rows, {}),
+        strategy_id="demo",
+        max_probes=3,
+        timeout_seconds=60.0,
+    )
+
+    assert result.passed is False
+    assert result.replay_scope == "bounded"
+    assert result.timed_out is True
+    assert result.violations == ("bounded_causality_timeout",)
 
 
 def test_hidden_lookahead_detects_payload_change_with_stable_decision_id():

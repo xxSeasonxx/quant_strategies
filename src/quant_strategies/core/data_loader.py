@@ -165,6 +165,15 @@ def _mark_dataset(config: StrategyExecutionSpec) -> str | None:
     return candidate if candidate in datasets_with_regular_series_repair() else None
 
 
+# The universe mark frame loads every symbol at once, so its row count scales with
+# symbol_count * window_minutes. The upstream strict default (5M rows) is a conservative
+# rail sized for small universes and is too low for a wide crypto-perp universe (~25 names
+# over a year is ~11M 1-minute rows). The rail is overridable per call by design; raise it
+# here for the universe path to a bounded ceiling that still sits well below the Polars
+# materialization limit. Per-symbol loaders keep the default rail.
+_UNIVERSE_MARK_MAX_ROWS = 20_000_000
+
+
 def _load_mark_rows(
     config: StrategyExecutionSpec, engine: object
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
@@ -179,6 +188,7 @@ def _load_mark_rows(
         data.effective_load_start,
         data.effective_load_end,
         strict=True,
+        max_rows=_UNIVERSE_MARK_MAX_ROWS,
         return_summary=True,
     )
     mark_repair = {
